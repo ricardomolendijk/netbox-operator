@@ -16,6 +16,7 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	netboxv1alpha1 "github.com/ricardomolendijk/netbox-operator/api/v1alpha1"
+	"github.com/ricardomolendijk/netbox-operator/internal/controller"
 )
 
 var scheme = runtime.NewScheme()
@@ -85,7 +86,16 @@ func run() error {
 		return fmt.Errorf("creating manager: %w", err)
 	}
 
-	// Controllers are registered here as they land; see internal/controller.
+	// The client cache is shared: the endpoint controller fills it, object controllers
+	// read from it. A miss means the endpoint is not Ready.
+	clients := controller.NewClientCache()
+
+	if err := (&controller.NetBoxEndpointReconciler{
+		Client: mgr.GetClient(),
+		Cache:  clients,
+	}).SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("setting up the NetBoxEndpoint controller: %w", err)
+	}
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		return fmt.Errorf("adding healthz check: %w", err)

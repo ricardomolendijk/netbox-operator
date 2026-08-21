@@ -1,0 +1,27 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: netbox-token
+  namespace: default
+type: Opaque
+stringData:
+  # A NetBox API token with write access to the object types the operator manages.
+  # Human accounts should be read-only; see docs/decisions/0005-gitops-coexistence.md.
+  token: "0123456789abcdef0123456789abcdef01234567"
+---
+apiVersion: netbox.populator.io/v1alpha1
+kind: NetBoxEndpoint
+metadata:
+  name: homelab
+  namespace: default
+spec:
+  url: https://netbox.home.arpa
+  tokenSecretRef:
+    name: netbox-token
+    key: token
+  mode: Apply
+  timeout: 30s
+  resyncPeriod: 10m
+  rateLimit:
+    qps: 20
+    burst: 40
