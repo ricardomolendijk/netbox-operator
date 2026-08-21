@@ -62,14 +62,22 @@ the engine requeue a reconcile that was deliberately abandoned.
 
 ## Runaway lists
 
-`List` follows pagination up to `MaxPages` (default 1000), then logs a warning and
+`List` follows pagination up to `MaxPages` (default 1000), then logs at **`error`** and
 returns what it has. A NetBox that always reports a `next` page cannot exhaust the
-manager's memory. The truncation is logged rather than silent, because incomplete list
-results that look complete are how a prune deletes the wrong things.
+manager's memory. It is logged at error rather than info because the caller cannot tell a
+truncated result from a complete one: a lookup that should have matched comes back empty
+and the engine creates a second object, and incomplete list results that look complete are
+how a prune deletes the wrong things. The fix is a human raising `MaxPages` or narrowing
+the filter.
 
 ## Secrets
 
-Request bodies are logged at `debug` only, through a tested redaction pass — not a
-convention. `auth_psk`, `psk`, `preshared_key`, `password`, `token`, `secret`,
-`private_key` and `api_key` are masked. `custom_fields` are collapsed to their key names,
-because the names help debugging and the values are arbitrary user data.
+Request and response bodies are logged at `debug` only, through a tested redaction pass —
+not a convention. `auth_psk`, `psk`, `preshared_key`, `password`, `token`, `secret`,
+`private_key` and `api_key` are masked wherever they appear, including nested inside a
+`results` array, since masking only the top level would put every PSK on a list page into
+the log. `custom_fields` are collapsed to their key names, because the names help debugging
+and the values are arbitrary user data.
+
+See [Observability](../operations/observability.md) for the log levels, the stable key set
+and the metrics these errors move.

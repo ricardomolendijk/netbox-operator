@@ -6,6 +6,7 @@ import (
 	"time"
 
 	netboxv1alpha1 "github.com/ricardomolendijk/netbox-operator/api/v1alpha1"
+	"github.com/ricardomolendijk/netbox-operator/internal/metrics"
 	"github.com/ricardomolendijk/netbox-operator/internal/netbox"
 )
 
@@ -61,6 +62,11 @@ var (
 	// a lookup that matched, or a write that is supposed to have created something. No
 	// amount of retrying will add one.
 	errNoObjectID = errors.New("netbox returned an object with no id")
+
+	// errNotConfigured is a wiring mistake: a collaborator the engine needs was not
+	// supplied. It is an error rather than a panic because a nil dereference halfway
+	// through a reconcile tells whoever is paged nothing about what is missing.
+	errNotConfigured = errors.New("the engine is missing a collaborator")
 )
 
 // ambiguousMatch is more than one NetBox object matching one natural-key candidate.
@@ -103,6 +109,11 @@ type outcome struct {
 	// severe marks a state that needs a human, and so is logged at error rather than
 	// debug.
 	severe bool
+
+	// result is the metrics.Result* bucket this failure counts as. Set here rather than
+	// derived from severe, because "waiting for the endpoint" and "NetBox is down" are
+	// both non-severe and only one of them is an error on a dashboard.
+	result string
 }
 
 // classify maps a failure onto what to record and when to come back.
@@ -127,13 +138,17 @@ func classify(err error, resync time.Duration) outcome {
 // waiting for. None of them is logged at error, and none emits an Event, because they are
 // normal and would otherwise drown the log at cluster scale.
 func classifyWait(err error, resync time.Duration) (outcome, bool) {
+	waiting := func(reason string, requeue time.Duration) outcome {
+		return outcome{reason: reason, requeue: requeue, result: metrics.ResultWaiting}
+	}
+
 	switch {
 	case errors.Is(err, errEndpointNotReady):
-		return outcome{reason: netboxv1alpha1.ReasonWaitingForEndpoint, requeue: endpointRetry}, true
+		return waiting(netboxv1alpha1.ReasonWaitingForEndpoint, endpointRetry), true
 	case errors.Is(err, errNoCandidate):
-		return outcome{reason: netboxv1alpha1.ReasonWaitingForKey, requeue: resync}, true
+		return waiting(netboxv1alpha1.ReasonWaitingForKey, resync), true
 	case errors.Is(err, errAdoptOnly):
-		return outcome{reason: netboxv1alpha1.ReasonAdoptOnly, requeue: resync}, true
+		return waiting(netboxv1alpha1.ReasonAdoptOnly, resync), true
 	default:
 		return outcome{}, false
 	}
@@ -149,11 +164,11 @@ func classifyInvalid(err error, resync time.Duration) (outcome, bool) {
 
 	conflict := outcome{
 		reason: netboxv1alpha1.ReasonConflict, requeue: resync,
-		event: netboxv1alpha1.EventConflict, severe: true,
+		event: netboxv1alpha1.EventConflict, severe: true, result: metrics.ResultError,
 	}
 	invalid := outcome{
 		reason: netboxv1alpha1.ReasonInvalid, requeue: resync,
-		event: netboxv1alpha1.EventInvalid, severe: true,
+		event: netboxv1alpha1.EventInvalid, severe: true, result: metrics.ResultError,
 	}
 
 	switch {
@@ -181,7 +196,10 @@ func classifyAPI(err error, resync time.Duration) outcome {
 	var notFound *netbox.NotFoundError
 
 	api := func(requeue time.Duration, severe bool) outcome {
-		return outcome{reason: netboxv1alpha1.ReasonAPIError, requeue: requeue, severe: severe}
+		return outcome{
+			reason: netboxv1alpha1.ReasonAPIError, requeue: requeue,
+			severe: severe, result: metrics.ResultError,
+		}
 	}
 
 	switch {

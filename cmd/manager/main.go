@@ -95,8 +95,9 @@ func run() error {
 	clients := controller.NewClientCache()
 
 	if err := (&controller.NetBoxEndpointReconciler{
-		Client: mgr.GetClient(),
-		Cache:  clients,
+		Client:   mgr.GetClient(),
+		Cache:    clients,
+		Recorder: mgr.GetEventRecorderFor("netboxendpoint-controller"),
 	}).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("setting up the NetBoxEndpoint controller: %w", err)
 	}

@@ -5,6 +5,7 @@ package controller
 import (
 	"sync"
 
+	"github.com/ricardomolendijk/netbox-operator/internal/metrics"
 	"github.com/ricardomolendijk/netbox-operator/internal/netbox"
 )
 
@@ -49,6 +50,7 @@ func (c *ClientCache) put(key clientKey, client *netbox.Client) {
 		}
 	}
 	c.clients[key] = client
+	metrics.ClientCacheSize.Set(float64(len(c.clients)))
 }
 
 // Lookup returns the client for an endpoint by namespace and name, if one has been built.
@@ -76,4 +78,5 @@ func (c *ClientCache) Forget(namespace, name string) {
 			delete(c.clients, key)
 		}
 	}
+	metrics.ClientCacheSize.Set(float64(len(c.clients)))
 }

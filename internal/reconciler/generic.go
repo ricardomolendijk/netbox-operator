@@ -24,6 +24,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	netboxv1alpha1 "github.com/ricardomolendijk/netbox-operator/api/v1alpha1"
+	"github.com/ricardomolendijk/netbox-operator/internal/metrics"
 	"github.com/ricardomolendijk/netbox-operator/internal/netbox"
 	"github.com/ricardomolendijk/netbox-operator/internal/registry"
 )
@@ -162,7 +163,18 @@ func (e *Engine) Reconcile(ctx context.Context, obj Object) (ctrl.Result, error)
 		"kind", descriptor.GVK.Kind, "namespace", obj.GetNamespace(), "name", obj.GetName(),
 		"endpoint", descriptor.Endpoint))
 
-	p := &pass{engine: e, obj: obj, before: obj.NetBoxStatus().DeepCopy(), desc: descriptor}
+	// The initial result is ResultError because a path that returns without deciding an
+	// outcome is a bug, and it should look like one on the dashboard rather than like a
+	// success.
+	p := &pass{
+		engine: e, obj: obj, before: obj.NetBoxStatus().DeepCopy(),
+		desc: descriptor, result: metrics.ResultError,
+	}
+
+	// Deferred, so every exit lands in exactly one bucket and reconcile_total is a count
+	// of reconciles rather than a count of the paths somebody remembered to instrument.
+	started := time.Now()
+	defer func() { metrics.ObserveReconcile(descriptor.GVK.Kind, p.result, time.Since(started)) }()
 
 	if !obj.GetDeletionTimestamp().IsZero() {
 		return p.deleting(ctx)
@@ -245,6 +257,10 @@ type pass struct {
 
 	// state is which spec fields are set, and which hold a value a filter can use.
 	state registry.SpecState
+
+	// result is this pass's outcome, one of the metrics.Result* values. Written by
+	// whichever step decided, read once by the deferred observation in Reconcile.
+	result string
 }
 
 // build renders the spec into a payload and reports the references it had to leave out.
@@ -410,9 +426,12 @@ func (p *pass) update(ctx context.Context, live netbox.Object) (ctrl.Result, err
 			"netboxID", p.obj.NetBoxStatus().ID, "action", "none")
 		p.condition(netboxv1alpha1.ConditionSynced, true,
 			netboxv1alpha1.ReasonNoDrift, "netbox matches the spec")
+		p.result = metrics.ResultUnchanged
 
 		return p.ready(ctx)
 	}
+
+	p.driftDetected(changes)
 
 	id := int(p.obj.NetBoxStatus().ID)
 	if p.desc.UpdateStrategy == registry.UpdateRecreate && touchesIdentity(p.desc, changes) {
@@ -423,6 +442,7 @@ func (p *pass) update(ctx context.Context, live netbox.Object) (ctrl.Result, err
 	if err != nil {
 		return p.stop(ctx, fmt.Errorf("patching netbox %s/%d: %w", p.desc.Endpoint, id, err))
 	}
+	p.driftCorrected(patched, changes)
 
 	return p.applyWrite(ctx, patched, netboxv1alpha1.EventUpdated, "update", renderChanges(changes))
 }
@@ -442,6 +462,7 @@ func (p *pass) recreate(ctx context.Context, id int, changes []netbox.Change) (c
 	if err != nil {
 		return p.stop(ctx, fmt.Errorf("recreating netbox %s: %w", p.desc.Endpoint, err))
 	}
+	p.driftCorrected(created, changes)
 
 	// status.id is only ever taken from a create response, so a DryRun -- where the delete
 	// is suppressed too -- keeps the id of the object that is still there rather than
@@ -455,10 +476,15 @@ func (p *pass) applyWrite(ctx context.Context, written netbox.Object, event, act
 	log := logf.FromContext(ctx).WithValues("action", action, "changes", detail)
 
 	if netbox.Suppressed(written) {
-		log.Info("dry run: netbox was not written")
+		// Debug, not info: a DryRun endpoint finds the same drift on every resync and
+		// writes nothing, so at info this is one identical line per object per resync
+		// forever. What changed is nothing; drift_detected_total and the
+		// Synced=False/DriftDetectedDryRun condition are the signals that scale.
+		log.V(1).Info("dry run: netbox was not written")
 		p.engine.event(p.obj, event, "dry run: would have written %s (%s)", p.desc.Endpoint, detail)
 		p.condition(netboxv1alpha1.ConditionSynced, false,
 			netboxv1alpha1.ReasonDriftDetectedDryRun, "the endpoint is in DryRun, so nothing was sent")
+		p.result = metrics.ResultDryRun
 
 		return p.pending(ctx, netboxv1alpha1.ReasonDryRunPending,
 			fmt.Sprintf("dry run: netbox was not written (%s)", detail))
@@ -492,8 +518,43 @@ func (p *pass) applyWrite(ctx context.Context, written netbox.Object, event, act
 	p.engine.event(p.obj, event, "netbox %s/%d: %s", p.desc.Endpoint, status.ID, detail)
 	p.condition(netboxv1alpha1.ConditionSynced, true,
 		netboxv1alpha1.ReasonDriftCorrected, detail)
+	if result, ok := writeResults[action]; ok {
+		p.result = result
+	}
 
 	return p.ready(ctx)
+}
+
+// writeResults maps a write action onto the metric result it counts as. Data next to
+// applyWrite rather than a parameter, so the action in the log line and the bucket on the
+// dashboard cannot disagree about what just happened.
+var writeResults = map[string]string{
+	"create":   metrics.ResultCreated,
+	"update":   metrics.ResultUpdated,
+	"recreate": metrics.ResultRecreated,
+}
+
+// driftDetected counts every field that differs, whether or not it gets corrected.
+func (p *pass) driftDetected(changes []netbox.Change) {
+	for _, change := range changes {
+		metrics.DriftDetected.WithLabelValues(p.desc.GVK.Kind, change.Field).Inc()
+	}
+}
+
+// driftCorrected counts the fields NetBox actually accepted.
+//
+// A suppressed response means the endpoint is in DryRun and nothing was sent, so the
+// fields stay detected-but-uncorrected. The gap between the two counters is what makes
+// Report mode legible (docs/decisions/0005-gitops-coexistence.md) instead of
+// indistinguishable from a healthy cluster.
+func (p *pass) driftCorrected(written netbox.Object, changes []netbox.Change) {
+	if netbox.Suppressed(written) {
+		return
+	}
+
+	for _, change := range changes {
+		metrics.DriftCorrected.WithLabelValues(p.desc.GVK.Kind, change.Field).Inc()
+	}
 }
 
 // recordHash stores a digest of the payload NetBox just accepted, as the record of what
