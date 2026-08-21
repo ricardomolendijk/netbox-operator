@@ -35,8 +35,13 @@ type NetBoxEndpointReconciler struct {
 
 // +kubebuilder:rbac:groups=netbox.populator.io,resources=netboxendpoints,verbs=get;list;watch
 // +kubebuilder:rbac:groups=netbox.populator.io,resources=netboxendpoints/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
+
+// All three Secret verbs are load-bearing under the label-selected cache: a selected
+// informer still issues a LIST before it WATCHes, and `watch` is what makes a rotated
+// token take effect without a restart. RBAC cannot filter by label, so this grant stays
+// cluster-wide until per-namespace Roles land; see docs/operations/rbac.md and NBO-072.
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 
 // Reconcile builds a client for one endpoint and records what it found.
 //
@@ -126,7 +131,7 @@ func (r *NetBoxEndpointReconciler) readToken(ctx context.Context, e *netboxv1alp
 	secret := &corev1.Secret{}
 	name := types.NamespacedName{Namespace: e.Namespace, Name: e.Spec.TokenSecretRef.Name}
 	if err := r.Get(ctx, name, secret); err != nil {
-		return "", "", fmt.Errorf("reading token secret %s: %w", name, err)
+		return "", "", unreadableSecret("token", name, err)
 	}
 
 	key := orDefaultKey(e.Spec.TokenSecretRef.Key, "token")
@@ -140,6 +145,19 @@ func (r *NetBoxEndpointReconciler) readToken(ctx context.Context, e *netboxv1alp
 var (
 	errTokenMissing = errors.New("token missing")
 )
+
+// unreadableSecret explains a Secret the controller could not read. It exists because the
+// manager's Secret cache is label-selected: an unlabelled Secret is reported as NotFound
+// even though it is sitting in the API server, and a bare "not found" sends the user
+// looking for a typo in a name that is correct. The condition has to name the label.
+func unreadableSecret(what string, name types.NamespacedName, err error) error {
+	if !apierrors.IsNotFound(err) {
+		return fmt.Errorf("reading %s secret %s: %w", what, name, err)
+	}
+	return fmt.Errorf("reading %s secret %s: %w; the secret may exist but be invisible to "+
+		"the operator, which reads only Secrets labelled %s=%s (see docs/operations/rbac.md)",
+		what, name, err, CredentialLabel, CredentialLabelValue)
+}
 
 func (r *NetBoxEndpointReconciler) buildConfig(ctx context.Context, e *netboxv1alpha1.NetBoxEndpoint, token string) (netbox.Config, error) {
 	cfg := netbox.Config{
@@ -169,7 +187,7 @@ func (r *NetBoxEndpointReconciler) buildConfig(ctx context.Context, e *netboxv1a
 	secret := &corev1.Secret{}
 	name := types.NamespacedName{Namespace: e.Namespace, Name: ref.Name}
 	if err := r.Get(ctx, name, secret); err != nil {
-		return netbox.Config{}, fmt.Errorf("reading ca bundle secret %s: %w", name, err)
+		return netbox.Config{}, unreadableSecret("ca bundle", name, err)
 	}
 	key := orDefaultKey(ref.Key, "ca.crt")
 	cfg.CABundle = secret.Data[key]

@@ -98,8 +98,10 @@ spec:
                 description: TLSConfig tunes the TLS handshake.
                 properties:
                   caBundleSecretRef:
-                    description: CABundleSecretRef holds additional trusted roots,
-                      PEM-encoded.
+                    description: |-
+                      CABundleSecretRef holds additional trusted roots, PEM-encoded. That Secret must be
+                      labelled netbox.populator.io/endpoint-credential: "true" or the operator cannot
+                      read it; see docs/operations/rbac.md.
                     properties:
                       key:
                         description: |-
@@ -124,7 +126,10 @@ spec:
                     type: boolean
                 type: object
               tokenSecretRef:
-                description: TokenSecretRef names the Secret holding the API token.
+                description: |-
+                  TokenSecretRef names the Secret holding the API token. That Secret must be
+                  labelled netbox.populator.io/endpoint-credential: "true" or the operator cannot
+                  read it; see docs/operations/rbac.md.
                 properties:
                   key:
                     description: |-

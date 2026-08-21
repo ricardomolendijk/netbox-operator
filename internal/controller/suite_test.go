@@ -16,6 +16,7 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -25,9 +26,13 @@ import (
 )
 
 var (
-	testEnv   *envtest.Environment
-	scheme    = runtime.NewScheme()
+	testEnv *envtest.Environment
+	scheme  = runtime.NewScheme()
+	// k8sClient reads through the manager's caches, so it sees Secrets exactly as the
+	// controller does. apiClient bypasses them, which is how a test can show that an
+	// unlabelled Secret exists in the API server and is still invisible to the operator.
 	k8sClient client.Client
+	apiClient client.Client
 	clients   *ClientCache
 )
 
@@ -70,9 +75,17 @@ func startManager(cfg *rest.Config) (func(), error) {
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme:  scheme,
 		Metrics: metricsserver.Options{BindAddress: "0"},
+		// The same scoping the shipped manager uses, so the tests exercise the label
+		// selector rather than a cache more permissive than production's.
+		Cache: cache.Options{ByObject: SecretCacheOptions()},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("manager: %w", err)
+	}
+
+	apiClient, err = client.New(cfg, client.Options{Scheme: scheme})
+	if err != nil {
+		return nil, fmt.Errorf("direct client: %w", err)
 	}
 
 	clients = NewClientCache()

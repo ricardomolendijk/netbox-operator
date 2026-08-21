@@ -3,6 +3,11 @@ kind: Secret
 metadata:
   name: netbox-token
   namespace: default
+  labels:
+    # Required. The operator's Secret cache selects on this label, so a Secret without
+    # it is invisible to the operator even when the name is right. See
+    # docs/operations/rbac.md.
+    netbox.populator.io/endpoint-credential: "true"
 type: Opaque
 stringData:
   # A NetBox API token with write access to the object types the operator manages.

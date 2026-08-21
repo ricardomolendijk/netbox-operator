@@ -43,7 +43,9 @@ const (
 	EndpointModeDryRun EndpointMode = "DryRun"
 )
 
-// SecretKeyRef points at one key of a Secret in this namespace.
+// SecretKeyRef points at one key of a Secret in this namespace. Every use site requires
+// the netbox.populator.io/endpoint-credential label, because the manager's Secret cache
+// selects on it rather than holding every Secret in the cluster.
 //
 // Deliberately not namespace-qualified: reading a Secret from another namespace is a
 // privilege escalation dressed up as convenience, and it would make the operator's RBAC
@@ -70,7 +72,9 @@ type TLSConfig struct {
 	// +optional
 	InsecureSkipVerify bool `json:"insecureSkipVerify,omitempty"`
 
-	// CABundleSecretRef holds additional trusted roots, PEM-encoded.
+	// CABundleSecretRef holds additional trusted roots, PEM-encoded. That Secret must be
+	// labelled netbox.populator.io/endpoint-credential: "true" or the operator cannot
+	// read it; see docs/operations/rbac.md.
 	// +optional
 	CABundleSecretRef *SecretKeyRef `json:"caBundleSecretRef,omitempty"`
 }
@@ -94,7 +98,9 @@ type NetBoxEndpointSpec struct {
 	// +kubebuilder:validation:Pattern=`^https?://`
 	URL string `json:"url"`
 
-	// TokenSecretRef names the Secret holding the API token.
+	// TokenSecretRef names the Secret holding the API token. That Secret must be
+	// labelled netbox.populator.io/endpoint-credential: "true" or the operator cannot
+	// read it; see docs/operations/rbac.md.
 	TokenSecretRef SecretKeyRef `json:"tokenSecretRef"`
 
 	// TLSConfig tunes the TLS handshake.
