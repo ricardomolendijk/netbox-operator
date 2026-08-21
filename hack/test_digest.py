@@ -1,23 +1,33 @@
-"""Regression test for the schema extraction pipeline (NBO-067, NBO-070).
+"""Regression test for the schema extraction pipeline (NBO-067, NBO-070, NBO-071).
 
-Runs extract-netbox-schema.py, digest-netbox-schema.py and extract-netbox-endpoints.py over
-test/fixtures/netbox-models -- a hand-written miniature of a NetBox source tree -- and asserts
-each of the five NBO-067 defects stays fixed, plus NBO-070: a model's inherited columns are
-merged in and attributed, and no model's meta.constraints names a column absent from its own
-field list. It deliberately does not need a NetBox checkout, which is what makes it runnable
-in CI:
+Runs extract-netbox-schema.py, digest-netbox-schema.py, extract-netbox-endpoints.py and
+classify-scope.py over test/fixtures/netbox-models -- a hand-written miniature of a NetBox
+source tree -- and asserts each of the five NBO-067 defects stays fixed, plus NBO-070 (a
+model's inherited columns are merged in and attributed, and no model's meta.constraints names
+a column absent from its own field list) and the six NBO-071 defects. The two NBO-071 defects
+that now stop the run get their own deliberately-broken tree, test/fixtures/netbox-models-bad.
+It deliberately does not need a NetBox checkout, which is what makes it runnable in CI:
 
     python3 hack/test_digest.py
 """
-import ast, json, os, subprocess, sys
+import ast, json, os, re, subprocess, sys
 
 HACK = os.path.dirname(os.path.abspath(__file__))
 FIXTURE = os.path.join(os.path.dirname(HACK), 'test', 'fixtures', 'netbox-models')
+BAD = FIXTURE + '-bad'
 
 def run(script, *args):
+    """(stdout, stderr) of a run that must succeed."""
     r = subprocess.run([sys.executable, os.path.join(HACK, script), *args], capture_output=True, text=True)
     assert r.returncode == 0, f"{script} failed: {r.stderr}"
-    return r.stdout
+    return r.stdout, r.stderr
+
+def fails(script, *args):
+    """stderr of a run that must NOT succeed. A defect that corrupts a field list in silence is
+    worse than one that stops the pipeline, so two of these are exits rather than warnings."""
+    r = subprocess.run([sys.executable, os.path.join(HACK, script), *args], capture_output=True, text=True)
+    assert r.returncode != 0, f"{script} was expected to fail over {args[-1]}, but exited 0"
+    return r.stderr
 
 def rows(digest, model):
     """The lines of one `## app.Model` block."""
@@ -34,12 +44,13 @@ def field(digest, model, name):
         if line.startswith(f"     {name} ") or line.strip().startswith(name + ' '): return line
     raise AssertionError(f"{model}.{name} missing from digest")
 
-models = run('extract-netbox-schema.py', FIXTURE)
+models, extract_err = run('extract-netbox-schema.py', FIXTURE)
 schema = json.loads(models)
 models_path = os.path.join(os.environ.get('TMPDIR', '/tmp'), 'nbo067-models.json')
 with open(models_path, 'w', encoding='utf-8') as fh: fh.write(models)
-digest = run('digest-netbox-schema.py', models_path)
-endpoints = run('extract-netbox-endpoints.py', FIXTURE)
+digest, _ = run('digest-netbox-schema.py', models_path)
+endpoints, _ = run('extract-netbox-endpoints.py', FIXTURE)
+endpoint_models = {line.split()[0]: line.split()[1] for line in endpoints.splitlines()}
 
 # --- defect 1: meta.constraints emitted in full, wrapped, never truncated ----------------
 src = open(os.path.join(FIXTURE, 'ipam', 'models', 'vlans.py'), encoding='utf-8').read()
@@ -154,5 +165,95 @@ for key, v in sorted(schema.items()):
         checked += 1
 assert checked >= 4, f"only {checked} Meta constraint blocks in the fixture: the invariant is barely exercised"
 
-print(f"ok: 5/5 NBO-067 defects + NBO-070 inherited columns covered over {len(schema)} fixture models, "
-      f"{len(endpoints.splitlines())} endpoints, {checked} Meta constraint blocks")
+# --- NBO-071 defect 1: an M2M and a GenericRelation are not columns, so never REQ --------
+# An M2M has no NOT NULL column and Django ignores null= on it. Nine real rows carried a
+# spurious REQ; dcim.Interface.vdcs made the CRD demand a VDC the user cannot supply.
+assert ' REQ' not in field(digest, 'dcim.Rack', 'tagged_vlans'), 'ManyToManyField marked REQ'
+for line in digest.splitlines():
+    if 'ManyToManyField' in line or 'GenericRelation' in line:
+        assert ' REQ' not in line, f"a row that is not a column is marked REQ: {line}"
+# Nor does an M2M have an on_delete: its second positional argument is related_name.
+assert 'on_delete' not in field(digest, 'dcim.Rack', 'tagged_vlans'), 'on_delete invented for an M2M'
+
+# --- NBO-071 defect 2: every FK target reads app.Model ----------------------------------
+# `to=Site` unparsed to a bare `Site`, leaving the app to be guessed -- and a guess by class
+# name silently picks the wrong app's model when two apps share a name.
+assert '-> dcim.Site '     in field(digest, 'dcim.Rack', 'site'), 'a bare positional FK target was not qualified'
+assert '-> dcim.RackRole ' in field(digest, 'dcim.Rack', 'role'), 'a bare to= FK target was not qualified'
+# `to='self'` names the model the column ends up on, which for an inherited column is the
+# subclass: qualifying it where it is declared would make every nested group `netbox.self`.
+assert '-> dcim.RackGroup ' in field(digest, 'dcim.RackGroup', 'parent'), 'inherited self-FK not resolved to the inheriting model'
+assert '-> dcim.Region '    in field(digest, 'dcim.Region', 'parent')
+assert '-> netbox.NestedGroupModel ' in field(digest, 'netbox.NestedGroupModel', 'parent')
+# A class from outside the ten scanned apps (django.contrib.auth's User) has no app to be
+# qualified with, so it is flagged -- never mislabelled dcim.User.
+assert '-> UNRESOLVED:User ' in field(digest, 'dcim.RackReservation', 'user')
+for key, v in schema.items():
+    for f in v['fields']:
+        if not f.get('to') or f.get('to_unresolved'): continue
+        assert re.fullmatch(r'[a-z_]+\.\w+', f['to']), f"{key}.{f['name']} target is not app.Model: {f['to']}"
+
+# --- NBO-071 defect 2, second half: classify-scope.py's byname fallback ------------------
+# It matched a bare class name in whatever app happened to declare it, so the wrong edge could
+# quietly move a Kind in or out of the cluster-scoped set. It is gone; what replaced it warns,
+# and it can only fire for a target the extractor itself flagged as unresolvable.
+scope_out, scope_err = run('classify-scope.py', models_path)
+assert set(re.findall(r"unqualified FK target '([^']+)'", scope_err)) == \
+    {f['to'] for v in schema.values() for f in v['fields'] if f.get('to_unresolved')}, \
+    f"classify-scope guessed, or warned about a target the extractor had qualified: {scope_err}"
+assert 'STABLE cluster-scoped set' in scope_out, 'classify-scope no longer produces a scope set'
+
+# --- NBO-071 defect 3: a symbolic default is not a string literal ------------------------
+assert 'def=UNRESOLVED:RackStatus.ACTIVE' in field(digest, 'dcim.Rack', 'status'), 'a symbol was quoted into a literal'
+assert "def='front-to-rear'" in field(digest, 'dcim.Rack', 'airflow'), 'a real string default lost its quotes'
+assert 'choices=RackAirflow' in field(digest, 'dcim.Rack', 'airflow')
+# A callable default is symbolic too: `default=dict` is not the string 'dict'.
+assert 'def=UNRESOLVED:dict' in field(digest, 'dcim.Manufacturer', 'custom_field_data')
+
+# --- NBO-071 defect 4: DecimalField precision is emitted --------------------------------
+assert 'decimal(4,1)' in field(digest, 'dcim.Rack', 'position'), 'declared DecimalField shows no precision'
+assert 'decimal(8,2)' in field(digest, 'dcim.DeviceType', 'weight'), 'inherited DecimalField shows no precision'
+for line in digest.splitlines():
+    if 'DecimalField' in line:
+        assert 'decimal(' in line, f"a DecimalField row has no precision: {line}"
+
+# --- NBO-071 defect 5: a router.register the extractor cannot parse stops the run --------
+# Double-quoted, and a viewset with no `views.` prefix: both were skipped in silence, and a
+# missing endpoint row is a Kind that never gets a CRD at all.
+assert endpoint_models.get('dcim/racks') == 'dcim.Rack', 'a double-quoted register was skipped'
+assert endpoint_models.get('dcim/rack-reservations') == 'dcim.RackReservation', 'a viewset with no views. prefix was skipped'
+err = fails('extract-netbox-endpoints.py', BAD)
+assert 'cannot parse' in err and 'router.register(RACKS' in err, f"an unparsable register line did not fail loudly: {err}"
+
+# --- NBO-071 defect 6: two same-named classes in one app stop the run --------------------
+# `if key in out and not fields: continue` kept whichever file the glob reached first and
+# dropped the other class's entire field list, in either direction, silently.
+err = fails('extract-netbox-schema.py', BAD)
+assert 'dcim.Rack is declared twice' in err, f"a same-named class pair did not fail the run: {err}"
+# The cross-app case stays a warning by choice: one class name in two apps is legitimate, and
+# all that is lost is base attribution, which is already said out loud. Intra-app, one model's
+# entire field list is replaced by another model's.
+
+# --- NBO-071: the two silent losses found while fixing the six ---------------------------
+# `ast.walk` also reached each model's nested `class Meta(PrimaryModel.Meta)`, whose base name
+# contains "Model": every one of those became a phantom `app.Meta` entry, and the second
+# collapsed into the first. The fixture has two such Metas.
+assert 'dcim.Meta' not in schema and '## dcim.Meta' not in digest, 'a nested class became a model entry'
+assert schema['dcim.Rack']['meta']['ordering'] == "('site', 'position')", 'a nested Meta stopped being read'
+# A field class the whitelist does not know is a column missing from the entry, and a property
+# missing from any CRD derived from it. It is still dropped -- but no longer in silence, and
+# that warning is the only thing the extractor has to say about a healthy tree.
+assert not any(f['name'] == 'outer_unit' for f in schema['dcim.Rack']['fields'])
+assert extract_err.split() == '!! dcim.Rack.outer_unit: unknown field type RackUnitField, column omitted'.split(), \
+    f"unexpected extractor stderr: {extract_err}"
+
+# --- NBO-071 "also worth checking": blank is form-level, not SQL -------------------------
+# A ForeignKey(null=False, blank=True) column really is NOT NULL...
+assert ' REQ' in field(digest, 'dcim.Rack', 'role'), 'blank=True suppressed REQ on a NOT NULL FK'
+# ...while a CharField(blank=True) takes '' instead, so it stays optional.
+assert ' REQ' not in field(digest, 'dcim.Site', 'facility'), 'blank=True stopped meaning optional on a CharField'
+assert ' REQ' not in field(digest, 'ipam.VLAN', 'site'), 'a null=True FK became required'
+
+print(f"ok: 5/5 NBO-067 defects + NBO-070 inherited columns + 6/6 NBO-071 defects covered over "
+      f"{len(schema)} fixture models, {len(endpoints.splitlines())} endpoints, "
+      f"{checked} Meta constraint blocks")

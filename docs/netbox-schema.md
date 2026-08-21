@@ -7,7 +7,10 @@ This is the authoritative field list the operator's CRD schemas are derived from
 How to read an entry:
 
 - `REQ`   — the column is `NOT NULL` with no default: it must be supplied on create.
-- `-> x`  — `ForeignKey` / `OneToOneField` / `ManyToManyField` target (the SQL FK).
+- `-> x`  — `ForeignKey` / `OneToOneField` / `ManyToManyField` target, always spelled
+  `app.Model`. `-> UNRESOLVED:Name` means the source names a class from outside the ten
+  scanned apps (`django.contrib.auth`'s `User`, `Permission`), so there is no app to qualify
+  it with: read the source rather than assume the app.
 - `on_delete=X` — what NetBox does to this row when the target goes away: `PROTECT`
   (the delete is refused while this row exists), `CASCADE` (this row goes too),
   `SET_NULL` / `SET_DEFAULT` (the column is cleared).
@@ -15,6 +18,16 @@ How to read an entry:
 - `len=n` — `max_length`. `len=UNRESOLVED:SYMBOL` means NetBox declares the length as a
   module constant the AST walk could not pin to a single value: read the source, do not
   assume.
+- `decimal(d,p)` — a `DecimalField`'s `max_digits` and `decimal_places`. `decimal(8,6)` is
+  not a free float, and a CRD field for it needs the same precision.
+- `def=x` — the column default. A quoted value is a real literal; `def=UNRESOLVED:SYMBOL` is
+  a symbol (`VLANStatusChoices.STATUS_ACTIVE`, `dict`) that the AST walk cannot evaluate, so
+  it is *not* the string it happens to spell.
+- A `ManyToManyField` is a through table, not a column on this model: it has no `NOT NULL` to
+  violate, Django ignores `null=` on it, and it therefore never carries `REQ`.
+- `blank=True` is a form-level flag, not SQL. It stands in for optional on a `CharField`,
+  whose `NOT NULL` column takes `''` instead — but a `ForeignKey(null=False, blank=True)`
+  column has no such empty value and really must be supplied, so it is marked `REQ`.
 - `meta.constraints` — table-level `UniqueConstraint`s, wrapped across lines but never
   truncated. **These are the natural keys the operator uses to look an object up before
   deciding create-vs-update.**
@@ -34,7 +47,8 @@ How to read an entry:
 
 Regenerate with `hack/extract-netbox-schema.py` (see `docs/regenerating.md`).
 
-> **This body has not been regenerated since NBO-067 and NBO-070 fixed the extractors.**
+> **This body has not been regenerated since NBO-067, NBO-070 and NBO-071 fixed the
+> extractors.**
 > It is the output of the pre-fix scripts, so — until someone re-runs them against a NetBox
 > 4.6.8 checkout — **no entry below lists a single inherited column**: `name`, `slug`,
 > `parent`, `description`, `comments`, `scope_type`/`scope_id`, `weight`/`weight_unit` and
@@ -50,6 +64,17 @@ Regenerate with `hack/extract-netbox-schema.py` (see `docs/regenerating.md`).
 > (`Manufacturer`, `RackGroup`, `ContactGroup`, `ContactRole`, `ClusterType`,
 > `TunnelGroup`, `CircuitType`, `VirtualCircuitType`) have an endpoint above but no
 > entry below. Do not read their absence as "this kind does not exist".
+>
+> And still pre-NBO-071, which is the part that misleads rather than omits: **nine
+> `ManyToManyField` rows below are marked `REQ` and are not required at all**
+> (`dcim.Interface.vdcs`, six `object_types`, two `proposals`) — do not make a CRD demand
+> them. Thirteen FK targets are unqualified
+> (`dcim.PowerPanel.site -> Site`, `dcim.VirtualChassis.master -> Device`, …) and six read
+> `-> self`; all fourteen `DecimalField` rows (`latitude`, `longitude`, `Cable.length`,
+> `Rack.position`, `rf_channel_frequency`, …) show no precision; and a `def='...'` below may
+> be either a real literal or a symbol such as `VLANStatusChoices.STATUS_ACTIVE`, which the
+> pre-fix digest quoted identically. Conversely, a `ForeignKey(null=False, blank=True)` row
+> below is missing its `REQ`.
 
 ## API endpoint -> model map
 

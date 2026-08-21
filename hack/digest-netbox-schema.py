@@ -2,6 +2,10 @@ import json,re,sys,textwrap
 d=json.load(open(sys.argv[1]))
 want=sys.argv[2].split(',') if len(sys.argv)>2 else None
 GENERIC_FK=('GenericForeignKey','RestrictedGenericForeignKey')
+# Not columns: nothing here has a NOT NULL to violate, so nothing here can be REQ.
+NOT_A_COLUMN=('GenericRelation','ManyToManyField')
+# Columns that hold a reference and nothing else -- no empty value to fall back on.
+RELATIONS=('ForeignKey','OneToOneField','TreeForeignKey')
 MODULE_PREFIX=re.compile(r'^[\w.]*\.')  # models.PROTECT -> PROTECT, models.SET(x) -> SET(x)
 
 def req(f,by_name,seen=()):
@@ -10,12 +14,25 @@ def req(f,by_name,seen=()):
     # unassigned IP or an unscoped prefix look illegal. A GenericRelation is a reverse
     # relation (never required); a GenericForeignKey inherits its requiredness from the
     # content-type half of its pair.
-    if f['type']=='GenericRelation': return False
+    # A ManyToManyField is a through table, not a column on this model: it has no NOT NULL
+    # to violate and Django ignores null= on it entirely. `REQ` there makes the CRD demand a
+    # value the user has no way to supply -- dcim.Interface.vdcs, where a VDC assignment is
+    # optional, is one of nine such rows.
+    if f['type'] in NOT_A_COLUMN: return False
     if f['type'] in GENERIC_FK:
         ct=by_name.get(f.get('ct_field'))
         if ct is None or ct['name'] in seen: return False
         return req(ct,by_name,seen+(f['name'],))
+    # `blank` is a form-level flag, not SQL. It stands in for optional on a CharField,
+    # whose NOT NULL column takes '' instead, but a ForeignKey(null=False, blank=True) has
+    # no such empty value: that column really must be supplied.
+    if f['type'] in RELATIONS: return not (f.get('null') or 'default' in f)
     return not (f.get('null') or f.get('blank') or 'default' in f)
+
+def sym(f,k):
+    """A resolved kwarg, or the symbol flagged as unresolved -- never a symbol passed off as
+    the value it happens to spell."""
+    return f"{'UNRESOLVED:' if f.get(k+'_unresolved') else ''}{f.get(k,'?')}"
 
 for k,v in sorted(d.items()):
     if want and not any(k.endswith('.'+w) for w in want): continue
@@ -37,11 +54,15 @@ for k,v in sorted(d.items()):
         # but a CRD author needs to know it is not declared here.
         label=f"{f['name']} ({f['declared_by']})" if f.get('declared_by') else f['name']
         extra=[]
-        if f.get('to'): extra.append(f"-> {f['to']}")
+        if f.get('to'): extra.append(f"-> {sym(f,'to')}")
         if f.get('on_delete'): extra.append(f"on_delete={MODULE_PREFIX.sub('',str(f['on_delete']))}")
         if f.get('unique'): extra.append('UNIQUE')
-        if f.get('max_length'): extra.append(f"len={'UNRESOLVED:' if f.get('max_length_unresolved') else ''}{f['max_length']}")
-        if 'default' in f: extra.append(f"def={f['default']!r}")
+        if f.get('max_length'): extra.append(f"len={sym(f,'max_length')}")
+        # A DecimalField's precision is the whole of its contract: without it a CRD author
+        # cannot tell decimal(8,6) from a free float, which is 14 rows of the schema.
+        if 'max_digits' in f or 'decimal_places' in f: extra.append(f"decimal({sym(f,'max_digits')},{sym(f,'decimal_places')})")
+        # `def='VLANStatusChoices.STATUS_ACTIVE'` read exactly like the literal 'active'.
+        if 'default' in f: extra.append(f"def={sym(f,'default') if f.get('default_unresolved') else repr(f['default'])}")
         if f.get('choices'): extra.append(f"choices={f['choices']}")
         # Wider than the 28 it was, to keep the type column aligned once a row carries the
         # class that declares it; rstrip so an extra-less row does not pad out to the limit.

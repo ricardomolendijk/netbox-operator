@@ -14,7 +14,14 @@ def norm(t,app):
         return None
     for k,v in d.items():
         if v['app']==app and v['name'].lower()==t.lower(): return k
-    return byname.get(t)
+    # There used to be a `byname.get(t)` fallback here: match the class name in whatever app
+    # happens to declare it. That silently picks the wrong model when two apps share a class
+    # name, and the wrong edge quietly moves a Kind in or out of the cluster-scoped set.
+    # extract-netbox-schema.py now emits every FK target as `app.Model` (NBO-071), so this is
+    # only reachable from a models.json written before that -- say so instead of guessing.
+    print(f"!! unqualified FK target {t!r} declared in {app}: re-run extract-netbox-schema.py",
+          file=sys.stderr)
+    return None
 
 # Curated seed: base-class catalogues PLUS conceptual catalogues that NetBox
 # models as PrimaryModel only because they carry description/comments/custom fields.
@@ -48,7 +55,11 @@ for k,v in d.items():
         if f['name'].startswith('_'): continue
         tgt=norm(f.get('to'), v['app'])
         if tgt in (None,'SELF',k) or tgt in NEUTRAL: continue
-        out.append((f['name'],tgt,not (f.get('null') or f.get('blank') or 'default' in f)))
+        # Required-ness, derived the same way the digest derives it (NBO-071): an M2M has no
+        # NOT NULL column at all, and `blank` is form-level, not SQL -- every field here is a
+        # relation, so there is no '' for a blank column to fall back on. Getting this wrong
+        # in either direction moves a Kind in or out of the cluster-scoped set.
+        out.append((f['name'],tgt,f['type']!='ManyToManyField' and not (f.get('null') or 'default' in f)))
     edges[k]=out
 
 s=set(cand); rounds=0
