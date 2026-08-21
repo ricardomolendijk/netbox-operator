@@ -204,14 +204,14 @@ func lookedFor(key map[string]string, endpoint string) string {
 // deleteObject issues the DELETE and decides what its answer means.
 func (p *pass) deleteObject(ctx context.Context) (ctrl.Result, error) {
 	id := int(p.obj.NetBoxStatus().ID)
-	err := p.endpoint.Client.Delete(ctx, p.desc.Endpoint, id)
+	deleted, err := p.endpoint.Client.Delete(ctx, p.desc.Endpoint, id)
 
 	var notFound *netbox.NotFoundError
 	var protected *netbox.ProtectedError
 
 	switch {
 	case err == nil:
-		return p.release(ctx, p.deleted(id))
+		return p.release(ctx, p.deleted(id, deleted))
 	// Already gone is the end state the CR asked for, reached by somebody else. Calling it
 	// a failure would keep the finalizer on forever waiting for a delete that can never
 	// succeed, because there is nothing left to delete.
@@ -234,12 +234,12 @@ func (p *pass) deleteObject(ctx context.Context) (ctrl.Result, error) {
 
 // deleted describes a delete that came back clean.
 //
-// A DryRun endpoint suppresses the request and returns no error, which is indistinguishable
-// from a real 204 through Writer.Delete -- unlike Create and Patch, which hand back a
-// payload the engine can recognise as suppressed. So the endpoint's mode is carried as data
-// and consulted here, rather than the Event claiming a deletion that never happened.
-func (p *pass) deleted(id int) release {
-	if p.endpoint.DryRun {
+// A suppressed answer is a DryRun that sent nothing, and it is read from the answer itself
+// rather than from the endpoint's mode: carrying the mode alongside would be a second source
+// of truth for the same fact, and whichever of the two drifted would have the Event claim a
+// deletion that never happened.
+func (p *pass) deleted(id int, out netbox.Object) release {
+	if netbox.Suppressed(out) {
 		return release{
 			event: netboxv1alpha1.EventDeleted,
 			message: fmt.Sprintf("dry run: netbox %s/%d was not deleted and is left in place",

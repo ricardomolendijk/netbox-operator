@@ -245,9 +245,17 @@ Retain` and `onConflict: Adopt` belong together on any object you intend to hand
 forth. Without the pair you get a `Conflict` condition naming the object it will not touch.
 
 **A `DryRun` endpoint deletes nothing and the CR still goes away.** `Client.Delete` suppresses
-the request and returns success, so the finalizer comes off and the NetBox object stays. That
-is right — a dry run must not write — but it is reported as a `Warning` rather than passed off
-as a deletion: *"dry run: netbox extras/tags/9 was not deleted and is left in place"*.
+the request, so the finalizer comes off and the NetBox object stays. That is right — a dry run
+must not write — but it is reported as a `Warning` rather than passed off as a deletion:
+*"dry run: netbox extras/tags/9 was not deleted and is left in place"*.
+
+The engine knows which it was because all three mutating methods report suppression
+identically: `Create`, `Patch` and `Delete` each return an `Object` that `netbox.Suppressed`
+recognises, and a caller checks that one thing rather than the endpoint's mode. A suppressed
+create or patch carries the payload that was never sent; a suppressed delete carries the
+`endpoint` and `id` it would have removed, which is enough to render *"would delete
+ipam/prefixes/11"*. A real delete returns a nil `Object`, because NetBox answers `204` with no
+body — so nothing can mistake a suppressed delete for a completed one.
 
 ## Related
 
