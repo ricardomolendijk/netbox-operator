@@ -69,13 +69,18 @@ or two clusters — cannot land on the same address. On top of that:
 
 - **Allocation happens exactly once**, guarded by `status.address`. After that the
   object is reconciled by ID and never re-allocated.
-- **An idempotency key** — the claim's UID, written to a custom field or a tag on the
-  allocated object — makes a retry after a lost response recoverable: the controller
-  looks for its own key before allocating again. Without this, a timeout on the POST
-  leaks an address on every retry.
+- **An idempotency key** written to a custom field or tag on the allocated object makes
+  a retry after a lost response recoverable: the controller looks for its own key before
+  allocating again. Without this, a timeout on the POST leaks an address on every retry.
+  The key is **deterministic**, derived from `(endpoint, namespace, kind, name)` rather
+  than from the claim's UID, so a claim re-created from the same Git manifest reclaims
+  the same address — see [ADR-0005 §3](0005-gitops-coexistence.md). The UID is recorded
+  in `status` for debugging and to detect a *different* claim taking the same name.
 - **Read-after-write** verification before `status.address` is set.
-- A claim deleted and re-created gets a **new** address. Documented, and avoidable with
-  `deletionPolicy: Retain`.
+- A claim deleted and re-created **reclaims its previous address**, via the deterministic
+  identity above — which is what makes rebuilding a cluster from Git converge instead of
+  re-rolling every address. `deletionPolicy: Retain` additionally keeps the NetBox object
+  alive while the claim is gone.
 
 ## Exhaustion
 

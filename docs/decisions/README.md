@@ -10,3 +10,4 @@ that if they *are* revisited, it is with the original trade-off in view.
 | [0002](0002-crd-scoping.md) | Everything is namespaced in `v1alpha1` | Accepted |
 | [0003](0003-ownership-and-references.md) | `parentRef` carries the FK; owner references are added only where legal | Accepted |
 | [0004](0004-claims-first-allocation.md) | Allocation is a separate `*Claim` kind, not a mode of the resource | Accepted |
+| [0005](0005-gitops-coexistence.md) | Git is authoritative; the operator never writes `spec`; no Git write-back | Accepted |
