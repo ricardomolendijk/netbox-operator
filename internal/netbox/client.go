@@ -251,12 +251,16 @@ func (c *Client) Patch(ctx context.Context, endpoint string, id int, payload Obj
 }
 
 // Delete removes an object by id. A protected foreign key surfaces as *ProtectedError.
-func (c *Client) Delete(ctx context.Context, endpoint string, id int) error {
+//
+// A DryRun client sends nothing and returns a suppressed Object naming what it would have
+// removed -- {"endpoint": endpoint, "id": id} -- so a caller can report "would delete
+// ipam/prefixes/11" without consulting Mode, exactly as it recognises a suppressed Create
+// or Patch. A real delete returns a nil Object, because NetBox answers 204 with no body.
+func (c *Client) Delete(ctx context.Context, endpoint string, id int) (Object, error) {
 	if c.DryRun() {
-		return nil
+		return suppress(Object{"endpoint": endpoint, "id": id}), nil
 	}
-	_, err := c.do(ctx, http.MethodDelete, c.objectURL(endpoint, id), endpoint, nil)
-	return err
+	return c.do(ctx, http.MethodDelete, c.objectURL(endpoint, id), endpoint, nil)
 }
 
 // suppress returns a copy of payload flagged as never-sent, so a caller cannot mistake

@@ -485,11 +485,30 @@ func TestDryRunIssuesNoMutatingRequests(t *testing.T) {
 		t.Errorf("payload not returned: %v", created)
 	}
 
-	if _, err := client.Patch(ctx, "dcim/sites", 7, Object{"name": "away"}); err != nil {
+	patched, err := client.Patch(ctx, "dcim/sites", 7, Object{"name": "away"})
+	if err != nil {
 		t.Fatalf("Patch: %v", err)
 	}
-	if err := client.Delete(ctx, "dcim/sites", 7); err != nil {
+	if !Suppressed(patched) {
+		t.Error("patched object is not marked suppressed")
+	}
+
+	// A suppressed delete has to be tellable from a completed one, or a caller reports a
+	// deletion that never happened -- which for the finalizer means dropping itself and
+	// leaving the object behind in NetBox.
+	deleted, err := client.Delete(ctx, "dcim/sites", 7)
+	if err != nil {
 		t.Fatalf("Delete: %v", err)
+	}
+	if !Suppressed(deleted) {
+		t.Error("a DryRun delete is indistinguishable from a completed one")
+	}
+	// The marker names its target, so a caller can render "would delete dcim/sites/7".
+	if id, ok := deleted.ID(); !ok || id != 7 {
+		t.Errorf("suppressed delete id = %d (found %t), want 7", id, ok)
+	}
+	if deleted["endpoint"] != "dcim/sites" {
+		t.Errorf("suppressed delete endpoint = %v, want dcim/sites", deleted["endpoint"])
 	}
 
 	// Reads must still hit the live API, so drift is reported against real state.
@@ -517,7 +536,7 @@ func TestApplyModeSendsMutations(t *testing.T) {
 	if _, err := client.Patch(ctx, "dcim/sites", 7, Object{"name": "away"}); err != nil {
 		t.Fatalf("Patch: %v", err)
 	}
-	if err := client.Delete(ctx, "dcim/sites", 7); err != nil {
+	if _, err := client.Delete(ctx, "dcim/sites", 7); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 	want := []string{http.MethodPost, http.MethodPatch, http.MethodDelete}
@@ -537,8 +556,13 @@ func TestDeleteTolerated204(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	if err := newTestClient(t, srv, nil).Delete(context.Background(), "dcim/sites", 1); err != nil {
+	deleted, err := newTestClient(t, srv, nil).Delete(context.Background(), "dcim/sites", 1)
+	if err != nil {
 		t.Fatalf("Delete on 204: %v", err)
+	}
+	// A 204 has no body, and a real delete must not look suppressed.
+	if deleted != nil {
+		t.Errorf("Delete on 204 returned %v, want nil", deleted)
 	}
 }
 

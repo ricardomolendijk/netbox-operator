@@ -214,14 +214,15 @@ func (f *fakeClient) Patch(ctx context.Context, endpoint string, id int, payload
 	return f.patched, f.patchErr
 }
 
-func (f *fakeClient) Delete(ctx context.Context, endpoint string, id int) error {
+func (f *fakeClient) Delete(ctx context.Context, endpoint string, id int) (netbox.Object, error) {
 	f.calls = append(f.calls, call{method: "DELETE", endpoint: endpoint, id: id})
 
 	if f.dryRun != nil {
 		return f.dryRun.Delete(ctx, endpoint, id)
 	}
 
-	return f.deleteErr
+	// nil is what a real 204 decodes to, so an Apply delete cannot look suppressed.
+	return nil, f.deleteErr
 }
 
 // methods is the sequence of requests the engine made, which is what "zero writes" and

@@ -18,15 +18,17 @@ type Object map[string]any
 const dryRunMarker = "__dryRun"
 
 // Suppressed reports whether obj was produced by a DryRun client rather than by NetBox.
-// Such an Object carries the payload that would have been sent and has no id, because
-// nothing was created. Callers must not treat it as proof the object exists.
+// Every mutating method reports suppression this way: a suppressed create or patch carries
+// the payload that would have been sent and no id, because nothing was created; a
+// suppressed delete carries the endpoint and id it would have removed. Callers must not
+// treat either as proof of what NetBox now holds.
 func Suppressed(obj Object) bool {
 	suppressed, ok := obj[dryRunMarker].(bool)
 	return ok && suppressed
 }
 
 // ID returns the object's NetBox id. The second result is false when the field is
-// absent or not a number, which is the normal case for a suppressed DryRun object.
+// absent or not a number, which is the normal case for a suppressed create or patch.
 func (o Object) ID() (int, bool) {
 	return asInt(o["id"])
 }

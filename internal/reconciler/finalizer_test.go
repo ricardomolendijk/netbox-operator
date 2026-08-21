@@ -220,6 +220,12 @@ func TestEngineReconcileDeleting(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			client := tc.client()
+			if tc.dryRun {
+				// A real DryRun client, so the suppressed answer the finalizer has to
+				// recognise is produced by the code under test rather than described here.
+				client.dryRun = dryRunClient(t)
+			}
+
 			status := &fakeStatus{}
 			finalizers := &fakeFinalizers{}
 			events := &fakeRecorder{}
@@ -228,7 +234,7 @@ func TestEngineReconcileDeleting(t *testing.T) {
 			engine := &Engine{
 				Descriptors: fakeDescriptors{descriptor: fakeDescriptor(), registered: true},
 				Endpoints: fakeEndpoints{
-					endpoint: Endpoint{Client: client, Resync: testResync, DryRun: tc.dryRun},
+					endpoint: Endpoint{Client: client, Resync: testResync},
 					ready:    !tc.notReady,
 				},
 				Status:     status,

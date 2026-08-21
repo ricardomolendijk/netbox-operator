@@ -47,8 +47,8 @@ type Reader interface {
 	List(ctx context.Context, endpoint string, params netbox.Params) ([]netbox.Object, error)
 }
 
-// Writer mutates NetBox. A DryRun client implements it by returning the payload marked
-// suppressed instead of sending it, which the engine detects with netbox.Suppressed.
+// Writer mutates NetBox. A DryRun client implements every method by returning a suppressed
+// Object instead of sending anything, which the engine detects with netbox.Suppressed.
 type Writer interface {
 	Create(ctx context.Context, endpoint string, payload netbox.Object) (netbox.Object, error)
 	Patch(ctx context.Context, endpoint string, id int, payload netbox.Object) (netbox.Object, error)
@@ -58,10 +58,11 @@ type Writer interface {
 	// away.
 	//
 	// A refused delete is a *netbox.ProtectedError and a missing one a
-	// *netbox.NotFoundError; both are ordinary answers rather than failures. A DryRun
-	// client suppresses the request and returns nil, which this signature cannot express
-	// -- Endpoint.DryRun is how the engine knows.
-	Delete(ctx context.Context, endpoint string, id int) error
+	// *netbox.NotFoundError; both are ordinary answers rather than failures. A real delete
+	// returns a nil Object; a DryRun client returns a suppressed one instead of sending
+	// anything, so the engine detects a suppressed delete the same way it detects a
+	// suppressed create.
+	Delete(ctx context.Context, endpoint string, id int) (netbox.Object, error)
 }
 
 // NetBoxClient is what one endpoint hands the engine: both halves of the API it needs.
@@ -79,14 +80,6 @@ type Endpoint struct {
 	// Resync is how often to re-check for drift with no CR change. Zero means
 	// DefaultResync.
 	Resync time.Duration
-
-	// DryRun reports that this endpoint suppresses every write.
-	//
-	// Carried as data because Writer.Delete returns only an error, so a suppressed delete
-	// is indistinguishable from a completed one -- unlike Create and Patch, whose
-	// suppressed response the engine recognises with netbox.Suppressed. Without this the
-	// finalizer would report a deletion that never happened.
-	DryRun bool
 }
 
 // Endpoints hands out the client for one NetBoxEndpoint by namespace and name. A miss
@@ -434,7 +427,7 @@ func (p *pass) update(ctx context.Context, live netbox.Object) (ctrl.Result, err
 // is gone, so the replacement cannot be created first
 // (docs/netbox-schema.md -> dcim.Cable.meta.constraints).
 func (p *pass) recreate(ctx context.Context, id int, changes []netbox.Change) (ctrl.Result, error) {
-	if err := p.endpoint.Client.Delete(ctx, p.desc.Endpoint, id); err != nil {
+	if _, err := p.endpoint.Client.Delete(ctx, p.desc.Endpoint, id); err != nil {
 		return p.stop(ctx, fmt.Errorf("deleting netbox %s/%d to recreate it: %w", p.desc.Endpoint, id, err))
 	}
 
