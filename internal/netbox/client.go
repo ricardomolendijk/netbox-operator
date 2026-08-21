@@ -163,7 +163,7 @@ func (c *Client) DryRun() bool { return c.mode == ModeDryRun }
 
 // GetOne returns the single object matching params, or nil when nothing matches.
 // More than one match is an *AmbiguousError, never a silent choice.
-func (c *Client) GetOne(ctx context.Context, endpoint string, params map[string]string) (Object, error) {
+func (c *Client) GetOne(ctx context.Context, endpoint string, params Params) (Object, error) {
 	target := c.endpointURL(endpoint)
 	if len(params) > 0 {
 		target += "?" + encodeParams(params)
@@ -184,8 +184,8 @@ func (c *Client) GetOne(ctx context.Context, endpoint string, params map[string]
 }
 
 // List returns every object matching params, following pagination up to MaxPages.
-func (c *Client) List(ctx context.Context, endpoint string, params map[string]string) ([]Object, error) {
-	query := map[string]string{"limit": fmt.Sprint(c.pageSize)}
+func (c *Client) List(ctx context.Context, endpoint string, params Params) ([]Object, error) {
+	query := Params{"limit": fmt.Sprint(c.pageSize)}
 	for key, value := range params {
 		query[key] = value
 	}
@@ -273,7 +273,7 @@ func (c *Client) objectURL(endpoint string, id int) string {
 
 // encodeParams renders params in sorted key order, so a URL is stable across calls and
 // therefore usable as a cache key and readable in a log line.
-func encodeParams(params map[string]string) string {
+func encodeParams(params Params) string {
 	keys := make([]string, 0, len(params))
 	for key := range params {
 		keys = append(keys, key)
