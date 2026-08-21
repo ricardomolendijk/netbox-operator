@@ -62,13 +62,24 @@ the engine requeue a reconcile that was deliberately abandoned.
 
 ## Runaway lists
 
-`List` follows pagination up to `MaxPages` (default 1000), then logs at **`error`** and
-returns what it has. A NetBox that always reports a `next` page cannot exhaust the
-manager's memory. It is logged at error rather than info because the caller cannot tell a
-truncated result from a complete one: a lookup that should have matched comes back empty
-and the engine creates a second object, and incomplete list results that look complete are
-how a prune deletes the wrong things. The fix is a human raising `MaxPages` or narrowing
-the filter.
+`List` follows pagination up to `MaxPages` (default 1000). Hitting that cap returns a
+**`TruncatedError`** and **no results at all** — not a short slice.
+
+The cap is not negotiable: a NetBox that always reports a `next` page must not be able to
+exhaust the manager's memory. Returning partial data was. A caller cannot tell a truncated
+result from a complete one, so the engine's natural-key lookup found no match in the pages
+it received and took the **create** path, creating an object that already existed. A safety
+limit that silently duplicates data is worse than no limit, so the limit stayed and the
+silence went.
+
+`TruncatedError` is deliberately **not** retryable — the same request truncates in the same
+place, so a retry burns API budget and never converges. It means either the filter did not
+apply (a natural-key lookup expects a handful of results, so paginating past the cap says
+the query was wrong) or the endpoint genuinely holds more objects than `MaxPages` allows.
+Either way a human raises `MaxPages` or narrows the filter, which is what `error` means.
+
+The same reasoning applies with more force to anything acting on *absence*: a prune or a
+sweep deleting what it did not see in a truncated list would delete real data.
 
 ## Secrets
 

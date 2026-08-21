@@ -354,8 +354,10 @@ func TestListFollowsPagination(t *testing.T) {
 	}
 }
 
-func TestListStopsAtThePageCap(t *testing.T) {
-	// A NetBox that always reports a next page must not be able to exhaust memory.
+func TestListRefusesToReturnTruncatedResults(t *testing.T) {
+	// A NetBox that always reports a next page must not be able to exhaust memory, so the
+	// cap stays -- but it must not hand back a partial answer either. A caller cannot tell
+	// partial from complete, and acting on absence means creating a duplicate.
 	var srv *httptest.Server
 	var requests atomic.Int64
 	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -366,14 +368,27 @@ func TestListStopsAtThePageCap(t *testing.T) {
 
 	client := newTestClient(t, srv, func(c *Config) { c.MaxPages = 3 })
 	objs, err := client.List(context.Background(), "dcim/sites", nil)
-	if err != nil {
-		t.Fatalf("List: %v", err)
+
+	var truncated *TruncatedError
+	if !errors.As(err, &truncated) {
+		t.Fatalf("err = %v, want *TruncatedError", err)
+	}
+	if objs != nil {
+		t.Errorf("got %d objects alongside the error; partial results must not escape", len(objs))
+	}
+	if truncated.MaxPages != 3 {
+		t.Errorf("MaxPages = %d, want 3", truncated.MaxPages)
+	}
+	if truncated.Collected != 3 {
+		t.Errorf("Collected = %d, want 3 -- the diagnosis needs to say how far it got", truncated.Collected)
 	}
 	if got := requests.Load(); got != 3 {
 		t.Errorf("made %d requests, want 3 (the cap)", got)
 	}
-	if len(objs) != 3 {
-		t.Errorf("got %d objects, want 3", len(objs))
+	// Not retryable: the same request truncates in the same place. Retrying it would burn
+	// the API budget and never converge.
+	if Retryable(err) {
+		t.Error("a truncated list was reported as retryable")
 	}
 }
 

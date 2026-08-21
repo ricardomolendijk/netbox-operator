@@ -119,6 +119,30 @@ func (e *AmbiguousError) Error() string {
 	return fmt.Sprintf("ambiguous lookup on %s matched %d objects: %v", e.Endpoint, e.Matched, e.Params)
 }
 
+// TruncatedError is a list that hit the page cap before NetBox stopped offering pages.
+//
+// It is deliberately not retryable: the same request will truncate at the same place. It
+// means either the filter did not apply -- a natural-key lookup expects a handful of
+// results, so paginating past the cap says the query was wrong -- or the endpoint genuinely
+// holds more objects than MaxPages allows, and somebody has to decide which.
+//
+// Returning this instead of partial results is the whole point. A caller that cannot tell
+// truncation from completeness will act on absence, and acting on absence means creating a
+// duplicate, or in a prune, deleting something real.
+type TruncatedError struct {
+	Endpoint string
+	MaxPages int
+	// Collected is how many objects had been read when the cap was hit, for diagnosis
+	// only. It is not returned to the caller as data.
+	Collected int
+}
+
+func (e *TruncatedError) Error() string {
+	return fmt.Sprintf(
+		"list of %s truncated at the %d-page cap after %d objects; results would be incomplete",
+		e.Endpoint, e.MaxPages, e.Collected)
+}
+
 // Retryable reports whether err is worth retrying without any change to the request.
 // Only transient failures and rate limits qualify; a 400 or a 409 will fail identically
 // every time, and retrying them inside the client hides the failure from the engine.
