@@ -16,7 +16,31 @@ const (
 	// id. References are accepted and ignored until NBO-012, so in v1alpha1's first
 	// milestone this condition reports NotImplemented rather than lying.
 	ConditionRefsResolved = "RefsResolved"
+
+	// ConditionDeleting reports what the engine is doing about the NetBox object behind a
+	// CR that carries a deletion timestamp.
+	//
+	// It is only ever False. The finalizer comes off the moment the NetBox side is
+	// settled, so a True would describe a CR that no longer exists to carry it; the
+	// Reason is therefore always what is holding the deletion up.
+	ConditionDeleting = "Deleting"
 )
+
+// Finalizer is what keeps a CR alive until its NetBox object has been dealt with.
+//
+// It is added before the engine writes anything to NetBox, and removed only once the
+// NetBox side is settled -- see docs/concepts/deletion.md for why that order and not the
+// other one.
+const Finalizer = "netbox.populator.io/finalizer"
+
+// SkipFinalizerAnnotation is the break-glass. Set to "true" and the engine drops the
+// finalizer without calling NetBox at all.
+//
+// It exists because a finalizer that is added and never removed makes a namespace
+// undeletable forever, and no operator should be able to do that to a cluster. It
+// guarantees an object left behind in NetBox, which is sometimes the right trade and is
+// never the default.
+const SkipFinalizerAnnotation = "netbox.populator.io/skip-finalizer"
 
 // Condition reasons for an object CR. The vocabulary is deliberately small: a reason is
 // keyed on by tooling and by the docs, so a new one is a documented addition rather than
@@ -71,10 +95,19 @@ const (
 	// build does not resolve any (NBO-012). They are accepted and left out of the
 	// payload, which is reported rather than silent.
 	ReasonNotImplemented = "NotImplemented"
+
+	// ReasonProtected is on Deleting: NetBox refused the delete because something still
+	// references the object. Nothing about this object can clear it -- the referring
+	// object has to go first -- so it is a backed-off requeue rather than a fast retry,
+	// and the message names what NetBox said is in the way.
+	ReasonProtected = "Protected"
 )
 
 // Event reasons emitted by the engine. Events are the audit trail of what changed in
 // NetBox, so they name the action and never the internal state.
+// Every deletion outcome gets an Event because the CR is about to stop existing: once the
+// finalizer is off there is no status left to read, so the Event is the only record that
+// survives the object.
 const (
 	EventCreated   = "Created"
 	EventAdopted   = "Adopted"
@@ -82,6 +115,26 @@ const (
 	EventRecreated = "Recreated"
 	EventConflict  = "Conflict"
 	EventInvalid   = "Invalid"
+
+	// EventDeleted is the NetBox object gone, whether this operator removed it or found
+	// it already absent.
+	EventDeleted = "Deleted"
+
+	// EventRetained is spec.deletionPolicy: Retain -- the finalizer came off and NetBox
+	// was not touched.
+	EventRetained = "Retained"
+
+	// EventNothingToDelete is a CR deleted with no status.id, so the operator has no
+	// object it can prove it owns.
+	EventNothingToDelete = "NothingToDelete"
+
+	// EventDeleteBlocked is a delete NetBox has now refused several times. Emitted once,
+	// so a permanently stuck deletion is visible rather than silent.
+	EventDeleteBlocked = "DeleteBlocked"
+
+	// EventFinalizerSkipped is the break-glass annotation being honoured, which leaves an
+	// object behind in NetBox.
+	EventFinalizerSkipped = "FinalizerSkipped"
 )
 
 // ConflictPolicy is what the engine does when a NetBox object already matches this CR's
@@ -108,6 +161,28 @@ const (
 	ConflictAdoptOnly ConflictPolicy = "AdoptOnly"
 )
 
+// DeletionPolicy is what happens to the NetBox object when its CR is deleted.
+//
+// Not spelled `reclaimPolicy`: that is PersistentVolume vocabulary, where it decides what
+// happens to *storage* after a claim is released and carries a `Recycle` value with no
+// analogue here. `deletionPolicy` matches
+// docs/decisions/0003-ownership-and-references.md and Crossplane.
+//
+// +kubebuilder:validation:Enum=Delete;Retain
+type DeletionPolicy string
+
+const (
+	// DeletionDelete removes the NetBox object when the CR goes away. The default,
+	// because a CR that created an object and then leaves it behind is a leak nobody
+	// asked for.
+	DeletionDelete DeletionPolicy = "Delete"
+
+	// DeletionRetain drops the finalizer and leaves NetBox alone. For migrating off the
+	// operator, and for an object that is shared with something else -- in both cases the
+	// NetBox object outliving the CR is the point rather than an accident.
+	DeletionRetain DeletionPolicy = "Retain"
+)
+
 // NetBoxObjectSpec is the part of every object CR's spec that the engine owns. Kinds embed
 // it inline, so its fields are spec fields like any other -- and the engine excludes
 // exactly these from the NetBox payload, since they configure the operator rather than
@@ -123,6 +198,15 @@ type NetBoxObjectSpec struct {
 	// +kubebuilder:default=Fail
 	// +optional
 	OnConflict ConflictPolicy `json:"onConflict,omitempty"`
+
+	// DeletionPolicy is what happens to the NetBox object when this CR is deleted.
+	//
+	// Read fresh on every pass rather than latched when deletion starts, so switching it
+	// to Retain on an object whose delete NetBox keeps refusing is a way out of that
+	// state (docs/concepts/deletion.md).
+	// +kubebuilder:default=Delete
+	// +optional
+	DeletionPolicy DeletionPolicy `json:"deletionPolicy,omitempty"`
 }
 
 // NetBoxObjectStatus is the part of every object CR's status that the engine owns. It is
@@ -164,6 +248,16 @@ type NetBoxObjectStatus struct {
 	// because `kubectl wait` lies without it.
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
+	// DeletionAttempts counts the deletes NetBox refused because something still
+	// references the object.
+	//
+	// It is a status field rather than in-memory state because a controller has no memory
+	// between passes: the exponential backoff on a protected delete has to be computed
+	// from a count that survives a requeue, a leader election and a restart. Non-zero
+	// only while a CR is terminating.
+	// +optional
+	DeletionAttempts int32 `json:"deletionAttempts,omitempty"`
 
 	// Conditions follow the standard Kubernetes vocabulary.
 	// +listType=map

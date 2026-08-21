@@ -14,6 +14,7 @@ How the engine behaves, and why.
 | Page | Answers |
 |---|---|
 | [The Descriptor](concepts/descriptor.md) | What per-kind facts the engine needs, why they are data rather than code, and how natural keys establish identity before a `status.id` exists |
+| [Deletion](concepts/deletion.md) | What `deletionPolicy: Delete` and `Retain` each do, why the finalizer goes on before the first write and comes off after the last one, what a `PROTECT`-blocked delete looks like and how to get out of it |
 | [Drift detection](concepts/drift.md) | Why what NetBox returns is not what you wrote, and the eight comparison rules that stop a reconcile loop from PATCHing forever |
 | [Errors and retries](concepts/errors-and-retries.md) | Which NetBox failure becomes which typed error, what gets retried and where, and why more than one lookup match is an error rather than a guess |
 | [Lookups](concepts/lookups.md) | How a natural key becomes a query string, why `?name__ie=` exists, and why a null filter is pinned rather than omitted |

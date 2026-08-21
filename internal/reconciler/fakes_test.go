@@ -95,6 +95,18 @@ func fakeObject() *fakeKind {
 	}
 }
 
+// deletingObject is a NetBoxFake the way the API server hands one back after
+// `kubectl delete`: a deletion timestamp, the finalizer still on, and a status.id proving
+// the engine created the NetBox object it is now responsible for removing.
+func deletingObject() *fakeKind {
+	obj := fakeObject()
+	obj.DeletionTimestamp = &metav1.Time{Time: metav1.Now().Time}
+	obj.Finalizers = []string{netboxv1alpha1.Finalizer}
+	obj.Status.ID = 9
+
+	return obj
+}
+
 // fakeDescriptor is extras.Tag's shape: one scalar natural key, an object-type list, and a
 // reference the engine cannot resolve yet.
 func fakeDescriptor() registry.Descriptor {
@@ -277,6 +289,27 @@ func (f *fakeStatus) UpdateStatus(_ context.Context, _ client.Object) error {
 
 	return f.err
 }
+
+// fakeFinalizers records what the finalizer list looked like at each write, which is how a
+// test asserts the ordering that matters: the finalizer has to be persisted before the
+// first NetBox write and removed only after the last one.
+type fakeFinalizers struct {
+	writes [][]string
+	err    error
+}
+
+func (f *fakeFinalizers) UpdateFinalizers(_ context.Context, obj client.Object) error {
+	if f.err != nil {
+		return f.err
+	}
+
+	f.writes = append(f.writes, slices.Clone(obj.GetFinalizers()))
+
+	return nil
+}
+
+// errFinalizerWrite stands in for an API-server rejection of a finalizer update.
+var errFinalizerWrite = errors.New("finalizer update rejected")
 
 // fakeRecorder collects Events as "Type/Reason".
 type fakeRecorder struct {
