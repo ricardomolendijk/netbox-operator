@@ -128,9 +128,13 @@ Applied to every PR touching `internal/`:
 ## Local development
 
 ```sh
-make help          # list targets
-make generate      # deepcopy
-make manifests     # CRDs + RBAC
-make lint test     # golangci-lint + unit tests + envtest
-make test-e2e      # kind + a real NetBox in docker compose
+make help                      # list every target
+make build                     # generate, manifests, fmt, vet, then build bin/manager
+make lint test                 # golangci-lint, then unit tests + envtest
+make verify                    # fail if generated output is not committed
+make test-e2e                  # kind + a real NetBox (harness lands with NBO-017)
+make run                       # run against the current kubeconfig
 ```
+
+Tools install themselves into `./bin` at pinned versions on first use — there is nothing
+to install by hand, and your global toolchain cannot change generated output.
