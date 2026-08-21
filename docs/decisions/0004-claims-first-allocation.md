@@ -82,6 +82,31 @@ or two clusters — cannot land on the same address. On top of that:
   re-rolling every address. `deletionPolicy: Retain` additionally keeps the NetBox object
   alive while the claim is gone.
 
+## `status.address` is immutable. The operator never re-allocates.
+
+If the allocated NetBox object is deleted out from under a live claim — someone with write
+access removes it, or a restore rolls it back — the claim does **not** pick a new address.
+
+Recovery belongs to the child `NetBoxIPAddress`, and the engine already does it: `status.id`
+404s, the id is cleared, the natural-key lookup finds nothing, and the object is
+re-created — **at the same address**, because by then the address is literal in the child's
+spec. The claim goes `Bound=True` again and nothing else happens.
+
+If re-creation is genuinely impossible — a third party has taken the address, or the pool
+prefix is gone — the claim reports `Bound=False`, `Ready=False`,
+`Reason=AllocationLost` with a long backoff, and waits for a human.
+
+The reason this is worth stating as a guarantee rather than leaving to the code: by the
+time a claim has handed out an address, something outside Kubernetes is using it — a NIC's
+static configuration, a DNS record, a firewall rule. Restoring the same address is always
+safe. Silently picking a new one converts a NetBox bookkeeping accident into a live network
+change nobody asked for, and the operator is the last component that should be making that
+call.
+
+`Allocated` therefore stays `True` forever once it is true — it is a historical fact, not a
+liveness signal — and `Bound` carries liveness. That split is why there is no `Degraded`
+condition on a claim.
+
 ## Exhaustion
 
 `Ready=False, Reason=PoolExhausted`, an Event, and a long backoff. Not an error that
