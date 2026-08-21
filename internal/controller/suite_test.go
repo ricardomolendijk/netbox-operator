@@ -101,6 +101,12 @@ func startManager(cfg *rest.Config) (func(), error) {
 		return nil, fmt.Errorf("setup: %w", err)
 	}
 
+	// The same call the shipped manager makes, so the object tests exercise the real
+	// registration path rather than a controller wired up by hand for the test.
+	if err := SetupObjectControllers(mgr, clients); err != nil {
+		return nil, fmt.Errorf("object controllers: %w", err)
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		if err := mgr.Start(ctx); err != nil {
@@ -119,10 +125,19 @@ func startManager(cfg *rest.Config) (func(), error) {
 // that they share one manager.
 func newNamespace(t *testing.T) string {
 	t.Helper()
+	return newNamespaceSuffixed(t, "")
+}
+
+// newNamespaceSuffixed is newNamespace for a test that needs more than one. A NetBox slug
+// is unique globally while a CRD is namespaced, so "the same object claimed from two
+// namespaces" is a case that cannot be written with one namespace per test.
+func newNamespaceSuffixed(t *testing.T, suffix string) string {
+	t.Helper()
 	name := "nbtest-" + strings.ToLower(strings.NewReplacer("/", "-", "_", "-").Replace(t.Name()))
-	if len(name) > 60 {
-		name = name[:60]
+	if len(name) > 60-len(suffix) {
+		name = name[:60-len(suffix)]
 	}
+	name += suffix
 	if err := k8sClient.Create(context.Background(), &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{Name: name},
 	}); err != nil {

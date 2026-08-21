@@ -1,0 +1,25 @@
+apiVersion: netbox.populator.io/v1alpha1
+kind: NetBoxTag
+metadata:
+  name: managed
+  namespace: default
+spec:
+  # The NetBoxEndpoint to write through, in this namespace. There is no cluster-wide
+  # default endpoint; see config/samples/netbox_v1alpha1_netboxendpoint.yaml.
+  endpointRef: homelab
+
+  name: Managed
+  # The natural key. NetBox enforces slug uniqueness globally, so the first namespace to
+  # claim `managed` gets it and a second NetBoxTag with this slug reports Conflict.
+  slug: managed
+
+  color: "2196f3"
+  description: Managed by netbox-operator
+  # Lower sorts first in the NetBox UI. 1000 is NetBox's own default.
+  weight: 100
+
+  # Django ContentType strings, not references to other CRs -- a content type is not a
+  # NetBox object this operator manages. Omit the field entirely to allow every model.
+  objectTypes:
+    - dcim.device
+    - virtualization.virtualmachine

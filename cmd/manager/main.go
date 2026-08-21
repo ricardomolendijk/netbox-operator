@@ -102,6 +102,13 @@ func run() error {
 		return fmt.Errorf("setting up the NetBoxEndpoint controller: %w", err)
 	}
 
+	// Every object kind at once, from the set its init() functions registered. This call
+	// does not change when a kind is added, which is the point: a new kind is three new
+	// files and no edit here (CONTRIBUTING.md, "Extensibility").
+	if err := controller.SetupObjectControllers(mgr, clients); err != nil {
+		return fmt.Errorf("setting up the object controllers: %w", err)
+	}
+
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		return fmt.Errorf("adding healthz check: %w", err)
 	}
