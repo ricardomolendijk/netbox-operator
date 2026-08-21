@@ -1,0 +1,11 @@
+# Kubebuilder project metadata.
+# See https://book.kubebuilder.io/reference/project-config
+#
+# Kinds are added here as they land. Every kind is Namespaced in v1alpha1 --
+# see docs/decisions/0002-crd-scoping.md.
+domain: populator.io
+layout:
+- go.kubebuilder.io/v4
+projectName: netbox-operator
+repo: github.com/ricardomolendijk/netbox-operator
+version: "3"

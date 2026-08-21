@@ -1,0 +1,9 @@
+bin/
+dist/
+cover.out
+.git/
+*.md
+config/
+docs/
+hack/*.py
+test/
