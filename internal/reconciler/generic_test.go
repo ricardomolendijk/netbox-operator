@@ -385,9 +385,10 @@ func TestEngineReconcile(t *testing.T) {
 					endpoint: Endpoint{Client: client, Resync: testResync},
 					ready:    !tc.notReady,
 				},
-				Status: status,
-				Events: events,
-				Scheme: fakeScheme(t),
+				Status:     status,
+				Finalizers: &fakeFinalizers{},
+				Events:     events,
+				Scheme:     fakeScheme(t),
 			}
 
 			result, err := engine.Reconcile(context.Background(), obj)
@@ -468,6 +469,7 @@ func TestEngineReconcileIsIdempotent(t *testing.T) {
 		Descriptors: fakeDescriptors{descriptor: fakeDescriptor(), registered: true},
 		Endpoints:   fakeEndpoints{endpoint: Endpoint{Client: client, Resync: testResync}, ready: true},
 		Status:      status,
+		Finalizers:  &fakeFinalizers{},
 		Scheme:      fakeScheme(t),
 	}
 
@@ -517,6 +519,7 @@ func TestEngineReconcileUnregisteredKind(t *testing.T) {
 		Descriptors: fakeDescriptors{},
 		Endpoints:   fakeEndpoints{ready: false},
 		Status:      &fakeStatus{},
+		Finalizers:  &fakeFinalizers{},
 		Scheme:      fakeScheme(t),
 	}
 
@@ -535,8 +538,9 @@ func TestEngineReconcileStatusWriteFails(t *testing.T) {
 			endpoint: Endpoint{Client: &fakeClient{created: liveTag(7)}, Resync: testResync},
 			ready:    true,
 		},
-		Status: &fakeStatus{err: errStatusWrite},
-		Scheme: fakeScheme(t),
+		Status:     &fakeStatus{err: errStatusWrite},
+		Finalizers: &fakeFinalizers{},
+		Scheme:     fakeScheme(t),
 	}
 
 	if _, err := engine.Reconcile(context.Background(), fakeObject()); err == nil {

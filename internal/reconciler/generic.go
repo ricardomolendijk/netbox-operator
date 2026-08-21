@@ -1,4 +1,4 @@
-// Package reconciler is the only place a create, adopt or update decision is made.
+// Package reconciler is the only place a create, adopt, update or delete decision is made.
 //
 // One Engine drives every kind. Everything that differs between kinds arrives as data on
 // a registry.Descriptor, so there is no branch on Kind anywhere below and adding a kind is
@@ -53,9 +53,14 @@ type Writer interface {
 	Create(ctx context.Context, endpoint string, payload netbox.Object) (netbox.Object, error)
 	Patch(ctx context.Context, endpoint string, id int, payload netbox.Object) (netbox.Object, error)
 
-	// Delete is used only by the recreate strategy, for a kind whose identity lives
-	// somewhere a PATCH cannot reach. Deletion because a CR went away is the finalizer's
-	// job (NBO-007).
+	// Delete removes one object by id. Used by the recreate strategy, for a kind whose
+	// identity lives somewhere a PATCH cannot reach, and by the finalizer when a CR goes
+	// away.
+	//
+	// A refused delete is a *netbox.ProtectedError and a missing one a
+	// *netbox.NotFoundError; both are ordinary answers rather than failures. A DryRun
+	// client suppresses the request and returns nil, which this signature cannot express
+	// -- Endpoint.DryRun is how the engine knows.
 	Delete(ctx context.Context, endpoint string, id int) error
 }
 
@@ -74,6 +79,14 @@ type Endpoint struct {
 	// Resync is how often to re-check for drift with no CR change. Zero means
 	// DefaultResync.
 	Resync time.Duration
+
+	// DryRun reports that this endpoint suppresses every write.
+	//
+	// Carried as data because Writer.Delete returns only an error, so a suppressed delete
+	// is indistinguishable from a completed one -- unlike Create and Patch, whose
+	// suppressed response the engine recognises with netbox.Suppressed. Without this the
+	// finalizer would report a deletion that never happened.
+	DryRun bool
 }
 
 // Endpoints hands out the client for one NetBoxEndpoint by namespace and name. A miss
@@ -125,6 +138,10 @@ type Engine struct {
 	// Status persists status updates.
 	Status StatusWriter
 
+	// Finalizers persists the finalizer that keeps a CR alive until its NetBox object has
+	// been dealt with.
+	Finalizers FinalizerWriter
+
 	// Events records what changed in NetBox. Optional.
 	Events Recorder
 
@@ -146,6 +163,16 @@ func (e *Engine) Reconcile(ctx context.Context, obj Object) (ctrl.Result, error)
 		"endpoint", descriptor.Endpoint))
 
 	p := &pass{engine: e, obj: obj, before: obj.NetBoxStatus().DeepCopy(), desc: descriptor}
+
+	if !obj.GetDeletionTimestamp().IsZero() {
+		return p.deleting(ctx)
+	}
+
+	// Before the endpoint is even resolved, so that there is no ordering in which the
+	// engine writes to NetBox without a durable finalizer already behind it. See claim.
+	if err := e.claim(ctx, obj); err != nil {
+		return ctrl.Result{}, err
+	}
 
 	endpoint, ok := e.Endpoints.Endpoint(obj.GetNamespace(), obj.NetBoxSpec().EndpointRef)
 	if !ok {

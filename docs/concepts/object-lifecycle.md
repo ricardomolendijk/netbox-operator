@@ -3,7 +3,7 @@
 > **Status: designed, not implemented.**
 >
 > Nothing on this page exists in the codebase. There is no `internal/reconciler` package
-> with an engine in it, no object Kind, and no finalizer. It is the design for
+> with an engine in it, and no object Kind. It is the design for
 > [NBO-006 — generic reconcile engine](https://github.com/ricardomolendijk/netbox-operator/issues/6),
 > with the deletion half from
 > [NBO-007 — finalizer and deletion policy](https://github.com/ricardomolendijk/netbox-operator/issues/7)
@@ -25,7 +25,8 @@
 | `Descriptor` and the Kind registry (`internal/registry/registry.go`) | Built |
 | `NetBoxEndpoint` and its controller (`internal/controller/`) | Built |
 | The per-object reconcile loop | **Not built** — NBO-006 (#6) |
-| Finalizer and deletion | **Not built** — NBO-007 (#7) |
+| Finalizer, `spec.deletionPolicy`, `PROTECT`-aware deletion (`internal/reconciler/finalizer.go`) | Built — NBO-007 (#7); documented at [deletion](deletion.md) |
+| Waiting for owned child CRs before deleting | **Not built** — NBO-032 |
 | The deferred-field second pass | **Not built** — NBO-015 (#27) |
 | Any object Kind at all (`NetBoxTag`, `NetBoxSite`, …) | **Not built** — NBO-008 (#8) onward |
 
@@ -191,50 +192,69 @@ operator must not claim success for an object missing a field the user asked for
 
 ## Finalizers and deletion
 
-Designed at NBO-007 (#7). The claim being tested is that **`PROTECT` plus backoff is the
-topological sort** — that the operator needs no hand-maintained deletion-ordering table,
-because NetBox declares its foreign keys with `on_delete=PROTECT` almost everywhere
-(NetBox source: `netbox/ipam/models/ip.py`, e.g. `Prefix.vrf`, `IPAddress.vrf`) and will
-refuse a delete whose dependents are still present.
+> **Built at NBO-007 (#7)**, except where noted. Full page:
+> [deletion](deletion.md). This section is the summary and the one row still outstanding.
 
-The finalizer is `netbox.populator.io/finalizer`, added on first reconcile **before any
-create**. Order matters: a finalizer added after the POST leaves a window in which the
-process can die between creating a NetBox object and recording that it must be cleaned up,
-which is how an orphan is made.
+The claim being tested was that **`PROTECT` plus backoff is the topological sort** — that
+the operator needs no hand-maintained deletion-ordering table, because NetBox declares its
+foreign keys with `on_delete=PROTECT` almost everywhere (NetBox source:
+`netbox/ipam/models/ip.py`, e.g. `Prefix.vrf`, `IPAddress.vrf`) and will refuse a delete
+whose dependents are still present. It holds: there is no ordering table in the codebase.
 
-The intended sequence on a CR with a deletion timestamp:
+The finalizer is `netbox.populator.io/finalizer`, added on first reconcile and **persisted
+by its own API write before any create**. Order matters in both directions: a finalizer
+added after the POST leaves a window in which the process can die between creating a NetBox
+object and recording that it must be cleaned up, and a finalizer removed before the DELETE
+succeeds leaves nothing to retry it. Both windows orphan the object.
 
-| Step | Condition | Action |
-|---|---|---|
-| 1 | `spec.deletionPolicy: Retain` | Drop the finalizer, emit a `Retained` Event, leave NetBox alone. |
-| 2 | `status.id == 0` | Nothing was ever created. Drop the finalizer. |
-| 3 | Owned child CRs still present | `Deleting=False, Reason=PendingDependents`. Wait for Kubernetes GC, which deletes them first because they carry an owner reference. |
-| 4 | Otherwise | `DELETE /api/<endpoint>/<id>/`. `204` or `404` → drop the finalizer. `409`, or a body naming a protected relation → `Deleting=False, Reason=Protected` with the server's message verbatim, requeue with capped exponential backoff. |
+The sequence on a CR with a deletion timestamp, as implemented in
+`internal/reconciler/finalizer.go`:
+
+| Step | Condition | Action | |
+|---|---|---|---|
+| 1 | `netbox.populator.io/skip-finalizer=true` | Drop the finalizer, `FinalizerSkipped` Event, leave NetBox alone. | Built |
+| 2 | `spec.deletionPolicy: Retain` | Drop the finalizer, `Retained` Event, leave NetBox alone. | Built |
+| 3 | `status.id == 0` | Nothing the operator can prove it owns. Drop the finalizer, `NothingToDelete` Event. | Built |
+| 4 | The endpoint is not `Ready` | `Deleting=False, Reason=WaitingForEndpoint`. Keep the finalizer. | Built |
+| 5 | Owned child CRs still present | `Deleting=False, Reason=PendingDependents`. Wait for Kubernetes GC, which deletes them first because they carry an owner reference. | **Not built** — NBO-032, which is what creates child CRs in the first place |
+| 6 | Otherwise | `DELETE /api/<endpoint>/<id>/`. `204` or `404` → drop the finalizer. `409`, or a body naming a protected relation → `Deleting=False, Reason=Protected` with the server's message verbatim, requeue with capped exponential backoff. | Built |
+
+Steps 1–3 are answered before the endpoint is resolved, deliberately: an escape hatch that
+only works when NetBox is reachable is not an escape hatch. Step 4 is the judgement call —
+blocking is reversible and an orphan is not, so the finalizer stays on and the condition
+names the annotation that overrides it. Step 5 is the only row this ticket did not build,
+and it is not a stub: there is nothing that materialises a child CR yet, so there is nothing
+to wait for.
 
 `spec.deletionPolicy` is `Delete | Retain`, matching
 [ADR-0003](../decisions/0003-ownership-and-references.md#deletion-policy). `Retain` is for
-migrating off the operator, or for objects shared with something else.
+migrating off the operator, or for objects shared with something else. It is read fresh on
+every pass rather than latched when deletion starts, which makes switching to `Retain` the
+gentle way out of a delete NetBox keeps refusing.
 
-Three design points worth stating explicitly:
+Four points worth stating explicitly, all of them now in the code:
 
 **Never force.** No cascade parameter, no dependent-hunting, no ordering table. The
 dependent's own deletion unblocks the parent, and the retry finds it unblocked. The
 server's opinion about what still references what is more reliable than a list the
 operator would have to keep in sync with 159 models.
 
-**The `Protected` message must name the blocker.** `*netbox.ProtectedError` already
-preserves NetBox's body (`internal/netbox/errors.go:70`–`:77`), and detecting a Django
-`ProtectedError` that arrived with a non-409 status is confined to one function that
-matches on wording, deliberately (`internal/netbox/errors.go:158`–`:163`). "Cannot delete"
-without a reason is the worst possible operator experience.
+**The `Protected` message names the blocker.** `*netbox.ProtectedError` preserves NetBox's
+body (`internal/netbox/errors.go:70`–`:77`), and detecting a Django `ProtectedError` that
+arrived with a non-409 status is confined to one function that matches on wording,
+deliberately (`internal/netbox/errors.go:158`–`:163`). "Cannot delete" without a reason is
+the worst possible operator experience.
 
-**Backoff is capped, around five minutes.** A genuinely stuck delete must not spin, and
-after N attempts it should surface as an Event so it is visible rather than silent.
+**Backoff is capped at five minutes**, doubling from ten seconds, counted in
+`status.deletionAttempts` because a controller has no memory between passes. After three
+refusals it surfaces once as a `DeleteBlocked` Event, so a stuck delete is visible rather
+than silent and rather than repeated.
 
 **There is a break-glass.** A finalizer added but never removed makes a namespace
 undeletable forever. The annotation `netbox.populator.io/skip-finalizer=true` drops the
-finalizer without touching NetBox. It is documented as break-glass because that is what it
-is: it guarantees an orphan in NetBox, and that is sometimes the right trade.
+finalizer without touching NetBox, and overrides every other step. It is documented as
+break-glass because that is what it is: it guarantees an orphan in NetBox, and that is
+sometimes the right trade.
 
 ## The status envelope
 
@@ -266,7 +286,7 @@ performs — a list nobody can be sure is complete.
 `spec.deletionPolicy`, matching
 [ADR-0003](../decisions/0003-ownership-and-references.md#deletion-policy), on the grounds
 that `reclaimPolicy` is PersistentVolume vocabulary where it means something materially
-different. `deletionPolicy` is the name to expect.
+different. `deletionPolicy` is the field that exists, built at NBO-007.
 
 `plan.md` §6.2 sketches `Descriptor.NaturalKeys` as `[]func(o Object) map[string]string`
 and `Deferred` as `[]string`. The built registry uses neither: natural keys are the data

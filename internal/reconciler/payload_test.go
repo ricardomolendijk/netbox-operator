@@ -256,7 +256,7 @@ func TestFieldRulesFromDescriptor(t *testing.T) {
 // fields from every payload by reading them off the struct, so a field added to the
 // envelope cannot leak into NetBox as an unknown column.
 func TestEnvelopeFieldsAreDerived(t *testing.T) {
-	for _, name := range []string{"endpointRef", "onConflict"} {
+	for _, name := range []string{"endpointRef", "onConflict", "deletionPolicy"} {
 		if !envelopeFields[name] {
 			t.Errorf("envelopeFields is missing %q", name)
 		}
