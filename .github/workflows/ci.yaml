@@ -1,0 +1,96 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# A newer push to the same PR makes the older run irrelevant.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build, lint, test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up Go
+        uses: actions/setup-go@41dfa10bad2bb2ae585af6ee5bb4d7d973ad74ed # v5.1.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      # Pinned tool binaries and envtest assets, keyed on the versions in the Makefile
+      # so a version bump invalidates the cache instead of silently reusing the old one.
+      - name: Cache tool binaries
+        uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
+        with:
+          path: bin
+          key: tools-${{ runner.os }}-${{ hashFiles('Makefile') }}
+
+      - name: Build
+        run: make build
+
+      - name: Vet
+        run: make vet
+
+      - name: Lint
+        run: make lint
+
+      - name: Test
+        run: make test
+
+      # The highest-value check here. It must run generate AND manifests, and fail on any
+      # diff including whitespace, or a stale zz_generated.deepcopy.go ships silently.
+      - name: Generated output is committed
+        run: make verify
+
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
+        with:
+          name: coverage
+          path: cover.out
+          if-no-files-found: ignore
+
+  manifests:
+    name: kustomize builds
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up Go
+        uses: actions/setup-go@41dfa10bad2bb2ae585af6ee5bb4d7d973ad74ed # v5.1.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      # A kustomization that references a file which does not exist is a broken deploy,
+      # and it is invisible to go build.
+      - name: Build the default overlay
+        run: |
+          make kustomize
+          ./bin/kustomize build config/default > /dev/null
+          ./bin/kustomize build config/crd > /dev/null
+
+  python:
+    name: lint the schema extractors
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      # hack/*.py must not run here -- they need a NetBox source checkout -- but linting
+      # them is cheap and they are the source of docs/netbox-schema.md.
+      - name: Ruff
+        uses: astral-sh/ruff-action@f14634c415d3e63ffd4d550a22f037df4c734a60 # v3.1.0
+        with:
+          args: check hack/

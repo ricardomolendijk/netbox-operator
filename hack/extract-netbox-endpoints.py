@@ -1,4 +1,4 @@
-import re,os,sys,glob
+import re,os,sys
 ROOT=sys.argv[1]
 rows=[]
 for app in ['circuits','core','dcim','extras','ipam','tenancy','users','virtualization','vpn','wireless']:
