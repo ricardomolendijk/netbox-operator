@@ -72,6 +72,21 @@ endpoint with `spec.parentOwnership: false`. Default is on, because "delete the 
 its prefixes go too" is the behaviour people expect and the alternative is silent
 orphans in NetBox.
 
+**At most one containment owner reference per kind.** Kubernetes garbage collection
+deletes a dependent only once *every* owner is gone. Two containment references therefore
+give AND semantics — the object survives until both parents are deleted — while a user
+reading the manifest expects OR: "delete the site *or* the VRF and the prefix goes." The
+gap is silent and only shows up as an object that refuses to disappear.
+
+So each kind nominates exactly **one** containment ref, and it is the required FK:
+`siteRef` for `NetBoxDevice`, `clusterRef` (else `siteRef`) for
+`NetBoxVirtualMachine`, `deviceRef` / `virtualMachineRef` for components, `scopeRef` for
+`NetBoxCluster` and `NetBoxPrefix`. Catalogue references — `manufacturerRef`,
+`deviceTypeRef`, `platformRef`, `tags` — contribute none; a catalogue is not a parent, and
+in the all-namespaced model those refs usually cross namespaces anyway, where an owner
+reference is illegal. A controller owner reference and a containment owner reference that
+name the same parent dedupe to one.
+
 **`assignedObject` is on that list for a correctness reason, not an aesthetic one.**
 NetBox deletes an interface's IP addresses server-side through a `GenericRelation` when
 the interface goes away. Without an owner reference, the `NetBoxIPAddress` CR outlives
