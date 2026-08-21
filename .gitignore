@@ -12,6 +12,11 @@
 cover.out
 cover.html
 
+# Byte-compiled hack/*.py. A .pyc of the gitignored hack/sync-issues.py was committed
+# once already, which published the source it exists to keep local.
+__pycache__/
+*.py[cod]
+
 # Local config and secrets
 .env
 *.local.yaml

@@ -24,6 +24,27 @@ list of bare model names, to print just those (handy while designing one CRD):
 python3 hack/digest-netbox-schema.py /tmp/models.json Prefix,VLAN,IPAddress
 ```
 
+## Testing the pipeline without a NetBox checkout
+
+`test/fixtures/netbox-models/` is a hand-written miniature of a NetBox source tree:
+a few Django model modules whose only job is to pin the behaviour of the extraction
+pipeline. `make test-schema` runs all three scripts over it and asserts the output,
+so the extractors stay honest in CI — where cloning NetBox is not worth the minute.
+
+```sh
+make test-schema        # == python3 hack/test_digest.py
+```
+
+Any fix to an extractor belongs with a fixture declaration that reproduces the bug.
+The fixture is not a copy of NetBox and should stay small; `test/fixtures/netbox-models/README.md`
+lists what each declaration is there to pin.
+
+> **The committed `docs/netbox-schema.md` predates NBO-067.** It was produced by the
+> pre-fix scripts, so it still truncates `meta.constraints` at 400 characters, carries
+> no `on_delete`, prints unresolved length symbols, marks generic relations `REQ`, and
+> omits the column-less organisational kinds. Re-running the commands above against a
+> NetBox 4.6.8 checkout is what refreshes it.
+
 ## Cross-checking against a live instance
 
 The AST walk gives the SQL truth (nullability, FK targets, unique constraints).

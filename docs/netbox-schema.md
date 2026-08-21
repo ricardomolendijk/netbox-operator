@@ -8,15 +8,37 @@ How to read an entry:
 
 - `REQ`   — the column is `NOT NULL` with no default: it must be supplied on create.
 - `-> x`  — `ForeignKey` / `OneToOneField` / `ManyToManyField` target (the SQL FK).
+- `on_delete=X` — what NetBox does to this row when the target goes away: `PROTECT`
+  (the delete is refused while this row exists), `CASCADE` (this row goes too),
+  `SET_NULL` / `SET_DEFAULT` (the column is cleared).
 - `UNIQUE` — column-level unique index.
-- `meta.constraints` — table-level `UniqueConstraint`s. **These are the natural keys
-  the operator uses to look an object up before deciding create-vs-update.**
+- `len=n` — `max_length`. `len=UNRESOLVED:SYMBOL` means NetBox declares the length as a
+  module constant the AST walk could not pin to a single value: read the source, do not
+  assume.
+- `meta.constraints` — table-level `UniqueConstraint`s, wrapped across lines but never
+  truncated. **These are the natural keys the operator uses to look an object up before
+  deciding create-vs-update.**
 - `GenericForeignKey` pairs (`*_type` / `*_id`) are polymorphic FKs; over the REST API
-  the `_type` half is written as an `"app_label.model"` string.
+  the `_type` half is written as an `"app_label.model"` string. The accessor half
+  (`scope`, `assigned_object`) is not a column, so it never carries `REQ` of its own —
+  requiredness is that of the `*_type` column. Likewise a `GenericRelation`
+  (`ip_addresses`, `l2vpn_terminations`) is a reverse relation and is never required.
+- `(no own columns …)` — a real API kind that declares no fields of its own; everything
+  comes from the named base classes (`OrganizationalModel` gives `name`, `slug`,
+  `description`; `NestedGroupModel` adds `parent`).
 - Fields prefixed `_` (e.g. `_site`, `_depth`, `_children`) and every `CounterCacheField`
   are denormalised caches maintained by NetBox itself — read-only, never write them.
 
 Regenerate with `hack/extract-netbox-schema.py` (see `docs/regenerating.md`).
+
+> **This body has not been regenerated since NBO-067 fixed the extractors.** It is
+> the output of the pre-fix scripts, so — until someone re-runs them against a NetBox
+> 4.6.8 checkout — `meta.constraints` is still cut off at 400 characters, no row carries
+> `on_delete`, six `len=` values are still raw symbols, generic relations are wrongly
+> marked `REQ`, and the eight column-less organisational kinds
+> (`Manufacturer`, `RackGroup`, `ContactGroup`, `ContactRole`, `ClusterType`,
+> `TunnelGroup`, `CircuitType`, `VirtualCircuitType`) have an endpoint above but no
+> entry below. Do not read their absence as "this kind does not exist".
 
 ## API endpoint -> model map
 
