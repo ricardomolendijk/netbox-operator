@@ -1,6 +1,7 @@
 package netbox
 
 import (
+	"reflect"
 	"sort"
 	"strconv"
 )
@@ -80,19 +81,30 @@ func asInt(v any) (int, bool) {
 // toFloat coerces a JSON scalar to a float. NetBox returns decimal columns as strings
 // (u_height "1.00", vcpus "2.00"), so a string that parses as a number is a number.
 func toFloat(v any) (float64, bool) {
+	// Fast paths for the two shapes that actually come out of encoding/json.
 	switch n := v.(type) {
 	case float64:
 		return n, true
-	case int:
-		return float64(n), true
-	case int64:
-		return float64(n), true
 	case string:
 		parsed, err := strconv.ParseFloat(n, 64)
 		if err != nil {
 			return 0, false
 		}
 		return parsed, true
+	}
+
+	// Every other numeric width, by kind rather than by type. Generated CRD types use
+	// int32 and int64 freely, and enumerating types one at a time both reads worse and
+	// leaves a width out -- which then falls through to a string comparison that happens
+	// to work until it does not.
+	value := reflect.ValueOf(v)
+	switch value.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return float64(value.Int()), true
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return float64(value.Uint()), true
+	case reflect.Float32, reflect.Float64:
+		return value.Float(), true
 	default:
 		return 0, false
 	}

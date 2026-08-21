@@ -203,12 +203,37 @@ func scalarEqual(have, want any) bool {
 	if have == nil || want == nil {
 		return have == nil && want == nil
 	}
+
+	if equal, decided := boolEqual(have, want); decided {
+		return equal
+	}
+
 	haveNum, haveOK := toFloat(have)
 	wantNum, wantOK := toFloat(want)
 	if haveOK && wantOK {
 		return haveNum == wantNum
 	}
+
+	// String comparison is the remaining case, and it is deliberate rather than lazy:
+	// NetBox returns choice values, slugs and free text as strings, and a spec supplies
+	// the same. A stricter same-type rule here would break the numeric widening above,
+	// which is what keeps an int32 from the CRD comparing equal to the float64 that
+	// comes back out of JSON.
 	return fmt.Sprint(have) == fmt.Sprint(want)
+}
+
+// boolEqual settles a comparison where either side is a boolean, reporting whether it
+// applied. It runs before the numeric and string paths because the fmt.Sprint fallback
+// otherwise makes the bool true and the string "true" compare equal -- so a field NetBox
+// returns as a bool and a spec supplying a string would silently agree, and the reverse
+// mismatch would silently disagree forever.
+func boolEqual(have, want any) (equal, decided bool) {
+	haveBool, haveIsBool := have.(bool)
+	wantBool, wantIsBool := want.(bool)
+	if !haveIsBool && !wantIsBool {
+		return false, false
+	}
+	return haveIsBool && wantIsBool && haveBool == wantBool, true
 }
 
 // sameIDSet compares an M2M field: a list of nested objects on read against a list of

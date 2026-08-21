@@ -412,6 +412,58 @@ func TestNoHotLoopOnRealResponses(t *testing.T) {
 	}
 }
 
+// TestScalarEqualTypeConfusion pins the boundary between the three comparison paths.
+// The fmt.Sprint fallback is load-bearing for strings and for integer widths, so it
+// cannot simply be replaced with a same-type rule -- these cases fix its edges.
+func TestScalarEqualTypeConfusion(t *testing.T) {
+	tests := []struct {
+		name       string
+		have, want any
+		equal      bool
+	}{
+		// The reported defect: stringifying made these agree.
+		{"bool true vs string true", true, "true", false},
+		{"string true vs bool true", "true", true, false},
+		{"bool false vs string false", false, "false", false},
+		{"bool false vs zero", false, 0, false},
+		{"bool true vs one", true, 1, false},
+		{"bool matches bool", true, true, true},
+		{"false matches false", false, false, true},
+		{"bool differs from bool", true, false, false},
+
+		// Integer widening must keep working, or a CRD int32 against a JSON float64
+		// becomes a permanent diff -- the hot loop this file exists to prevent.
+		{"int32 vs float64", int32(20), float64(20), true},
+		{"int64 vs float64", int64(20), float64(20), true},
+		{"uint32 vs float64", uint32(20), float64(20), true},
+		{"int vs numeric string", 20, "20", true},
+		{"float32 vs float64", float32(1.5), float64(1.5), true},
+		{"decimal string vs int", "1.00", 1, true},
+
+		// Strings stay strings.
+		{"choice value matches", "active", "active", true},
+		{"choice value differs", "active", "planned", false},
+		{"empty string is not zero", "", 0, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := scalarEqual(tc.have, tc.want); got != tc.equal {
+				t.Errorf("scalarEqual(%#v, %#v) = %v, want %v", tc.have, tc.want, got, tc.equal)
+			}
+		})
+	}
+}
+
+// TestDriftDoesNotConfuseBoolWithString is the same defect at the level Drift is used at:
+// NetBox returns is_pool as a bool, and a spec that supplied the string would previously
+// have looked equal.
+func TestDriftDoesNotConfuseBoolWithString(t *testing.T) {
+	got := Drift(Object{"is_pool": true}, Object{"is_pool": "true"}, FieldRules{})
+	if len(got) != 1 {
+		t.Errorf("drift = %v, want is_pool to differ: a bool and a string are not the same value", got)
+	}
+}
+
 func TestChangesCarryOldAndNewInFieldOrder(t *testing.T) {
 	live := Object{"name": "home", "status": map[string]any{"value": "active"}, "description": "old"}
 	desired := Object{"name": "away", "status": "planned", "description": "new"}
