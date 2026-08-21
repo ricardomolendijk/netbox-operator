@@ -18,8 +18,11 @@ const (
 
 // Condition reasons. Kept as constants because tooling and the docs both key on them.
 const (
-	ReasonReady              = "Ready"
-	ReasonSecretMissing      = "SecretMissing"
+	ReasonReady         = "Ready"
+	ReasonSecretMissing = "SecretMissing"
+	// ReasonCABundleMissing is distinct from ReasonSecretMissing so a reader is sent to
+	// the right Secret: a missing CA bundle is not an authentication failure.
+	ReasonCABundleMissing    = "CABundleMissing"
 	ReasonTokenMissing       = "TokenMissing"
 	ReasonAuthError          = "AuthError"
 	ReasonProbeFailed        = "ProbeFailed"
