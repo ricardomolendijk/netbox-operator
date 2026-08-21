@@ -1,0 +1,518 @@
+// Package registry is the only place per-kind NetBox facts live.
+//
+// One generic engine drives ~120 kinds, so everything that differs between kinds is data
+// in a Descriptor rather than a branch in the engine: adding a kind is a new file
+// registering a Descriptor, and never an edit to internal/reconciler.
+//
+// Nothing in a Descriptor is a func. A closure cannot be emitted by a template, printed
+// in a diff, serialised or linted, so a Descriptor carrying one would put per-kind logic
+// back into shared code through the back door — and the M7 generator could not produce it
+// at all (NBO-069).
+package registry
+
+import (
+	"cmp"
+	"errors"
+	"fmt"
+	"regexp"
+	"slices"
+	"strings"
+	"sync"
+
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+)
+
+// Descriptor validation failures. Each is a distinct sentinel so callers and tests
+// classify by type rather than by matching a message.
+var (
+	// ErrDuplicateGVK is returned when a GroupVersionKind is registered twice.
+	ErrDuplicateGVK = errors.New("duplicate registration for GroupVersionKind")
+
+	// ErrEmptyGVK is returned for a descriptor with no GroupVersionKind, which would
+	// otherwise register itself under the zero key.
+	ErrEmptyGVK = errors.New("empty GroupVersionKind")
+
+	// ErrNoEndpoint is returned for a descriptor with no NetBox endpoint.
+	ErrNoEndpoint = errors.New("empty endpoint")
+
+	// ErrInvalidObjectType is returned for an object type that is not a Django
+	// `app_label.model` string.
+	ErrInvalidObjectType = errors.New("object type is not an app_label.model string")
+
+	// ErrUnknownScope is returned for a resource scope that is not a CRD scope.
+	ErrUnknownScope = errors.New("unknown resource scope")
+
+	// ErrNoNaturalKey is returned for a descriptor with no lookup candidate, which the
+	// engine cannot adopt with and would duplicate on every fresh cluster.
+	ErrNoNaturalKey = errors.New("no natural key")
+
+	// ErrDeferredReadOnly is returned for a field that is both deferred and read-only.
+	ErrDeferredReadOnly = errors.New("field is both deferred and read-only")
+
+	// ErrDeferredNaturalKey is returned for an unconditionally deferred field that a
+	// natural-key candidate matches on.
+	ErrDeferredNaturalKey = errors.New("natural-key field may not be deferred unconditionally")
+
+	// ErrUnknownDeferMode is returned for a deferral mode the engine does not implement.
+	ErrUnknownDeferMode = errors.New("unknown defer mode")
+
+	// ErrUnknownUpdateStrategy is returned for an update strategy the engine does not
+	// implement, the empty string included.
+	ErrUnknownUpdateStrategy = errors.New("unknown update strategy")
+
+	// ErrRecreateOnWithoutRecreate is returned when fields are declared identity-bearing
+	// on a kind that updates in place.
+	ErrRecreateOnWithoutRecreate = errors.New("recreateOn requires UpdateRecreate")
+
+	// ErrFieldClassConflict is returned for a field declared in two field classes.
+	ErrFieldClassConflict = errors.New("field is declared in two field classes")
+
+	// ErrEmptyField is returned for an empty entry in a field list.
+	ErrEmptyField = errors.New("empty field name")
+
+	// ErrInvalidGenericFK is returned for a generic-FK spec missing a column or its
+	// legal targets.
+	ErrInvalidGenericFK = errors.New("incomplete generic-FK spec")
+)
+
+// objectTypePattern is the Django ContentType spelling: `model` is lowercased and
+// unpunctuated, so it is `virtualization.vminterface`, never
+// `virtualization.VMInterface` (docs/netbox-schema.md, generic-FK note).
+var objectTypePattern = regexp.MustCompile(`^[a-z_]+\.[a-z0-9_]+$`)
+
+// UpdateStrategy is how the engine turns a diff into writes.
+type UpdateStrategy string
+
+const (
+	// UpdatePatch PATCHes the diff, which is what every kind does unless its identity
+	// lives somewhere a PATCH cannot reach.
+	UpdatePatch UpdateStrategy = "Patch"
+
+	// UpdateRecreate deletes the object and creates a replacement. dcim.Cable needs it:
+	// its identity lives in its terminations, `unique(termination_type, termination_id)`
+	// keeps the wanted endpoint occupied by the old cable until it is deleted
+	// (docs/netbox-schema.md -> dcim.Cable.meta.constraints), so the replacement cannot be
+	// created first. Declared as data because the alternative is `if kind == Cable` in the
+	// engine.
+	UpdateRecreate UpdateStrategy = "Recreate"
+)
+
+// knownUpdateStrategies deliberately excludes the zero value: whether an update is
+// destructive is too important to default silently.
+var knownUpdateStrategies = []UpdateStrategy{UpdatePatch, UpdateRecreate}
+
+// DeferMode is when a reference is left out of the create payload and applied by a
+// follow-up PATCH.
+type DeferMode string
+
+const (
+	// DeferAlways is for a reference that cannot exist at create time by construction: a
+	// Device's `primary_ip4` needs an address that needs an interface that needs the
+	// Device (docs/netbox-schema.md -> dcim.Device.primary_ip4). No apply order fixes it.
+	DeferAlways DeferMode = "Always"
+
+	// DeferIfUnresolved includes the field in the create payload when it resolves and
+	// defers only when it does not. Deferring a `parent` unconditionally would create the
+	// object as top-level, where it can adopt an unrelated top-level object of the same
+	// name, and the follow-up PATCH would then reparent that object (NBO-015).
+	DeferIfUnresolved DeferMode = "IfUnresolved"
+)
+
+var knownDeferModes = []DeferMode{DeferAlways, DeferIfUnresolved}
+
+// DeferredField is one field the engine may leave out of a create payload.
+type DeferredField struct {
+	// APIField is the NetBox field name as written, not the filter name.
+	APIField string
+
+	// Mode is when the deferral applies.
+	Mode DeferMode
+}
+
+// GenericFKSpec describes one polymorphic foreign key: a `*_type` / `*_id` column pair
+// whose type half is written as an `app_label.model` string over the REST API
+// (docs/netbox-schema.md, generic-FK note).
+type GenericFKSpec struct {
+	// TypeField is the content-type column, e.g. `assigned_object_type`.
+	TypeField string
+
+	// IDField is the object-id column, e.g. `assigned_object_id`.
+	IDField string
+
+	// AllowedTypes are the object types this pair may point at, in the same spelling as
+	// Descriptor.ObjectType. It drives resolver dispatch and ref watches, so a new union
+	// member stays a data change.
+	AllowedTypes []string
+}
+
+// Descriptor is everything the engine needs to reconcile one kind, as data.
+type Descriptor struct {
+	// GVK is the Kubernetes kind this descriptor drives.
+	GVK schema.GroupVersionKind
+
+	// Endpoint is the NetBox REST path relative to /api, e.g. `ipam/prefixes`. It is
+	// looked up, never derived by pluralising: virtualization.VMInterface lives at
+	// `virtualization/interfaces` and dcim.VirtualChassis at `dcim/virtual-chassis`
+	// (docs/netbox-schema.md, endpoint map).
+	Endpoint string
+
+	// ObjectType is the `app_label.model` spelling other kinds use to point at this one
+	// through a generic FK. It is written down here so there is exactly one source for it.
+	ObjectType string
+
+	// Scope is the CRD scope. Every kind is NamespaceScoped in v1alpha1
+	// (docs/decisions/0002-crd-scoping.md); the field exists because CRD scope is
+	// immutable, so promoting a kind is a new API version rather than a redesign, and the
+	// M7 generator carries it as a per-kind attribute.
+	Scope apiextensionsv1.ResourceScope
+
+	// NaturalKeys are the lookup candidates, tried in the order given. More than one is
+	// the normal case, not a fallback: ipam.Prefix and ipam.IPAddress have no
+	// meta.constraints at all (docs/netbox-schema.md), so their identity is a convention
+	// expressed as a priority list.
+	NaturalKeys []NaturalKey
+
+	// UpdateStrategy is how an update is written. Validate rejects the zero value:
+	// whether an update destroys the object first is not a thing to default silently.
+	UpdateStrategy UpdateStrategy
+
+	// RecreateOn are the API fields whose change forces delete-then-create. Only
+	// meaningful with UpdateRecreate, and load-bearing there: a cable's `label` is an
+	// ordinary PATCH while the membership of its termination lists is not, so a strategy
+	// alone would make every edit destructive.
+	RecreateOn []string
+
+	// Deferred are fields kept out of the create payload and applied by a second PATCH.
+	Deferred []DeferredField
+
+	// ReadOnly are fields the operator must never write: every `_`-prefixed cached
+	// column, every CounterCacheField, `created`, `last_updated`, `url`, `display`
+	// (docs/netbox-schema.md preamble). Writing one silently no-ops, which is a PATCH
+	// loop rather than an error.
+	ReadOnly []string
+
+	// M2M are many-to-many fields written as a list of NetBox object IDs.
+	M2M []string
+
+	// ObjectTypeLists are many-to-many fields onto contenttypes.ContentType, whose
+	// values are `app_label.model` strings rather than references to NetBox objects:
+	// extras.Tag.object_types is the first (docs/netbox-schema.md -> extras.Tag). They are
+	// a separate class from M2M because a resolver told to resolve them would look for
+	// CRs that cannot exist.
+	ObjectTypeLists []string
+
+	// GenericFKs are the polymorphic foreign keys on this kind.
+	GenericFKs []GenericFKSpec
+
+	// ContainmentRef is the one spec field whose target gets a non-controller owner
+	// reference, so deleting the parent cascades. Exactly one, because Kubernetes garbage
+	// collection waits for every owner and two containment owners silently turn "delete
+	// the site or the VRF" into "delete both"
+	// (docs/decisions/0003-ownership-and-references.md rule 4). Empty when the kind has no
+	// containment parent, which is every catalogue kind.
+	ContainmentRef string
+}
+
+// Candidates are the natural keys usable for state, in priority order. The engine tries
+// them in turn; an empty result means identity cannot be established yet, and the engine
+// must wait rather than create — see NaturalKey.Applicable.
+func (d Descriptor) Candidates(state SpecState) []NaturalKey {
+	usable := make([]NaturalKey, 0, len(d.NaturalKeys))
+
+	for _, key := range d.NaturalKeys {
+		if key.Applicable(state) {
+			usable = append(usable, key)
+		}
+	}
+
+	return usable
+}
+
+// Validate reports every way this descriptor is malformed. It runs at manager start, so
+// a bad descriptor fails the boot rather than one reconcile.
+func (d Descriptor) Validate() error {
+	checks := []func() error{
+		d.validateIdentity,
+		d.validateNaturalKeys,
+		d.validateDeferred,
+		d.validateFieldSets,
+		d.validateGenericFKs,
+		d.validateUpdates,
+	}
+
+	errs := make([]error, 0, len(checks))
+
+	for _, check := range checks {
+		errs = append(errs, check())
+	}
+
+	if err := errors.Join(errs...); err != nil {
+		return fmt.Errorf("descriptor %s: %w", d.GVK, err)
+	}
+
+	return nil
+}
+
+func (d Descriptor) validateIdentity() error {
+	errs := make([]error, 0, 4)
+
+	if d.GVK.Empty() {
+		errs = append(errs, ErrEmptyGVK)
+	}
+
+	if d.Endpoint == "" {
+		errs = append(errs, ErrNoEndpoint)
+	}
+
+	if !objectTypePattern.MatchString(d.ObjectType) {
+		errs = append(errs, fmt.Errorf("%w: %q", ErrInvalidObjectType, d.ObjectType))
+	}
+
+	if d.Scope != apiextensionsv1.NamespaceScoped && d.Scope != apiextensionsv1.ClusterScoped {
+		errs = append(errs, fmt.Errorf("%w: %q", ErrUnknownScope, d.Scope))
+	}
+
+	return errors.Join(errs...)
+}
+
+func (d Descriptor) validateNaturalKeys() error {
+	if len(d.NaturalKeys) == 0 {
+		return ErrNoNaturalKey
+	}
+
+	errs := make([]error, 0, len(d.NaturalKeys))
+
+	for i, key := range d.NaturalKeys {
+		if err := key.Validate(); err != nil {
+			errs = append(errs, fmt.Errorf("natural key %d: %w", i, err))
+		}
+	}
+
+	return errors.Join(errs...)
+}
+
+// validateDeferred also enforces NBO-015's identity guard. Note what it does not check:
+// a natural key naming a read-only column is legal and necessary —
+// virtualization.Cluster is unique on `(_site, name)` (docs/netbox-schema.md ->
+// virtualization.Cluster.meta.constraints), and `_site` is a cache the operator must
+// never write but must be able to filter on as `site_id`.
+func (d Descriptor) validateDeferred() error {
+	readOnly := make(map[string]struct{}, len(d.ReadOnly))
+	for _, field := range d.ReadOnly {
+		readOnly[field] = struct{}{}
+	}
+
+	errs := make([]error, 0, len(d.Deferred))
+
+	for _, deferred := range d.Deferred {
+		if deferred.APIField == "" {
+			errs = append(errs, fmt.Errorf("%w: deferred", ErrEmptyField))
+		}
+
+		if !slices.Contains(knownDeferModes, deferred.Mode) {
+			errs = append(errs, fmt.Errorf("%w: %q on %q", ErrUnknownDeferMode, deferred.Mode, deferred.APIField))
+		}
+
+		if _, dup := readOnly[deferred.APIField]; dup {
+			errs = append(errs, fmt.Errorf("%w: %s", ErrDeferredReadOnly, deferred.APIField))
+		}
+
+		if deferred.Mode == DeferAlways && d.matchedByNaturalKey(deferred.APIField) {
+			errs = append(errs, fmt.Errorf("%w: %s", ErrDeferredNaturalKey, deferred.APIField))
+		}
+	}
+
+	return errors.Join(errs...)
+}
+
+// matchedByNaturalKey reports whether any candidate matches on apiField by value. Null
+// pins are exempt: such a candidate asserts the field is unset, which is exactly the state
+// a create with the field deferred is in, so deferral cannot corrupt that identity.
+func (d Descriptor) matchedByNaturalKey(apiField string) bool {
+	for _, key := range d.NaturalKeys {
+		for _, field := range key.Fields {
+			// A foreign key is written as `parent` and filtered as `parent_id`, so the
+			// two spellings have to be reconciled before they can be compared.
+			if field.Filter == apiField || strings.TrimSuffix(field.Filter, "_id") == apiField {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+func (d Descriptor) validateFieldSets() error {
+	lists := []struct {
+		name   string
+		fields []string
+	}{
+		{"readOnly", d.ReadOnly},
+		{"m2m", d.M2M},
+		{"objectTypeLists", d.ObjectTypeLists},
+		{"recreateOn", d.RecreateOn},
+	}
+
+	errs := make([]error, 0, len(lists))
+
+	for _, list := range lists {
+		if slices.Contains(list.fields, "") {
+			errs = append(errs, fmt.Errorf("%w: %s", ErrEmptyField, list.name))
+		}
+	}
+
+	for _, field := range d.ObjectTypeLists {
+		if slices.Contains(d.M2M, field) {
+			errs = append(errs, fmt.Errorf("%w: %s is both m2m and objectTypeList", ErrFieldClassConflict, field))
+		}
+	}
+
+	return errors.Join(errs...)
+}
+
+func (d Descriptor) validateGenericFKs() error {
+	errs := make([]error, 0, len(d.GenericFKs))
+
+	for _, generic := range d.GenericFKs {
+		if generic.TypeField == "" || generic.IDField == "" || len(generic.AllowedTypes) == 0 {
+			errs = append(errs, fmt.Errorf("%w: %+v", ErrInvalidGenericFK, generic))
+
+			continue
+		}
+
+		for _, objectType := range generic.AllowedTypes {
+			if !objectTypePattern.MatchString(objectType) {
+				errs = append(errs, fmt.Errorf("%w: %q on %s", ErrInvalidObjectType, objectType, generic.TypeField))
+			}
+		}
+	}
+
+	return errors.Join(errs...)
+}
+
+func (d Descriptor) validateUpdates() error {
+	if !slices.Contains(knownUpdateStrategies, d.UpdateStrategy) {
+		return fmt.Errorf("%w: %q", ErrUnknownUpdateStrategy, d.UpdateStrategy)
+	}
+
+	if len(d.RecreateOn) > 0 && d.UpdateStrategy != UpdateRecreate {
+		return fmt.Errorf("%w: %v", ErrRecreateOnWithoutRecreate, d.RecreateOn)
+	}
+
+	return nil
+}
+
+// Registry maps a GroupVersionKind to its Descriptor.
+type Registry struct {
+	// mu guards the state below. Get is called from every reconcile goroutine while Add
+	// is called from init(), and an invariant held only by documentation is not one.
+	mu         sync.RWMutex
+	byGVK      map[schema.GroupVersionKind]Descriptor
+	duplicates []schema.GroupVersionKind
+}
+
+// New returns an empty registry. Tests use it to stay off the package-level one.
+func New() *Registry {
+	return &Registry{byGVK: make(map[schema.GroupVersionKind]Descriptor)}
+}
+
+// Add registers d. A GVK that is already registered is rejected and recorded, so the
+// first registration wins and Validate reports the collision too: registration happens in
+// one init() per kind, where a returned error is easy to drop.
+func (r *Registry) Add(d Descriptor) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, exists := r.byGVK[d.GVK]; exists {
+		r.duplicates = append(r.duplicates, d.GVK)
+
+		return fmt.Errorf("%w: %s", ErrDuplicateGVK, d.GVK)
+	}
+
+	r.byGVK[d.GVK] = d
+
+	return nil
+}
+
+// Get returns the descriptor for gvk.
+func (r *Registry) Get(gvk schema.GroupVersionKind) (Descriptor, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	d, ok := r.byGVK[gvk]
+
+	return d, ok
+}
+
+// List returns every descriptor, ordered by GVK. The order is deterministic because
+// callers log, validate and generate from it, and a map-ordered list makes all three
+// unreviewable.
+func (r *Registry) List() []Descriptor {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	return r.list()
+}
+
+// Validate reports every malformed descriptor and every duplicate registration. The
+// manager calls it at start, so the process fails to boot rather than failing a reconcile.
+func (r *Registry) Validate() error {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	descriptors := r.list()
+	errs := make([]error, 0, len(descriptors)+len(r.duplicates))
+
+	for _, gvk := range r.duplicates {
+		errs = append(errs, fmt.Errorf("%w: %s", ErrDuplicateGVK, gvk))
+	}
+
+	for _, d := range descriptors {
+		errs = append(errs, d.Validate())
+	}
+
+	return errors.Join(errs...)
+}
+
+// list is List without the lock, for callers that already hold it.
+func (r *Registry) list() []Descriptor {
+	descriptors := make([]Descriptor, 0, len(r.byGVK))
+	for _, d := range r.byGVK {
+		descriptors = append(descriptors, d)
+	}
+
+	slices.SortFunc(descriptors, func(a, b Descriptor) int {
+		return cmp.Compare(a.GVK.String(), b.GVK.String())
+	})
+
+	return descriptors
+}
+
+// defaultRegistry is what the per-kind init() functions register into. It is not exported
+// so it cannot be swapped out from under a running manager.
+var defaultRegistry = New()
+
+// MustRegister adds d to the package-level registry and panics if it cannot. It is called
+// from one init() per kind: a duplicate kind is a programming error that must stop the
+// process at boot, never surface as a reconcile failure hours later.
+func MustRegister(d Descriptor) {
+	if err := defaultRegistry.Add(d); err != nil {
+		panic(fmt.Sprintf("registry: %v", err))
+	}
+}
+
+// Get returns the descriptor registered for gvk.
+func Get(gvk schema.GroupVersionKind) (Descriptor, bool) {
+	return defaultRegistry.Get(gvk)
+}
+
+// List returns every registered descriptor, ordered by GVK.
+func List() []Descriptor {
+	return defaultRegistry.List()
+}
+
+// Validate validates every registered descriptor.
+func Validate() error {
+	return defaultRegistry.Validate()
+}
