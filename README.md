@@ -73,7 +73,9 @@ Longer form, one page each:
   typed error, what gets retried, and why an ambiguous lookup is never a silent choice.
 
 Full index: [`docs/README.md`](docs/README.md). Decisions and their rationale:
-[`docs/decisions/README.md`](docs/decisions/README.md).
+[`docs/decisions/README.md`](docs/decisions/README.md). Running it, including what the
+operator can read and the label every credential Secret needs:
+[`docs/operations/rbac.md`](docs/operations/rbac.md).
 
 ## Target NetBox version
 

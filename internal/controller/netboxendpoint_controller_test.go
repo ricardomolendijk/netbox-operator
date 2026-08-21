@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -32,11 +34,17 @@ func netboxStub(t *testing.T, version string, status int) *httptest.Server {
 	return srv
 }
 
+// makeSecret creates a credential Secret, labelled -- the operator's cache selects on
+// that label, so an unlabelled Secret here would be invisible to the controller.
 func makeSecret(t *testing.T, k8s client.Client, ns, name, token string) *corev1.Secret {
 	t.Helper()
 	secret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
-		Data:       map[string][]byte{"token": []byte(token)},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: ns,
+			Labels:    map[string]string{CredentialLabel: CredentialLabelValue},
+		},
+		Data: map[string][]byte{"token": []byte(token)},
 	}
 	if err := k8s.Create(context.Background(), secret); err != nil {
 		t.Fatalf("creating secret: %v", err)
@@ -200,8 +208,12 @@ func TestEmptyTokenKeyIsReported(t *testing.T) {
 	k8s, ns := k8sClient, newNamespace(t)
 	srv := netboxStub(t, "4.6.8", http.StatusOK)
 	secret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: "empty", Namespace: ns},
-		Data:       map[string][]byte{"other": []byte("x")},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "empty",
+			Namespace: ns,
+			Labels:    map[string]string{CredentialLabel: CredentialLabelValue},
+		},
+		Data: map[string][]byte{"other": []byte("x")},
 	}
 	if err := k8s.Create(context.Background(), secret); err != nil {
 		t.Fatalf("creating secret: %v", err)
@@ -216,6 +228,53 @@ func TestEmptyTokenKeyIsReported(t *testing.T) {
 		c := conditionOf(e, netboxv1alpha1.ConditionReady)
 		return c != nil && c.Reason == netboxv1alpha1.ReasonTokenMissing
 	})
+}
+
+// TestUnlabelledSecretIsInvisibleAndNamesTheLabel is the price of the label-selected
+// cache, made explicit: the Secret is in the API server, the name on the endpoint is
+// right, and the operator still cannot read it. Both halves are asserted -- that the
+// cache does not hold it (the privilege and memory win) and that the condition says why
+// (the usability cost, which is only acceptable while the message is this specific).
+func TestUnlabelledSecretIsInvisibleAndNamesTheLabel(t *testing.T) {
+	ctx, k8s, ns := context.Background(), k8sClient, newNamespace(t)
+	srv := netboxStub(t, "4.6.8", http.StatusOK)
+
+	unlabelled := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "unlabelled", Namespace: ns},
+		Data:       map[string][]byte{"token": []byte("valid-token")},
+	}
+	if err := apiClient.Create(ctx, unlabelled); err != nil {
+		t.Fatalf("creating unlabelled secret: %v", err)
+	}
+
+	key := client.ObjectKey{Namespace: ns, Name: "unlabelled"}
+	if err := apiClient.Get(ctx, key, &corev1.Secret{}); err != nil {
+		t.Fatalf("the unlabelled secret should exist in the API server: %v", err)
+	}
+	if err := k8s.Get(ctx, key, &corev1.Secret{}); !apierrors.IsNotFound(err) {
+		t.Errorf("reading an unlabelled secret through the manager: err = %v, want NotFound", err)
+	}
+	// A labelled Secret in the same namespace is readable, so the assertion above is the
+	// selector working rather than an empty cache.
+	makeSecret(t, k8s, ns, "labelled", "valid-token")
+	eventually(t, "labelled secret visible", func() bool {
+		return k8s.Get(ctx, client.ObjectKey{Namespace: ns, Name: "labelled"}, &corev1.Secret{}) == nil
+	})
+
+	makeEndpoint(t, k8s, ns, "invisible", srv.URL, "unlabelled", netboxv1alpha1.EndpointModeApply)
+	eventually(t, "SecretMissing", func() bool {
+		e := fetch(t, k8s, ns, "invisible")
+		if e == nil {
+			return false
+		}
+		c := conditionOf(e, netboxv1alpha1.ConditionReady)
+		return c != nil && c.Reason == netboxv1alpha1.ReasonSecretMissing
+	})
+
+	c := conditionOf(mustFetch(t, k8s, ns, "invisible"), netboxv1alpha1.ConditionReady)
+	if !strings.Contains(c.Message, CredentialLabel) {
+		t.Errorf("Ready message = %q, want it to name the %s label", c.Message, CredentialLabel)
+	}
 }
 
 func TestSecretRotationRebuildsTheClientWithoutRestart(t *testing.T) {
@@ -272,7 +331,11 @@ func TestCABundleKeyDefaultsToCACrt(t *testing.T) {
 	caPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: tlsSrv.Certificate().Raw})
 
 	ca := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: "nb-ca", Namespace: ns},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "nb-ca",
+			Namespace: ns,
+			Labels:    map[string]string{CredentialLabel: CredentialLabelValue},
+		},
 		// Only ca.crt. If the key defaults to "token" this Secret looks empty.
 		Data: map[string][]byte{"ca.crt": caPEM},
 	}
