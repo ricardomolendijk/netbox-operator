@@ -27,3 +27,6 @@ kubeconfig
 # Aspirational design example; the published examples land per-milestone as kinds
 # become real. See docs/examples/README.md.
 /docs/examples/homelab.yaml
+
+# Syncs the local specs onto GitHub issues; local because specs/ is.
+/hack/sync-issues.py

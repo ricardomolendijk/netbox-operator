@@ -13,7 +13,7 @@ deletes. So they are kept distinct and both are used, for different jobs.
 | Models | a NetBox foreign key | a Kubernetes lifecycle dependency |
 | Written by | the user, in `spec` | the operator, in `metadata` |
 | Effect | resolved to a NetBox ID at reconcile time | garbage collection, cascade delete |
-| Legal across namespaces | yes, with a `NetBoxRefGrant` | **no** |
+| Legal across namespaces | yes, with a `NetBoxRefGrant` | **no**, ever |
 
 ## Decision
 
@@ -55,17 +55,14 @@ ref that is genuinely a parent-child containment relationship (`scopeRef`,
 **non-controller** owner reference to the referring object. Non-controller so it never
 competes with rule 3; GC still counts it, so the cascade works.
 
-It is added **only when the reference is legal as an owner reference**:
-
-- same namespace, or
-- a namespaced dependent with a cluster-scoped owner.
+It is added **only when the reference is legal as an owner reference**. Since every kind
+is namespaced ([ADR-0002](0002-crd-scoping.md)), that reduces to a single rule: **same
+namespace, or no owner reference.**
 
 It is skipped, with a `CascadeUnavailable` condition explaining why, when:
 
-- the ref crosses namespaces, or
-- the owner is namespaced and the dependent is cluster-scoped (illegal; would raise
-  `OwnerRefInvalidNamespace`), or
-- the ref points at an unmanaged NetBox object by `id`.
+- the ref crosses namespaces (an owner reference may not), or
+- the ref points at an unmanaged NetBox object by raw `id`.
 
 Guard clause, not a best effort: the operator either sets a legal owner reference or
 says out loud that deleting the parent will not clean up this child.
