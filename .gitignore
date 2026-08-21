@@ -1,0 +1,29 @@
+# Local design authority — deliberately not published.
+# plan.md / roadmap.md / specs/ are projected onto GitHub issues instead.
+/plan.md
+/roadmap.md
+/specs/
+
+# Build output
+/bin/
+/dist/
+/testbin/
+*.test
+cover.out
+cover.html
+
+# Local config and secrets
+.env
+*.local.yaml
+kubeconfig
+/config/**/*secret*.yaml
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Aspirational design example; the published examples land per-milestone as kinds
+# become real. See docs/examples/README.md.
+/docs/examples/homelab.yaml
