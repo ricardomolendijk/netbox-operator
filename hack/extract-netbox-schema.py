@@ -23,12 +23,17 @@ def lit(n):
     except Exception:
         return ast.unparse(n)
 
+def is_lit(n):
+    """Whether the node is a real literal. `default=VLANStatusChoices.STATUS_ACTIVE`
+    unparses to a string the digest would then quote exactly like the literal 'active'."""
+    try: ast.literal_eval(n)
+    except Exception: return False
+    return True
+
 def kwargs_of(call):
-    out = {}
-    for kw in call.keywords:
-        if kw.arg is None: continue
-        out[kw.arg] = lit(kw.value)
-    return out
+    """The keyword *nodes*, unevaluated: once `lit` has unparsed one, a caller can no longer
+    tell a symbol from the string literal that happens to spell it."""
+    return {kw.arg: kw.value for kw in call.keywords if kw.arg is not None}
 
 def target_of(call):
     if call.args:
@@ -83,8 +88,15 @@ for app in ['circuits','core','dcim','extras','ipam','netbox','tenancy','users',
         tree = parse(f)
         if tree is None: continue
         local = int_consts(tree)
+        # A class declared inside another class is not a model. `ast.walk` also reached each
+        # model's nested `class Meta(PrimaryModel.Meta)`, whose base name contains "Model", so
+        # every one of those became a phantom `app.Meta` entry -- and the second one silently
+        # replaced the first. Still a walk rather than a read of tree.body, so a model declared
+        # inside a module-level `if` or `try` is not lost either.
+        nested = {c for n in ast.walk(tree) if isinstance(n, ast.ClassDef)
+                  for c in ast.walk(n) if isinstance(c, ast.ClassDef) and c is not n}
         for node in ast.walk(tree):
-            if not isinstance(node, ast.ClassDef): continue
+            if not isinstance(node, ast.ClassDef) or node in nested: continue
             bases = [ast.unparse(b) for b in node.bases]
             fields = []
             meta = {}
@@ -94,17 +106,27 @@ for app in ['circuits','core','dcim','extras','ipam','netbox','tenancy','users',
                     v = stmt.value
                     if isinstance(v, ast.Call):
                         fn = ast.unparse(v.func).split('.')[-1]
+                        # A field class the whitelist does not know is a column missing from the
+                        # entry, and so a property missing from any CRD derived from it -- the
+                        # same silent loss as a missed endpoint. Say it out loud.
+                        if fn.endswith('Field') and fn not in FIELD_TYPES:
+                            print(f"!! {app}.{node.name}.{name}: unknown field type {fn}, column omitted",
+                                  file=sys.stderr)
                         if fn in FIELD_TYPES:
-                            kw = kwargs_of(v)
+                            kwn = kwargs_of(v)
+                            kw = {k: lit(n) for k, n in kwn.items()}
                             entry = {'name': name, 'type': fn}
                             if fn in FK_TYPES:
                                 entry['to'] = target_of(v) or kw.get('to')
                                 # on_delete is the referential-integrity contract (PROTECT vs
                                 # CASCADE vs SET_NULL) a spec needs to cite; Django also accepts
-                                # it as the second positional argument.
-                                od = kw.get('on_delete')
-                                if od is None and len(v.args) > 1: od = lit(v.args[1])
-                                if od is not None: entry['on_delete'] = od
+                                # it as the second positional argument. A ManyToManyField has no
+                                # on_delete at all, and its second positional argument is
+                                # `related_name`: reading that as one invents a contract.
+                                if fn != 'ManyToManyField':
+                                    od = kw.get('on_delete')
+                                    if od is None and len(v.args) > 1: od = lit(v.args[1])
+                                    if od is not None: entry['on_delete'] = od
                                 if 'related_name' in kw: entry['related_name'] = kw['related_name']
                             if fn in GENERIC_FK_TYPES:
                                 # A GenericForeignKey is an accessor over a (ct_field, fk_field)
@@ -113,6 +135,12 @@ for app in ['circuits','core','dcim','extras','ipam','netbox','tenancy','users',
                                 entry['ct_field'] = kw.get('ct_field') or (lit(v.args[0]) if v.args else 'content_type')
                             for k in ('null','blank','max_length','unique','default','choices','db_index','max_digits','decimal_places'):
                                 if k in kw: entry[k] = kw[k]
+                            # A symbolic default (`default=VLANStatusChoices.STATUS_ACTIVE`,
+                            # `default=dict`) is not the string it unparses to. Flag it as the
+                            # sizes are flagged, rather than let the digest quote it into a
+                            # literal that does not exist.
+                            if 'default' in entry and not is_lit(kwn['default']):
+                                entry['default_unresolved'] = True
                             for k in SIZE_KWARGS:
                                 if k not in entry: continue
                                 entry[k], unresolved = resolve_size(entry[k], local)
@@ -124,7 +152,13 @@ for app in ['circuits','core','dcim','extras','ipam','netbox','tenancy','users',
                             meta[m.targets[0].id] = ast.unparse(m.value)
             if fields or any('Model' in b or 'Component' in b or 'Template' in b for b in bases):
                 key = f"{app}.{node.name}"
-                if key in out and not fields: continue
+                if key in out:
+                    # Whichever file the glob reached first won, and the other class's entire
+                    # field list was dropped -- silently, in either direction. A wrong field
+                    # list is worse than a missing one, so this stops the run.
+                    sys.exit(f"!! {key} is declared twice: {out[key]['file']} and "
+                             f"{os.path.relpath(f, ROOT)}. One class's field list would silently "
+                             f"replace the other's.")
                 out[key] = {'app': app, 'name': node.name, 'file': os.path.relpath(f, ROOT),
                             'bases': bases, 'fields': fields, 'meta': meta}
 
@@ -145,6 +179,23 @@ for v in out.values():
               file=sys.stderr)
     else:
         BY_NAME[v['name']] = v
+
+# An FK target has to read `app.Model`, because anything mapping a target to a Kind can
+# otherwise only guess the app -- and a guess by class name picks the wrong app's model when
+# two apps share a name, which is exactly what hack/classify-scope.py's `byname` fallback did.
+# A bare reference is qualified here, where the declaring model's app is known: with its own
+# app if that app declares the class, else with the one app that does. `django.contrib.auth`'s
+# User and Permission are referenced bare and are not in the walk at all, so there is no app
+# to qualify them with: those are flagged, never mislabelled. `to='self'` is deliberately left
+# for after the merge -- it means the model the column ends up on, which for an inherited
+# column is the subclass, not the class that declares it.
+for v in out.values():
+    for f in v['fields']:
+        to = f.get('to')
+        if not isinstance(to, str) or '.' in to or to == 'self': continue
+        e = out.get(f"{v['app']}.{to}") or BY_NAME.get(to)
+        if e: f['to'] = f"{e['app']}.{e['name']}"
+        else: f['to_unresolved'] = True
 
 def ancestors(v, seen):
     for b in v['bases']:
@@ -175,4 +226,11 @@ for v in out.values():
                 shadowed.append(f"{entry['name']} ({entry['declared_by']})")
     v['fields'] += merged
     if shadowed: v['shadowed'] = shadowed
+
+# `to='self'` names the model the column ends up on: NestedGroupModel.parent is
+# Region -> Region on Region and RackGroup -> RackGroup on RackGroup. Resolved per entry
+# after the merge, so an inherited `parent` does not read `netbox.self`.
+for key, v in out.items():
+    for f in v['fields']:
+        if f.get('to') == 'self': f['to'] = key
 print(json.dumps(out, indent=1, default=str))

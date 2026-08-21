@@ -100,7 +100,9 @@ one, all the same field: `CircuitGroup.tenant`, `ASNRange.tenant`, `VLANGroup.te
 It was rejected for `v1alpha1` as premature optimisation of an ergonomic problem we have
 not felt yet, at the cost of complexity we would have to carry from the first commit.
 `hack/classify-scope.py` stays in the tree, unwired, because its output is the input to
-any future promotion.
+any future promotion. The numbers above were computed before NBO-071 corrected how that
+script derives required-ness (an M2M is never required; `blank=True` does not make a
+`NOT NULL` FK optional), so re-running it is expected to move some of them.
 
 Also rejected: **duplicating every kind** cert-manager style
 (`NetBoxSite` + `NetBoxClusterSite`). ~240 CRDs, and every ref field needs a
