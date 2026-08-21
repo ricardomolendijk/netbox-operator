@@ -575,3 +575,58 @@ func assertRequeue(t *testing.T, got, want time.Duration) {
 		t.Errorf("requeueAfter = %s, want %s ± 10%%", got, want)
 	}
 }
+
+// TestTruncatedLookupCreatesNothing is the regression test for the worst defect found in
+// this codebase so far. Client.List used to return partial results when it hit its page
+// cap, the lookup below found no match in the pages it received, and the engine took the
+// create path -- so a NetBox object that already existed was created a second time, caused
+// by a safety limit.
+//
+// The engine's part of the fix is that it must treat the error as an error. Asserting it
+// here rather than only in the client keeps the two halves honest: the client could regress
+// to returning partial data and this test would still fail.
+func TestTruncatedLookupCreatesNothing(t *testing.T) {
+	descriptor := fakeDescriptor()
+	client := &fakeClient{
+		listErr: &netbox.TruncatedError{Endpoint: descriptor.Endpoint, MaxPages: 3, Collected: 750},
+	}
+	engine := &Engine{
+		Descriptors: fakeDescriptors{descriptor: descriptor, registered: true},
+		Endpoints: fakeEndpoints{
+			endpoint: Endpoint{Client: client, Resync: testResync},
+			ready:    true,
+		},
+		Status:     &fakeStatus{},
+		Finalizers: &fakeFinalizers{},
+		Scheme:     fakeScheme(t),
+	}
+
+	obj := fakeObject()
+	if _, err := engine.Reconcile(context.Background(), obj); err != nil {
+		t.Fatalf("Reconcile() = %v; a NetBox failure is a condition, not a returned error", err)
+	}
+
+	// The truncation must reach the object, or a user has no way to learn why nothing
+	// happened.
+	if !mentions(obj, "truncated") {
+		t.Errorf("no condition mentions the truncation; conditions = %v", obj.NetBoxStatus().Conditions)
+	}
+	// The assertion that matters: no write of any kind.
+	for _, method := range client.methods() {
+		if method == "POST" || method == "PATCH" || method == "DELETE" {
+			t.Errorf("engine issued %s on a truncated lookup; this is the duplicate-object bug", method)
+		}
+	}
+}
+
+// mentions reports whether any condition message on obj contains want. Conditions are the
+// only channel a user has for a failure the engine deliberately does not return.
+func mentions(obj Object, want string) bool {
+	for _, condition := range obj.NetBoxStatus().Conditions {
+		if strings.Contains(condition.Message, want) {
+			return true
+		}
+	}
+
+	return false
+}

@@ -190,11 +190,14 @@ func (c *Client) GetOne(ctx context.Context, endpoint string, params Params) (Ob
 	}
 }
 
-// errListTruncated is the page cap being hit. It exists so the truncation is logged
-// through the error path rather than as an info line nobody reads.
-var errListTruncated = errors.New("netbox returned more pages than MaxPages allows")
-
-// List returns every object matching params, following pagination up to MaxPages.
+// List returns every object matching params, following pagination.
+//
+// Hitting the page cap is an error, not a truncated result. The cap itself is not
+// negotiable -- a NetBox that always reports a next page must not be able to exhaust the
+// manager's memory -- but returning partial data is: a caller cannot distinguish it from a
+// complete answer, and the engine's natural-key lookup then finds no match in the pages it
+// received and creates an object that already exists. A safety limit that silently
+// duplicates data is worse than no limit, so the limit stays and the silence goes.
 func (c *Client) List(ctx context.Context, endpoint string, params Params) ([]Object, error) {
 	query := Params{"limit": fmt.Sprint(c.pageSize)}
 	for key, value := range params {
@@ -205,13 +208,13 @@ func (c *Client) List(ctx context.Context, endpoint string, params Params) ([]Ob
 	var all []Object
 	for page := 0; target != ""; page++ {
 		if page >= c.maxPages {
-			// At error, not info: the caller cannot tell a truncated page from a complete
-			// one, so a lookup that should have matched can come back empty and the engine
-			// creates a second object. That needs a human to raise MaxPages or narrow the
-			// filter, which is what `error` means (CONTRIBUTING.md, "Logging").
-			logf.FromContext(ctx).Error(errListTruncated, "netbox list truncated at the page cap",
+			// Needs a human to raise MaxPages or narrow the filter, which is what `error`
+			// means (CONTRIBUTING.md, "Logging").
+			err := &TruncatedError{Endpoint: endpoint, MaxPages: c.maxPages, Collected: len(all)}
+			logf.FromContext(ctx).Error(err, "netbox list truncated at the page cap",
 				"endpoint", endpoint, "action", "list", "maxPages", c.maxPages, "collected", len(all))
-			break
+
+			return nil, err
 		}
 		body, err := c.do(ctx, http.MethodGet, target, endpoint, nil)
 		if err != nil {
