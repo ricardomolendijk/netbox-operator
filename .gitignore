@@ -30,3 +30,6 @@ kubeconfig
 
 # Syncs the local specs onto GitHub issues; local because specs/ is.
 /hack/sync-issues.py
+
+# Agent worktrees and local Claude Code state.
+/.claude/
