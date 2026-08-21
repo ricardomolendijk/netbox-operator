@@ -90,10 +90,14 @@ jobs:
 
       # A full regeneration needs a NetBox source checkout, which this job has not got --
       # but linting is cheap and the extractors are the source of docs/netbox-schema.md.
+      # src is set explicitly: the action otherwise appends the workspace root to the
+      # arguments, so `check hack/` silently became "check hack/ and everything else" --
+      # which is how the fixture tree got linted.
       - name: Ruff
         uses: astral-sh/ruff-action@f14634c415d3e63ffd4d550a22f037df4c734a60 # v3.1.0
         with:
-          args: check hack/
+          args: check
+          src: hack/
 
       # test_digest.py runs the pipeline over test/fixtures/netbox-models instead, so the
       # extraction defects behind ~112 CRD field lists stay regression-tested without one.

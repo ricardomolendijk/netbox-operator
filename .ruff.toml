@@ -10,6 +10,12 @@
 # So: F catches undefined names and unused imports, E9 catches syntax and IO errors, and
 # B catches bug-shaped patterns like a mutable default argument. Nothing here is a matter
 # of taste.
+# The fixture tree under test/ is a deliberately incomplete imitation of NetBox's Django
+# source: viewsets are referenced but never defined, because what is under test is how the
+# extractors parse the text, not whether it would run. Linting it reports undefined names
+# that are the point of the fixture.
+exclude = ["test/fixtures"]
+
 target-version = "py311"
 line-length = 200
 
