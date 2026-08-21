@@ -51,8 +51,8 @@ completes last.
 
 So that `kubectl delete netboxsite home` also removes the prefixes scoped to it, a
 ref that is genuinely a parent-child containment relationship (`scopeRef`,
-`siteRef`, `clusterRef`, `deviceRef`, `vrfRef`, `prefixRef`) contributes a
-**non-controller** owner reference to the referring object. Non-controller so it never
+`siteRef`, `clusterRef`, `deviceRef`, `vrfRef`, `prefixRef`, `assignedObject`)
+contributes a **non-controller** owner reference to the referring object. Non-controller so it never
 competes with rule 3; GC still counts it, so the cascade works.
 
 It is added **only when the reference is legal as an owner reference**. Since every kind
@@ -71,6 +71,16 @@ Opt out per object with `netbox.populator.io/parent-ownership: "false"`, or per
 endpoint with `spec.parentOwnership: false`. Default is on, because "delete the site,
 its prefixes go too" is the behaviour people expect and the alternative is silent
 orphans in NetBox.
+
+**`assignedObject` is on that list for a correctness reason, not an aesthetic one.**
+NetBox deletes an interface's IP addresses server-side through a `GenericRelation` when
+the interface goes away. Without an owner reference, the `NetBoxIPAddress` CR outlives
+the object it described, finds nothing at `status.id` on the next reconcile, and the
+engine's create-if-absent step **recreates the address** — resurrecting data NetBox
+deliberately deleted. The owner reference is what makes the CR disappear with its
+parent instead. Any ref whose target's deletion cascades server-side belongs in this
+list for the same reason; the general rule is *server-side cascade implies an owner
+reference*, and the list is the enumeration of where that is true.
 
 ## Why not make the parent ref the *controller* reference
 
