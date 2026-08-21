@@ -35,7 +35,7 @@ for app in ['circuits','core','dcim','extras','ipam','tenancy','users','virtuali
     for f in files:
         try:
             tree = ast.parse(open(f, encoding='utf-8').read())
-        except Exception as e:
+        except Exception:
             continue
         for node in ast.walk(tree):
             if not isinstance(node, ast.ClassDef): continue

@@ -1,0 +1,17 @@
+# The extractors in hack/ are standalone scripts, run by hand against a NetBox source
+# checkout (docs/regenerating.md). CI lints them; CI never runs them.
+#
+# The rule selection is deliberately narrow: real defects only, not formatting. These
+# scripts are dense one-liner-heavy AST walkers, and reflowing them to satisfy E7 would
+# be a large diff across the code that produces docs/netbox-schema.md -- the file every
+# CRD's field list is derived from. NBO-067 is already rewriting parts of them; churning
+# the style first would make that diff unreadable.
+#
+# So: F catches undefined names and unused imports, E9 catches syntax and IO errors, and
+# B catches bug-shaped patterns like a mutable default argument. Nothing here is a matter
+# of taste.
+target-version = "py311"
+line-length = 200
+
+[lint]
+select = ["F", "E9", "B"]

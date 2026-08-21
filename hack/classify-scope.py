@@ -66,7 +66,7 @@ while True:
 print(f"\nSTABLE cluster-scoped set ({len(s)}) after {rounds} round(s):")
 for k in sorted(s): print("   ",k)
 
-print(f"\n--- optional FKs from the stable set into namespaced kinds (need a namespace-qualified ref) ---")
+print("\n--- optional FKs from the stable set into namespaced kinds (need a namespace-qualified ref) ---")
 for k in sorted(s):
     for fname,tgt,req in edges[k]:
         if not req and tgt not in s:
