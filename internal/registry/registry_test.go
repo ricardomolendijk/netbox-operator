@@ -18,10 +18,18 @@ func testGVK(kind string) schema.GroupVersionKind {
 // values are "app_label.model" strings (docs/netbox-schema.md -> extras.Tag).
 func tagDescriptor() Descriptor {
 	return Descriptor{
-		GVK:             testGVK("NetBoxTag"),
-		Endpoint:        "extras/tags",
-		ObjectType:      "extras.tag",
-		Scope:           apiextensionsv1.NamespaceScoped,
+		GVK:        testGVK("NetBoxTag"),
+		Endpoint:   "extras/tags",
+		ObjectType: "extras.tag",
+		Scope:      apiextensionsv1.NamespaceScoped,
+		Fields: []Field{
+			{Spec: "name", API: "name"},
+			{Spec: "slug", API: "slug"},
+			{Spec: "color", API: "color"},
+			{Spec: "description", API: "description"},
+			{Spec: "weight", API: "weight"},
+			{Spec: "objectTypes", API: "object_types"},
+		},
 		NaturalKeys:     []NaturalKey{{Fields: []KeyField{{Filter: "slug", Spec: "slug"}}}},
 		UpdateStrategy:  UpdatePatch,
 		ReadOnly:        []string{"created", "last_updated", "url", "display"},
@@ -38,6 +46,15 @@ func vrfDescriptor() Descriptor {
 		Endpoint:   "ipam/vrfs",
 		ObjectType: "ipam.vrf",
 		Scope:      apiextensionsv1.NamespaceScoped,
+		Fields: []Field{
+			{Spec: "name", API: "name"},
+			{Spec: "rd", API: "rd"},
+			{Spec: "enforceUnique", API: "enforce_unique"},
+			{Spec: "description", API: "description"},
+			{Spec: "tenantRef", API: "tenant", Ref: true},
+			{Spec: "importTargets", API: "import_targets", Ref: true},
+			{Spec: "exportTargets", API: "export_targets", Ref: true},
+		},
 		NaturalKeys: []NaturalKey{
 			{Fields: []KeyField{{Filter: "rd", Spec: "rd"}}},
 			{Fields: []KeyField{{Filter: "name", Spec: "name"}}},
@@ -56,6 +73,12 @@ func regionDescriptor() Descriptor {
 		Endpoint:   "dcim/regions",
 		ObjectType: "dcim.region",
 		Scope:      apiextensionsv1.NamespaceScoped,
+		Fields: []Field{
+			{Spec: "name", API: "name"},
+			{Spec: "slug", API: "slug"},
+			{Spec: "description", API: "description"},
+			{Spec: "parentRef", API: "parent", Ref: true},
+		},
 		NaturalKeys: []NaturalKey{
 			{Fields: []KeyField{
 				{Filter: "parent_id", Spec: "parentRef"},
@@ -82,6 +105,21 @@ func deviceDescriptor() Descriptor {
 		Endpoint:   "dcim/devices",
 		ObjectType: "dcim.device",
 		Scope:      apiextensionsv1.NamespaceScoped,
+		// The four deferred fields are why this table cannot be a convention:
+		// `primaryIP4Ref` camelCase-to-snake_case's to `primary_i_p4`, and NetBox ignores
+		// an unknown field rather than rejecting it, so the mistake would be silent.
+		Fields: []Field{
+			{Spec: "name", API: "name"},
+			{Spec: "status", API: "status"},
+			{Spec: "siteRef", API: "site", Ref: true},
+			{Spec: "tenantRef", API: "tenant", Ref: true},
+			{Spec: "roleRef", API: "role", Ref: true},
+			{Spec: "deviceTypeRef", API: "device_type", Ref: true},
+			{Spec: "primaryIP4Ref", API: "primary_ip4", Ref: true},
+			{Spec: "primaryIP6Ref", API: "primary_ip6", Ref: true},
+			{Spec: "oobIPRef", API: "oob_ip", Ref: true},
+			{Spec: "virtualChassisRef", API: "virtual_chassis", Ref: true},
+		},
 		NaturalKeys: []NaturalKey{
 			{Fields: []KeyField{
 				{Filter: "name", Spec: "name", Lookup: LookupIExact},
@@ -127,6 +165,13 @@ func ipAddressDescriptor() Descriptor {
 		Endpoint:   "ipam/ip-addresses",
 		ObjectType: "ipam.ipaddress",
 		Scope:      apiextensionsv1.NamespaceScoped,
+		Fields: []Field{
+			{Spec: "address", API: "address"},
+			{Spec: "status", API: "status"},
+			{Spec: "dnsName", API: "dns_name"},
+			{Spec: "vrfRef", API: "vrf", Ref: true},
+			{Spec: "natInsideRef", API: "nat_inside", Ref: true},
+		},
 		NaturalKeys: []NaturalKey{
 			{Fields: append([]KeyField{address, vrf}, assigned...)},
 			{Fields: append([]KeyField{address}, assigned...), NullFields: []NullField{noVRF}},
@@ -144,6 +189,7 @@ func ipAddressDescriptor() Descriptor {
 				"virtualization.vminterface",
 				"ipam.fhrpgroup",
 			},
+			Spec: "assignedObject",
 		}},
 		ContainmentRef: "vrfRef",
 	}
@@ -159,6 +205,12 @@ func clusterDescriptor() Descriptor {
 		Endpoint:   "virtualization/clusters",
 		ObjectType: "virtualization.cluster",
 		Scope:      apiextensionsv1.NamespaceScoped,
+		Fields: []Field{
+			{Spec: "name", API: "name"},
+			{Spec: "status", API: "status"},
+			{Spec: "typeRef", API: "type", Ref: true},
+			{Spec: "groupRef", API: "group", Ref: true},
+		},
 		NaturalKeys: []NaturalKey{
 			{Fields: []KeyField{
 				{Filter: "group_id", Spec: "groupRef"},
@@ -175,6 +227,7 @@ func clusterDescriptor() Descriptor {
 			TypeField:    "scope_type",
 			IDField:      "scope_id",
 			AllowedTypes: []string{"dcim.region", "dcim.sitegroup", "dcim.site", "dcim.location"},
+			Spec:         "scope",
 		}},
 		ContainmentRef: "scope",
 	}
@@ -186,10 +239,16 @@ func clusterDescriptor() Descriptor {
 // parent variant, which is why the parent-null case cannot be inferred from the base class.
 func tenantGroupDescriptor() Descriptor {
 	return Descriptor{
-		GVK:            testGVK("NetBoxTenantGroup"),
-		Endpoint:       "tenancy/tenant-groups",
-		ObjectType:     "tenancy.tenantgroup",
-		Scope:          apiextensionsv1.NamespaceScoped,
+		GVK:        testGVK("NetBoxTenantGroup"),
+		Endpoint:   "tenancy/tenant-groups",
+		ObjectType: "tenancy.tenantgroup",
+		Scope:      apiextensionsv1.NamespaceScoped,
+		Fields: []Field{
+			{Spec: "name", API: "name"},
+			{Spec: "slug", API: "slug"},
+			{Spec: "description", API: "description"},
+			{Spec: "parentRef", API: "parent", Ref: true},
+		},
 		NaturalKeys:    []NaturalKey{{Fields: []KeyField{{Filter: "slug", Spec: "slug"}}}},
 		UpdateStrategy: UpdatePatch,
 		Deferred:       []DeferredField{{APIField: "parent", Mode: DeferIfUnresolved}},
@@ -395,7 +454,12 @@ func TestDescriptorValidateDeferredNaturalKey(t *testing.T) {
 		{
 			name: "read-only column matched by a candidate",
 			mutate: func(d *Descriptor) {
-				d.NaturalKeys = clusterDescriptor().NaturalKeys
+				cluster := clusterDescriptor()
+				// The field map comes along with the keys: a candidate may only match on
+				// a spec field the descriptor declares.
+				d.NaturalKeys, d.Fields, d.GenericFKs = cluster.NaturalKeys, cluster.Fields, cluster.GenericFKs
+				d.Deferred = nil
+				d.ContainmentRef = cluster.ContainmentRef
 				d.ReadOnly = append(d.ReadOnly, "_site")
 			},
 		},

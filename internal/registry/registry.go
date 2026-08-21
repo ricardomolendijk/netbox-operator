@@ -144,6 +144,11 @@ type GenericFKSpec struct {
 	// Descriptor.ObjectType. It drives resolver dispatch and ref watches, so a new union
 	// member stays a data change.
 	AllowedTypes []string
+
+	// Spec is the CR spec field behind the pair (`scopeRef`, `assignedObject`). One spec
+	// field writes both columns, which is why it is declared here rather than in Fields:
+	// a Field maps one spec name to one API name, and this reference has two.
+	Spec string
 }
 
 // Descriptor is everything the engine needs to reconcile one kind, as data.
@@ -166,6 +171,11 @@ type Descriptor struct {
 	// immutable, so promoting a kind is a new API version rather than a redesign, and the
 	// M7 generator carries it as a per-kind attribute.
 	Scope apiextensionsv1.ResourceScope
+
+	// Fields maps this kind's CR spec fields to the NetBox fields they are written as. It
+	// is the only bridge between the two vocabularies every other list here uses — see
+	// Field for why it is a table and not a naming convention.
+	Fields []Field
 
 	// NaturalKeys are the lookup candidates, tried in the order given. More than one is
 	// the normal case, not a fallback: ipam.Prefix and ipam.IPAddress have no
@@ -194,6 +204,13 @@ type Descriptor struct {
 
 	// M2M are many-to-many fields written as a list of NetBox object IDs.
 	M2M []string
+
+	// Arrays are Postgres ArrayFields, whose order is data rather than incidental:
+	// ipam.VLANGroup.vid_ranges and ipam.Service.ports (docs/netbox-schema.md). They are
+	// a separate class from M2M because comparing them order-independently would miss a
+	// reordering the user asked for, and comparing an M2M order-sensitively would PATCH
+	// forever — NetBox does not preserve M2M order.
+	Arrays []string
 
 	// ObjectTypeLists are many-to-many fields onto contenttypes.ContentType, whose
 	// values are `app_label.model` strings rather than references to NetBox objects:
@@ -237,7 +254,9 @@ func (d Descriptor) Validate() error {
 		d.validateNaturalKeys,
 		d.validateDeferred,
 		d.validateFieldSets,
+		d.validateFieldMap,
 		d.validateGenericFKs,
+		d.validateGenericFKSpecFields,
 		d.validateUpdates,
 	}
 
@@ -351,6 +370,7 @@ func (d Descriptor) validateFieldSets() error {
 		{"readOnly", d.ReadOnly},
 		{"m2m", d.M2M},
 		{"objectTypeLists", d.ObjectTypeLists},
+		{"arrays", d.Arrays},
 		{"recreateOn", d.RecreateOn},
 	}
 
@@ -365,6 +385,12 @@ func (d Descriptor) validateFieldSets() error {
 	for _, field := range d.ObjectTypeLists {
 		if slices.Contains(d.M2M, field) {
 			errs = append(errs, fmt.Errorf("%w: %s is both m2m and objectTypeList", ErrFieldClassConflict, field))
+		}
+	}
+
+	for _, field := range d.Arrays {
+		if slices.Contains(d.M2M, field) || slices.Contains(d.ObjectTypeLists, field) {
+			errs = append(errs, fmt.Errorf("%w: %s is an array and a list of references", ErrFieldClassConflict, field))
 		}
 	}
 
