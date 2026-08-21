@@ -40,9 +40,9 @@ controller to requeue on a timer rather than chase every possible trigger.
 
 ## The endpoint loop, step by step
 
-`Reconcile` (`netboxendpoint_controller.go:47`) runs these in order. Every failure path
-goes through `fail` (`:178`), which drops the cached client, sets conditions, writes
-status, and returns a `RequeueAfter` — never an error.
+`Reconcile` in `internal/controller/netboxendpoint_controller.go` runs these in order.
+Every failure path goes through `fail`, which drops the cached client, sets conditions,
+writes status, and returns a `RequeueAfter` — never an error.
 
 ### 1. Fetch the object
 
@@ -53,22 +53,22 @@ endpoint is gone, so the client must go with it. This is the only place a delete
 endpoint is cleaned up, and it works precisely because the model is level-triggered — the
 controller does not need a deletion event, it needs to notice the object is absent.
 
-Any other Get error is wrapped and **returned as an error** (`:54`). That is correct: a
+Any other Get error is wrapped and **returned as an error**. That is correct: a
 failure to read from the informer cache is a fault in the manager, not in NetBox.
 
 ### 2. Read the token Secret
 
-`readToken` (`:117`) fetches the Secret named by `spec.tokenSecretRef.name` from the
-endpoint's **own namespace**, and reads `spec.tokenSecretRef.key`, defaulting to `token`
-(`:124`–`:127`). It returns the token *and* the Secret's `resourceVersion`, which is what the
-client cache is keyed on.
+`readToken` fetches the Secret named by `spec.tokenSecretRef.name` from the endpoint's
+**own namespace**, and reads `spec.tokenSecretRef.key`, defaulting to `token` through the
+shared helper `orDefaultKey`. It returns the token *and* the Secret's `resourceVersion`,
+which is what the client cache is keyed on.
 
 | Failure | Reason | Condition set | Requeue |
 |---|---|---|---|
-| Secret absent | `SecretMissing` | `Authenticated=False`, `Ready=False` | 30s |
-| Key absent, or its value empty | `TokenMissing` | `Authenticated=False`, `Ready=False` | 30s |
+| Secret absent | `SecretMissing` | `Authenticated=False`, `VersionSupported=Unknown`, `Ready=False` | 30s |
+| Key absent, or its value empty | `TokenMissing` | `Authenticated=False`, `VersionSupported=Unknown`, `Ready=False` | 30s |
 
-An empty value is treated the same as an absent key (`:128`–`:131`) — a Secret with
+An empty value is treated the same as an absent key — a Secret with
 `token: ""` is a misconfiguration, not an anonymous session.
 
 The Secret is deliberately not namespace-qualified. Reading a Secret from another
@@ -78,20 +78,20 @@ operator's Secret RBAC to be genuinely cluster-wide
 
 ### 3. Build the client config
 
-`buildConfig` (`:139`) maps the spec onto `netbox.Config`: `url`, the token, `mode`,
+`buildConfig` maps the spec onto `netbox.Config`: `url`, the token, `mode`,
 `timeout`, and `rateLimit.qps` / `rateLimit.burst` when set. If `spec.tlsConfig` is
 present it also carries `insecureSkipVerify` and, when `caBundleSecretRef` is set, reads
-a second Secret for the PEM bundle under key `ca.crt` by default (`:165`–`:172`).
+a second Secret for the PEM bundle, defaulting to key `ca.crt` through that same
+`orDefaultKey` helper.
 
-Every failure here — an unreadable CA bundle Secret, a bundle Secret with no such key —
-is `InvalidConfig`, requeued after **2 minutes**. Note the asymmetry: a missing *token*
-Secret is `SecretMissing` at 30s, a missing *CA bundle* Secret is `InvalidConfig` at 2m,
-because `buildConfig`'s errors are classified by where they came from rather than by
-what went wrong.
+Failures are classified by `reasonForConfig` rather than lumped together: a `NotFound`
+on either Secret is `SecretMissing` at 30s, whichever field referenced it, and everything
+else — a bundle Secret present but missing its key, a PEM holding no usable certificate —
+is `InvalidConfig` at 2 minutes. A missing Secret is a missing Secret.
 
 ### 4. Construct the client
 
-`netbox.New(cfg)` (`:66`). This returns an error only for configuration that cannot work
+`netbox.New(cfg)`. This returns an error only for configuration that cannot work
 at all: an empty URL, an unparseable URL, a scheme that is not `http`/`https`, or a CA
 bundle containing no usable certificates (`internal/netbox/client.go:108`–`:141`). It
 performs no I/O, so it says nothing about whether NetBox is up. Failures are
@@ -99,33 +99,36 @@ performs no I/O, so it says nothing about whether NetBox is up. Failures are
 
 ### 5. Probe `GET /api/status/`
 
-`nbClient.Status(ctx)` (`:71`). One request answers three questions at once — is NetBox
+`nbClient.Status(ctx)`. One request answers three questions at once — is NetBox
 reachable, is the token good, and what version is it — because NetBox's status endpoint
 requires an authenticated request (NetBox source: `netbox/netbox/api/views.py`,
 `StatusView`). It reads the `netbox-version` key and the keys of `plugins`
 (`internal/netbox/status.go:20`–`:36`).
 
-The reason comes from `reasonFor` (`:211`), which translates the client's already-typed
+The reason comes from `reasonFor`, which translates the client's already-typed
 error rather than re-diagnosing it:
 
 | Client error | Reason | Condition set | Requeue |
 |---|---|---|---|
-| `*netbox.AuthError` (401, 403) | `AuthError` | `Authenticated=False`, `Ready=False` | 2m |
-| anything else — `*TransientError`, `*NotFoundError`, `*ValidationError`, a context deadline | `ProbeFailed` | `Ready=False` only | 30s |
+| `*netbox.AuthError` (401, 403) | `AuthError` | `Authenticated=False`, `VersionSupported=Unknown`, `Ready=False` | 2m |
+| anything else — `*TransientError`, `*NotFoundError`, `*ValidationError`, a context deadline | `ProbeFailed` | `Authenticated=Unknown`, `VersionSupported=Unknown`, `Ready=False` | 30s |
 
 `ProbeFailed` is the catch-all, and it covers more than "NetBox is down". A URL pointing
 at something that is not NetBox produces a 404 (`*NotFoundError`); a reverse proxy
 returning an HTML error page produces a `*ValidationError` whose message is the page's
 first line (`internal/netbox/do.go:122`–`:136`). Both land here.
 
-Retries inside this one call are the client's, not the controller's: `do`
-(`internal/netbox/do.go:24`) retries only `*TransientError` and `*RateLimitError`, up to
-`DefaultMaxRetries` (4) with full jitter. See
-[errors and retries](errors-and-retries.md) — this page does not restate it.
+There are **no client-side retries on the probe**. `buildConfig` sets
+`MaxRetries: netbox.Retries(0)`, so one `Reconcile` makes exactly one HTTP attempt and
+the 30-second requeue is the retry. That is deliberate: the controller already requeues,
+one worker serves every endpoint, and four retries behind a 30-second timeout would let a
+single black-holed NetBox stall every other endpoint for minutes. The client's retry
+machinery (`internal/netbox/do.go:24`) still governs every other call — see
+[errors and retries](errors-and-retries.md), which this page does not restate.
 
 ### 6. Parse and gate the version
 
-`netbox.SupportedVersion(status.Version)` (`:76`) parses the string and compares it
+`netbox.SupportedVersion(status.Version)` parses the string and compares it
 against the compiled-in range `netbox.MinVersion` = `4.2.0`, `netbox.MaxVersion` =
 `5.0.0`, half-open (`internal/netbox/version.go:18`–`:21`, `:76`–`:90`).
 
@@ -134,12 +137,11 @@ against the compiled-in range `netbox.MinVersion` = `4.2.0`, `netbox.MaxVersion`
 | Unparseable version string | `VersionUnparseable` | `VersionSupported=False`, `Ready=False` | 10m |
 | Parsed but outside `[4.2.0, 5.0.0)` | `VersionUnsupported` | `VersionSupported=False`, `Ready=False` | 10m |
 
-On the unsupported path — and only there — `status.netboxVersion` and `status.plugins`
-are recorded first (`:81`–`:82`) and then persisted by `fail`, so
-`kubectl get netboxendpoint` shows the version that was refused. Knowing what it found is
-how anyone diagnoses this. The `VersionUnparseable` path returns at `:78`, before those
-assignments, so `status.netboxVersion` stays empty there and the raw string survives only
-in the condition message.
+`status.netboxVersion` and `status.plugins` are recorded **before** the gate and then
+persisted by `fail`, so both failure paths leave the version visible to
+`kubectl get netboxendpoint`. Whatever NetBox said is the most useful thing in status when
+the answer is "that is not a version", and knowing what it found is how anyone diagnoses
+either case.
 
 The lower bound is the guard that matters. NetBox 4.2 replaced the `site` foreign key on
 `Prefix`, `Cluster`, `WirelessLAN` and `VLANGroup` with a polymorphic `(scope_type,
@@ -152,24 +154,25 @@ response.
 
 ### 7. Cache the client
 
-`r.Cache.put(clientKey{...}, nbClient)` (`:94`). See
+`r.Cache.put(clientKey{...}, nbClient)`. See
 [the client cache](#the-client-cache-and-secret-resourceversion).
 
 ### 8. Set conditions and requeue
 
-Three conditions go to `True` with reason `Ready` (`:105`–`:110`): `Authenticated`
+Three conditions go to `True` with reason `Ready`: `Authenticated`
 ("token accepted"), `VersionSupported` ("netbox <version>"), `Ready` ("client
-available"). A single log line at info level records the URL, version, mode and plugin
-list (`:101`).
+available"). A single log line at info level records the URL, version, mode, plugin list and whether
+certificate verification is disabled.
 
-The return is `ctrl.Result{RequeueAfter: resyncPeriod(endpoint)}, r.writeStatus(...)`
-(`:112`). `resyncPeriod` (`:225`) uses `spec.resyncPeriod` when positive and otherwise
+Status is written first, and the requeue is returned on its own afterwards — never both
+at once, for the reason at the end of the next section. `resyncPeriod` uses
+`spec.resyncPeriod` when positive and otherwise
 falls back to 10 minutes — belt and braces, since the CRD already defaults the field to
 `10m` (`api/v1alpha1/netboxendpoint_types.go:107`–`:110`).
 
 ## Tiered backoff, and why
 
-`failureBackoff` (`:198`) picks the requeue delay from the reason alone:
+`failureBackoff` picks the requeue delay from the reason alone:
 
 | Reason | Delay | Reasoning |
 |---|---|---|
@@ -192,7 +195,7 @@ cost of finding out.
 
 ## Why NetBox being down is never a returned error
 
-`Reconcile`'s doc comment states the rule (`:44`–`:46`): it never returns an error for
+`Reconcile`'s doc comment states the rule: it never returns an error for
 anything about NetBox's availability. An unreachable or misconfigured NetBox is a
 condition on the object.
 
@@ -224,24 +227,26 @@ code does *not* know: an API server write that lost a conflict, a cache read tha
 a bug. Then exponential backoff is the correct guess, and inflating the error metric is
 the correct signal.
 
-One wrinkle worth knowing: an error and a `RequeueAfter` are mutually exclusive, and the
-error wins. Line `:112` returns both — `RequeueAfter: resyncPeriod(endpoint)` alongside
-`r.writeStatus(...)`. On the normal path `writeStatus` returns nil and the resync is
-scheduled. When it returns an error (a status-update conflict, say), the `RequeueAfter` is
-discarded in favour of a rate-limited requeue, and controller-runtime logs a warning
-about being handed both.
+**The two must never be returned together.** An error and a `RequeueAfter` are mutually
+exclusive and the error wins, so returning both means a status-update conflict silently
+discards the resync schedule — and earns a warning from controller-runtime for the
+contradiction. `Reconcile` therefore writes status, returns `ctrl.Result{}, err` if that
+write fails, and only then returns the bare `RequeueAfter`. The general rule: decide which
+of the two exits you mean, and return exactly one of them.
 
 ## Watches, and why a Secret event matters
 
-`SetupWithManager` (`:251`) does two things beyond the obvious `For(&NetBoxEndpoint{})`.
+`SetupWithManager` does two things beyond the obvious `For(&NetBoxEndpoint{})`.
 
 **A field index.** `mgr.GetFieldIndexer().IndexField` registers the index
-`spec.tokenSecretRef.name` (the constant `secretRefIndex`, `:28`) over
-`NetBoxEndpoint`, extracting exactly that field (`:252`–`:260`).
+`spec.secretRefs` (the constant `secretRefIndex`) over `NetBoxEndpoint`, extracting
+**both** referenced Secret names: `spec.tokenSecretRef.name` and, when set,
+`spec.tlsConfig.caBundleSecretRef.name`.
 
 **A Secret watch with a map function.** `Watches(&corev1.Secret{},
-handler.EnqueueRequestsFromMapFunc(r.endpointsForSecret))` (`:266`). `endpointsForSecret`
-(`:279`) lists endpoints in the changed Secret's namespace with
+handler.EnqueueRequestsFromMapFunc(r.endpointsForSecret))`. There is no predicate: every
+Secret event in the cluster invokes the map function, which is cheap only because of the
+index. `endpointsForSecret` lists endpoints in the changed Secret's namespace with
 `client.MatchingFieldsSelector{Selector: fields.OneTermEqualSelector(secretRefIndex,
 obj.GetName())}` and returns one `reconcile.Request` per hit.
 
@@ -264,43 +269,55 @@ With the watch, the Secret write enqueues the endpoint immediately, `readToken` 
 new value, and the new client is cached within one reconcile. That is the whole of
 NBO-004's "credential rotation without a restart", and it is about eight lines of wiring.
 
-The same mechanism is why the index is on the token Secret and not on the CA bundle
-Secret: rotating a CA bundle is not watched, so it takes effect at the next resync. That
-is a real gap, though a much rarer one.
+The index covers the CA bundle Secret for the same reason, so rotating a trust bundle is
+noticed as promptly as rotating a token rather than waiting out a resync.
 
 ## The client cache and Secret `resourceVersion`
 
-`ClientCache` (`internal/controller/clientcache.go:23`) maps `clientKey` to
-`*netbox.Client`. The key is `{namespace, name, generation, secretVersion}` (`:15`), and
-`secretVersion` is the token Secret's `metadata.resourceVersion` as returned by
-`readToken`.
+`ClientCache` (`internal/controller/clientcache.go:26`) maps `clientKey` to
+`*netbox.Client`. The key is `{namespace, name, generation, secretVersion}`
+(`clientcache.go:18`), and `secretVersion` is the token Secret's
+`metadata.resourceVersion` as returned by `readToken`.
 
-Putting the Secret's version *in the key* makes invalidation structural. The alternative
-is a piece of logic — "if the Secret changed, throw the old client away" — living
-somewhere, in some code path, that somebody has to remember to call. Every real
-cache-invalidation bug is that sentence: a new code path that forgets the call, and a
-stale credential that keeps working until it does not. A key that includes the
-credential's version cannot be forgotten, because there is nowhere to forget it from: a
-rotated Secret is a different key, and a different key is a different entry.
+What actually invalidates is worth being precise about, because the obvious reading is
+wrong. `Reconcile` does **not** read through the cache before building: it constructs a
+client every pass and calls `put`, which evicts any existing entry for the same endpoint
+before inserting (`clientcache.go:42`–`:52`). So invalidation comes from that eviction,
+not from a key miss — there is no lookup on the write path that could miss.
 
-`put` (`:35`) additionally deletes every other entry for the same namespace and name
-before inserting. `Lookup` (`:48`) matches on namespace and name only — object
-controllers ask "the client for endpoint X", not "the client for endpoint X at
-generation 4 with Secret version 91827" — so without that eviction a rotation would
-leave two entries for one endpoint and `Lookup` would return whichever the map iteration
-reached first. The eviction is what guarantees at most one live client per endpoint.
+The version and generation are carried in the key anyway, for two reasons stated in the
+code: they make an entry self-describing in a dump, and a future read-through path would
+need exactly this key. That is the shape to keep in mind if anyone adds one, because a
+read-through cache keyed on the credential's version is what makes invalidation
+structural rather than a piece of logic — "if the Secret changed, throw the old client
+away" — living in some code path somebody has to remember to call. Every real
+cache-invalidation bug is that sentence.
+
+`Lookup` (`clientcache.go:56`) matches on namespace and name only: object controllers ask
+"the client for endpoint X", not "the client for endpoint X at generation 4 with Secret
+version 91827". Without `put`'s eviction a rotation would leave two entries for one
+endpoint and `Lookup` would return whichever the map iteration reached first. The eviction
+is what guarantees at most one live client per endpoint.
+
+Eviction also releases the old client's idle connections. `put` and `Forget` both call
+`CloseIdleConnections` on the client they drop (`clientcache.go:47`, `:75`; the method
+itself is `internal/netbox/client.go:158`–`:163`). Without it,
+every reconcile — including every resync tick — would leave behind a transport holding an
+idle keep-alive pool, and pools would accumulate for the lifetime of the process: one per
+endpoint per `resyncPeriod`, forever.
 
 ### Why a failing endpoint must actively forget
 
-`fail` calls `r.Cache.Forget(e.Namespace, e.Name)` as its first action (`:179`), before
-it touches conditions. `Forget` (`:62`) deletes every entry for that endpoint.
+`fail` calls `r.Cache.Forget(e.Namespace, e.Name)` as its first action, before it touches
+conditions. `Forget` (`clientcache.go:70`) deletes every entry for that endpoint and
+closes its idle connections.
 
 Leaving the client in place would be worse than useless. Object controllers read the
-cache, and a miss means "not Ready, wait" — that is the contract (`clientcache.go:46`–`:47`). A client
-left behind after a 403 is a client that every object controller in the namespace will
-keep writing through, generating an identical `AuthError` per object, when the endpoint
-already knows the answer and has recorded it. The endpoint's job is to be the single
-place that failure is diagnosed; a stale cache entry would scatter it back across every
+cache, and a miss means "not Ready, wait" — that is the contract
+(`clientcache.go:54`–`:55`). A client left behind after a 403 is a client that every
+object controller in the namespace will keep writing through, generating an identical
+`AuthError` per object, when the endpoint already knows the answer and has recorded it.
+The endpoint's job is to be the single place that failure is diagnosed; a stale cache entry would scatter it back across every
 CR in the cluster, which is exactly what typing the error was meant to prevent
 (`internal/netbox/errors.go:41`–`:43`).
 
@@ -312,24 +329,25 @@ CR in the cluster, which is exactly what typing the error was meant to prevent
 | Get on the endpoint fails for any other reason | return the error | The informer cache is broken. That is a controller fault and belongs in the error metric. |
 | Token Secret absent | condition, requeue 30s | Ordering, most likely. A Secret arriving is not a controller failure. |
 | Token key absent or empty | condition, requeue 30s | User error; a Secret edit is watched, so the timer is a floor. |
-| CA bundle Secret unreadable or missing its key | condition, requeue 2m | Needs a human. |
+| CA bundle Secret absent | condition, requeue 30s | A missing Secret is a missing Secret, whichever field referenced it. |
+| CA bundle Secret present but missing its key, or holding no usable certificate | condition, requeue 2m | Needs a human. |
 | `netbox.New` rejects the URL or the CA bundle | condition, requeue 2m | Needs a spec edit, which bumps `generation` and reconciles at once. |
 | `GET /api/status/` returns 401 or 403 | condition, requeue 2m | Someone has to fix the token or its NetBox permissions. |
 | NetBox unreachable, 5xx, timeout, non-NetBox URL | condition, requeue 30s | Somebody else's outage. Must not touch the operator's error rate. |
 | Version outside `[4.2.0, 5.0.0)`, or unparseable | condition, requeue 10m | Cannot self-correct. Fast retries are noise. |
 | Everything succeeded | conditions `True`, requeue after `resyncPeriod` | Periodic re-probe catches a NetBox upgrade, a revoked token, an expired certificate. |
-| `Status().Update` fails | return the error | A conflict means the object moved under us; exponential backoff and a fresh read is the right answer. |
+| `Status().Update` fails | return the error, **and no `RequeueAfter`** | A conflict means the object moved under us; exponential backoff and a fresh read is the right answer. Returning a `Result` too would discard it silently. |
 
 The through-line: **return an error only for a failure of the operator's own
 machinery.** Everything about the outside world is state, and state goes in `status`.
 
 ## Condition conventions
 
-`setCondition` (`:232`) wraps `meta.SetStatusCondition`, which is what keeps
+`setCondition` wraps `meta.SetStatusCondition`, which is what keeps
 `lastTransitionTime` honest — it only moves when `status` actually changes, so a condition
 that has been `False` for an hour says so instead of resetting on every reconcile.
 
-**Every condition carries `ObservedGeneration`** (`:238`), and `writeStatus` (`:242`) sets
+**Every condition carries `ObservedGeneration`**, and `writeStatus` sets
 `status.observedGeneration` on every path, success and failure alike. This is what lets a
 reader tell "reconciled and healthy" from "not yet looked at since the last edit". Without
 it, `kubectl wait --for=condition=Ready` returns immediately on a stale `True` from
@@ -343,11 +361,17 @@ before the spec change, and any automation built on that quietly does the wrong 
 | `Authenticated` | The token was accepted. | `AuthError`, `TokenMissing`, `SecretMissing` |
 | `VersionSupported` | The server's version is in range. | `VersionUnsupported`, `VersionUnparseable` |
 
-`fail`'s switch (`:182`–`:187`) only touches the specific condition when the reason
-matches. `ProbeFailed` and `InvalidConfig` therefore set `Ready=False` and leave
-`Authenticated` and `VersionSupported` at whatever the last successful probe left them —
-`True`, if there was one. Read those two as "the last time we could tell, this was the
-answer", not as current fact. `Ready` is the only one that is always current.
+`fail`'s switch sets the condition the failure actually speaks to and sets the others to
+`Unknown`, rather than leaving a previous answer standing. An authentication failure
+happens upstream of the version probe, so it reports `VersionSupported=Unknown` with the
+message "not probed: authentication failed first". A `ProbeFailed` or `InvalidConfig`
+answers neither question, so `Authenticated` and `VersionSupported` both go `Unknown`.
+
+`Unknown` plus a reason is a documented state, not an absence of one. The alternative was
+a stale `Authenticated=True` sitting next to `Ready=False`, which reads as "the token is
+fine" — not something that reconcile established. Anything other than `False` on
+`Authenticated` or `VersionSupported` means the operator did not get far enough to have an
+opinion; `Ready` is the one to act on.
 
 **Status is the only thing the operator writes.** `writeStatus` goes through
 `r.Status().Update(ctx, e)` and there is no code path in the controller that writes an

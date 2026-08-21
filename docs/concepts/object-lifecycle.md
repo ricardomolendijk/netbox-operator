@@ -273,3 +273,74 @@ and `Deferred` as `[]string`. The built registry uses neither: natural keys are 
 type `NaturalKey` with `KeyField` / `NullField` / `Lookup`, and `Deferred` is
 `[]DeferredField` with a mode. Both changes are deliberate and both are in the built code,
 so the built code wins.
+
+## Proposal: generate the descriptors, not the types
+
+> **Status: proposal.** This argues for a narrower scope than
+> [NBO-041](https://github.com/ricardomolendijk/netbox-operator/issues/65) and
+> [NBO-042](https://github.com/ricardomolendijk/netbox-operator/issues/66) currently
+> specify. Neither ticket is implemented, so nothing here contradicts shipped code.
+
+Those tickets propose ingesting the OpenAPI schema and `models.json` into one IR, then
+emitting types, registry entries and controllers from it. The scope is worth
+reconsidering, because the usual justification for code generation does not apply here and
+a different one does.
+
+**The weak argument: keeping up with NetBox releases.** The operator is pinned to a single
+extracted schema version, and the supported range is compiled in as `[4.2.0, 5.0.0)`
+(`internal/netbox/version.go:18`–`:21`). NetBox minor releases add columns; they rarely
+move the ones the operator writes. Building an emitter toolchain to track that is a lot of
+machinery aimed at a slow-moving target.
+
+**The strong argument: the initial fan-out.** Roughly 120 kinds is the real cost, and it
+is paid once, up front. Hand-transcribing 120 `Descriptor`s means hand-transcribing 120
+endpoint paths, object-type strings, natural-key sets and read-only column lists — and
+every one of those mistakes fails *silently* rather than loudly. A wrong endpoint path is a
+404 on first use, which is at least visible. A wrong natural key adopts an unrelated
+object, and a missing `ReadOnly` entry writes a cached column that NetBox ignores, which is
+a PATCH loop for the lifetime of the object. Those are the failure modes this codebase has
+already been bitten by, and they scale with kind count.
+
+**NetBox does change in the way that matters, though rarely.** The 4.2 replacement of
+`site` with `(scope_type, scope_id)` plus a read-only `_site` cache
+(`docs/netbox-schema.md` → `dcim.CachedScopeMixin`) happened *inside* the supported range,
+and it no-ops rather than erroring. So "upstream barely changes" is true on average and
+dangerous in the tail.
+
+### The narrower shape
+
+1. **Generate only the `Descriptor` data.** Endpoint path and object type from the
+   endpoint map; `NaturalKeys` from `meta.constraints`; `ReadOnly` from the `_`-prefixed
+   columns and every `CounterCacheField`; `M2M` and `GenericFKs` from the field kinds. All
+   of it is already in `docs/netbox-schema.md`, produced by the extractor that exists
+   (`hack/extract-netbox-schema.py`). This is the mechanical, high-volume, silently-wrong
+   part.
+
+   `Descriptor` is already shaped for this. Nothing in it is a func, precisely so that a
+   template can emit it and a diff can show it (`internal/registry/registry.go:1`–`:10`).
+   The type was designed for a generator; it does not need an IR to feed it.
+
+2. **Keep CRD types and controllers hand-written.** That is where the judgement lives —
+   which fields to expose, what to call them, which references are `ObjectRef`s, what the
+   printer columns should be. Generating them buys little and costs an override mechanism
+   for every deviation, which is where generator projects go to die.
+
+3. **Make upstream drift a test, not a generator input.** Re-run the extractor in CI and
+   diff against the committed `docs/netbox-schema.md`. A NetBox change that matters then
+   arrives as a failing golden diff that a human reads and acts on, rather than as a
+   silent regeneration. This is close to what
+   [NBO-043](https://github.com/ricardomolendijk/netbox-operator/issues/67) already
+   reaches for, and it is the part that would have caught the 4.2 scope change.
+
+### What this trades away
+
+Generated CRD types would guarantee that a field present in NetBox is exposed in the CRD.
+Under this proposal, adding a field to an existing kind stays a manual edit, and a field
+nobody notices stays unexposed until someone asks for it. That is an acceptable trade: an
+unexposed field is a feature request, whereas a wrong natural key is data corruption, and
+only the second one is what generation is being bought for.
+
+It also means the coverage audit
+([NBO-060](https://github.com/ricardomolendijk/netbox-operator/issues/61)) carries more
+weight, since it becomes the mechanism that finds unexposed fields rather than the
+generator.
