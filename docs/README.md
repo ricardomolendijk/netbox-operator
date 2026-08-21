@@ -76,6 +76,7 @@ Dated records of decisions that are expensive to reverse. Index and status:
 
 | Page | Answers |
 |---|---|
+| [Observability](operations/observability.md) | Every metric with its labels, cardinality and what to alert on; which Events fire and when; the log levels and the stable key set, with `kubectl logs \| jq` recipes |
 | [NetBox schema reference](netbox-schema.md) | The authoritative field list every CRD is derived from: 159 models, 138 endpoints, machine-extracted from NetBox 4.6.8. Grep it; do not read it |
 | [Regenerating the schema](regenerating.md) | How to retarget a newer NetBox release, how to test the extraction pipeline without a NetBox checkout, and how to cross-check the AST walk against a live instance |
 

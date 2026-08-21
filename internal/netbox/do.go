@@ -13,6 +13,8 @@ import (
 	"time"
 
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+
+	"github.com/ricardomolendijk/netbox-operator/internal/metrics"
 )
 
 // do performs one request, retrying only failures that a retry can fix.
@@ -38,7 +40,8 @@ func (c *Client) do(ctx context.Context, method, target, endpoint string, payloa
 		}
 		lastErr = err
 		logf.FromContext(ctx).V(1).Info("retrying netbox request",
-			"method", method, "endpoint", endpoint, "attempt", attempt+1, "err", err.Error())
+			"method", method, "endpoint", endpoint, "action", "retry",
+			"attempt", attempt+1, "err", err.Error())
 	}
 	return nil, fmt.Errorf("netbox request to %s gave up after %d attempts: %w", endpoint, c.maxRetries+1, lastErr)
 }
@@ -68,13 +71,23 @@ func (c *Client) attempt(ctx context.Context, method, target, endpoint string, p
 		return nil, err
 	}
 
-	log := logf.FromContext(ctx).WithValues("method", method, "endpoint", endpoint)
-	if payload != nil {
-		log.V(1).Info("netbox request", "body", redact(payload))
+	// Enabled() is checked rather than relying on the logger to drop the line: redact
+	// copies the whole body, and doing that for every request and every 250-object list
+	// page when nobody is listening is real work for nothing.
+	log := logf.FromContext(ctx).WithValues("method", method, "endpoint", endpoint, "action", "request")
+	debug := log.V(1)
+
+	if payload != nil && debug.Enabled() {
+		debug.Info("netbox request", "body", redact(payload))
 	}
+
+	// Timed from here rather than from the top of the function, so the metric measures
+	// NetBox's latency and not the operator throttling itself at the rate limiter above.
+	started := time.Now()
 
 	resp, err := c.http.Do(req)
 	if err != nil {
+		metrics.ObserveRequest(endpoint, method, 0, time.Since(started))
 		// A cancelled or timed-out context is the caller's decision, not a NetBox
 		// failure: surfacing it as transient would make the engine retry a reconcile
 		// that has already been abandoned.
@@ -86,6 +99,9 @@ func (c *Client) attempt(ctx context.Context, method, target, endpoint string, p
 	defer func() { _ = resp.Body.Close() }()
 
 	body, readErr := io.ReadAll(resp.Body)
+	// Recorded once the body is read, because a response whose body is still arriving has
+	// not cost the caller its full latency yet.
+	metrics.ObserveRequest(endpoint, method, resp.StatusCode, time.Since(started))
 	if readErr != nil {
 		return nil, &TransientError{Err: fmt.Errorf("reading response from %s: %w", endpoint, readErr)}
 	}
@@ -93,7 +109,16 @@ func (c *Client) attempt(ctx context.Context, method, target, endpoint string, p
 	if resp.StatusCode >= http.StatusBadRequest {
 		return nil, classify(endpoint, resp.StatusCode, resp.Header, body)
 	}
-	return decode(endpoint, body)
+
+	decoded, err := decode(endpoint, body)
+	if err != nil {
+		return nil, err
+	}
+	if debug.Enabled() {
+		debug.Info("netbox response", "code", resp.StatusCode, "body", redact(decoded))
+	}
+
+	return decoded, nil
 }
 
 func (c *Client) newRequest(ctx context.Context, method, target string, payload Object) (*http.Request, error) {
@@ -158,19 +183,42 @@ var secretFields = map[string]struct{}{
 // key names. Custom fields are collapsed rather than masked because their names are
 // useful for debugging and their values are arbitrary user data. This is a tested
 // function rather than a convention because "remember not to log that" does not hold.
+//
+// It descends into nested objects and lists. That is not decoration: a list response
+// arrives as {"results": [...]}, so masking only the top level would put every
+// `auth_psk` on the page straight into the log.
 func redact(payload Object) Object {
 	out := make(Object, len(payload))
 	for key, value := range payload {
-		switch {
-		case isSecretField(key):
-			out[key] = "[redacted]"
-		case key == "custom_fields":
-			out[key] = redactCustomFields(value)
-		default:
-			out[key] = value
-		}
+		out[key] = redactValue(key, value)
 	}
 	return out
+}
+
+// redactValue masks one value, recursing through the containers it may be inside. Depth
+// is bounded by the JSON itself, exactly as in parseFieldErrors.
+func redactValue(key string, value any) any {
+	if isSecretField(key) {
+		return "[redacted]"
+	}
+	if key == customFieldsKey {
+		return redactCustomFields(value)
+	}
+
+	switch typed := value.(type) {
+	case map[string]any:
+		return map[string]any(redact(typed))
+	case []any:
+		items := make([]any, 0, len(typed))
+		for _, item := range typed {
+			// The parent's key is carried down so that a list *of* secrets is masked by
+			// its own name; a list of objects is masked by each object's own keys.
+			items = append(items, redactValue(key, item))
+		}
+		return items
+	default:
+		return value
+	}
 }
 
 func isSecretField(key string) bool {

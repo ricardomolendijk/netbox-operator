@@ -89,7 +89,14 @@ func startManager(cfg *rest.Config) (func(), error) {
 	}
 
 	clients = NewClientCache()
-	reconciler := &NetBoxEndpointReconciler{Client: mgr.GetClient(), Cache: clients}
+	reconciler := &NetBoxEndpointReconciler{
+		Client: mgr.GetClient(),
+		Cache:  clients,
+		// The real recorder, so the envtest suite exercises the same path production
+		// does; Event *content* is asserted against a FakeRecorder in events_test.go,
+		// where one test's Events cannot be another's.
+		Recorder: mgr.GetEventRecorderFor("netboxendpoint-controller"),
+	}
 	if err := reconciler.SetupWithManager(mgr); err != nil {
 		return nil, fmt.Errorf("setup: %w", err)
 	}

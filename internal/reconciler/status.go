@@ -14,6 +14,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	netboxv1alpha1 "github.com/ricardomolendijk/netbox-operator/api/v1alpha1"
+	"github.com/ricardomolendijk/netbox-operator/internal/metrics"
 	"github.com/ricardomolendijk/netbox-operator/internal/netbox"
 )
 
@@ -42,6 +43,7 @@ func (p *pass) pending(ctx context.Context, reason, message string) (ctrl.Result
 // chosen deliberately.
 func (p *pass) stop(ctx context.Context, err error) (ctrl.Result, error) {
 	out := classify(err, p.resync())
+	p.result = out.result
 	log := logf.FromContext(ctx).WithValues("reason", out.reason, "action", "stop")
 
 	// A write that 404s means the object went away between locating it and writing it.
@@ -55,7 +57,7 @@ func (p *pass) stop(ctx context.Context, err error) (ctrl.Result, error) {
 	if out.severe {
 		log.Error(err, "reconcile stopped")
 	} else {
-		log.V(1).Info("reconcile waiting", "cause", err.Error())
+		log.V(1).Info("reconcile waiting", "err", err.Error())
 	}
 
 	if out.event != "" {
@@ -101,6 +103,11 @@ func (p *pass) finish(ctx context.Context, requeue time.Duration) (ctrl.Result, 
 	}
 
 	if err := p.engine.Status.UpdateStatus(ctx, p.obj); err != nil {
+		// The NetBox side may well have succeeded, but a reconcile whose status never
+		// landed is not a success: observedGeneration is stale and the next pass will do
+		// the work again. Counted as an error so it cannot hide inside `updated`.
+		p.result = metrics.ResultError
+
 		return ctrl.Result{}, fmt.Errorf("updating the status of %s/%s: %w",
 			p.obj.GetNamespace(), p.obj.GetName(), err)
 	}

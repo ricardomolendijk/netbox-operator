@@ -12,6 +12,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
@@ -19,6 +20,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	netboxv1alpha1 "github.com/ricardomolendijk/netbox-operator/api/v1alpha1"
+	"github.com/ricardomolendijk/netbox-operator/internal/metrics"
 	"github.com/ricardomolendijk/netbox-operator/internal/netbox"
 )
 
@@ -31,6 +33,12 @@ const secretRefIndex = "spec.secretRefs"
 type NetBoxEndpointReconciler struct {
 	client.Client
 	Cache *ClientCache
+
+	// Recorder emits the Events a user sees in `kubectl describe`, which is the only
+	// answer to "why is this endpoint not working" that needs no knowledge of conditions.
+	// Optional: a nil recorder simply records nothing, so a test that does not care about
+	// Events does not have to wire one.
+	Recorder record.EventRecorder
 }
 
 // +kubebuilder:rbac:groups=netbox.populator.io,resources=netboxendpoints,verbs=get;list;watch
@@ -49,6 +57,13 @@ type NetBoxEndpointReconciler struct {
 // misconfigured NetBox is a condition on this object, not a controller failure, or the
 // manager's error rate becomes a function of someone else's uptime.
 func (r *NetBoxEndpointReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	// `kind` completes the stable key set on every line this reconcile produces --
+	// including the ones the NetBox client writes, which add `endpoint`, `method` and
+	// `action` of their own. Only `kind`: controller-runtime already put `namespace` and
+	// `name` on the context logger, and repeating them emits the key twice in one JSON
+	// object (CONTRIBUTING.md, "Logging").
+	ctx = logf.IntoContext(ctx, logf.FromContext(ctx).WithValues("kind", "NetBoxEndpoint"))
+
 	endpoint := &netboxv1alpha1.NetBoxEndpoint{}
 	if err := r.Get(ctx, req.NamespacedName, endpoint); err != nil {
 		if apierrors.IsNotFound(err) {
@@ -105,24 +120,48 @@ func (r *NetBoxEndpointReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		secretVersion: secretVersion,
 	}, nbClient)
 
-	logf.FromContext(ctx).Info("endpoint ready",
-		"url", endpoint.Spec.URL, "netboxVersion", status.Version,
+	return r.ready(ctx, endpoint, cfg, status)
+}
+
+// ready records a usable endpoint. Symmetric with fail, so the log line, the Event, the
+// metric and the conditions for one outcome all live in one place.
+func (r *NetBoxEndpointReconciler) ready(ctx context.Context, e *netboxv1alpha1.NetBoxEndpoint,
+	cfg netbox.Config, status netbox.ServerStatus,
+) (ctrl.Result, error) {
+	metrics.EndpointReconcileTotal.WithLabelValues(netboxv1alpha1.ReasonReady).Inc()
+
+	// Info on the transition, debug on a resync that found it exactly as it was left.
+	// `endpoint ready` at info every pass is one line per endpoint per resync for the
+	// lifetime of the process, and a log where nothing means anything is a log nobody
+	// reads (CONTRIBUTING.md, "Logging").
+	became := transitioned(e, netboxv1alpha1.ConditionReady, metav1.ConditionTrue,
+		netboxv1alpha1.ReasonReady)
+
+	logf.FromContext(ctx).V(debugUnless(became)).Info("endpoint ready",
+		"action", "probe",
+		"url", e.Spec.URL, "netboxVersion", status.Version,
 		"mode", cfg.Mode, "plugins", status.Plugins,
 		"insecureSkipVerify", cfg.InsecureSkipVerify)
 
-	setCondition(endpoint, netboxv1alpha1.ConditionAuthenticated, metav1.ConditionTrue,
+	if became {
+		r.event(e, corev1.EventTypeNormal, netboxv1alpha1.ReasonReady,
+			fmt.Sprintf("netbox %s at %s accepted the token; client available",
+				status.Version, e.Spec.URL))
+	}
+
+	setCondition(e, netboxv1alpha1.ConditionAuthenticated, metav1.ConditionTrue,
 		netboxv1alpha1.ReasonReady, "token accepted")
-	setCondition(endpoint, netboxv1alpha1.ConditionVersionSupported, metav1.ConditionTrue,
+	setCondition(e, netboxv1alpha1.ConditionVersionSupported, metav1.ConditionTrue,
 		netboxv1alpha1.ReasonReady, fmt.Sprintf("netbox %s", status.Version))
-	setCondition(endpoint, netboxv1alpha1.ConditionReady, metav1.ConditionTrue,
+	setCondition(e, netboxv1alpha1.ConditionReady, metav1.ConditionTrue,
 		netboxv1alpha1.ReasonReady, "client available")
 
-	if err := r.writeStatus(ctx, endpoint); err != nil {
+	if err := r.writeStatus(ctx, e); err != nil {
 		// controller-runtime discards RequeueAfter when the error is non-nil, so the two
 		// must never be returned together or a status conflict silently loses the resync.
 		return ctrl.Result{}, err
 	}
-	return ctrl.Result{RequeueAfter: resyncPeriod(endpoint)}, nil
+	return ctrl.Result{RequeueAfter: resyncPeriod(e)}, nil
 }
 
 // readToken fetches the API token and the Secret's resourceVersion, which is what makes
@@ -201,7 +240,21 @@ func (r *NetBoxEndpointReconciler) buildConfig(ctx context.Context, e *netboxv1a
 // controllers stop writing through a connection that has since been rejected.
 func (r *NetBoxEndpointReconciler) fail(ctx context.Context, e *netboxv1alpha1.NetBoxEndpoint, reason string, cause error) (ctrl.Result, error) {
 	r.Cache.Forget(e.Namespace, e.Name)
-	logf.FromContext(ctx).Error(cause, "endpoint not ready", "reason", reason)
+	metrics.EndpointReconcileTotal.WithLabelValues(reason).Inc()
+
+	// Error on the transition into this state, debug on every repeat of it. An endpoint
+	// whose token was revoked re-probes every two minutes and an unreachable one every
+	// thirty seconds; at error, either buries whatever is actually new under thousands of
+	// identical lines a day. The Event and the condition carry the standing state.
+	changed := transitioned(e, netboxv1alpha1.ConditionReady, metav1.ConditionFalse, reason)
+	log := logf.FromContext(ctx).WithValues("reason", reason, "action", "probe")
+
+	if changed {
+		log.Error(cause, "endpoint not ready")
+		r.event(e, corev1.EventTypeWarning, reason, cause.Error())
+	} else {
+		log.V(1).Info("endpoint is still not ready", "err", cause.Error())
+	}
 
 	// A failure upstream of a check must not leave that check's previous answer standing:
 	// a stale Authenticated=True next to Ready=False reads as "the token is fine", which
@@ -294,6 +347,39 @@ func resyncPeriod(e *netboxv1alpha1.NetBoxEndpoint) time.Duration {
 	return 10 * time.Minute
 }
 
+// transitioned reports whether writing this condition would change the endpoint's state.
+//
+// Status and reason only; the message is deliberately excluded. A probe failure message
+// carries the wording of the underlying error, and a timeout whose text differs by a
+// millisecond is not a state change -- keying on it would re-fire the Event and the error
+// line on every retry, which is the thing this exists to prevent.
+func transitioned(e *netboxv1alpha1.NetBoxEndpoint, condType string,
+	status metav1.ConditionStatus, reason string,
+) bool {
+	existing := meta.FindStatusCondition(e.Status.Conditions, condType)
+
+	return existing == nil || existing.Status != status || existing.Reason != reason
+}
+
+// debugUnless returns the logr verbosity to log at: 0 (info) when something changed, 1
+// (debug) when it did not. CONTRIBUTING.md: info means state changed.
+func debugUnless(changed bool) int {
+	if changed {
+		return 0
+	}
+	return 1
+}
+
+// event records an Event, when there is a recorder to record it to. Callers emit only on
+// a transition: an Event per resync would put one line per endpoint per interval into the
+// namespace, and `kubectl describe` would show a page of the same thing.
+func (r *NetBoxEndpointReconciler) event(e *netboxv1alpha1.NetBoxEndpoint, eventtype, reason, message string) {
+	if r.Recorder == nil {
+		return
+	}
+	r.Recorder.Event(e, eventtype, reason, message)
+}
+
 func setCondition(e *netboxv1alpha1.NetBoxEndpoint, condType string, status metav1.ConditionStatus, reason, message string) {
 	meta.SetStatusCondition(&e.Status.Conditions, metav1.Condition{
 		Type:               condType,
@@ -352,7 +438,7 @@ func (r *NetBoxEndpointReconciler) endpointsForSecret(ctx context.Context, obj c
 		client.MatchingFieldsSelector{Selector: fields.OneTermEqualSelector(secretRefIndex, obj.GetName())})
 	if err != nil {
 		logf.FromContext(ctx).Error(err, "listing endpoints for a changed secret",
-			"secret", obj.GetName())
+			"namespace", obj.GetNamespace(), "name", obj.GetName(), "action", "map")
 		return nil
 	}
 

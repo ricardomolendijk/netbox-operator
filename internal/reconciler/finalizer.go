@@ -68,6 +68,13 @@ func (e *Engine) claim(ctx context.Context, obj Object) error {
 		return nil
 	}
 
+	// A missing collaborator is a wiring mistake, and it must say so rather than panic
+	// halfway through a pass. Claiming runs before any NetBox call, so failing here is
+	// also the safest place to fail: nothing has been created that could leak.
+	if e.Finalizers == nil {
+		return fmt.Errorf("%w: no FinalizerWriter is wired", errNotConfigured)
+	}
+
 	controllerutil.AddFinalizer(obj, netboxv1alpha1.Finalizer)
 
 	if err := e.Finalizers.UpdateFinalizers(ctx, obj); err != nil {

@@ -190,6 +190,10 @@ func (c *Client) GetOne(ctx context.Context, endpoint string, params Params) (Ob
 	}
 }
 
+// errListTruncated is the page cap being hit. It exists so the truncation is logged
+// through the error path rather than as an info line nobody reads.
+var errListTruncated = errors.New("netbox returned more pages than MaxPages allows")
+
 // List returns every object matching params, following pagination up to MaxPages.
 func (c *Client) List(ctx context.Context, endpoint string, params Params) ([]Object, error) {
 	query := Params{"limit": fmt.Sprint(c.pageSize)}
@@ -201,8 +205,12 @@ func (c *Client) List(ctx context.Context, endpoint string, params Params) ([]Ob
 	var all []Object
 	for page := 0; target != ""; page++ {
 		if page >= c.maxPages {
-			logf.FromContext(ctx).Info("list truncated at the page cap; results are incomplete",
-				"endpoint", endpoint, "maxPages", c.maxPages, "collected", len(all))
+			// At error, not info: the caller cannot tell a truncated page from a complete
+			// one, so a lookup that should have matched can come back empty and the engine
+			// creates a second object. That needs a human to raise MaxPages or narrow the
+			// filter, which is what `error` means (CONTRIBUTING.md, "Logging").
+			logf.FromContext(ctx).Error(errListTruncated, "netbox list truncated at the page cap",
+				"endpoint", endpoint, "action", "list", "maxPages", c.maxPages, "collected", len(all))
 			break
 		}
 		body, err := c.do(ctx, http.MethodGet, target, endpoint, nil)

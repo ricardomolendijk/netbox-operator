@@ -2,6 +2,7 @@ package reconciler
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -484,5 +485,25 @@ func TestDeletionPolicyNeverReachesNetBox(t *testing.T) {
 func TestDeletionPolicyDefaultsToDelete(t *testing.T) {
 	if got := deletionPolicyOf(fakeObject()); got != netboxv1alpha1.DeletionDelete {
 		t.Errorf("deletionPolicyOf(unset) = %q, want %q", got, netboxv1alpha1.DeletionDelete)
+	}
+}
+
+// TestClaimWithoutAFinalizerWriterFailsLoudly pins the guard added after a rebase found
+// the nil path the hard way: claim ran before any NetBox call and segfaulted, which tells
+// whoever is paged nothing. A wiring mistake must name what is missing, and failing here
+// is also the safest place to fail -- nothing has been created that could leak.
+func TestClaimWithoutAFinalizerWriterFailsLoudly(t *testing.T) {
+	engine := &Engine{}
+	obj := fakeObject()
+
+	err := engine.claim(context.Background(), obj)
+	if err == nil {
+		t.Fatal("claim with no FinalizerWriter returned nil; it must report the wiring mistake")
+	}
+	if !errors.Is(err, errNotConfigured) {
+		t.Errorf("err = %v, want errNotConfigured", err)
+	}
+	if slices.Contains(obj.GetFinalizers(), netboxv1alpha1.Finalizer) {
+		t.Error("the finalizer was left on the object after a failed claim")
 	}
 }
