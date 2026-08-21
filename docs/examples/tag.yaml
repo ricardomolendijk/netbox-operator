@@ -1,0 +1,84 @@
+# A tag, end to end: a credential, a connection, and one NetBox object.
+#
+# This is the whole operator in one file. Everything after it -- sites, prefixes, devices --
+# adds references between objects; nothing here changes.
+#
+#   kubectl create namespace homelab
+#   kubectl apply -f docs/examples/tag.yaml
+#   kubectl get nbtag -n homelab -w
+#
+# Replace the URL and the token before applying. Then edit the tag's colour in the NetBox
+# UI and watch it come back within one resyncPeriod -- that is the difference between this
+# operator and a one-shot import.
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: netbox-token
+  namespace: homelab
+  labels:
+    # Required. The operator's Secret cache selects on this label, so a Secret without it
+    # is invisible even when the name on the endpoint is right. See docs/operations/rbac.md.
+    netbox.populator.io/endpoint-credential: "true"
+type: Opaque
+stringData:
+  # A NetBox API token with write access to extras.tag.
+  token: "0123456789abcdef0123456789abcdef01234567"
+---
+apiVersion: netbox.populator.io/v1alpha1
+kind: NetBoxEndpoint
+metadata:
+  name: homelab
+  namespace: homelab
+spec:
+  url: https://netbox.home.arpa
+  tokenSecretRef:
+    name: netbox-token
+  # Every object in this namespace re-checks NetBox for drift on this cadence.
+  resyncPeriod: 2m
+  # Switch to DryRun to see what the operator would write without writing it.
+  mode: Apply
+---
+apiVersion: netbox.populator.io/v1alpha1
+kind: NetBoxTag
+metadata:
+  name: managed
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  name: Managed
+  # The natural key. NetBox enforces slug uniqueness across the whole instance, so the
+  # first namespace to claim `managed` gets it and any other NetBoxTag with this slug
+  # reports Ready=False, Reason=Conflict rather than creating a second tag.
+  slug: managed
+
+  color: "2196f3"
+  description: Managed by netbox-operator
+  weight: 100
+
+  # Django ContentType strings, not references to other CRs -- a content type is not a
+  # NetBox object this operator manages. Omit the field to allow every taggable model.
+  objectTypes:
+    - dcim.device
+    - virtualization.virtualmachine
+---
+# A second tag, showing the two fields that decide what happens to somebody else's data.
+apiVersion: netbox.populator.io/v1alpha1
+kind: NetBoxTag
+metadata:
+  name: deprecated
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  name: Deprecated
+  slug: deprecated
+  color: "ff9800"
+
+  # Take over a tag that already exists in NetBox instead of reporting a Conflict. Opt-in,
+  # because the next step reconciles that tag towards this spec and there is no undo.
+  onConflict: Adopt
+
+  # Leave the tag in NetBox when this CR is deleted. The default is Delete.
+  deletionPolicy: Retain

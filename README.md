@@ -86,14 +86,15 @@ hand-reading the REST docs — see [`docs/netbox-schema.md`](docs/netbox-schema.
 
 ## Supported kinds
 
-`NetBoxEndpoint` is the first kind to land. The delivery order for the rest is
-deliberate: **the logical model first** — tenancy, IPAM and virtualization — with
-physical plant (racks, power, modules, cabling), circuits and VPN deliberately last.
+`NetBoxEndpoint` is the connection; `NetBoxTag` is the first NetBox object to land, and
+the one that proves the engine. The delivery order for the rest is deliberate: **the
+logical model first** — tenancy, IPAM and virtualization — with physical plant (racks,
+power, modules, cabling), circuits and VPN deliberately last.
 
 | Group | Kinds | Status |
 |---|---|---|
 | Connection | [`NetBoxEndpoint`](docs/reference/netboxendpoint.md) | **Available** (M1) |
-| `extras` | `NetBoxTag` | M1 |
+| `extras` | [`NetBoxTag`](docs/reference/netboxtag.md) | **Available** (M1) |
 | `dcim` | `NetBoxSite` | M1 |
 | `tenancy` | `NetBoxTenantGroup`, `NetBoxTenant` | M3 |
 | `ipam` | `NetBoxVRF`, `NetBoxRouteTarget`, `NetBoxVLAN`, `NetBoxVLANGroup`, `NetBoxPrefix`, `NetBoxIPAddress` | M3 |

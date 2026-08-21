@@ -31,7 +31,24 @@ rules:
   - netbox.populator.io
   resources:
   - netboxendpoints/status
+  - netboxtags/status
   verbs:
   - get
   - patch
+  - update
+- apiGroups:
+  - netbox.populator.io
+  resources:
+  - netboxtags
+  verbs:
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - netbox.populator.io
+  resources:
+  - netboxtags/finalizers
+  verbs:
   - update
