@@ -1,10 +1,8 @@
-# manager-role (role.yaml) and its binding are generated from +kubebuilder:rbac markers
-# and are added here by the first controller that needs cluster-level access (NBO-004).
-# Listing them now would break `kustomize build`, since controller-gen emits nothing
-# until a marker exists.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
 - service_account.yaml
+- role.yaml
+- role_binding.yaml
 - leader_election_role.yaml
 - leader_election_role_binding.yaml

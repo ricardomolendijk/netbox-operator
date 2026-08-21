@@ -1,4 +1,4 @@
-# Samples are added here as kinds land. See docs/examples/ for runnable manifests.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-resources: []
+resources:
+- netbox_v1alpha1_netboxendpoint.yaml
