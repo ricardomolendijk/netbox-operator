@@ -2,6 +2,20 @@
 
 **Status:** Accepted · 2026-08-21
 
+## The governing principle
+
+**Git is in charge. NetBox is a projection of it, not a peer.**
+
+A change made in the NetBox UI is not a competing opinion about desired state — it is
+drift, and it gets corrected back to what the source says. There is no mode in which a
+human editing NetBox wins, and there is no path by which a UI edit is promoted into
+desired state. Everything below follows from that.
+
+The recommended deployment posture makes this structural rather than a matter of
+discipline: **give human NetBox accounts read-only permissions** and let the operator's
+own token be the only account with write access to the object types it manages. Then the
+question stops arising. See [NetBox permissions](#7-netbox-side-permissions).
+
 ## The problem
 
 This operator reconciles **outward**, from Kubernetes to NetBox. Flux and Argo CD
@@ -14,7 +28,7 @@ not:
 
 | Interaction | Problem? |
 |---|---|
-| Human edits NetBox; operator corrects it back to match the CR | **No.** That is drift correction and it is the entire point. Git is untouched. |
+| Human edits NetBox; operator corrects it back to match the CR | **No.** That is drift correction and it is the entire point. Git is untouched, and Git wins. |
 | Git changes; Flux/Argo updates the CR; operator pushes it to NetBox | **No.** That is the intended flow. |
 | Operator writes to a CR's **`status`** | **No.** Flux ignores `status`; Argo CD ignores it for CRs by default. |
 | Operator writes to a CR's **`spec`** | **Yes — this is the fight.** The GitOps tool sees the live spec diverge from Git and reverts it. The operator writes it again. Loop. |
@@ -128,7 +142,8 @@ gitops:
   extraAnnotations: {}
 
 drift:
-  # How aggressively NetBox-side drift is corrected.
+  # How NetBox-side drift is handled. Correct is the default and the intended
+  # steady state: the source of truth is Git, so drift is simply wrong.
   mode: Correct             # Correct | Report | Off
   resyncPeriod: 10m         # periodic re-check even with no CR change
   webhookReceiver:
@@ -140,10 +155,56 @@ allocation:
     customField: k8s_allocation_identity
 ```
 
-`drift.mode: Report` is the one worth calling out: it makes the operator observe and
-report NetBox-side drift via conditions, Events and metrics **without correcting it**.
-That is the mode for running this alongside a team that still edits NetBox by hand, and
-for the first week of any adoption.
+`drift.mode: Correct` is the default and the intended steady state — Git is
+authoritative, so NetBox-side drift is simply wrong and gets fixed.
+
+`Report` exists for exactly two situations, both temporary: the first week of an
+adoption, when you want to see what the operator *would* change before letting it, and
+running alongside a team that still edits NetBox by hand and has not been moved to
+read-only accounts yet. It observes and reports drift via conditions, Events and metrics
+without correcting it. Treat time spent in `Report` as migration time, not as a
+supported operating mode.
+
+`Off` disables the periodic resync entirely, so the operator only acts when a CR
+changes. Useful for a very large NetBox where the resync cost is real, at the price of
+UI edits persisting until the next CR change touches that object.
+
+## 6. The one place Git is not the source of truth
+
+Claims. A `NetBoxIPAddressClaim` deliberately does not say which address it wants — the
+value is chosen at allocation time and lives in `status`, so for that one field the
+authoritative value originates outside Git.
+
+This is a bounded, deliberate exception, and §3's deterministic allocation identity is
+what keeps it from becoming drift: the same manifest always reclaims the same address,
+so a rebuild from Git converges rather than re-rolling. Anyone who wants the address
+itself under version control should use `NetBoxIPAddress` with an explicit address —
+that is what it is for.
+
+## 7. NetBox-side permissions
+
+The recommended posture, and what the docs should tell people to do on day one:
+
+| Account | Permissions |
+|---|---|
+| The operator's API token | Write on every object type it manages; read elsewhere. |
+| Human users | **Read-only.** |
+| Anything else writing to NetBox | Nothing, or a documented exception with a `managedBy` tag (NBO-047). |
+
+Read-only human accounts turn "don't edit NetBox by hand" from a convention into a
+constraint, and they make the `Conflict` and drift machinery a safety net rather than a
+daily occurrence.
+
+Two failure modes to handle explicitly, since this configuration is easy to get wrong:
+
+- **The operator's own token is read-only.** Every mutation returns `403`. NBO-002
+  classifies that as `AuthError` and fails the `NetBoxEndpoint` rather than the
+  individual object, so the condition points at the real cause instead of scattering
+  identical failures across every CR in the cluster.
+- **The token has write on some object types but not others.** Partial permissions
+  produce per-kind `403`s that look like bugs. The `NetBoxEndpoint` auth probe (NBO-004)
+  should check the token's permissions against the set of registered kinds at startup
+  and report the gap up front, rather than discovering it one kind at a time.
 
 ## Docs impact
 
