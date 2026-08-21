@@ -111,7 +111,7 @@ func (e *TransientError) Unwrap() error { return e.Err }
 // address keyed on that VRF. See docs/netbox-schema.md.
 type AmbiguousError struct {
 	Endpoint string
-	Params   map[string]string
+	Params   Params
 	Matched  int
 }
 
