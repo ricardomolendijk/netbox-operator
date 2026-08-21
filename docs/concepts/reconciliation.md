@@ -181,7 +181,14 @@ available"). A single log line at info level records the URL, version, mode, plu
 certificate verification is disabled.
 
 Status is written first, and the requeue is returned on its own afterwards — never both
-at once, for the reason at the end of the next section. `resyncPeriod` uses
+at once, for the reason at the end of the next section. A pass that computed exactly the
+status already stored writes nothing at all: `writeStatus` compares the whole status
+against the copy taken before the pass began — `status.plugins` is sorted for that
+comparison to mean anything — and skips the `Status().Update`, which is the rule
+`internal/reconciler`'s `finish` already applies to object kinds. That matters to anything
+watching the object: an unconditional write bumps `resourceVersion` every `resyncPeriod`
+forever and wakes every watcher, which is an Argo CD refresh and an audit entry per
+endpoint per interval for a change that is not one. `resyncPeriod` uses
 `spec.resyncPeriod` when positive and otherwise
 falls back to 10 minutes — belt and braces, since the CRD already defaults the field to
 `10m` (`api/v1alpha1/netboxendpoint_types.go:107`–`:110`).

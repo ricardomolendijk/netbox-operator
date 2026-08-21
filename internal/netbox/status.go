@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"slices"
 )
 
 // ServerStatus is the useful part of GET /api/status/.
@@ -33,6 +34,10 @@ func (c *Client) Status(ctx context.Context) (ServerStatus, error) {
 	for name := range toMap(body["plugins"]) {
 		status.Plugins = append(status.Plugins, name)
 	}
+	// Go randomises map iteration, and this list is written straight to an endpoint's
+	// status: unsorted, the same server yields a different order every probe and every
+	// resync becomes a real status write. See NBO-078.
+	slices.Sort(status.Plugins)
 	return status, nil
 }
 
