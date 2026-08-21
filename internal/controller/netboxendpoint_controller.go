@@ -7,6 +7,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -73,23 +74,28 @@ func (r *NetBoxEndpointReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, fmt.Errorf("fetching endpoint: %w", err)
 	}
 
+	// The status as stored, before this pass touches it. writeStatus compares against it,
+	// so a resync that finds the endpoint exactly as it left it writes nothing -- which is
+	// what the engine's finish() already does for every object kind.
+	before := endpoint.Status.DeepCopy()
+
 	token, secretVersion, err := r.readToken(ctx, endpoint)
 	if err != nil {
-		return r.fail(ctx, endpoint, reasonFor(err), err)
+		return r.fail(ctx, endpoint, before, reasonFor(err), err)
 	}
 
 	cfg, err := r.buildConfig(ctx, endpoint, token)
 	if err != nil {
-		return r.fail(ctx, endpoint, reasonForConfig(err), err)
+		return r.fail(ctx, endpoint, before, reasonForConfig(err), err)
 	}
 	nbClient, err := netbox.New(cfg)
 	if err != nil {
-		return r.fail(ctx, endpoint, netboxv1alpha1.ReasonInvalidConfig, err)
+		return r.fail(ctx, endpoint, before, netboxv1alpha1.ReasonInvalidConfig, err)
 	}
 
 	status, err := nbClient.Status(ctx)
 	if err != nil {
-		return r.fail(ctx, endpoint, reasonFor(err), err)
+		return r.fail(ctx, endpoint, before, reasonFor(err), err)
 	}
 
 	// Recorded before the gate: whatever NetBox said is the most useful thing in status
@@ -99,7 +105,7 @@ func (r *NetBoxEndpointReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	version, supported, err := netbox.SupportedVersion(status.Version)
 	if err != nil {
-		return r.fail(ctx, endpoint, netboxv1alpha1.ReasonVersionUnparseable,
+		return r.fail(ctx, endpoint, before, netboxv1alpha1.ReasonVersionUnparseable,
 			fmt.Errorf("netbox reported version %q: %w", status.Version, err))
 	}
 
@@ -108,7 +114,7 @@ func (r *NetBoxEndpointReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		// four models, and writing `site` to 4.2+ silently no-ops -- so an operator run
 		// against an out-of-range server does not fail, it quietly does nothing. Refuse
 		// instead.
-		return r.fail(ctx, endpoint, netboxv1alpha1.ReasonVersionUnsupported,
+		return r.fail(ctx, endpoint, before, netboxv1alpha1.ReasonVersionUnsupported,
 			fmt.Errorf("netbox %s is outside the supported range >=%s, <%s",
 				version, netbox.MinVersion, netbox.MaxVersion))
 	}
@@ -120,13 +126,13 @@ func (r *NetBoxEndpointReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		secretVersion: secretVersion,
 	}, nbClient)
 
-	return r.ready(ctx, endpoint, cfg, status)
+	return r.ready(ctx, endpoint, before, cfg, status)
 }
 
 // ready records a usable endpoint. Symmetric with fail, so the log line, the Event, the
 // metric and the conditions for one outcome all live in one place.
 func (r *NetBoxEndpointReconciler) ready(ctx context.Context, e *netboxv1alpha1.NetBoxEndpoint,
-	cfg netbox.Config, status netbox.ServerStatus,
+	before *netboxv1alpha1.NetBoxEndpointStatus, cfg netbox.Config, status netbox.ServerStatus,
 ) (ctrl.Result, error) {
 	metrics.EndpointReconcileTotal.WithLabelValues(netboxv1alpha1.ReasonReady).Inc()
 
@@ -156,7 +162,7 @@ func (r *NetBoxEndpointReconciler) ready(ctx context.Context, e *netboxv1alpha1.
 	setCondition(e, netboxv1alpha1.ConditionReady, metav1.ConditionTrue,
 		netboxv1alpha1.ReasonReady, "client available")
 
-	if err := r.writeStatus(ctx, e); err != nil {
+	if err := r.writeStatus(ctx, e, before); err != nil {
 		// controller-runtime discards RequeueAfter when the error is non-nil, so the two
 		// must never be returned together or a status conflict silently loses the resync.
 		return ctrl.Result{}, err
@@ -238,7 +244,9 @@ func (r *NetBoxEndpointReconciler) buildConfig(ctx context.Context, e *netboxv1a
 
 // fail records why the endpoint is not usable and drops any cached client, so object
 // controllers stop writing through a connection that has since been rejected.
-func (r *NetBoxEndpointReconciler) fail(ctx context.Context, e *netboxv1alpha1.NetBoxEndpoint, reason string, cause error) (ctrl.Result, error) {
+func (r *NetBoxEndpointReconciler) fail(ctx context.Context, e *netboxv1alpha1.NetBoxEndpoint,
+	before *netboxv1alpha1.NetBoxEndpointStatus, reason string, cause error,
+) (ctrl.Result, error) {
 	r.Cache.Forget(e.Namespace, e.Name)
 	metrics.EndpointReconcileTotal.WithLabelValues(reason).Inc()
 
@@ -286,7 +294,7 @@ func (r *NetBoxEndpointReconciler) fail(ctx context.Context, e *netboxv1alpha1.N
 	}
 	setCondition(e, netboxv1alpha1.ConditionReady, metav1.ConditionFalse, reason, cause.Error())
 
-	if err := r.writeStatus(ctx, e); err != nil {
+	if err := r.writeStatus(ctx, e, before); err != nil {
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{RequeueAfter: failureBackoff(reason)}, nil
@@ -390,8 +398,27 @@ func setCondition(e *netboxv1alpha1.NetBoxEndpoint, condType string, status meta
 	})
 }
 
-func (r *NetBoxEndpointReconciler) writeStatus(ctx context.Context, e *netboxv1alpha1.NetBoxEndpoint) error {
+// writeStatus persists what this pass observed, and writes nothing when the pass observed
+// what was already stored.
+//
+// The comparison is of the whole status rather than a chosen few fields: a field list is
+// something a future change has to remember to extend, and the field that gets missed is
+// the next one added. It is stable because every condition is written through
+// meta.SetStatusCondition, which leaves LastTransitionTime alone when the condition's
+// status has not changed -- so an unchanged reconcile yields an identical status rather
+// than a fresh timestamp. Every exit from Reconcile sets Ready, so a first pass always
+// differs from the empty stored status and an endpoint still reports something.
+func (r *NetBoxEndpointReconciler) writeStatus(ctx context.Context, e *netboxv1alpha1.NetBoxEndpoint,
+	before *netboxv1alpha1.NetBoxEndpointStatus,
+) error {
 	e.Status.ObservedGeneration = e.Generation
+	if equality.Semantic.DeepEqual(before, &e.Status) {
+		// Every watcher of this object wakes on a resourceVersion bump, so a write that
+		// says nothing new is not free: it is an Argo CD refresh and an audit entry per
+		// endpoint per resync, forever.
+		logf.FromContext(ctx).V(1).Info("status unchanged; not writing", "action", "none")
+		return nil
+	}
 	if err := r.Status().Update(ctx, e); err != nil {
 		return fmt.Errorf("updating endpoint status: %w", err)
 	}

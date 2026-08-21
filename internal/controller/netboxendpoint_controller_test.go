@@ -482,3 +482,102 @@ func TestTwoEndpointsInOneNamespaceAreIndependent(t *testing.T) {
 		return prodOK && !labOK
 	})
 }
+
+// TestUnchangedReconcileWritesNoStatus is the endpoint controller's half of the property
+// the engine already has: a resync that found the endpoint exactly as it left it performs
+// no status write. Without it every endpoint bumps its resourceVersion every resyncPeriod
+// forever, waking every watcher -- an Argo CD refresh and an audit entry for a change that
+// is not one.
+//
+// Writes are counted at the client seam rather than inferred from resourceVersion under the
+// package's shared manager, for the reason events_test.go states: the manager reconciles on
+// its own schedule, so "nothing happened" cannot be asserted while something else may also
+// be reconciling the object. Counting is the same technique internal/reconciler's tests use
+// (fakeStatus), which is the point -- both components are held to one standard.
+func TestUnchangedReconcileWritesNoStatus(t *testing.T) {
+	// Six plugins rather than the shared stub's one, deliberately: NetBox returns them as
+	// a JSON object and the client builds the list by ranging a map, so with one plugin an
+	// unsorted list is indistinguishable from a sorted one. It takes both defects to
+	// produce the churn, so the fixture has to be able to expose both.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprint(w, `{"netbox-version":"4.6.8","plugins":{
+			"netbox_topology_views":"4.1.0","netbox_bgp":"0.14.0","netbox_dns":"1.1.0",
+			"netbox_secrets":"2.1.0","netbox_qrcode":"0.0.13","netbox_attachments":"7.0.0"}}`)
+	}))
+	t.Cleanup(srv.Close)
+
+	reconciler, _ := fakeReconciler(t, endpointFor(srv.URL), credentialSecret())
+	counter := &countingClient{Client: reconciler.Client}
+	reconciler.Client = counter
+
+	reconcileOnce(t, reconciler)
+	if counter.statusWrites != 1 {
+		t.Fatalf("status writes on the first reconcile = %d, want 1: an endpoint that has "+
+			"never been reconciled must report something", counter.statusWrites)
+	}
+
+	const resyncs = 10
+	for range resyncs {
+		reconcileOnce(t, reconciler)
+	}
+	if counter.statusWrites != 1 {
+		t.Errorf("status writes after %d unchanged resyncs = %d, want 1",
+			resyncs, counter.statusWrites)
+	}
+
+	// The other half: suppression must not extend to a status that genuinely differs, or
+	// the object stops reporting reality. Repointing the endpoint at a NetBox outside the
+	// supported range is a real change to every condition.
+	old := netboxStub(t, "3.7.8", http.StatusOK)
+	current := &netboxv1alpha1.NetBoxEndpoint{}
+	key := client.ObjectKey{Namespace: "default", Name: "homelab"}
+	if err := reconciler.Get(context.Background(), key, current); err != nil {
+		t.Fatalf("re-reading the endpoint: %v", err)
+	}
+	current.Spec.URL = old.URL
+	// Set by hand because the fake client does not bump it: a real API server does on a
+	// spec change, and a zero on both sides would make the observedGeneration assertion
+	// below true without asserting anything.
+	current.Generation = 7
+	if err := reconciler.Update(context.Background(), current); err != nil {
+		t.Fatalf("updating the endpoint: %v", err)
+	}
+
+	reconcileOnce(t, reconciler)
+	if counter.statusWrites != 2 {
+		t.Errorf("status writes after a genuine change = %d, want 2", counter.statusWrites)
+	}
+
+	// And skipping a write must not mean skipping observedGeneration: it is what
+	// `kubectl wait` reads, and the pass that writes has to stamp the generation it saw.
+	after := mustFetch(t, reconciler.Client, "default", "homelab")
+	if after.Status.ObservedGeneration != after.Generation {
+		t.Errorf("status.observedGeneration = %d, want %d",
+			after.Status.ObservedGeneration, after.Generation)
+	}
+}
+
+// countingClient counts status writes, so a test can assert that a reconcile issued none.
+// The engine's tests count the same thing through its Status collaborator; the endpoint
+// controller writes through client.Client directly, so the count goes here instead.
+type countingClient struct {
+	client.Client
+	statusWrites int
+}
+
+func (c *countingClient) Status() client.SubResourceWriter {
+	return &countingStatusWriter{SubResourceWriter: c.Client.Status(), owner: c}
+}
+
+type countingStatusWriter struct {
+	client.SubResourceWriter
+	owner *countingClient
+}
+
+func (w *countingStatusWriter) Update(ctx context.Context, obj client.Object,
+	opts ...client.SubResourceUpdateOption,
+) error {
+	w.owner.statusWrites++
+
+	return w.SubResourceWriter.Update(ctx, obj, opts...)
+}
