@@ -9,8 +9,10 @@ FIELD_TYPES = {
     'IPAddressField','IPNetworkField','MACAddressField','ASNField','URLField','EmailField',
     'UUIDField','ArrayField','ColorField','CounterCacheField','RestrictedGenericForeignKey',
     'CachedValueField','WWNField','NaturalOrderingField','GenericIPAddressField',
+    # mptt's FK flavour, which is how every NestedGroupModel declares `parent`.
+    'TreeForeignKey',
 }
-FK_TYPES = ('ForeignKey','OneToOneField','ManyToManyField')
+FK_TYPES = ('ForeignKey','OneToOneField','ManyToManyField','TreeForeignKey')
 GENERIC_FK_TYPES = ('GenericForeignKey','RestrictedGenericForeignKey')
 # Kwargs that must be an integer to be usable downstream; the rest of what we keep is
 # either boolean or symbolic by nature (choices, default).
@@ -68,7 +70,13 @@ def resolve_size(v, local):
     return v, True
 
 out = {}
-for app in ['circuits','core','dcim','extras','ipam','tenancy','users','virtualization','vpn','wireless']:
+# `netbox` is not an API app: it is where the shared abstract bases live
+# (netbox/models/__init__.py -- PrimaryModel, OrganizationalModel, NestedGroupModel --
+# plus netbox/models/features.py and netbox/models/mixins.py). Without it, every column a
+# model inherits rather than declares is invisible: RackRole loses name/slug/description,
+# Region loses name/slug/parent. Per-app mixins (dcim/models/mixins.py -> WeightMixin) are
+# already inside the app globs; they were extracted but never merged. See the merge pass below.
+for app in ['circuits','core','dcim','extras','ipam','netbox','tenancy','users','virtualization','vpn','wireless']:
     files = glob.glob(os.path.join(ROOT, app, 'models', '*.py')) + \
             glob.glob(os.path.join(ROOT, app, 'models.py'))
     for f in files:
@@ -119,4 +127,52 @@ for app in ['circuits','core','dcim','extras','ipam','tenancy','users','virtuali
                 if key in out and not fields: continue
                 out[key] = {'app': app, 'name': node.name, 'file': os.path.relpath(f, ROOT),
                             'bases': bases, 'fields': fields, 'meta': meta}
+
+# A model's class body is only part of its column list. Walk each entry's bases
+# left-to-right, depth-first -- Django's own field-resolution order -- and merge in every
+# column the model has but does not declare, tagged with the class that does declare it.
+# Django lets a subclass shadow an inherited field, so a declared field always wins; the
+# inherited loser is recorded in `shadowed` rather than dropped silently, because that is
+# where a merge goes wrong invisibly.
+BY_NAME = {}
+for v in out.values():
+    # A bare class name is how a base is written in a subclass's declaration. The same name
+    # in two apps cannot be attributed, so it is dropped rather than guessed -- inventing an
+    # inherited column is worse than omitting one -- but the omission is said out loud.
+    if v['name'] in BY_NAME:
+        BY_NAME[v['name']] = None
+        print(f"!! {v['name']} is declared in more than one app: columns inherited from it cannot be attributed",
+              file=sys.stderr)
+    else:
+        BY_NAME[v['name']] = v
+
+def ancestors(v, seen):
+    for b in v['bases']:
+        e = BY_NAME.get(b.split('[')[0].split('.')[-1].strip())
+        if e is None or e['name'] in seen: continue
+        seen.add(e['name'])
+        yield e
+        yield from ancestors(e, seen)
+
+# Every base contributes only the columns it declares itself, so a column is attributed to
+# the class that declares it however deep the chain, and the result does not depend on which
+# entry the merge loop reaches first.
+OWN = {id(v): list(v['fields']) for v in out.values()}
+
+for v in out.values():
+    have = {f['name']: None for f in v['fields']}   # value None == declared on this model
+    merged, shadowed = [], []
+    for e in ancestors(v, {v['name']}):
+        for f in OWN[id(e)]:
+            entry = dict(f, declared_by=e['name'])
+            if entry['name'] not in have:
+                have[entry['name']] = entry['declared_by']
+                merged.append(entry)
+            elif have[entry['name']] != entry['declared_by']:
+                # Two *different* classes declare this column: the winner is the one already
+                # in `have` (Django's order). Reaching the same declaring class twice is just
+                # a diamond in the base graph, not a conflict, so it is not reported.
+                shadowed.append(f"{entry['name']} ({entry['declared_by']})")
+    v['fields'] += merged
+    if shadowed: v['shadowed'] = shadowed
 print(json.dumps(out, indent=1, default=str))

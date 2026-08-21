@@ -1,13 +1,15 @@
-"""Regression test for the schema extraction pipeline (NBO-067).
+"""Regression test for the schema extraction pipeline (NBO-067, NBO-070).
 
 Runs extract-netbox-schema.py, digest-netbox-schema.py and extract-netbox-endpoints.py over
 test/fixtures/netbox-models -- a hand-written miniature of a NetBox source tree -- and asserts
-each of the five NBO-067 defects stays fixed. It deliberately does not need a NetBox checkout,
-which is what makes it runnable in CI:
+each of the five NBO-067 defects stays fixed, plus NBO-070: a model's inherited columns are
+merged in and attributed, and no model's meta.constraints names a column absent from its own
+field list. It deliberately does not need a NetBox checkout, which is what makes it runnable
+in CI:
 
     python3 hack/test_digest.py
 """
-import json, os, subprocess, sys
+import ast, json, os, subprocess, sys
 
 HACK = os.path.dirname(os.path.abspath(__file__))
 FIXTURE = os.path.join(os.path.dirname(HACK), 'test', 'fixtures', 'netbox-models')
@@ -86,4 +88,71 @@ for line in endpoints.splitlines():
     model = line.split()[-1]
     assert f"## {model} " in digest, f"endpoint {line.split()[0]} maps to {model}, which has no Models entry"
 
-print(f"ok: 5/5 NBO-067 defects covered over {len(schema)} fixture models, {len(endpoints.splitlines())} endpoints")
+# --- NBO-070: inherited columns are merged in, and attributed to the class declaring them -
+# The shared abstract bases (netbox/models/) were never scanned, so a model's inherited
+# columns appeared nowhere: RackRole listed only `color`, Region only its GenericRelation.
+def declaring(digest, model, name):
+    """The class a row is attributed to, or None when the model declares it itself."""
+    line = field(digest, model, name).strip()
+    return line.split('(', 1)[1].split(')')[0] if line.split()[1].startswith('(') else None
+
+for name in ('name', 'slug', 'description'):
+    assert declaring(digest, 'dcim.RackRole', name) == 'OrganizationalModel', f"RackRole.{name} not attributed"
+assert declaring(digest, 'dcim.RackRole', 'color') is None, 'a declared column was marked inherited'
+assert 'len=100' in field(digest, 'dcim.RackRole', 'name'), 'a base-module constant was not resolved before merging'
+for name in ('name', 'slug', 'parent'):
+    assert declaring(digest, 'dcim.Region', name) == 'NestedGroupModel', f"Region.{name} not attributed"
+# Two hops up: CustomFieldsMixin is a base of NetBoxModel, which is a base of the base.
+assert declaring(digest, 'dcim.Manufacturer', 'custom_field_data') == 'CustomFieldsMixin'
+# A mixin alongside the abstract base, in the app's own models package.
+for name in ('weight', 'weight_unit'):
+    assert declaring(digest, 'dcim.DeviceType', name) == 'WeightMixin', f"DeviceType.{name} not attributed"
+for name in ('description', 'comments'):
+    assert declaring(digest, 'ipam.VRF', name) == 'PrimaryModel', f"VRF.{name} not attributed"
+# A generic-FK pair that arrives entirely by inheritance still gets its REQ derived, not guessed.
+assert declaring(digest, 'ipam.VLANGroup', 'scope_type') == 'CachedScopeMixin'
+assert ' REQ' not in field(digest, 'ipam.VLANGroup', 'scope'), 'inherited GenericForeignKey over a nullable pair marked REQ'
+# TagsMixin declares a TaggableManager, not a column: nothing to merge, and nothing invented.
+assert not any(f['name'] == 'tags' for v in schema.values() for f in v['fields']), 'a through-table manager was merged as a column'
+# Every attribution names a class the run actually saw.
+classes = {v['name'] for v in schema.values()}
+for key, v in schema.items():
+    for f in v['fields']:
+        assert f.get('declared_by', v['name']) in classes, f"{key}.{f['name']} attributed to unknown class {f['declared_by']}"
+# Django lets a subclass shadow an inherited field. The declared one must win, and the loser
+# must be reported -- silent shadowing is how a merge goes wrong invisibly.
+assert 'len=UNRESOLVED:AMBIGUOUS_MAX_LENGTH' in field(digest, 'ipam.VLAN', 'description'), 'an inherited column overwrote a declared one'
+assert schema['ipam.VLAN']['shadowed'] == ['description (PrimaryModel)'], f"shadowing not reported: {schema['ipam.VLAN'].get('shadowed')}"
+assert 'shadowed' not in schema['dcim.Manufacturer'], 'a diamond in the base graph was reported as a conflict'
+
+# --- NBO-070, the regression test that matters ------------------------------------------
+# A Meta constraint is the natural key the engine looks an object up by, so a constraint
+# naming a column the same entry does not list is a self-contradiction in the field truth --
+# and it is exactly what dcim.Region did. Asserted over every fixture model, not one case.
+def cited_columns(expr, meta_key):
+    """Column names a meta.constraints / unique_together expression names."""
+    out = set()
+    if meta_key == 'unique_together':
+        groups = ast.literal_eval(expr)
+        if groups and isinstance(groups[0], str): groups = (groups,)
+        for g in groups: out.update(g)
+        return out
+    for node in ast.walk(ast.parse(expr, mode='eval')):
+        # UniqueConstraint(fields=(...)); a `condition=Q(...)` lookup is not a column list.
+        if isinstance(node, ast.keyword) and node.arg == 'fields':
+            out.update(ast.literal_eval(node.value))
+    return out
+
+checked = 0
+for key, v in sorted(schema.items()):
+    have = {f['name'] for f in v['fields']}
+    for meta_key in ('constraints', 'unique_together'):
+        if meta_key not in v['meta']: continue
+        # `_name__isnull` and friends are lookups on a column, so compare the column half.
+        missing = sorted({c for c in cited_columns(v['meta'][meta_key], meta_key) if c.split('__')[0] not in have})
+        assert not missing, f"{key}.meta.{meta_key} names {missing}, absent from its own field list"
+        checked += 1
+assert checked >= 4, f"only {checked} Meta constraint blocks in the fixture: the invariant is barely exercised"
+
+print(f"ok: 5/5 NBO-067 defects + NBO-070 inherited columns covered over {len(schema)} fixture models, "
+      f"{len(endpoints.splitlines())} endpoints, {checked} Meta constraint blocks")

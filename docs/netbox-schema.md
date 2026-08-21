@@ -26,15 +26,26 @@ How to read an entry:
 - `(no own columns …)` — a real API kind that declares no fields of its own; everything
   comes from the named base classes (`OrganizationalModel` gives `name`, `slug`,
   `description`; `NestedGroupModel` adds `parent`).
+- `name (OrganizationalModel)` — the column is inherited, not declared on this model, and
+  the parenthesis names the class that declares it. It is a column of this model all the
+  same: an inherited `name` is as required, and as writable, as a declared one.
 - Fields prefixed `_` (e.g. `_site`, `_depth`, `_children`) and every `CounterCacheField`
   are denormalised caches maintained by NetBox itself — read-only, never write them.
 
 Regenerate with `hack/extract-netbox-schema.py` (see `docs/regenerating.md`).
 
-> **This body has not been regenerated since NBO-067 fixed the extractors.** It is
-> the output of the pre-fix scripts, so — until someone re-runs them against a NetBox
-> 4.6.8 checkout — `meta.constraints` is still cut off at 400 characters, no row carries
-> `on_delete`, six `len=` values are still raw symbols, generic relations are wrongly
+> **This body has not been regenerated since NBO-067 and NBO-070 fixed the extractors.**
+> It is the output of the pre-fix scripts, so — until someone re-runs them against a NetBox
+> 4.6.8 checkout — **no entry below lists a single inherited column**: `name`, `slug`,
+> `parent`, `description`, `comments`, `scope_type`/`scope_id`, `weight`/`weight_unit` and
+> `custom_field_data` are missing wherever a model inherits rather than declares them
+> (NBO-070). `dcim.RackRole` shows only `color`; `dcim.Region` shows only its
+> `GenericRelation`s while its `meta.constraints` cites `parent` and `name`, columns this
+> document never lists. Do not derive a CRD's required fields from an entry below without
+> reading the model's bases in the NetBox source.
+>
+> Also still pre-NBO-067: `meta.constraints` is cut off at 400 characters, no row carries
+> `on_delete`, six `len=` values are raw symbols, generic relations are wrongly
 > marked `REQ`, and the eight column-less organisational kinds
 > (`Manufacturer`, `RackGroup`, `ContactGroup`, `ContactRole`, `ClusterType`,
 > `TunnelGroup`, `CircuitType`, `VirtualCircuitType`) have an endpoint above but no
