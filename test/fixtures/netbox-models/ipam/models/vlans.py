@@ -5,7 +5,8 @@ from django.db.models import Q
 from django.utils.translation import gettext_lazy as _
 
 from ipam.constants import AMBIGUOUS_MAX_LENGTH, VRF_RD_MAX_LENGTH
-from netbox.models import PrimaryModel
+from netbox.models import OrganizationalModel, PrimaryModel
+from netbox.models.mixins import CachedScopeMixin
 
 # A constant defined in the model module rather than in constants.py.
 LOCAL_NAME_MAX_LENGTH = 33
@@ -31,6 +32,15 @@ class VLAN(PrimaryModel):
     )
     name = models.CharField(
         max_length=LOCAL_NAME_MAX_LENGTH,
+    )
+    # Cited by Meta.constraints below: a constraint must never name a column the entry does
+    # not list, in either direction.
+    qinq_svlan = models.ForeignKey(
+        to='ipam.VLAN',
+        on_delete=models.PROTECT,
+        related_name='qinq_cvlans',
+        blank=True,
+        null=True,
     )
     role = models.ForeignKey(
         to='ipam.Role',
@@ -80,6 +90,21 @@ class VLAN(PrimaryModel):
             ),
         )
         indexes = (models.Index(fields=('site', 'group', 'vid', 'id')),)
+
+
+class VLANGroup(OrganizationalModel, CachedScopeMixin):
+    """Every column inherited, from two bases: name/slug/description from one, the
+    scope_type/scope_id/scope trio from the other. `scope`'s requiredness has to be derived
+    from a `scope_type` that arrives by inheritance too."""
+
+    class Meta:
+        ordering = ('name',)
+        constraints = (
+            models.UniqueConstraint(
+                fields=('scope_type', 'scope_id', 'name'),
+                name='%(app_label)s_%(class)s_unique_scope_name'
+            ),
+        )
 
 
 class VRF(PrimaryModel):

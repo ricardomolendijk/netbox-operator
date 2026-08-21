@@ -15,6 +15,27 @@ class RackGroup(NestedGroupModel):
     pass
 
 
+class Region(NestedGroupModel):
+    """Declares only a reverse relation, and its Meta.constraints cites `parent` and `name`
+    — two columns it inherits. A constraint naming a column the same entry does not list is
+    exactly the contradiction NBO-070 is about."""
+    prefixes = GenericRelation(
+        to='ipam.Prefix',
+        content_type_field='scope_type',
+        object_id_field='scope_id',
+        related_query_name='region',
+    )
+
+    class Meta:
+        ordering = ('name',)
+        constraints = (
+            models.UniqueConstraint(
+                fields=('parent', 'name'),
+                name='%(app_label)s_%(class)s_unique_parent_name'
+            ),
+        )
+
+
 class Site(OrganizationalModel):
     region = models.ForeignKey(
         to='dcim.Region',
