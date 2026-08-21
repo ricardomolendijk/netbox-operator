@@ -65,11 +65,18 @@ which is what the client cache is keyed on.
 
 | Failure | Reason | Condition set | Requeue |
 |---|---|---|---|
-| Secret absent | `SecretMissing` | `Authenticated=False`, `VersionSupported=Unknown`, `Ready=False` | 30s |
+| Token Secret absent, or invisible to the operator | `SecretMissing` | `Authenticated=False`, `VersionSupported=Unknown`, `Ready=False` | 30s |
 | Key absent, or its value empty | `TokenMissing` | `Authenticated=False`, `VersionSupported=Unknown`, `Ready=False` | 30s |
 
 An empty value is treated the same as an absent key — a Secret with
 `token: ""` is a misconfiguration, not an anonymous session.
+
+"Invisible to the operator" is a real case, not a hedge: the manager reads Secrets through
+a label-scoped informer cache, so a Secret that `kubectl get secret` shows plainly is
+absent as far as the operator is concerned unless it carries
+`netbox.populator.io/endpoint-credential=true`. The condition message covers both causes,
+because distinguishing them would need an uncached read of the very Secret the scoping
+exists to avoid reading. See [RBAC](../operations/rbac.md).
 
 The Secret is deliberately not namespace-qualified. Reading a Secret from another
 namespace is a privilege escalation dressed up as convenience, and it would force the
@@ -84,10 +91,19 @@ present it also carries `insecureSkipVerify` and, when `caBundleSecretRef` is se
 a second Secret for the PEM bundle, defaulting to key `ca.crt` through that same
 `orDefaultKey` helper.
 
-Failures are classified by `reasonForConfig` rather than lumped together: a `NotFound`
-on either Secret is `SecretMissing` at 30s, whichever field referenced it, and everything
-else — a bundle Secret present but missing its key, a PEM holding no usable certificate —
-is `InvalidConfig` at 2 minutes. A missing Secret is a missing Secret.
+Failures are classified by `reasonForConfig` rather than lumped together, and the CA
+bundle gets its **own** reason:
+
+| Failure | Reason | `Authenticated` | Requeue |
+|---|---|---|---|
+| CA bundle Secret absent | `CABundleMissing` | `Unknown` | 30s |
+| Bundle present, key absent, or no usable certificate in the PEM | `InvalidConfig` | `Unknown` | 2m |
+
+`CABundleMissing` is distinct from the token Secret's `SecretMissing` on purpose. By the
+time the CA bundle is read the token has already been read successfully, so reporting
+`Authenticated=False` would send the reader to the wrong Secret — the message says
+`reading ca bundle secret …` while the condition claimed the token failed. `Unknown` is the
+honest value: this reconcile never asked NetBox whether the token was good.
 
 ### 4. Construct the client
 
@@ -178,7 +194,7 @@ falls back to 10 minutes — belt and braces, since the CRD already defaults the
 |---|---|---|
 | `VersionUnsupported`, `VersionUnparseable` | 10m | Nothing the operator does changes the answer. NetBox has to be upgraded, or the endpoint pointed elsewhere — both of which bump `metadata.generation` and trigger an immediate reconcile anyway. |
 | `AuthError`, `InvalidConfig` | 2m | Needs a human to fix a token's permissions or a manifest. A Secret edit arrives on the watch, so the timer is only the floor. |
-| `SecretMissing`, `TokenMissing`, `ProbeFailed`, anything else | 30s | Plausibly self-correcting: a Secret is about to be created by a sealed-secrets controller, or NetBox is mid-restart. |
+| `SecretMissing`, `TokenMissing`, `CABundleMissing`, `ProbeFailed`, anything else | 30s | Plausibly self-correcting: a Secret is about to be created by a sealed-secrets controller or about to be labelled, or NetBox is mid-restart. |
 
 Re-probing an unsupported version every 30 seconds would be pure noise. It cannot
 succeed: the version is a property of the server, the operator's supported range is
@@ -358,7 +374,7 @@ before the spec change, and any automation built on that quietly does the wrong 
 | Type | Meaning | Set to `False` by |
 |---|---|---|
 | `Ready` | There is a usable client. Object controllers wait on this one. | every failure |
-| `Authenticated` | The token was accepted. | `AuthError`, `TokenMissing`, `SecretMissing` |
+| `Authenticated` | The token was accepted. | `AuthError`, `TokenMissing`, `SecretMissing` — and set to `Unknown` by `CABundleMissing`, `InvalidConfig` and `ProbeFailed`, which never asked |
 | `VersionSupported` | The server's version is in range. | `VersionUnsupported`, `VersionUnparseable` |
 
 `fail`'s switch sets the condition the failure actually speaks to and sets the others to
