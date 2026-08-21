@@ -50,6 +50,8 @@ kubectl get netboxendpoint <name> -n <namespace> \
 |---|---|---|---|
 | `READY` is empty and `describe` shows no conditions at all | `kubectl logs -n <ns> deploy/<manager> \| grep netboxendpoint` | none — no reconcile has run | The controller is not running, not watching this namespace, or the manager is crash-looping. Check the pod, then check leader election if you run more than one replica. |
 | `Ready=False`, message names a Secret | `kubectl get secret <name> -n <ns>` | `Ready=False`, `Authenticated=False`, `VersionSupported=Unknown`, `Reason=SecretMissing` | A referenced Secret does not exist **in the endpoint's own namespace** — either `spec.tokenSecretRef.name` or `spec.tlsConfig.caBundleSecretRef.name`; the message says which. Cross-namespace refs are not supported by design. Retries every 30s. |
+| A Secret that plainly exists reports `SecretMissing` | `kubectl get secret <name> -n <ns> --show-labels` | `Ready=False`, `Authenticated=False`, `Reason=SecretMissing`, message says the Secret "may exist but be invisible to the operator" | **The Secret is not labelled.** The operator reads Secrets through a label-scoped cache, so an unlabelled Secret is genuinely invisible to it even though `kubectl` shows it. Fix: `kubectl label secret <name> -n <ns> netbox.populator.io/endpoint-credential=true`. The operator cannot tell "absent" from "unlabelled" without an uncached read of the very Secret it is trying not to read, which is why the message covers both. See [RBAC](rbac.md). |
+| `Ready=False`, message says `reading ca bundle secret` | `kubectl get secret <name> -n <ns>` | `Ready=False`, `Authenticated=Unknown`, `Reason=CABundleMissing` | The CA bundle Secret is absent. Distinct from `SecretMissing` on purpose: the token read fine, so `Authenticated` is `Unknown` rather than `False` and you are pointed at the right Secret. Retries every 30s. |
 | `Ready=False`, message says `has no key "token"` | `kubectl get secret <name> -n <ns> -o jsonpath='{.data}' \| jq 'keys'` | `Ready=False`, `Authenticated=False`, `VersionSupported=Unknown`, `Reason=TokenMissing` | The key is absent or its value is empty. Default key is `token`; set `spec.tokenSecretRef.key` if yours differs. An empty value counts as missing. Retries every 30s. |
 | `Ready=False`, message mentions `401` or `403` | `kubectl describe netboxendpoint <name> -n <ns>` | `Ready=False`, `Authenticated=False`, `VersionSupported=Unknown`, `Reason=AuthError` | The token is wrong, revoked, expired, or disabled. A read-only token is *not* this symptom — `/api/status/` only needs an authenticated read, so a token with no write permission still probes `Ready=True` and fails later, on the first write. Rotate the Secret — the watch picks it up immediately, no restart. Retries every 2m. |
 | `Ready=False`, message quotes a version and a range | `kubectl get netboxendpoint <name> -n <ns> -o jsonpath='{.status.netboxVersion}'` | `Ready=False`, `VersionSupported=False`, `Reason=VersionUnsupported` | NetBox is outside `[4.2.0, 5.0.0)`. Upgrade NetBox, or point the endpoint at a supported instance. Retries every **10m** — an edit reconciles at once, so you will not wait. |
@@ -63,6 +65,8 @@ kubectl get netboxendpoint <name> -n <namespace> \
 | A CA bundle was rotated and nothing changed | `kubectl get netboxendpoint <name> -n <ns> -o jsonpath='{.spec.tlsConfig.caBundleSecretRef.name}{"\n"}'` | n/a | Both referenced Secrets are indexed and watched, so a CA rotation takes effect on the next reconcile, same as a token. If it did not, the Secret you edited is not the one referenced, or it is in another namespace. |
 | `Ready=True` but object controllers report the endpoint is not ready | — | n/a | No object Kinds exist yet (NBO-008 onward). If you see this, it is from a build not described by these docs. |
 | Endpoint deleted but NetBox traffic continues | `kubectl logs -n <ns> deploy/<manager> \| grep 'endpoint not ready\|endpoint ready'` | n/a | The cached client is dropped when the reconcile observes the deletion. If traffic persists, the reconcile has not run — check the manager is alive. |
+| `kubectl delete` hangs on an object | `kubectl get <kind> <name> -n <ns> -o jsonpath='{.status.conditions}' \| jq` | `Deleting=False`, `Reason=Protected` | NetBox refuses the delete because another object references it through a protected foreign key. The condition message names what blocks it. Delete the referencing object first; the retry backs off and will complete on its own. This is not an error to retry faster. |
+| `kubectl delete` hangs and NetBox is down | `kubectl get netboxendpoint -n <ns>` | `Deleting=False`, `Reason=WaitingForEndpoint` | The object is real and its id is known, so the finalizer holds rather than orphaning it in NetBox. It completes once the endpoint is `Ready`. To force it through and accept the orphan, annotate `netbox.populator.io/skip-finalizer=true` — the condition message names this. See [deletion](../concepts/deletion.md). |
 
 ## Confirming which Secret is actually in use
 
@@ -203,27 +207,32 @@ The reason is a translation of a typed client error, not an independent diagnosi
 The last two exist for the object loop, which is
 [designed and not yet implemented](../concepts/object-lifecycle.md).
 
-## The blast radius, and one thing to check
+## The blast radius
 
-The generated manager role is a **ClusterRole** granting `get`, `list` and `watch` on
-`secrets` cluster-wide (`config/rbac/role.yaml`), because the controller watches
-`corev1.Secret` without a namespace or label restriction. That is broader than NBO-004's
-design note intends — it calls for Secret access only in namespaces named by some
-`NetBoxEndpoint` — and it means the manager's informer caches every Secret in the cluster
-in memory.
+Two halves, and only one of them is fixed.
 
-Tracked as
-[issue #100](https://github.com/ricardomolendijk/netbox-operator/issues/100), which costs
-three options: a label-selected informer cache, namespace-enumerated `Role`s instead of a
-`ClusterRole`, or both.
+**The informer cache is scoped.** Since NBO-072 the manager applies a label selector to
+both the LIST and the WATCH, so it caches only Secrets carrying
+`netbox.populator.io/endpoint-credential=true` (`SecretCacheOptions()` in
+`internal/controller/secretcache.go`). Manager memory therefore scales with the number of
+credential Secrets, not with the cluster's total. That is why an unlabelled Secret is
+invisible — see the symptom row above, which is the most common consequence.
 
-Two practical consequences while that stands:
+**The RBAC is still cluster-wide.** The generated manager role remains a `ClusterRole`
+granting `get`, `list` and `watch` on `secrets` across the cluster
+(`config/rbac/role.yaml`). All three verbs are required: a scoped informer still LISTs and
+WATCHes, and the selector becomes a query parameter rather than changing the verb, so none
+of them can be dropped while the cache works this way.
 
-- Manager memory scales with the cluster's total Secret count, not with the number of
-  endpoints. If the manager is being OOM-killed and you have a large cluster, this is the
-  first thing to look at.
-- The operator's read access is the whole cluster's Secrets. Treat it accordingly when
-  reviewing the deployment.
+So the operator's *cache* is narrow and its *permission* is not. A compromised controller
+could still read every Secret in the cluster; it simply does not do so in normal operation.
+Treat it accordingly when reviewing the deployment.
 
-Neither restriction is in place yet. Until one is, treat the operator as having read
-access to every Secret in the cluster.
+Narrowing the permission needs namespace-enumerated `Role`s instead of a `ClusterRole`,
+which requires deploy-time knowledge of which namespaces hold credentials — that is
+[issue #100](https://github.com/ricardomolendijk/netbox-operator/issues/100), still open,
+and it is expected to arrive with the Helm chart. See
+[RBAC](rbac.md) for what to label and the `kubectl auth can-i` check.
+
+If the manager is being OOM-killed, the cache is no longer the first thing to suspect;
+check how many Secrets carry the credential label.
