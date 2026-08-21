@@ -16,6 +16,7 @@ How the engine behaves, and why.
 | [The Descriptor](concepts/descriptor.md) | What per-kind facts the engine needs, why they are data rather than code, and how natural keys establish identity before a `status.id` exists |
 | [Drift detection](concepts/drift.md) | Why what NetBox returns is not what you wrote, and the eight comparison rules that stop a reconcile loop from PATCHing forever |
 | [Errors and retries](concepts/errors-and-retries.md) | Which NetBox failure becomes which typed error, what gets retried and where, and why more than one lookup match is an error rather than a guess |
+| [Lookups](concepts/lookups.md) | How a natural key becomes a query string, why `?name__ie=` exists, and why a null filter is pinned rather than omitted |
 
 ## Reference
 
@@ -75,7 +76,7 @@ Dated records of decisions that are expensive to reverse. Index and status:
 | Page | Answers |
 |---|---|
 | [NetBox schema reference](netbox-schema.md) | The authoritative field list every CRD is derived from: 159 models, 138 endpoints, machine-extracted from NetBox 4.6.8. Grep it; do not read it |
-| [Regenerating the schema](regenerating.md) | How to retarget a newer NetBox release, and how to cross-check the AST walk against a live instance |
+| [Regenerating the schema](regenerating.md) | How to retarget a newer NetBox release, how to test the extraction pipeline without a NetBox checkout, and how to cross-check the AST walk against a live instance |
 
 ## Examples
 

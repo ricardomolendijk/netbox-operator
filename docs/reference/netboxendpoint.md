@@ -82,7 +82,7 @@ spec:
     insecureSkipVerify: false              # default
     caBundleSecretRef:
       name: netbox-ca
-      key: ca.crt                          # you must set this; the default is "token"
+      key: ca.crt                          # default
   timeout: 30s                             # default
   mode: Apply                              # default; the other value is DryRun
   resyncPeriod: 10m                        # default
@@ -91,10 +91,10 @@ spec:
     burst: 20                              # ignored unless qps > 0
 ```
 
-The Secret and the `NetBoxEndpoint` must be in the **same namespace**. `SecretKeyRef` has
-no `namespace` field, deliberately: reading a Secret from another namespace is a privilege
-escalation dressed up as convenience, and supporting it would make the operator's Secret
-RBAC cluster-wide. A namespace that needs its own endpoint creates its own Secret.
+Both Secrets and the `NetBoxEndpoint` must be in the **same namespace** — `SecretKeyRef`
+has no `namespace` field, deliberately. A namespace that needs its own endpoint creates its
+own Secret. See [Secret RBAC](#secret-rbac-and-the-current-blast-radius) for why, and for
+what the operator's Secret permissions currently are.
 
 ## `spec`
 
@@ -150,10 +150,13 @@ every 30s, and the Secret watch re-reconciles as soon as it is created.
 |---|---|
 | Type | `string` |
 | Required | no |
-| Default | `token` (`+kubebuilder:default=token`) |
+| Default | `token`, applied by the controller |
 | Validation | none |
 
-Which key of the Secret holds the token.
+Which key of the Secret holds the token. The default is applied in the controller rather
+than by a `+kubebuilder:default` marker, because `SecretKeyRef` is shared with
+`caBundleSecretRef`, which needs a different one — a marker applies at every use of the
+struct.
 
 **If it is wrong.** A key that is absent, or present with an empty value, gives
 `Ready=False, Authenticated=False, Reason=TokenMissing`, message
@@ -183,10 +186,19 @@ TLS handshake settings. Omit it entirely for a NetBox with a publicly trusted ce
 Disables certificate verification for this endpoint. Prefer `caBundleSecretRef`. The client
 floors TLS at 1.2 either way.
 
-**If it is wrong.** Nothing fails; that is the problem. `true` makes a man-in-the-middle
-undetectable and produces no condition and no status field of its own. A certificate
-problem with this left `false` surfaces as `Ready=False, Reason=ProbeFailed` with the
-`x509` error in the message.
+**If it is wrong.** Nothing fails, which is the problem: `true` makes a
+man-in-the-middle undetectable. There is no condition and no status field for it, but it
+is not silent either — every successful reconcile logs it at `info` on the `endpoint ready`
+line, so it is greppable and it shows up in whatever collects the operator's logs:
+
+```
+INFO  endpoint ready  {"url": "https://netbox.home.arpa", "netboxVersion": "4.6.8",
+                       "mode": "Apply", "plugins": ["netbox_topology_views"],
+                       "insecureSkipVerify": true}
+```
+
+A certificate problem with this left `false` surfaces as
+`Ready=False, Reason=ProbeFailed` with the `x509` error in the message.
 
 ### `spec.tlsConfig.caBundleSecretRef`
 
@@ -199,23 +211,26 @@ problem with this left `false` surfaces as `Ready=False, Reason=ProbeFailed` wit
 Additional trusted roots, PEM-encoded, in a Secret in this namespace. When set, the bundle
 *replaces* the root pool for this endpoint rather than adding to the system roots.
 
-`caBundleSecretRef.key` reuses the `SecretKeyRef` type, so **its default is `token`, not
-`ca.crt`** — the `+kubebuilder:default=token` marker applies at every use of the struct.
-Set `key: ca.crt` explicitly if that is what your Secret calls it.
+`caBundleSecretRef.key` defaults to `ca.crt`. Like the token key, that default lives in
+the controller rather than in a `+kubebuilder:default` marker, precisely because the
+marker would apply to both uses of `SecretKeyRef` and default a CA bundle's key to
+`token`.
 
-**If it is wrong.** All three failures land on the same reason, `InvalidConfig`, retried
-every 2 minutes — note that a missing CA Secret reports `InvalidConfig` and *not*
-`SecretMissing`:
+**If it is wrong.**
 
-| Fault | Message |
-|---|---|
-| Secret does not exist | `reading ca bundle secret homelab/netbox-ca: secrets "netbox-ca" not found` |
-| key absent or empty | `ca bundle secret homelab/netbox-ca has no key "token"` |
-| value is not usable PEM | `ca bundle contains no usable certificates` |
+| Fault | Reason | Backoff | Message |
+|---|---|---|---|
+| Secret does not exist | `SecretMissing` | 30s | `reading ca bundle secret homelab/netbox-ca: secrets "netbox-ca" not found` |
+| key absent or empty | `InvalidConfig` | 2m | `ca bundle secret homelab/netbox-ca has no key "ca.crt"` |
+| value is not usable PEM | `InvalidConfig` | 2m | `ca bundle contains no usable certificates` |
 
-Also note: only `spec.tokenSecretRef.name` is indexed for the Secret watch. Editing the CA
-bundle Secret does **not** trigger a reconcile — wait for `resyncPeriod`, or touch the
-endpoint.
+A missing Secret is a missing Secret whichever field referenced it, so it reports
+`SecretMissing` on the same 30s backoff as a missing token Secret. One wrinkle worth
+knowing: that path also sets `Authenticated=False`, even though the token itself read
+fine — read the message, not just the reason.
+
+Both Secrets are indexed and watched, so rotating a CA bundle is noticed as promptly as
+rotating a token.
 
 ### `spec.timeout`
 
@@ -316,47 +331,54 @@ Every field is optional and written by the controller. `status` is a subresource
 
 | Field | Type | Populated by | When |
 |---|---|---|---|
-| `netboxVersion` | `string` | the `netbox-version` key of `GET /api/status/` | on success, **and** on `VersionUnsupported` — deliberately, so the message and the field agree |
+| `netboxVersion` | `string` | the `netbox-version` key of `GET /api/status/` | on success, **and** on `VersionUnsupported` and `VersionUnparseable` — it is recorded before the version gate runs, so the offending string is always visible |
 | `plugins` | `[]string` | the `plugins` map of `GET /api/status/` | same as `netboxVersion`. Unordered. Recorded because a plugin that adds a required custom field is an otherwise baffling source of 400s |
 | `observedGeneration` | `int64` | `metadata.generation` at the time status was written | every status write, success or failure. `observedGeneration < metadata.generation` means the conditions describe an older spec |
 | `conditions` | `[]metav1.Condition` | the controller | every reconcile. `+listType=map`, `+listMapKey=type` |
 
-`netboxVersion` and `plugins` are **not** cleared on failure, and are **not** set when the
-probe never got a parseable version — so on `VersionUnparseable`, `ProbeFailed`,
-`AuthError`, `SecretMissing`, `TokenMissing` or `InvalidConfig` they hold whatever the last
-successful probe left there, or nothing. Read them together with `observedGeneration` and
-the `Ready` condition, not on their own.
+`netboxVersion` and `plugins` are **not** cleared on failure, and are only written once
+the probe has returned — so on `ProbeFailed`, `AuthError`, `SecretMissing`, `TokenMissing`
+or `InvalidConfig` they hold whatever the last successful probe left there, or nothing.
+Read them together with `observedGeneration` and the `Ready` condition, not on their own.
 
 ## Conditions
 
-| Type | True when | False when | Reasons it can carry |
-|---|---|---|---|
-| `Ready` | a client was built, authenticated and version-checked, and is in the cache | any failure at all | `Ready`, `SecretMissing`, `TokenMissing`, `AuthError`, `ProbeFailed`, `VersionUnsupported`, `VersionUnparseable`, `InvalidConfig` |
-| `Authenticated` | `GET /api/status/` was accepted with the token | the token could not be read or was rejected | `Ready`, `SecretMissing`, `TokenMissing`, `AuthError` |
-| `VersionSupported` | the reported version parsed and is in `[4.2.0, 5.0.0)` | it did not parse, or is out of range | `Ready`, `VersionUnsupported`, `VersionUnparseable` |
+| Type | `True` when | `False` when | `Unknown` when | Reasons it can carry |
+|---|---|---|---|---|
+| `Ready` | a client was built, authenticated and version-checked, and is in the cache | any failure at all | never | `Ready`, `SecretMissing`, `TokenMissing`, `AuthError`, `ProbeFailed`, `VersionUnsupported`, `VersionUnparseable`, `InvalidConfig` |
+| `Authenticated` | `GET /api/status/` was accepted with the token | the token could not be read, or NetBox rejected it | the probe never ran, so the token was not tried: `ProbeFailed`, `InvalidConfig` | `Ready`, `SecretMissing`, `TokenMissing`, `AuthError`, `ProbeFailed`, `InvalidConfig` |
+| `VersionSupported` | the reported version parsed and is in `[4.2.0, 5.0.0)` | it did not parse, or is out of range | the version was never obtained: `SecretMissing`, `TokenMissing`, `AuthError`, `ProbeFailed`, `InvalidConfig` | `Ready`, `VersionUnsupported`, `VersionUnparseable`, `SecretMissing`, `TokenMissing`, `AuthError`, `ProbeFailed`, `InvalidConfig` |
 
 `Ready` is the one object controllers wait on. A client is handed out only while it is
 `True`; every failure drops the cached client, so nothing keeps writing through a
 connection NetBox has since rejected.
 
-`Authenticated` and `VersionSupported` are only *touched* by the failures listed against
-them. A failure of another kind — `ProbeFailed`, `InvalidConfig` — sets `Ready=False` and
-leaves the other two at their previous values, so you can legitimately see
-`Ready=False, Reason=ProbeFailed` alongside a stale `Authenticated=True` from the last good
-reconcile. Trust `Ready`, and check `observedGeneration`.
+**`Unknown` means "this reconcile did not establish it", and it is written deliberately.**
+A failure upstream of a check does not leave that check's previous answer standing: an
+authentication failure sets `VersionSupported=Unknown` with the message
+`not probed: authentication failed first`, and a `ProbeFailed` or `InvalidConfig` sets
+*both* downstream conditions to `Unknown` with the cause appended. So the three conditions
+describe one reconcile rather than a mixture of this one and an older one, and a stale
+`Authenticated=True` next to `Ready=False` — which reads as "the token is fine" when
+nothing established that — cannot happen.
+
+The one condition not rewritten on every path is `Authenticated` under
+`VersionUnsupported` / `VersionUnparseable`. Reaching the version gate means the probe
+succeeded, so the token *was* accepted; the condition is simply left as it was, which means
+it can be absent on a first reconcile that lands straight on a version failure.
 
 ### Reasons
 
 | Reason | Meaning |
 |---|---|
 | `Ready` | success. Carried by all three conditions when they are `True` |
-| `SecretMissing` | the Secret named by `spec.tokenSecretRef.name` does not exist in this namespace |
+| `SecretMissing` | a referenced Secret does not exist in this namespace — `spec.tokenSecretRef.name` or `spec.tlsConfig.caBundleSecretRef.name` |
 | `TokenMissing` | the Secret exists but the key is absent or empty |
 | `AuthError` | NetBox returned 401 or 403 — the token is wrong, expired, or lacks permission |
 | `ProbeFailed` | `GET /api/status/` failed for any other reason: unreachable host, TLS failure, 5xx, timeout, or a status body with no `netbox-version` |
 | `VersionUnsupported` | the version parsed and is outside `>=4.2, <5.0` |
 | `VersionUnparseable` | the version string could not be parsed at all |
-| `InvalidConfig` | the client could not be constructed: unparseable URL, non-http scheme, or an unreadable / unusable CA bundle |
+| `InvalidConfig` | the client could not be constructed: unparseable URL, non-http scheme, or a CA bundle Secret that exists but has no usable PEM under the key |
 
 ### Retry intervals
 
@@ -372,6 +394,12 @@ Retries are spaced by how likely a retry is to help.
 None of these is returned as a controller error. An unreachable or misconfigured NetBox is
 a condition on this object, not a controller failure — otherwise the manager's error rate
 becomes a function of someone else's uptime.
+
+The probe itself makes **one attempt per reconcile**: the controller builds its client with
+`MaxRetries: netbox.Retries(0)`, so there are no client-side retries on top of the requeue.
+One worker serves every endpoint, and four retries behind a 30-second timeout would let a
+single black-holed NetBox stall every other endpoint for minutes. The requeue in the table
+above is the retry.
 
 ## The supported-version gate
 
@@ -408,19 +436,37 @@ Conditions:
   Ready             False   VersionUnsupported   netbox 3.7.8 is outside the supported range >=4.2.0, <5.0.0
 ```
 
-It is **not** recorded on `VersionUnparseable`, because the controller never got a version
-it could use.
+It is recorded on `VersionUnparseable` too — the version is written to status *before* the
+gate runs, precisely because "that is not a version" is the case where seeing the raw
+string matters most:
 
-## Token rotation
+```
+Conditions:
+  Type              Status   Reason               Message
+  VersionSupported  False    VersionUnparseable   netbox reported version "": empty version string
+  Ready             False    VersionUnparseable   netbox reported version "": empty version string
+```
 
-The client cache is keyed by `(namespace, name, spec generation, token Secret
-resourceVersion)`, and the controller watches Secrets, mapping a Secret event back to the
-endpoints that reference it by name via a field index on `spec.tokenSecretRef.name`.
+## Rotating a token or a CA bundle
 
-So rotating a token is: write the new value into the Secret. The Secret gets a new
-`resourceVersion`, the watch enqueues the endpoint, the cache key misses, and the next
-reconcile builds a client with the new token. No invalidation logic, no restart. Editing
-`spec` invalidates the same way, through the generation half of the key.
+Write the new value into the Secret. That is the whole procedure — no restart, and nothing
+to invalidate by hand.
+
+The controller watches Secrets and maps a Secret event back to the endpoints that reference
+it, through a field index (`spec.secretRefs`) that covers **both**
+`spec.tokenSecretRef.name` and `spec.tlsConfig.caBundleSecretRef.name`. So a CA rotation is
+noticed as promptly as a token rotation, rather than waiting for the next
+`spec.resyncPeriod`.
+
+What makes the new value take effect is eviction, not a cache miss: the reconciler does not
+read through the client cache before building. It builds a client every reconcile and calls
+`put`, which drops any previous entry for the same endpoint and closes that client's idle
+connections. Editing `spec` goes through the same path. The cache key still carries the spec
+generation and the token Secret's `resourceVersion`, which makes an entry self-describing in
+a dump and is what a future read-through path would need.
+
+Object controllers read the cache by `(namespace, name)`; a miss means the endpoint is not
+`Ready` yet.
 
 ## Printer columns
 
@@ -450,20 +496,34 @@ works too.
 |---|---|---|---|
 | `kubectl apply` rejected, "should match `^https?://`" | none; admission refused the object | `spec.url` has no scheme | Write `https://host`, not `host` |
 | `kubectl apply` rejected, "Unsupported value" on `mode` | none; admission refused the object | `spec.mode` is not `Apply` or `DryRun` | Use one of the two, exactly as spelled |
-| `READY=False` immediately after apply | `Ready=False, Authenticated=False, Reason=SecretMissing` | Secret absent, or in another namespace | Create the Secret **in the endpoint's namespace**; there is no cross-namespace ref |
+| `READY=False` immediately after apply | `Ready=False, Authenticated=False, Reason=SecretMissing` | a referenced Secret is absent, or in another namespace. Read the message — it names which one | Create the Secret **in the endpoint's namespace**; there is no cross-namespace ref |
 | `READY=False`, Secret exists | `Ready=False, Authenticated=False, Reason=TokenMissing` | wrong key name, or the key holds an empty string | Match `spec.tokenSecretRef.key` to the Secret's key, or drop it to use `token` |
 | `READY=False` after a token rotation | `Ready=False, Authenticated=False, Reason=AuthError` | NetBox returned 401/403 — token revoked, expired, or read-only | Issue a token with write permission; the Secret watch picks it up with no restart |
-| `READY=False`, message names `x509` | `Ready=False, Reason=ProbeFailed` | NetBox serves a certificate the operator does not trust | Add the root via `spec.tlsConfig.caBundleSecretRef` (remember `key: ca.crt`) |
-| `READY=False`, message names `no usable certificates` | `Ready=False, Reason=InvalidConfig` | the CA Secret key holds something that is not PEM — or the key defaulted to `token` and picked up the wrong value | Set `caBundleSecretRef.key` explicitly and check the value is a PEM certificate |
-| `READY=False`, message names `secrets "…" not found` but points at the CA Secret | `Ready=False, Reason=InvalidConfig` | missing CA bundle Secret. It reports `InvalidConfig`, not `SecretMissing` | Create the Secret; note the CA Secret is **not** watched, so also touch the endpoint or wait for `resyncPeriod` |
+| `READY=False`, message names `x509` | `Ready=False, Reason=ProbeFailed`, both other conditions `Unknown` | NetBox serves a certificate the operator does not trust | Add the root via `spec.tlsConfig.caBundleSecretRef`; the key defaults to `ca.crt` |
+| `READY=False`, message names `no usable certificates` | `Ready=False, Reason=InvalidConfig` | the CA Secret key holds something that is not PEM | Check the value is a PEM certificate, and that `caBundleSecretRef.key` names the right key |
+| `READY=False`, message names `ca bundle secret … has no key` | `Ready=False, Reason=InvalidConfig` | the CA Secret exists but not under that key | Create the key, or point `caBundleSecretRef.key` at the one you have |
 | `READY=False`, message names `context deadline exceeded` | `Ready=False, Reason=ProbeFailed` | NetBox is slow or unreachable, or `spec.timeout` is too short | Raise `spec.timeout`; check the URL is reachable from the operator's network |
 | `READY=False`, `VERSION` populated | `VersionSupported=False, Reason=VersionUnsupported` | NetBox is older than 4.2 or 5.0+ | Upgrade NetBox to 4.2+. This is intentional — see the version gate above |
-| `READY=False`, `VERSION` empty | `VersionSupported=False, Reason=VersionUnparseable` | `GET /api/status/` returned a version string the parser could not read, or a proxy replaced the body | Confirm `curl -H "Authorization: Token …" $URL/api/status/` returns JSON with `netbox-version` |
+| `READY=False`, `VERSION` holds something that is not a version | `VersionSupported=False, Reason=VersionUnparseable` | `GET /api/status/` returned a version string the parser could not read, or a proxy replaced the body. The raw string is in `status.netboxVersion` and in the message | Confirm `curl -H "Authorization: Token …" $URL/api/status/` returns JSON with `netbox-version` |
 | `READY=False`, no condition changes at all, nothing in status | none | the object failed to decode — usually an unparseable `timeout` or `resyncPeriod` | Fix the duration string (`30s`, not `30 seconds`); check the manager log |
 | Objects report drift that never clears | `Ready=True` on the endpoint | `spec.mode: DryRun` — reads happen, writes are suppressed | Set `mode: Apply` |
 | Objects stuck `WaitingForEndpoint` | endpoint is `Ready=False` for any reason | no client is handed out while `Ready` is false | Fix the endpoint; the objects converge on their own |
 | Conditions look wrong for the spec you just applied | `status.observedGeneration` < `metadata.generation` | the reconcile for the new spec has not completed | Wait one reconcile; if it persists, check the manager log |
-| `Authenticated=True` but `Ready=False` | `Ready=False, Reason=ProbeFailed` or `InvalidConfig` | those reasons do not touch `Authenticated`, so it is stale from the last good reconcile | Believe `Ready` |
+| `Authenticated=Unknown` and `VersionSupported=Unknown` | `Ready=False, Reason=ProbeFailed` or `InvalidConfig` | the probe never ran, so neither question was answered this reconcile. `Unknown` is the honest answer, not a bug | Fix the cause named in the `Ready` message |
+
+## Secret RBAC, and the current blast radius
+
+The Secret reference is same-namespace only, and that is deliberate: `SecretKeyRef` has no
+`namespace` field because reading a Secret across namespaces is a privilege escalation, and
+supporting it would force the operator's Secret permissions to be cluster-wide.
+
+Be aware that today they are anyway. The controller's RBAC marker generates a `ClusterRole`
+granting `get`, `list` and `watch` on Secrets **cluster-wide**, rather than a `Role` per
+namespace that actually contains a `NetBoxEndpoint`. NBO-004's design note calls for the
+narrower grant; narrowing it is tracked as
+[issue #100](https://github.com/ricardomolendijk/netbox-operator/issues/100). Until that
+lands, deploying this operator gives it read access to every Secret in the cluster — worth
+knowing before you install it in a shared cluster.
 
 ## Related
 

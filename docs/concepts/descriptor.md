@@ -174,7 +174,8 @@ key" are different queries with different results, and the difference is silent.
 
 `NullField.Param()` emits the Django `isnull` lookup — `vrf_id__isnull`, sent as `true`.
 Omitting `vrf_id` instead matches that address **in every VRF**, so a global address adopts
-an identical address out of somebody's VRF and starts managing it.
+an identical address out of somebody's VRF and starts managing it. [Lookups](lookups.md)
+covers the query side, including why the value has to be the literal `true`.
 
 The pin is also **state-dependent**, which is the part that is easy to get wrong. A
 candidate that pins `parent_id` to null asserts the parent is unset, so it may only be used
@@ -226,6 +227,10 @@ double underscore. Two values are permitted:
 | `LookupExact` (`""`, the zero value) | `?slug=eu-west` | everything, by default |
 | `LookupIExact` (`"ie"`) | `?name__ie=dns` | fields unique on `lower(name)` |
 
+`internal/netbox` mirrors these constants under the same names. They are repeated rather
+than shared because neither package imports the other, and because the strings are NetBox's
+wire format rather than a choice either package gets to make.
+
 `dcim.Device` is unique on `(Lower('name'), site, tenant)` and
 `virtualization.VirtualMachine` on `(Lower('name'), cluster, tenant)`
 (`docs/netbox-schema.md` → `dcim.Device.meta.constraints`,
@@ -238,6 +243,9 @@ per-field property of the natural key rather than a client-wide setting.
 The zero value is the exact match, so a field that declares nothing gets the conservative
 behaviour. Substring, prefix and negation lookups are deliberately absent from the permitted
 set: a natural key has to identify at most one object, and those cannot.
+
+How these get rendered into a query string, and the step-by-step of the duplicate they
+prevent, is in [lookups](lookups.md).
 
 ## `UpdateStrategy` and `RecreateOn`
 

@@ -67,6 +67,8 @@ Longer form, one page each:
   no per-kind code, and how an object's identity is established before it has an ID.
 - [Drift detection](docs/concepts/drift.md) — why what NetBox returns is not what you
   wrote, and the comparison rules that keep a reconcile from PATCHing forever.
+- [Lookups](docs/concepts/lookups.md) — how a natural key becomes a query string, and the
+  two silent failures that come from getting it wrong.
 - [Errors and retries](docs/concepts/errors-and-retries.md) — every NetBox failure as a
   typed error, what gets retried, and why an ambiguous lookup is never a silent choice.
 
