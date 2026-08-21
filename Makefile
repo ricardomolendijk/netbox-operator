@@ -39,10 +39,15 @@ help: ## Show this help.
 generate: controller-gen ## Generate DeepCopy methods.
 	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./api/..."
 
+
 .PHONY: manifests
 manifests: controller-gen ## Generate CRDs and RBAC into config/.
+	@# paths=./... rather than listing ./api/... and ./internal/... separately:
+	@# controller-gen fails hard on a path pattern that matches no package, and git does
+	@# not track empty directories, so a fresh checkout has no ./internal/... until the
+	@# first controller lands. Found by CI on exactly that clean checkout.
 	$(CONTROLLER_GEN) rbac:roleName=manager-role crd \
-		paths="./api/..." paths="./internal/..." \
+		paths="./..." \
 		output:crd:artifacts:config=config/crd/bases \
 		output:rbac:artifacts:config=config/rbac
 
