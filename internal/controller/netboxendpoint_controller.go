@@ -188,15 +188,26 @@ func (r *NetBoxEndpointReconciler) fail(ctx context.Context, e *netboxv1alpha1.N
 	// A failure upstream of a check must not leave that check's previous answer standing:
 	// a stale Authenticated=True next to Ready=False reads as "the token is fine", which
 	// is not something this reconcile established. Unknown is the honest value.
+	// Every condition must describe *this* reconcile. Which ones are knowable depends on
+	// how far the reconcile got, so the switch is on the stage that failed.
 	switch reason {
 	case netboxv1alpha1.ReasonAuthError, netboxv1alpha1.ReasonTokenMissing, netboxv1alpha1.ReasonSecretMissing:
+		// Failed at or before reading the token: authentication is answered, the version
+		// was never asked.
 		setCondition(e, netboxv1alpha1.ConditionAuthenticated, metav1.ConditionFalse, reason, cause.Error())
 		setCondition(e, netboxv1alpha1.ConditionVersionSupported, metav1.ConditionUnknown, reason,
 			"not probed: authentication failed first")
 	case netboxv1alpha1.ReasonVersionUnsupported, netboxv1alpha1.ReasonVersionUnparseable:
+		// Reaching the version gate means the probe succeeded, which means the token was
+		// accepted. Leaving Authenticated unwritten made it absent on a first reconcile
+		// that lands straight on a version failure.
+		setCondition(e, netboxv1alpha1.ConditionAuthenticated, metav1.ConditionTrue,
+			netboxv1alpha1.ReasonReady, "token accepted")
 		setCondition(e, netboxv1alpha1.ConditionVersionSupported, metav1.ConditionFalse, reason, cause.Error())
 	default:
-		// ProbeFailed, InvalidConfig: neither question was answered this time.
+		// ProbeFailed, InvalidConfig, CABundleMissing: the token itself may be perfectly
+		// good, so claiming Authenticated=False would point the reader at the wrong
+		// Secret. Neither question was answered.
 		setCondition(e, netboxv1alpha1.ConditionAuthenticated, metav1.ConditionUnknown, reason,
 			"not established: "+cause.Error())
 		setCondition(e, netboxv1alpha1.ConditionVersionSupported, metav1.ConditionUnknown, reason,
@@ -253,7 +264,7 @@ func orDefaultKey(key, fallback string) string {
 // whichever field referenced it.
 func reasonForConfig(err error) string {
 	if apierrors.IsNotFound(err) {
-		return netboxv1alpha1.ReasonSecretMissing
+		return netboxv1alpha1.ReasonCABundleMissing
 	}
 	return netboxv1alpha1.ReasonInvalidConfig
 }

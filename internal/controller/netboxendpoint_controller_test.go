@@ -302,6 +302,73 @@ func TestCABundleKeyDefaultsToCACrt(t *testing.T) {
 	})
 }
 
+// TestVersionFailureStillReportsAuthenticated pins that every condition describes the
+// same reconcile. Reaching the version gate proves the token was accepted, so leaving
+// Authenticated unwritten made it absent entirely on a first reconcile that lands
+// straight on a version failure.
+func TestVersionFailureStillReportsAuthenticated(t *testing.T) {
+	k8s, _, ns := k8sClient, clients, newNamespace(t)
+	srv := netboxStub(t, "3.7.8", http.StatusOK)
+	makeSecret(t, k8s, ns, "nb-token", "valid-token")
+	makeEndpoint(t, k8s, ns, "oldbox", srv.URL, "nb-token", netboxv1alpha1.EndpointModeApply)
+
+	eventually(t, "VersionSupported=False", func() bool {
+		e := fetch(t, k8s, ns, "oldbox")
+		if e == nil {
+			return false
+		}
+		c := conditionOf(e, netboxv1alpha1.ConditionVersionSupported)
+		return c != nil && c.Status == metav1.ConditionFalse
+	})
+
+	e := mustFetch(t, k8s, ns, "oldbox")
+	c := conditionOf(e, netboxv1alpha1.ConditionAuthenticated)
+	if c == nil {
+		t.Fatal("Authenticated is absent; reaching the version gate proves the token was accepted")
+	}
+	if c.Status != metav1.ConditionTrue {
+		t.Errorf("Authenticated = %v, want True", c.Status)
+	}
+}
+
+// TestMissingCABundleIsNotAnAuthFailure pins that a missing CA bundle does not claim the
+// token failed -- the token read fine, and saying otherwise sends the reader to the wrong
+// Secret.
+func TestMissingCABundleIsNotAnAuthFailure(t *testing.T) {
+	k8s, _, ns := k8sClient, clients, newNamespace(t)
+	srv := netboxStub(t, "4.6.8", http.StatusOK)
+	makeSecret(t, k8s, ns, "nb-token", "valid-token")
+
+	endpoint := &netboxv1alpha1.NetBoxEndpoint{
+		ObjectMeta: metav1.ObjectMeta{Name: "noca", Namespace: ns},
+		Spec: netboxv1alpha1.NetBoxEndpointSpec{
+			URL:            srv.URL,
+			TokenSecretRef: netboxv1alpha1.SecretKeyRef{Name: "nb-token"},
+			TLSConfig: &netboxv1alpha1.TLSConfig{
+				CABundleSecretRef: &netboxv1alpha1.SecretKeyRef{Name: "absent-ca"},
+			},
+		},
+	}
+	if err := k8s.Create(context.Background(), endpoint); err != nil {
+		t.Fatalf("creating endpoint: %v", err)
+	}
+	t.Cleanup(func() { _ = k8s.Delete(context.Background(), endpoint) })
+
+	eventually(t, "CABundleMissing", func() bool {
+		e := fetch(t, k8s, ns, "noca")
+		if e == nil {
+			return false
+		}
+		c := conditionOf(e, netboxv1alpha1.ConditionReady)
+		return c != nil && c.Reason == netboxv1alpha1.ReasonCABundleMissing
+	})
+
+	e := mustFetch(t, k8s, ns, "noca")
+	if c := conditionOf(e, netboxv1alpha1.ConditionAuthenticated); c == nil || c.Status != metav1.ConditionUnknown {
+		t.Errorf("Authenticated = %v, want Unknown -- the token was never rejected", c)
+	}
+}
+
 func TestDryRunModeReachesTheClient(t *testing.T) {
 	k8s, cache, ns := k8sClient, clients, newNamespace(t)
 	srv := netboxStub(t, "4.6.8", http.StatusOK)

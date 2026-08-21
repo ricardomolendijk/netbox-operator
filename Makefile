@@ -84,9 +84,14 @@ test-e2e: ## Run e2e tests against a kind cluster and a live NetBox.
 	fi
 	go test ./test/e2e/ -v -ginkgo.v
 
+# Paths whose contents are produced by controller-gen. Listed explicitly so that a dirty
+# working tree does not read as stale codegen: the two failures have different fixes, and
+# conflating them makes the target useless locally.
+GENERATED_PATHS ?= config/crd config/rbac api/v1alpha1/zz_generated.deepcopy.go
+
 .PHONY: verify
 verify: manifests generate ## Fail if generated output is not committed.
-	@git diff --exit-code || { \
+	@git diff --exit-code -- $(GENERATED_PATHS) || { \
 		echo ""; \
 		echo "Generated output is stale. Run 'make manifests generate' and commit the result."; \
 		exit 1; }

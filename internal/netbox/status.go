@@ -3,6 +3,7 @@ package netbox
 import (
 	"context"
 	"fmt"
+	"net/http"
 )
 
 // ServerStatus is the useful part of GET /api/status/.
@@ -18,7 +19,7 @@ type ServerStatus struct {
 // requires a valid token for it -- so one call answers "can we reach it", "is the token
 // good" and "what version is it".
 func (c *Client) Status(ctx context.Context) (ServerStatus, error) {
-	body, err := c.do(ctx, "GET", c.base+"/status/", "status", nil)
+	body, err := c.do(ctx, http.MethodGet, c.base+"/status/", "status", nil)
 	if err != nil {
 		return ServerStatus{}, err
 	}
