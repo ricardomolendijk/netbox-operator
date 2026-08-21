@@ -8,4 +8,4 @@ Actions are pinned to a commit SHA rather than a tag, because a tag can be moved
 
 | Workflow | Gates |
 |---|---|
-| `ci.yaml` | `make build vet lint test verify`, `kustomize build`, `ruff check hack/` |
+| `ci.yaml` | `make build vet lint test verify`, `kustomize build`, `ruff check hack/`, `make test-schema` |

@@ -88,9 +88,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      # hack/*.py must not run here -- they need a NetBox source checkout -- but linting
-      # them is cheap and they are the source of docs/netbox-schema.md.
+      # A full regeneration needs a NetBox source checkout, which this job has not got --
+      # but linting is cheap and the extractors are the source of docs/netbox-schema.md.
       - name: Ruff
         uses: astral-sh/ruff-action@f14634c415d3e63ffd4d550a22f037df4c734a60 # v3.1.0
         with:
           args: check hack/
+
+      # test_digest.py runs the pipeline over test/fixtures/netbox-models instead, so the
+      # extraction defects behind ~112 CRD field lists stay regression-tested without one.
+      - name: Test the extraction pipeline
+        run: make test-schema

@@ -72,6 +72,10 @@ test: manifests generate fmt vet envtest ## Run unit tests and envtest.
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" \
 		go test $$(go list ./... | grep -v /test/e2e) -coverprofile cover.out
 
+.PHONY: test-schema
+test-schema: ## Run the schema extraction pipeline against test/fixtures/netbox-models.
+	python3 hack/test_digest.py
+
 .PHONY: test-e2e
 test-e2e: ## Run e2e tests against a kind cluster and a live NetBox.
 	@if [ -z "$$(find test/e2e -name '*_test.go' 2>/dev/null)" ]; then \
