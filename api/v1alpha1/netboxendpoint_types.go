@@ -50,16 +50,20 @@ type SecretKeyRef struct {
 	// +kubebuilder:validation:MinLength=1
 	Name string `json:"name"`
 
-	// Key within the Secret. Defaults to "token".
-	// +kubebuilder:default=token
+	// Key within the Secret. Left unset, the controller uses a default appropriate to
+	// the field: "token" for tokenSecretRef, "ca.crt" for caBundleSecretRef.
+	//
+	// Deliberately not a +kubebuilder:default: this type is used for both, a marker
+	// applies at every use site, and defaulting a CA bundle's key to "token" makes the
+	// controller's own fallback unreachable and the endpoint fail with InvalidConfig.
 	// +optional
 	Key string `json:"key,omitempty"`
 }
 
 // TLSConfig tunes the TLS handshake with NetBox.
 type TLSConfig struct {
-	// InsecureSkipVerify disables certificate verification. Reported on the endpoint's
-	// status when set, because it is not a thing to forget about.
+	// InsecureSkipVerify disables certificate verification. Logged at info on every
+	// successful reconcile, because it is not a thing to forget about.
 	// +optional
 	InsecureSkipVerify bool `json:"insecureSkipVerify,omitempty"`
 

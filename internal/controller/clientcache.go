@@ -8,10 +8,13 @@ import (
 	"github.com/ricardomolendijk/netbox-operator/internal/netbox"
 )
 
-// clientKey identifies a cached client. The Secret's resourceVersion is part of the key
-// so that rotating a token invalidates the cache by construction: a rotated Secret gets
-// a new resourceVersion, misses the cache, and the next reconcile builds a client with
-// the new token. No invalidation logic, no restart.
+// clientKey identifies a cached client.
+//
+// The reconciler does not read through this cache before building -- it builds a client
+// every reconcile and calls put, which evicts any previous entry for the same endpoint.
+// So invalidation comes from that eviction, not from a key miss. The generation and
+// secretVersion are carried anyway because they make an entry self-describing in a dump,
+// and because a future read-through path would need exactly this key.
 type clientKey struct {
 	namespace     string
 	name          string
@@ -32,11 +35,16 @@ func NewClientCache() *ClientCache {
 
 // put stores client under key and drops any other entry for the same endpoint, so a
 // rotated Secret or an edited spec cannot leave a stale client reachable.
+//
+// The evicted client's idle connections are released. Without that, every reconcile --
+// including every resync tick -- would leave behind a transport holding an idle
+// keep-alive pool, so connection pools would accumulate for the lifetime of the process.
 func (c *ClientCache) put(key clientKey, client *netbox.Client) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	for existing := range c.clients {
+	for existing, previous := range c.clients {
 		if existing.namespace == key.namespace && existing.name == key.name {
+			previous.CloseIdleConnections()
 			delete(c.clients, existing)
 		}
 	}
@@ -62,8 +70,9 @@ func (c *ClientCache) Lookup(namespace, name string) (*netbox.Client, bool) {
 func (c *ClientCache) Forget(namespace, name string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	for key := range c.clients {
+	for key, client := range c.clients {
 		if key.namespace == namespace && key.name == name {
+			client.CloseIdleConnections()
 			delete(c.clients, key)
 		}
 	}

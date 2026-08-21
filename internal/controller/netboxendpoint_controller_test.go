@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"encoding/pem"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -137,11 +138,12 @@ func TestBadTokenHandsOutNoClient(t *testing.T) {
 	if c := conditionOf(e, netboxv1alpha1.ConditionAuthenticated); c.Reason != netboxv1alpha1.ReasonAuthError {
 		t.Errorf("reason = %q, want %q", c.Reason, netboxv1alpha1.ReasonAuthError)
 	}
-	if c := conditionOf(e, netboxv1alpha1.ConditionReady); c == nil || c.Status != metav1.ConditionTrue {
-		// Ready must be False; asserting the inverse to make the failure message useful.
-		if c != nil && c.Status == metav1.ConditionFalse {
-			return
-		}
+	if c := conditionOf(e, netboxv1alpha1.ConditionReady); c == nil || c.Status != metav1.ConditionFalse {
+		t.Errorf("Ready = %v, want False", c)
+	}
+	// A failure before the version probe must not leave a stale answer standing.
+	if c := conditionOf(e, netboxv1alpha1.ConditionVersionSupported); c == nil || c.Status != metav1.ConditionUnknown {
+		t.Errorf("VersionSupported = %v, want Unknown -- it was never probed", c)
 	}
 	if _, ok := cache.Lookup(ns, "badauth"); ok {
 		t.Error("a client was cached for an endpoint with a bad token")
@@ -252,6 +254,52 @@ func TestSecretRotationRebuildsTheClientWithoutRestart(t *testing.T) {
 	if firstClient == secondClient {
 		t.Error("the same client instance survived a token rotation")
 	}
+}
+
+// TestCABundleKeyDefaultsToCACrt guards a defaulting bug: SecretKeyRef is shared by
+// tokenSecretRef and caBundleSecretRef, so a +kubebuilder:default on its Key field
+// applied to both and defaulted the CA bundle's key to "token" -- making the controller's
+// own ca.crt fallback unreachable and the endpoint fail with InvalidConfig.
+func TestCABundleKeyDefaultsToCACrt(t *testing.T) {
+	k8s, cache, ns := k8sClient, clients, newNamespace(t)
+	srv := netboxStub(t, "4.6.8", http.StatusOK)
+	makeSecret(t, k8s, ns, "nb-token", "valid-token")
+
+	// A real certificate, taken from a throwaway TLS server rather than hand-written:
+	// the client parses the bundle, so an invalid PEM fails for the wrong reason.
+	tlsSrv := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	t.Cleanup(tlsSrv.Close)
+	caPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: tlsSrv.Certificate().Raw})
+
+	ca := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "nb-ca", Namespace: ns},
+		// Only ca.crt. If the key defaults to "token" this Secret looks empty.
+		Data: map[string][]byte{"ca.crt": caPEM},
+	}
+	if err := k8s.Create(context.Background(), ca); err != nil {
+		t.Fatalf("creating ca secret: %v", err)
+	}
+
+	endpoint := &netboxv1alpha1.NetBoxEndpoint{
+		ObjectMeta: metav1.ObjectMeta{Name: "withca", Namespace: ns},
+		Spec: netboxv1alpha1.NetBoxEndpointSpec{
+			URL:            srv.URL,
+			TokenSecretRef: netboxv1alpha1.SecretKeyRef{Name: "nb-token"},
+			TLSConfig: &netboxv1alpha1.TLSConfig{
+				// Key deliberately omitted.
+				CABundleSecretRef: &netboxv1alpha1.SecretKeyRef{Name: "nb-ca"},
+			},
+		},
+	}
+	if err := k8s.Create(context.Background(), endpoint); err != nil {
+		t.Fatalf("creating endpoint: %v", err)
+	}
+	t.Cleanup(func() { _ = k8s.Delete(context.Background(), endpoint) })
+
+	eventually(t, "client built with the CA bundle", func() bool {
+		_, ok := cache.Lookup(ns, "withca")
+		return ok
+	})
 }
 
 func TestDryRunModeReachesTheClient(t *testing.T) {

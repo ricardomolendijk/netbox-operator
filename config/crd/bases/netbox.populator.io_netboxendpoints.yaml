@@ -102,8 +102,13 @@ spec:
                       PEM-encoded.
                     properties:
                       key:
-                        default: token
-                        description: Key within the Secret. Defaults to "token".
+                        description: |-
+                          Key within the Secret. Left unset, the controller uses a default appropriate to
+                          the field: "token" for tokenSecretRef, "ca.crt" for caBundleSecretRef.
+
+                          Deliberately not a +kubebuilder:default: this type is used for both, a marker
+                          applies at every use site, and defaulting a CA bundle's key to "token" makes the
+                          controller's own fallback unreachable and the endpoint fail with InvalidConfig.
                         type: string
                       name:
                         description: Name of the Secret.
@@ -114,16 +119,21 @@ spec:
                     type: object
                   insecureSkipVerify:
                     description: |-
-                      InsecureSkipVerify disables certificate verification. Reported on the endpoint's
-                      status when set, because it is not a thing to forget about.
+                      InsecureSkipVerify disables certificate verification. Logged at info on every
+                      successful reconcile, because it is not a thing to forget about.
                     type: boolean
                 type: object
               tokenSecretRef:
                 description: TokenSecretRef names the Secret holding the API token.
                 properties:
                   key:
-                    default: token
-                    description: Key within the Secret. Defaults to "token".
+                    description: |-
+                      Key within the Secret. Left unset, the controller uses a default appropriate to
+                      the field: "token" for tokenSecretRef, "ca.crt" for caBundleSecretRef.
+
+                      Deliberately not a +kubebuilder:default: this type is used for both, a marker
+                      applies at every use site, and defaulting a CA bundle's key to "token" makes the
+                      controller's own fallback unreachable and the endpoint fail with InvalidConfig.
                     type: string
                   name:
                     description: Name of the Secret.

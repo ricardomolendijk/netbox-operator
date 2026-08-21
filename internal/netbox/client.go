@@ -155,6 +155,13 @@ func buildTransport(cfg Config) (http.RoundTripper, error) {
 	return &http.Transport{TLSClientConfig: tlsConfig}, nil
 }
 
+// CloseIdleConnections releases keep-alive connections this client is holding. Callers
+// that replace a client -- on a token rotation, say -- must call it, or every replacement
+// leaves an idle connection pool behind for the lifetime of the process.
+func (c *Client) CloseIdleConnections() {
+	c.http.CloseIdleConnections()
+}
+
 // Mode reports whether this client is allowed to mutate NetBox.
 func (c *Client) Mode() Mode { return c.mode }
 

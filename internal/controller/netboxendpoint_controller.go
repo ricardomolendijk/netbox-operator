@@ -13,7 +13,6 @@ import (
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -25,7 +24,7 @@ import (
 
 // secretRefIndex indexes endpoints by the Secret they read, so a Secret event can find
 // the endpoints to re-reconcile without listing every endpoint in the cluster.
-const secretRefIndex = "spec.tokenSecretRef.name"
+const secretRefIndex = "spec.secretRefs"
 
 // NetBoxEndpointReconciler turns a NetBoxEndpoint into a live, authenticated,
 // version-checked client that object controllers fetch from the cache.
@@ -61,7 +60,7 @@ func (r *NetBoxEndpointReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	cfg, err := r.buildConfig(ctx, endpoint, token)
 	if err != nil {
-		return r.fail(ctx, endpoint, netboxv1alpha1.ReasonInvalidConfig, err)
+		return r.fail(ctx, endpoint, reasonForConfig(err), err)
 	}
 	nbClient, err := netbox.New(cfg)
 	if err != nil {
@@ -73,13 +72,16 @@ func (r *NetBoxEndpointReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return r.fail(ctx, endpoint, reasonFor(err), err)
 	}
 
+	// Recorded before the gate: whatever NetBox said is the most useful thing in status
+	// when the answer is "that is not a version".
+	endpoint.Status.NetBoxVersion = status.Version
+	endpoint.Status.Plugins = status.Plugins
+
 	version, supported, err := netbox.SupportedVersion(status.Version)
 	if err != nil {
 		return r.fail(ctx, endpoint, netboxv1alpha1.ReasonVersionUnparseable,
 			fmt.Errorf("netbox reported version %q: %w", status.Version, err))
 	}
-	endpoint.Status.NetBoxVersion = status.Version
-	endpoint.Status.Plugins = status.Plugins
 
 	if !supported {
 		// The guard that matters. NetBox 4.2 replaced `site` with a polymorphic scope on
@@ -100,7 +102,8 @@ func (r *NetBoxEndpointReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	logf.FromContext(ctx).Info("endpoint ready",
 		"url", endpoint.Spec.URL, "netboxVersion", status.Version,
-		"mode", cfg.Mode, "plugins", status.Plugins)
+		"mode", cfg.Mode, "plugins", status.Plugins,
+		"insecureSkipVerify", cfg.InsecureSkipVerify)
 
 	setCondition(endpoint, netboxv1alpha1.ConditionAuthenticated, metav1.ConditionTrue,
 		netboxv1alpha1.ReasonReady, "token accepted")
@@ -109,7 +112,12 @@ func (r *NetBoxEndpointReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	setCondition(endpoint, netboxv1alpha1.ConditionReady, metav1.ConditionTrue,
 		netboxv1alpha1.ReasonReady, "client available")
 
-	return ctrl.Result{RequeueAfter: resyncPeriod(endpoint)}, r.writeStatus(ctx, endpoint)
+	if err := r.writeStatus(ctx, endpoint); err != nil {
+		// controller-runtime discards RequeueAfter when the error is non-nil, so the two
+		// must never be returned together or a status conflict silently loses the resync.
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{RequeueAfter: resyncPeriod(endpoint)}, nil
 }
 
 // readToken fetches the API token and the Secret's resourceVersion, which is what makes
@@ -121,10 +129,7 @@ func (r *NetBoxEndpointReconciler) readToken(ctx context.Context, e *netboxv1alp
 		return "", "", fmt.Errorf("reading token secret %s: %w", name, err)
 	}
 
-	key := e.Spec.TokenSecretRef.Key
-	if key == "" {
-		key = "token"
-	}
+	key := orDefaultKey(e.Spec.TokenSecretRef.Key, "token")
 	token := string(secret.Data[key])
 	if token == "" {
 		return "", "", fmt.Errorf("%w: secret %s has no key %q", errTokenMissing, name, key)
@@ -138,10 +143,14 @@ var (
 
 func (r *NetBoxEndpointReconciler) buildConfig(ctx context.Context, e *netboxv1alpha1.NetBoxEndpoint, token string) (netbox.Config, error) {
 	cfg := netbox.Config{
-		URL:     e.Spec.URL,
-		Token:   token,
-		Mode:    netbox.Mode(e.Spec.Mode),
-		Timeout: e.Spec.Timeout.Duration,
+		URL:   e.Spec.URL,
+		Token: token,
+		Mode:  netbox.Mode(e.Spec.Mode),
+		// No client-side retries on the probe. The controller already requeues, one
+		// worker serves every endpoint, and four retries behind a 30s timeout let a
+		// single black-holed NetBox stall every other endpoint for minutes.
+		MaxRetries: netbox.Retries(0),
+		Timeout:    e.Spec.Timeout.Duration,
 	}
 	if e.Spec.RateLimit != nil {
 		cfg.QPS = float64(e.Spec.RateLimit.QPS)
@@ -162,10 +171,7 @@ func (r *NetBoxEndpointReconciler) buildConfig(ctx context.Context, e *netboxv1a
 	if err := r.Get(ctx, name, secret); err != nil {
 		return netbox.Config{}, fmt.Errorf("reading ca bundle secret %s: %w", name, err)
 	}
-	key := ref.Key
-	if key == "" {
-		key = "ca.crt"
-	}
+	key := orDefaultKey(ref.Key, "ca.crt")
 	cfg.CABundle = secret.Data[key]
 	if len(cfg.CABundle) == 0 {
 		return netbox.Config{}, fmt.Errorf("ca bundle secret %s has no key %q", name, key)
@@ -179,11 +185,22 @@ func (r *NetBoxEndpointReconciler) fail(ctx context.Context, e *netboxv1alpha1.N
 	r.Cache.Forget(e.Namespace, e.Name)
 	logf.FromContext(ctx).Error(cause, "endpoint not ready", "reason", reason)
 
+	// A failure upstream of a check must not leave that check's previous answer standing:
+	// a stale Authenticated=True next to Ready=False reads as "the token is fine", which
+	// is not something this reconcile established. Unknown is the honest value.
 	switch reason {
 	case netboxv1alpha1.ReasonAuthError, netboxv1alpha1.ReasonTokenMissing, netboxv1alpha1.ReasonSecretMissing:
 		setCondition(e, netboxv1alpha1.ConditionAuthenticated, metav1.ConditionFalse, reason, cause.Error())
+		setCondition(e, netboxv1alpha1.ConditionVersionSupported, metav1.ConditionUnknown, reason,
+			"not probed: authentication failed first")
 	case netboxv1alpha1.ReasonVersionUnsupported, netboxv1alpha1.ReasonVersionUnparseable:
 		setCondition(e, netboxv1alpha1.ConditionVersionSupported, metav1.ConditionFalse, reason, cause.Error())
+	default:
+		// ProbeFailed, InvalidConfig: neither question was answered this time.
+		setCondition(e, netboxv1alpha1.ConditionAuthenticated, metav1.ConditionUnknown, reason,
+			"not established: "+cause.Error())
+		setCondition(e, netboxv1alpha1.ConditionVersionSupported, metav1.ConditionUnknown, reason,
+			"not probed: "+cause.Error())
 	}
 	setCondition(e, netboxv1alpha1.ConditionReady, metav1.ConditionFalse, reason, cause.Error())
 
@@ -213,13 +230,32 @@ func reasonFor(err error) string {
 	switch {
 	case errors.Is(err, errTokenMissing):
 		return netboxv1alpha1.ReasonTokenMissing
-	case apierrors.IsNotFound(errors.Unwrap(err)):
+	case apierrors.IsNotFound(err):
 		return netboxv1alpha1.ReasonSecretMissing
 	case errors.As(err, &authErr):
 		return netboxv1alpha1.ReasonAuthError
 	default:
 		return netboxv1alpha1.ReasonProbeFailed
 	}
+}
+
+// orDefaultKey applies the per-field Secret key default. It lives here rather than as a
+// CRD marker because SecretKeyRef is shared by tokenSecretRef and caBundleSecretRef,
+// which need different defaults.
+func orDefaultKey(key, fallback string) string {
+	if key == "" {
+		return fallback
+	}
+	return key
+}
+
+// reasonForConfig classifies a config failure. A missing Secret is a missing Secret
+// whichever field referenced it.
+func reasonForConfig(err error) string {
+	if apierrors.IsNotFound(err) {
+		return netboxv1alpha1.ReasonSecretMissing
+	}
+	return netboxv1alpha1.ReasonInvalidConfig
 }
 
 func resyncPeriod(e *netboxv1alpha1.NetBoxEndpoint) time.Duration {
@@ -256,16 +292,20 @@ func (r *NetBoxEndpointReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			if !ok {
 				return nil
 			}
-			return []string{endpoint.Spec.TokenSecretRef.Name}
+			// Both Secrets, so rotating a CA bundle is noticed as promptly as rotating a
+			// token rather than waiting for the next resync.
+			names := []string{endpoint.Spec.TokenSecretRef.Name}
+			if tls := endpoint.Spec.TLSConfig; tls != nil && tls.CABundleSecretRef != nil {
+				names = append(names, tls.CABundleSecretRef.Name)
+			}
+			return names
 		}); err != nil {
-		return fmt.Errorf("indexing endpoints by token secret: %w", err)
+		return fmt.Errorf("indexing endpoints by referenced secrets: %w", err)
 	}
 
 	err := ctrl.NewControllerManagedBy(mgr).
 		For(&netboxv1alpha1.NetBoxEndpoint{}).
-		Watches(&corev1.Secret{},
-			handler.EnqueueRequestsFromMapFunc(r.endpointsForSecret),
-			builder.WithPredicates()).
+		Watches(&corev1.Secret{}, handler.EnqueueRequestsFromMapFunc(r.endpointsForSecret)).
 		Named("netboxendpoint").
 		Complete(r)
 	if err != nil {
