@@ -61,8 +61,19 @@ loop rather than a tree walk. Consequences:
 | **Spec omission means "don't manage"** | Only fields present in the spec are sent, so the operator co-exists with humans editing the same object. |
 | **Never crash, never lie** | Every failure becomes a Condition, an Event and a backed-off requeue. `status.id` is set only once the object provably exists server-side. |
 
-Longer form: [`docs/concepts/`](docs/concepts/). Decisions and their rationale:
-[`docs/decisions/`](docs/decisions/).
+Longer form, one page each:
+
+- [The Descriptor](docs/concepts/descriptor.md) — how one engine drives ~120 kinds with
+  no per-kind code, and how an object's identity is established before it has an ID.
+- [Drift detection](docs/concepts/drift.md) — why what NetBox returns is not what you
+  wrote, and the comparison rules that keep a reconcile from PATCHing forever.
+- [Lookups](docs/concepts/lookups.md) — how a natural key becomes a query string, and the
+  two silent failures that come from getting it wrong.
+- [Errors and retries](docs/concepts/errors-and-retries.md) — every NetBox failure as a
+  typed error, what gets retried, and why an ambiguous lookup is never a silent choice.
+
+Full index: [`docs/README.md`](docs/README.md). Decisions and their rationale:
+[`docs/decisions/README.md`](docs/decisions/README.md).
 
 ## Target NetBox version
 
@@ -73,13 +84,13 @@ hand-reading the REST docs — see [`docs/netbox-schema.md`](docs/netbox-schema.
 
 ## Supported kinds
 
-Nothing is implemented yet. The delivery order is deliberate: **the logical model
-first** — tenancy, IPAM and virtualization — with physical plant (racks, power,
-modules, cabling), circuits and VPN deliberately last.
+`NetBoxEndpoint` is the first kind to land. The delivery order for the rest is
+deliberate: **the logical model first** — tenancy, IPAM and virtualization — with
+physical plant (racks, power, modules, cabling), circuits and VPN deliberately last.
 
 | Group | Kinds | Status |
 |---|---|---|
-| Connection | `NetBoxEndpoint` | M1 |
+| Connection | [`NetBoxEndpoint`](docs/reference/netboxendpoint.md) | **Available** (M1) |
 | `extras` | `NetBoxTag` | M1 |
 | `dcim` | `NetBoxSite` | M1 |
 | `tenancy` | `NetBoxTenantGroup`, `NetBoxTenant` | M3 |
