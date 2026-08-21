@@ -1,6 +1,9 @@
 package netbox
 
-import "strconv"
+import (
+	"sort"
+	"strconv"
+)
 
 // Object is a decoded NetBox API object.
 //
@@ -72,4 +75,113 @@ func asInt(v any) (int, bool) {
 	default:
 		return 0, false
 	}
+}
+
+// toFloat coerces a JSON scalar to a float. NetBox returns decimal columns as strings
+// (u_height "1.00", vcpus "2.00"), so a string that parses as a number is a number.
+func toFloat(v any) (float64, bool) {
+	switch n := v.(type) {
+	case float64:
+		return n, true
+	case int:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	case string:
+		parsed, err := strconv.ParseFloat(n, 64)
+		if err != nil {
+			return 0, false
+		}
+		return parsed, true
+	default:
+		return 0, false
+	}
+}
+
+// nestedIDs pulls the ids out of a list of nested objects, which is how NetBox returns
+// an M2M field on read.
+func nestedIDs(v any) []int {
+	list := asList(v)
+	ids := make([]int, 0, len(list))
+	for _, item := range list {
+		if id, ok := asInt(item["id"]); ok {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+// idsOf reads a list of bare ids, which is how an M2M field is written.
+func idsOf(v any) []int {
+	switch list := v.(type) {
+	case []int:
+		return list
+	case []any:
+		ids := make([]int, 0, len(list))
+		for _, item := range list {
+			// A desired M2M list may still contain nested objects when it came from a
+			// live object rather than from a spec, so accept both shapes.
+			if obj, ok := item.(map[string]any); ok {
+				if id, ok := asInt(obj["id"]); ok {
+					ids = append(ids, id)
+				}
+				continue
+			}
+			if id, ok := asInt(item); ok {
+				ids = append(ids, id)
+			}
+		}
+		return ids
+	default:
+		return nil
+	}
+}
+
+// stringsOf reads a list of strings, accepting the nested-object shape NetBox uses for
+// object-type lists on some endpoints.
+func stringsOf(v any) []string {
+	list, ok := v.([]any)
+	if !ok {
+		if typed, ok := v.([]string); ok {
+			return typed
+		}
+		return nil
+	}
+	out := make([]string, 0, len(list))
+	for _, item := range list {
+		if s, ok := item.(string); ok {
+			out = append(out, s)
+			continue
+		}
+		if obj, ok := item.(map[string]any); ok {
+			if s := asString(obj["app_label"]); s != "" {
+				out = append(out, s+"."+asString(obj["model"]))
+			}
+		}
+	}
+	return out
+}
+
+func sortedInts(in []int) []int {
+	out := append([]int(nil), in...)
+	sort.Ints(out)
+	return out
+}
+
+func sortedStrings(in []string) []string {
+	out := append([]string(nil), in...)
+	sort.Strings(out)
+	return out
+}
+
+func equalInts(a, b []int) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
