@@ -14,5 +14,7 @@ router.register('device-types', views.DeviceTypeViewSet)
 # missing endpoint row is a Kind with no CRD at all.
 router.register("racks", views.RackViewSet)
 router.register("rack-reservations", RackReservationViewSet)
+router.register('special-rack-kinds', views.SpecialRackKindViewSet)
+router.register('rack-ports', views.RackPortViewSet)
 
 urlpatterns = router.urls
