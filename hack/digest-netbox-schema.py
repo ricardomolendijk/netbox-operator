@@ -12,6 +12,12 @@ NOT_A_COLUMN=('GenericRelation','ManyToManyField')
 NEVER_REQ=('CounterCacheField',)
 # Columns that hold a reference and nothing else -- no empty value to fall back on.
 RELATIONS=('ForeignKey','OneToOneField','TreeForeignKey')
+# Width of the type column. Must fit the longest class name the extractor can emit
+# (RestrictedGenericForeignKey, 27) or that row's REQ/detail columns shift right and the
+# table stops lining up. test_digest.py checks it against FIELD_TYPES and MANAGER_TARGETS
+# rather than against whatever the fixture happens to declare -- widening the whitelist is
+# what breaks this, and the fixture would not notice.
+TYPE_COL = 27
 MODULE_PREFIX=re.compile(r'^[\w.]*\.')  # models.PROTECT -> PROTECT, models.SET(x) -> SET(x)
 
 def req(f,by_name,seen=()):
@@ -75,9 +81,8 @@ for k,v in sorted(d.items()):
         # `def='VLANStatusChoices.STATUS_ACTIVE'` read exactly like the literal 'active'.
         if 'default' in f: extra.append(f"def={sym(f,'default') if f.get('default_unresolved') else repr(f['default'])}")
         if f.get('choices'): extra.append(f"choices={f['choices']}")
-        # Wider than the 28 it was, to keep the type column aligned once a row carries the
-        # class that declares it; rstrip so an extra-less row does not pad out to the limit.
-        print(f"     {label:38} {f['type']:22}{r:4} {' '.join(extra)}".rstrip())
+        # rstrip so an extra-less row does not pad out to the limit.
+        print(f"     {label:38} {f['type']:{TYPE_COL}}{r:4} {' '.join(extra)}".rstrip())
     for mk in ('unique_together','constraints','ordering','indexes'):
         if mk not in v['meta']: continue
         # meta.constraints is the natural key the engine looks an object up by, so it is the
