@@ -3,6 +3,11 @@
 **Status:** Accepted · 2026-08-21
 **Amended:** 2026-08-24 — rule 5 added, settling whether inline child sugar belongs in
 `v1alpha1` at all ([#17](https://github.com/ricardomolendijk/netbox-operator/issues/17)).
+**Amended:** 2026-08-24 — rules 3 and 4 settled as the answer to *which* relationships get an
+owner reference, and what cross-namespace containment therefore gives up
+([#175](https://github.com/ricardomolendijk/netbox-operator/issues/175)). The
+[deletion policy](#deletion-policy) default is now per Kind
+([#176](https://github.com/ricardomolendijk/netbox-operator/issues/176)).
 
 ## The two different relationships
 
@@ -60,6 +65,19 @@ competes with rule 3; GC still counts it, so the cascade works.
 It is added **only when the reference is legal as an owner reference**. Since every kind
 is namespaced ([ADR-0002](0002-crd-scoping.md)), that reduces to a single rule: **same
 namespace, or no owner reference.**
+
+That was chosen over the narrower rule — owner references *only* for children the operator
+itself created (rule 3), and none for containment at all — and the cost of choosing it is
+stated here rather than left to be discovered:
+
+**An owner reference is only legal within one namespace, and a NetBox foreign key is not.**
+A `NetBoxPrefix` in `team-blue` scoped to a `NetBoxSite` in `netbox-catalogue` gets no owner
+reference, ever, so deleting that site does not remove the prefix — the prefix keeps working
+and reports its parent gone. Move both objects into one namespace and the identical manifest
+cascades. **The same YAML therefore cascades or does not cascade depending on namespace
+layout**, which is a property of Kubernetes garbage collection and not something the operator
+can paper over. It is why rule 4 emits `CascadeUnavailable` instead of staying quiet: the only
+defence against that surprise is saying, on the object, that the cascade is not there.
 
 It is skipped, with a `CascadeUnavailable` condition explaining why, when:
 
@@ -179,9 +197,14 @@ recoverable, which is the property that decided it.
 ## Deletion policy
 
 Independently of ownership, each object carries
-`spec.deletionPolicy: Delete | Retain`. `Delete` (the default) removes the NetBox
+`spec.deletionPolicy: Delete | Retain`. `Delete` removes the NetBox
 object when the CR goes away. `Retain` drops the finalizer and leaves NetBox alone —
 for migrating off the operator, or for objects that are shared with something else.
+
+**The default depends on the Kind**: `Retain` for the IPAM kinds, `Delete` everywhere else
+([#176](https://github.com/ricardomolendijk/netbox-operator/issues/176)). The table of which
+is which, and the reasoning, live in
+[deletion — the default depends on the Kind](../concepts/deletion.md#the-default-depends-on-the-kind).
 
 A `PROTECT`-ed deletion is not an error to retry quickly: it becomes a
 `Deleting=False, Reason=Protected` condition naming the objects that block it, and a
