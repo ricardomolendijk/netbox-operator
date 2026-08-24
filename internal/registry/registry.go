@@ -74,6 +74,23 @@ var (
 	// ErrInvalidGenericFK is returned for a generic-FK spec missing a column or its
 	// legal targets.
 	ErrInvalidGenericFK = errors.New("incomplete generic-FK spec")
+
+	// ErrCachedNotReadOnly is returned for a denormalised column a generic FK declares
+	// that is not also in ReadOnly.
+	//
+	// The check exists because writing one is the failure this whole mechanism is about:
+	// NetBox maintains `_site` from `(scope_type, scope_id)` and ignores an attempt to set
+	// it, so a descriptor that treats it as writable produces a field the operator sends
+	// forever and NetBox drops every time.
+	ErrCachedNotReadOnly = errors.New("cached generic-FK column is not read-only")
+
+	// ErrGenericFKTypeMismatch is returned when a union member's target kind reports an
+	// object type the pair does not permit.
+	//
+	// Checked across the registry rather than on the descriptor, because the answer lives
+	// on the *target's* descriptor. It is what stops `scope_type` from being written with a
+	// spelling NetBox rejects, or -- worse -- one it accepts for a different model.
+	ErrGenericFKTypeMismatch = errors.New("union member's object type is not permitted by the pair")
 )
 
 // objectTypePattern is the Django ContentType spelling: `model` is lowercased and
@@ -149,6 +166,44 @@ type GenericFKSpec struct {
 	// field writes both columns, which is why it is declared here rather than in Fields:
 	// a Field maps one spec name to one API name, and this reference has two.
 	Spec string
+
+	// Members are the union's own fields, each naming the Kind it resolves against. It is
+	// what turns the union from a shape the API server validates into one the resolver can
+	// dispatch on, and it is data so that a new member is a descriptor edit rather than a
+	// branch in internal/resolver.
+	//
+	// Optional, like Field.Target and for the same reason: a pair whose legal targets have
+	// no CRD yet -- ipam.IPAddress.assigned_object points at interfaces and FHRP groups --
+	// would otherwise have to name GVKs nobody has built. A pair with no members resolves
+	// to nothing and is reported unresolved, which is what the engine did before this
+	// existed.
+	Members []GenericFKMember
+
+	// Cached are the read-only denormalised columns NetBox maintains from this pair:
+	// `_region`, `_site_group`, `_site` and `_location` for CachedScopeMixin
+	// (docs/netbox-schema.md -> dcim.CachedScopeMixin). Each must also appear in
+	// Descriptor.ReadOnly, which Validate enforces.
+	//
+	// Declared per pair rather than as a constant because not every scoped model has them:
+	// ipam.VLANGroup declares `scope_type` / `scope_id` on the model itself and carries no
+	// caches at all.
+	Cached []string
+}
+
+// GenericFKMember is one arm of a polymorphic reference: the CR spec field, and the Kind it
+// points at.
+type GenericFKMember struct {
+	// Field is the union's own field name, which is its JSON name -- `siteRef`, not
+	// `scope.siteRef` and not `site`.
+	Field string
+
+	// Target is the Kind this member resolves against. The object type written to the
+	// pair's type column is that Kind's own Descriptor.ObjectType, never a string repeated
+	// here, so `dcim.sitegroup` is spelled once in the codebase.
+	//
+	// Write it as the matching typed alias's own answer,
+	// `v1alpha1.SiteRef{}.TargetGVK()`.
+	Target schema.GroupVersionKind
 }
 
 // Descriptor is everything the engine needs to reconcile one kind, as data.
@@ -434,6 +489,57 @@ func (d Descriptor) validateGenericFKs() error {
 				errs = append(errs, fmt.Errorf("%w: %q on %s", ErrInvalidObjectType, objectType, generic.TypeField))
 			}
 		}
+
+		errs = append(errs, d.validateGenericFKMembers(generic), d.validateGenericFKCaches(generic))
+	}
+
+	return errors.Join(errs...)
+}
+
+// validateGenericFKMembers checks the union's arms. A member with no target Kind cannot be
+// dispatched on, and a duplicate member field would make which Kind a spec value resolves
+// against depend on slice order.
+func (d Descriptor) validateGenericFKMembers(generic GenericFKSpec) error {
+	errs := make([]error, 0, len(generic.Members))
+	seen := make(map[string]struct{}, len(generic.Members))
+
+	for _, member := range generic.Members {
+		// Keyed on Kind rather than on GVK.Empty(): a target carrying a group and a
+		// version and no Kind is not empty and is not resolvable either, and it is the
+		// shape a half-written member actually has.
+		if member.Field == "" || member.Target.Kind == "" {
+			errs = append(errs, fmt.Errorf("%w: member %+v of %s", ErrInvalidGenericFK, member, generic.Spec))
+
+			continue
+		}
+
+		if _, dup := seen[member.Field]; dup {
+			errs = append(errs, fmt.Errorf("%w: %s.%s is declared twice",
+				ErrInvalidGenericFK, generic.Spec, member.Field))
+		}
+
+		seen[member.Field] = struct{}{}
+	}
+
+	return errors.Join(errs...)
+}
+
+// validateGenericFKCaches ties the pair's denormalised columns to ReadOnly, so that a kind
+// declaring `_site` as a cache and forgetting it in ReadOnly fails the boot rather than
+// PATCHing a column NetBox ignores on every resync.
+func (d Descriptor) validateGenericFKCaches(generic GenericFKSpec) error {
+	errs := make([]error, 0, len(generic.Cached))
+
+	for _, column := range generic.Cached {
+		if column == "" {
+			errs = append(errs, fmt.Errorf("%w: cached on %s", ErrEmptyField, generic.Spec))
+
+			continue
+		}
+
+		if !slices.Contains(d.ReadOnly, column) {
+			errs = append(errs, fmt.Errorf("%w: %s", ErrCachedNotReadOnly, column))
+		}
 	}
 
 	return errors.Join(errs...)
@@ -517,7 +623,37 @@ func (r *Registry) Validate() error {
 	}
 
 	for _, d := range descriptors {
-		errs = append(errs, d.Validate())
+		errs = append(errs, d.Validate(), r.validateUnionTypes(d))
+	}
+
+	return errors.Join(errs...)
+}
+
+// validateUnionTypes checks each union member's target kind against the object types its
+// pair permits.
+//
+// Cross-descriptor, so it lives here rather than on Descriptor: the object type written to
+// `scope_type` comes off the *target's* descriptor, and AllowedTypes is the referring kind's
+// statement of what NetBox will accept there. A member whose target reports a type the pair
+// does not list is a descriptor bug that would otherwise surface as a 400 on the first write.
+//
+// A target with no descriptor is skipped rather than rejected. Declaring a member before its
+// Kind exists is the normal state through M2-M9 -- NetBoxSiteGroup and NetBoxLocation are
+// still to come -- and the resolver already reports such a member as RefKindUnavailable.
+func (r *Registry) validateUnionTypes(d Descriptor) error {
+	var errs []error
+
+	for _, generic := range d.GenericFKs {
+		for _, member := range generic.Members {
+			target, registered := r.byGVK[member.Target]
+			if !registered || slices.Contains(generic.AllowedTypes, target.ObjectType) {
+				continue
+			}
+
+			errs = append(errs, fmt.Errorf("descriptor %s: %w: %s.%s -> %s is %q, permitted are %v",
+				d.GVK, ErrGenericFKTypeMismatch, generic.Spec, member.Field,
+				member.Target.Kind, target.ObjectType, generic.AllowedTypes))
+		}
 	}
 
 	return errors.Join(errs...)
