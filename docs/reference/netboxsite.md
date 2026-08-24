@@ -279,7 +279,9 @@ order-sensitive array — and a choice or a decimal is not one of those. See
 ### What is not here yet
 
 `region`, `group`, `tenant` and `asns` need the reference system (NBO-011, NBO-012). `tags`
-needs both that and [#106](https://github.com/ricardomolendijk/netbox-operator/issues/106).
+needs that too — the field itself is described in
+[the schema reference](../netbox-schema.md) now that NBO-073 emits it, but the CR still has
+no way to name a `NetBoxTag`.
 Custom fields need NBO-059.
 
 ## Printer columns

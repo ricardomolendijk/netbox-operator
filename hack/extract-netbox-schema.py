@@ -13,6 +13,14 @@ FIELD_TYPES = {
     'TreeForeignKey',
 }
 FK_TYPES = ('ForeignKey','OneToOneField','ManyToManyField','TreeForeignKey')
+# Not fields at all: a manager is an accessor, and the AST walk therefore attributed no
+# column from one -- correctly, since there is none. But taggit's TaggableManager is how
+# `tags` is declared, and `tags` is a writable REST field on every PrimaryModel and
+# OrganizationalModel, so leaving it out left the most-used field in the catalogue absent
+# from every entry. Emitted as what it is: an M2M onto the tag model through a through
+# table, never a column. Any other manager (`objects = TreeManager()`) is a queryset
+# accessor and no part of the API, so it stays out.
+MANAGER_TARGETS = {'TaggableManager': 'extras.Tag'}
 GENERIC_FK_TYPES = ('GenericForeignKey','RestrictedGenericForeignKey')
 # Kwargs that must be an integer to be usable downstream; the rest of what we keep is
 # either boolean or symbolic by nature (choices, default).
@@ -112,7 +120,7 @@ for app in ['circuits','core','dcim','extras','ipam','netbox','tenancy','users',
                         if fn.endswith('Field') and fn not in FIELD_TYPES:
                             print(f"!! {app}.{node.name}.{name}: unknown field type {fn}, column omitted",
                                   file=sys.stderr)
-                        if fn in FIELD_TYPES:
+                        if fn in FIELD_TYPES or fn in MANAGER_TARGETS:
                             kwn = kwargs_of(v)
                             kw = {k: lit(n) for k, n in kwn.items()}
                             entry = {'name': name, 'type': fn}
@@ -133,6 +141,14 @@ for app in ['circuits','core','dcim','extras','ipam','netbox','tenancy','users',
                                 # pair, not a column: requiredness lives on the pair, so record
                                 # which fields those are. NetBox passes them positionally.
                                 entry['ct_field'] = kw.get('ct_field') or (lit(v.args[0]) if v.args else 'content_type')
+                            if fn in MANAGER_TARGETS:
+                                # The target is the manager's, not the declaration's: taggit
+                                # reaches the tag model through the through table, which is the
+                                # only thing the source names. `not_a_column` is what stops the
+                                # digest deriving REQ from kwargs a manager does not have.
+                                entry['to'] = MANAGER_TARGETS[fn]
+                                entry['not_a_column'] = True
+                                if 'through' in kw: entry['through'] = kw['through']
                             for k in ('null','blank','max_length','unique','default','choices','db_index','max_digits','decimal_places'):
                                 if k in kw: entry[k] = kw[k]
                             # A symbolic default (`default=VLANStatusChoices.STATUS_ACTIVE`,

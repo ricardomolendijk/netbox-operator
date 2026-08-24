@@ -7,7 +7,7 @@ from dcim.fields import RackUnitField
 from dcim.models.mixins import WeightMixin
 from dcim.models.sites import Site
 from netbox.models import OrganizationalModel, PrimaryModel
-from utilities.fields import ColorField
+from utilities.fields import ColorField, CounterCacheField
 
 
 class RackRole(OrganizationalModel):
@@ -29,6 +29,13 @@ class DeviceType(PrimaryModel, WeightMixin):
     )
     slug = models.SlugField(
         max_length=100,
+    )
+    # NetBox sets `default=0` and `editable=False` inside CounterCacheField itself, so the
+    # AST sees neither: every one of the 35 real rows came out REQ — a counter the API
+    # maintains and refuses to accept, demanded on create.
+    interface_template_count = CounterCacheField(
+        to_model='dcim.InterfaceTemplate',
+        to_field='device_type',
     )
 
     class Meta:
