@@ -101,8 +101,8 @@ me a free address out of this prefix" is a
 
 ## `spec`
 
-`endpointRef` and `onConflict` come from the shared envelope and behave identically on every
-kind — see [`NetBoxTag`](netboxtag.md#specendpointref) for the full treatment of each.
+`endpointRef`, `onConflict` and `customFields` come from the shared envelope and behave
+identically on every kind — see [`NetBoxTag`](netboxtag.md#specendpointref) for the full treatment of each.
 
 ### `spec.deletionPolicy`
 

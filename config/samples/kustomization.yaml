@@ -15,4 +15,7 @@ resources:
 - netbox_v1alpha1_netboxvrf.yaml
 - netbox_v1alpha1_netboxvlangroup.yaml
 - netbox_v1alpha1_netboxvlan.yaml
+- netbox_v1alpha1_netboxclustertype.yaml
+- netbox_v1alpha1_netboxclustergroup.yaml
+- netbox_v1alpha1_netboxcluster.yaml
 - netbox_v1alpha1_netboxipaddressclaim.yaml

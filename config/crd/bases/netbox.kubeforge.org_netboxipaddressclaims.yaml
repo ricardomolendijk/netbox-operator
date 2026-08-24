@@ -364,10 +364,9 @@ spec:
                       These keys are also the only ones compared: NetBox merges a partial `custom_fields`
                       PATCH and returns every custom field defined for the object type, including ones the
                       operator knows nothing about, so it compares the keys it sets and leaves the rest
-                      alone. `custom_fields` therefore has two states rather than the three every other
-                      optional field has -- absent or empty means "manage nothing", not "clear everything",
-                      and a value written here cannot be removed through this API
-                      (docs/concepts/field-ownership.md, #171).
+                      alone. An absent or empty map therefore still means "manage nothing" rather than
+                      "clear everything"; removing one key's value is said with a `null` under
+                      spec.customFields (docs/concepts/field-ownership.md, #196).
                     type: object
                   tag:
                     description: |-
