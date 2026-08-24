@@ -89,6 +89,22 @@ test: manifests generate fmt vet envtest ## Run unit tests and envtest.
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" \
 		go test $$(go list ./... | grep -v /test/e2e) -coverprofile cover.out
 
+# The IR the generator reads. Committed and version-stamped, so `make gen-kinds` needs no
+# NetBox checkout and no network (docs/regenerating.md).
+IR ?= hack/testdata/ir-4.6.8.json.gz
+
+.PHONY: gen-kinds
+gen-kinds: ## Emit the generated Kinds from the IR, then regenerate deepcopy and CRDs.
+	go run ./hack/gen-types -ir $(IR)
+	$(MAKE) generate manifests
+
+# Not wired into `verify` yet, and deliberately: every NetBox kind in the tree today is
+# hand-written, so there is nothing committed for it to check. NBO-043 emits the M3/M4 kinds
+# for real and adds this to `verify` and to CI in the same change.
+.PHONY: gen-check
+gen-check: ## Fail if any generated Kind differs from what the IR would produce.
+	go run ./hack/gen-types -ir $(IR) -check
+
 .PHONY: lint-schema
 lint-schema: ## Lint hack/*.py with ruff, the same check CI runs.
 	@if command -v ruff >/dev/null 2>&1; then \

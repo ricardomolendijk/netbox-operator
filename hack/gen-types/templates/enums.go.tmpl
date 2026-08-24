@@ -1,0 +1,43 @@
+{{ template "header" .Header }}
+package v1alpha1
+
+// Every NetBox ChoiceSet the catalogue cites, as a Go string type, keyed by the choices class
+// rather than by the column: two kinds sharing a set share one type, and a set used by one
+// kind today still lives here so a second consumer does not move the declaration.
+{{ range $enum := .Enums }}
+// {{ .Name }} is one value of NetBox's {{ .Class }} ({{ .Source }}).
+{{- if .Closed }}
+//
+// A closed set: the class declares no FIELD_CHOICES key, so its members cannot be replaced or
+// extended by a deployment and the schema pins them.
+//
+// Every value is quoted in the marker, and that is load-bearing rather than tidy: unquoted,
+// controller-gen parses `2.5gbase-t` as the number 2.5 and silently discards the rest of the
+// value, so the schema ends up permitting a number nobody can write.
+//
+// +kubebuilder:validation:Enum={{ range $i, $v := .Values }}{{ if $i }};{{ end }}{{ if $v.Quoted }}"{{ $v.Value }}"{{ else }}{{ $v.Value }}{{ end }}{{ end }}
+{{- else }}
+//
+// Not a closed set, and that is why there is no Enum marker here. {{ .Class }} declares
+// `key = '{{ .Key }}'`, so a deployment's FIELD_CHOICES setting can replace or extend its
+// members (netbox/utilities/choices.py, ChoiceSetMeta.__new__). Pinning the values below into
+// the CRD would make the API server reject a value that deployment considers legal, and an
+// admission rejection is not a state the operator can report its way out of. The constants
+// are the values NetBox ships and the ones a manifest should normally use; the schema is left
+// as open as NetBox is, bounded only by length.
+//
+{{- if .MaxLength }}
+// +kubebuilder:validation:MaxLength={{ .MaxLength }}
+{{- end }}
+{{- end }}
+type {{ .Name }} {{ .Base }}
+
+const (
+{{- range .Values }}
+{{- if .Label }}
+	// {{ .Const }} is {{ printf "%q" .Label }}.
+{{- end }}
+	{{ .Const }} {{ $enum.Name }} = {{ if .Quoted }}"{{ .Value }}"{{ else }}{{ .Value }}{{ end }}
+{{- end }}
+)
+{{ end }}

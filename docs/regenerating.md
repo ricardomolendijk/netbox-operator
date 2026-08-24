@@ -227,3 +227,122 @@ e2e against a live instance is deferred to #29. Until then:
 curl -sH "Authorization: Token $NETBOX_TOKEN" \
   "$NETBOX_URL/api/schema/?format=json" > /tmp/netbox-openapi.json
 ```
+
+## Emitting the Kinds
+
+`hack/gen-types` turns the IR into Go: three files per Kind plus two shared ones.
+
+```sh
+make gen-kinds                      # ir -> emit -> make generate manifests
+make gen-check                      # write nothing; fail if any output differs from the tree
+
+go run ./hack/gen-types -kinds ipam.Prefix,ipam.VRF -out /tmp/scratch
+```
+
+| Output | Content |
+|---|---|
+| `api/v1alpha1/<app>_<kind>.go` | Spec/Status/List structs, kubebuilder markers, printer columns |
+| `internal/registry/<app>_<kind>.go` | the `Descriptor` literal and its `init()` |
+| `internal/controller/<app>_<kind>_controller.go` | the RBAC markers and the one-line `init()` |
+| `api/v1alpha1/zz_generated_refs.go` | every typed `ObjectRef` alias, deduplicated by target |
+| `api/v1alpha1/zz_generated_enums.go` | every choices class as a Go type and const block |
+
+The two shared files are built from the **whole** catalogue, hand-written Kinds included, and
+never from a `-kinds` subset: they are keyed by NetBox name rather than by Kind, so narrowing
+them to three Kinds would delete the other hundred's enums.
+
+`-kinds` names a Kind explicitly and emits it even when `overrides.yaml` marks it
+`handWritten`. That is how the generator is diffed against a human — point `-out` at a scratch
+tree, not at the repository.
+
+### What `overrides.yaml` may contain
+
+Three categories, and nothing else. A fourth entry is a bug in the derivation: a fact that
+could be read out of NetBox belongs in `hack/build-netbox-ir.py`, and a per-Kind *behaviour*
+belongs in the `Descriptor` as data. **No template may name a Kind** —
+`TestTemplatesNameNoKind` greps every template for every model name, object type and CRD kind
+in the IR, because a per-Kind branch in a template is a `switch` on Kind with extra
+indirection and it defeats the reason the generator exists.
+
+| Key | Why it cannot be derived |
+|---|---|
+| `shortNames` | there is no schema for what a human types; the default `nb` + model is unusable for a long one (ADR-0001) |
+| `printerColumns` | which columns matter in `kubectl get` is a judgement |
+| `cascades` | half the answer is a `GenericRelation` on the *target* and half an `on_delete=CASCADE` cache column on the referrer (#214) |
+| `containmentRef` | which one of several cascading references gets the single owner reference (ADR-0003 rule 4) |
+| `naturalKeys` | for a Kind whose identity is a NetBox *convention* rather than a `UNIQUE` — `ipam.Prefix` has no `meta.constraints` at all |
+| `readOnlyExtra` | `mptt.MPTTModel` is outside the NetBox tree, so the AST walk never sees `_depth` or `_children` |
+| `goTypes` | an `ArrayField`'s element type is a constructor argument the AST walk does not record |
+| `inherited` / `omit` | a column the embedded `NetBoxObjectSpec` already supplies, or one deliberately absent |
+| `extraCEL` | a rule that is a fact about NetBox rather than about the column, such as `isCIDR` |
+| `extraRefs` | an alias no NetBox foreign key produces — nothing in NetBox points at `ipam.Prefix`, but `NetBoxIPAddressClaim` does |
+
+### What it refuses to emit
+
+Every refusal names the Kind, the column and the missing fact, and a full run reports all of
+them in one pass rather than one per invocation. Nothing is emitted on a guess:
+
+- a column with no Go type — an `ArrayField` with no `goTypes` entry, or a Django class the
+  mapper does not know;
+- a null-pinned column whose filter class cannot be decided — `registry.NullColumn` has no zero
+  value, so an undeclared class fails `Validate()` at boot;
+- a Kind with no natural-key candidate, which would fail `Validate()` with `ErrNoNaturalKey`;
+- a polymorphic reference whose permitted object types the IR could not resolve, since an empty
+  `AllowedTypes` means the type half accepts anything — the opposite of what a union is for;
+- a `CustomFieldable` Kind absent from `stampedObjectTypes` in
+  `internal/controller/provenance_test.go`. That list is deliberately **not** generated: it is
+  the one independent copy of the set and the only assertion that can catch a Kind dropped from
+  the provenance stamp, so emitting it would make the assertion a generator agreeing with
+  itself. The emitter checks it and prints the paste-ready lines instead.
+
+### How a null pin is spelled
+
+An FK filter in NetBox is a `ModelMultipleChoiceFilter`, which takes
+`FILTER_NEGATION_LOOKUP_MAP` and so registers `n` and nothing else: neither `?vrf_id__isnull`
+nor `?vrf_id__empty` exists, and django-filter drops both without a word. The class is decided
+from the column's own Django field class and there is no default:
+
+| Column | `registry.NullColumn` | On the wire |
+|---|---|---|
+| `ForeignKey`, `OneToOneField`, `TreeForeignKey` | `NullColumnRef` | `?parent_id=null` |
+| `CharField`, `SlugField`, `TextField`, … | `NullColumnChar` | `?rd=null` |
+| any non-FK numeric column | `NullColumnNumeric` | `?scope_id__empty=true` |
+| the type half of a polymorphic pair | — | redirected to the paired `_id` half |
+
+The last row is not a shortcut. `scope_type`'s filter is `MultiValueContentTypeFilter`, which
+registers neither spelling, and the sentinel there is worse than dropped: it makes the filter
+`scope_type__in=[]`, which matches **nothing**, so the engine would create a duplicate instead
+of adopting. The `_id` half asks the same question, because NetBox refuses one half of the pair
+without the other.
+
+The IR marks every FK null pin `unusable`, which was true until the sentinel landed. The IR is
+the authority on *what the filterset registers*; the emitter is the authority on what the
+client can spell, and those are different questions.
+
+### An extendable choice set is emitted open
+
+26 of the 89 choice sets declare a FIELD_CHOICES `key`, so a deployment's `FIELD_CHOICES`
+setting can **replace or extend** their members: their values are a default, not a closed set.
+Those get the Go type and the const block — the documentation and the spelling a manifest should
+normally use — and **no `+kubebuilder:validation:Enum` marker**, bounded by `MaxLength` instead.
+Pinning them would make the API server reject a value that deployment considers legal, and an
+admission rejection is not a state the operator can report its way out of. The other 63 are
+pinned.
+
+Every value in an `Enum` marker is quoted, which is load-bearing rather than tidy: unquoted,
+controller-gen parses `2.5gbase-t` as the number `2.5` and silently discards the rest. For the
+same reason a generated CEL rule uses `[0-9]` and `[.]` rather than `\d` and `\.` — a backslash
+inside a double-quoted marker value is read as a Go char escape, and `\d` is not one, so the
+whole marker is rejected and no CRD is written at all.
+
+### Clobber protection
+
+Three independent mechanisms, because forgetting is easier than remembering:
+
+1. `handWritten:` in `overrides.yaml` — ingested and validated, emitted nowhere.
+2. **The header guard.** Every output path is checked *before* any file is written; if one
+   exists and does not begin with `// Code generated by hack/gen-types. DO NOT EDIT.` the whole
+   run aborts and writes nothing, because a partial regeneration leaves the tree in a state no
+   diff explains.
+3. `-check` — regenerate in memory and diff against the working tree, not against git, so a
+   tree with legitimately uncommitted work reports exactly the files the emitter would change.

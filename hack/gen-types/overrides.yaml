@@ -1,0 +1,363 @@
+# Per-kind data no reading of NetBox can supply, for hack/gen-types.
+#
+# Three categories and nothing else:
+#
+#   1. `shortNames` -- the `kubectl get` abbreviation. There is no schema for what humans type
+#      (docs/decisions/0001-*.md). The default is `nb` + the lower-cased model, which is right
+#      for a short model name and unusable for `virtualization.VirtualMachine`.
+#   2. `printerColumns` -- which columns matter in `kubectl get`. A judgement, not a fact.
+#   3. `cascades` -- whether the server deletes this kind's rows when a union member goes.
+#      Half the answer is a GenericRelation on the *target* and half is an `on_delete=CASCADE`
+#      denormalised column on the referrer, so it is a fact about the referring kind per
+#      target and cannot be defaulted (internal/registry/scope.go, #214).
+#
+# Anything else here is a bug in the derivation. An entry that could be read out of the IR
+# belongs in hack/build-netbox-ir.py, and a per-kind behaviour belongs in the Descriptor as
+# data -- never in a template conditional.
+#
+# `handWritten: true` keeps a kind out of a full run: it is still ingested and validated, so a
+# hand-written kind whose IR has moved is still a failure, it just is not overwritten. Naming
+# the kind in `--kinds` emits it anyway, which is how the generator is diffed against a human.
+
+# Initialisms that keep their casing in a Go identifier, matched whole-part and
+# case-insensitively: `vrf_id` is `VRFID` and `qinq_svlan` is `QinQSVLAN`. Whole parts only --
+# with prefix matching, `ID` in this list turns `idle` into `IDle`.
+acronyms:
+  - ADSL
+  - AH
+  - AKS
+  - AOC
+  - AS
+  - ASN
+  - AWS
+  - BGP
+  - BNC
+  - CARP
+  - CDP
+  - CPU
+  - CSV
+  - CVLAN
+  - DAC
+  - DHCP
+  - DNS
+  - DSL
+  - E1
+  - E3
+  - EKS
+  - EPON
+  - ESP
+  - EVPN
+  - FC
+  - FHRP
+  - GCP
+  - GENEVE
+  - GFP
+  - GKE
+  - GLBP
+  - GPON
+  - GRE
+  - HSRP
+  - HTTP
+  - HTTPS
+  - ICMP
+  - ID
+  - IKE
+  - IP
+  - IPAddresses
+  - IPSec
+  - IPV4
+  - IPV6
+  - ISCSI
+  - ISDN
+  - JSON
+  - KVM
+  - L2VPN
+  - LACP
+  - LAG
+  - LAN
+  - LDAP
+  - LLDP
+  - LXC
+  - MAC
+  - MPLS
+  - MTU
+  - NAPALM
+  - NFS
+  - NTP
+  - OC12
+  - OC3
+  - OIDC
+  - OSPF
+  - OVM
+  - PDU
+  - PON
+  - POTS
+  - PSU
+  - PoE
+  - QSFP
+  - QinQ
+  - RD
+  - RIR
+  - SAML
+  - SAS
+  - SATA
+  - SCSI
+  - SDN
+  - SFP
+  - SLA
+  - SLAAC
+  - SMTP
+  - SNMP
+  - SNMPV1
+  - SNMPV2C
+  - SNMPV3
+  - SSH
+  - SSL
+  - STP
+  - SVLAN
+  - SYSLOG
+  - T1
+  - T3
+  - TCP
+  - TLS
+  - UDP
+  - URL
+  - USB
+  - UUID
+  - VC
+  - VDC
+  - VDSL
+  - VID
+  - VIP
+  - VLAN
+  - VM
+  - VMWARE
+  - VRF
+  - VRRP
+  - VXLAN
+  - WAN
+  - WLAN
+  - WWN
+  - XEN
+  - XML
+  - YAML
+  - ipam.Prefix
+
+# Typed reference aliases no NetBox foreign key produces. NetBoxIPAddressClaim allocates out of
+# a prefix, and nothing in NetBox has a foreign key to ipam.Prefix, so there is nothing to
+# derive the alias from.
+extraRefs:
+  - ipam.Prefix
+
+kinds:
+  # ---------------------------------------------------------------------------------------
+  # The kinds M2-M4 shipped by hand. Kept out of a full run; regenerated into a scratch tree
+  # with `--kinds` when the generator is being diffed against them (NBO-043).
+  # ---------------------------------------------------------------------------------------
+
+  dcim.Region:
+    handWritten: true
+    # mptt.MPTTModel is outside the NetBox tree, so the AST walk never sees its two
+    # denormalised caches and the IR carries neither.
+    readOnlyExtra: [_depth, _children]
+    shortNames: [nbregion]
+    containmentRef: parentRef
+    printerColumns:
+      - {name: Slug, type: string, path: .spec.slug}
+      - {name: Parent, type: string, path: .spec.parentRef.name}
+
+  dcim.Site:
+    handWritten: true
+    shortNames: [nbsite]
+    printerColumns:
+      - {name: Slug, type: string, path: .spec.slug}
+      - {name: Status, type: string, path: .spec.status}
+      - {name: Region, type: string, path: .spec.regionRef.name}
+
+  dcim.SiteGroup:
+    handWritten: true
+    # mptt.MPTTModel is outside the NetBox tree, so the AST walk never sees its two
+    # denormalised caches and the IR carries neither.
+    readOnlyExtra: [_depth, _children]
+    shortNames: [nbsitegroup]
+    containmentRef: parentRef
+    printerColumns:
+      - {name: Slug, type: string, path: .spec.slug}
+      - {name: Parent, type: string, path: .spec.parentRef.name}
+
+  dcim.Location:
+    handWritten: true
+    # mptt.MPTTModel is outside the NetBox tree, so the AST walk never sees its two
+    # denormalised caches and the IR carries neither.
+    readOnlyExtra: [_depth, _children]
+    shortNames: [nblocation]
+    containmentRef: siteRef
+    printerColumns:
+      - {name: Slug, type: string, path: .spec.slug}
+      - {name: Site, type: string, path: .spec.siteRef.name}
+      - {name: Parent, type: string, path: .spec.parentRef.name}
+
+  extras.Tag:
+    handWritten: true
+    shortNames: [nbtag]
+    printerColumns:
+      - {name: Slug, type: string, path: .spec.slug}
+      - {name: Color, type: string, path: .spec.color}
+
+  tenancy.Tenant:
+    handWritten: true
+    shortNames: [nbtenant]
+    printerColumns:
+      - {name: Slug, type: string, path: .spec.slug}
+      - {name: Group, type: string, path: .spec.groupRef.name}
+
+  tenancy.TenantGroup:
+    handWritten: true
+    # mptt.MPTTModel is outside the NetBox tree, so the AST walk never sees its two
+    # denormalised caches and the IR carries neither.
+    readOnlyExtra: [_depth, _children]
+    shortNames: [nbtenantgroup]
+    containmentRef: parentRef
+    printerColumns:
+      - {name: Slug, type: string, path: .spec.slug}
+      - {name: Parent, type: string, path: .spec.parentRef.name}
+
+  ipam.Prefix:
+    handWritten: true
+    shortNames: [nbprefix]
+    containmentRef: scope
+    # ipam.Prefix carries no meta.constraints at all and `prefix` is not unique, so there is
+    # nothing to derive. `(vrf, prefix)` is the model's ordering tuple, which is a convention
+    # rather than a database guarantee: duplicates are legal when the enclosing VRF has
+    # `enforce_unique=false`. More than one match is a legitimate server state and is reported
+    # as a Conflict.
+    naturalKeys:
+      - doc: >-
+          `(vrf, prefix)` is ipam.Prefix's ordering tuple and NetBox's own identity for a
+          prefix; it is not a UNIQUE, so more than one match is a legitimate server state and
+          is reported as a Conflict rather than resolved by taking the first.
+        fields:
+          - {filter: prefix, spec: prefix}
+          - {filter: vrf_id, spec: vrfRef}
+      - doc: >-
+          The same identity in the global table. The `vrf_id` pin is load-bearing rather than
+          tidy: `?prefix=10.0.20.0/24` alone matches that CIDR in every VRF, so a global
+          prefix would adopt a VRF's prefix and then PATCH the VRF off somebody else's row.
+        fields:
+          - {filter: prefix, spec: prefix}
+        nullFields:
+          - {filter: vrf_id, spec: vrfRef, column: ref}
+    # All four scope targets declare a `prefixes` GenericRelation, and CachedScopeMixin's
+    # `_site` / `_location` are `on_delete=CASCADE` on top, so the site and location halves
+    # cascade twice over (docs/netbox-schema.md).
+    cascades: {regionRef: true, siteGroupRef: true, siteRef: true, locationRef: true}
+    printerColumns:
+      - {name: Prefix, type: string, path: .spec.prefix}
+      - {name: VRF, type: string, path: .spec.vrfRef.name}
+      - {name: Scope, type: string, path: .status.naturalKey.scope}
+      - {name: Status, type: string, path: .spec.status}
+
+  ipam.VRF:
+    handWritten: true
+    shortNames: [nbvrf]
+    # `rd` is UNIQUE on the column, which the derivation finds. The second candidate is not
+    # derivable from anything: `name` carries no UNIQUE, and a VRF with no RD being identified
+    # by name is NetBox's convention rather than its schema.
+    naturalKeys:
+      - doc: >-
+          `rd` is UNIQUE on the column (ipam/models/vrfs.py), so it identifies exactly one VRF
+          when it is set. It is optional, so a VRF without one falls to the next candidate.
+        fields:
+          - {filter: rd, spec: rd}
+      - doc: >-
+          A VRF with no route distinguisher is identified by name, which carries no UNIQUE: two
+          such VRFs may legitimately share one, so more than one match is a Conflict. `rd` is
+          pinned rather than omitted, or a VRF with no RD adopts one that has one.
+        fields:
+          - {filter: name, spec: name}
+        nullFields:
+          - {filter: rd, spec: rd, column: char}
+    printerColumns:
+      - {name: RD, type: string, path: .spec.rd}
+      - {name: Tenant, type: string, path: .spec.tenantRef.name}
+
+  ipam.RouteTarget:
+    handWritten: true
+    shortNames: [nbrt]
+    printerColumns:
+      - {name: Tenant, type: string, path: .spec.tenantRef.name}
+
+  ipam.VLAN:
+    handWritten: true
+    shortNames: [nbvlan]
+    printerColumns:
+      - {name: VID, type: integer, path: .spec.vid}
+      - {name: Name, type: string, path: .spec.name}
+      - {name: Site, type: string, path: .spec.siteRef.name}
+      - {name: Group, type: string, path: .spec.groupRef.name}
+      - {name: Status, type: string, path: .spec.status}
+
+  ipam.VLANGroup:
+    handWritten: true
+    shortNames: [nbvlangroup]
+    containmentRef: scope
+    cascades: {regionRef: true, siteGroupRef: true, siteRef: true, locationRef: true}
+    # `vid_ranges` is a Postgres ArrayField of integer pairs. The element type is a
+    # constructor argument the AST walk does not record, so there is nothing to derive.
+    goTypes: {vid_ranges: "[]VIDRange"}
+    printerColumns:
+      - {name: Slug, type: string, path: .spec.slug}
+      - {name: Scope, type: string, path: .status.naturalKey.scope}
+
+  ipam.IPAddress:
+    handWritten: true
+    shortNames: [nbip]
+    printerColumns:
+      - {name: Address, type: string, path: .spec.address}
+      - {name: VRF, type: string, path: .spec.vrfRef.name}
+      - {name: Status, type: string, path: .spec.status}
+
+  virtualization.ClusterType:
+    handWritten: true
+    shortNames: [nbctype]
+    printerColumns:
+      - {name: Slug, type: string, path: .spec.slug}
+
+  virtualization.ClusterGroup:
+    handWritten: true
+    shortNames: [nbcgroup]
+    printerColumns:
+      - {name: Slug, type: string, path: .spec.slug}
+
+  virtualization.Cluster:
+    handWritten: true
+    shortNames: [nbcluster]
+    containmentRef: scope
+    cascades: {regionRef: true, siteGroupRef: true, siteRef: true, locationRef: true}
+    printerColumns:
+      - {name: Type, type: string, path: .spec.typeRef.name}
+      - {name: Status, type: string, path: .spec.status}
+
+  virtualization.VirtualMachine:
+    handWritten: true
+    shortNames: [nbvm]
+    containmentRef: clusterRef
+    printerColumns:
+      - {name: Status, type: string, path: .spec.status}
+      - {name: Cluster, type: string, path: .spec.clusterRef.name}
+
+  virtualization.VMInterface:
+    handWritten: true
+    shortNames: [nbvmif]
+    containmentRef: virtualMachineRef
+    printerColumns:
+      - {name: VM, type: string, path: .spec.virtualMachineRef.name}
+      - {name: MAC, type: string, path: .spec.macAddress}
+
+  virtualization.VirtualDisk:
+    handWritten: true
+    shortNames: [nbvdisk]
+    containmentRef: virtualMachineRef
+    printerColumns:
+      - {name: VM, type: string, path: .spec.virtualMachineRef.name}
+      - {name: Size, type: integer, path: .spec.size}
