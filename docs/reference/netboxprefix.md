@@ -94,8 +94,10 @@ accepted and writes nothing is worse than a field that is not there.
 There is no `parentRef`, and there never will be. See
 [a prefix has no parent](#a-prefix-has-no-parent).
 
-There is no `fromPrefixRef` and no `prefixLength`: allocation is a separate kind
-([ADR-0004](../decisions/0004-claims-first-allocation.md)), so `spec.prefix` is required.
+There is no allocation field and no `prefixLength`: allocation is a separate kind
+([ADR-0004](../decisions/0004-claims-first-allocation.md)), so `spec.prefix` is required. "Give
+me a free address out of this prefix" is a
+[`NetBoxIPAddressClaim`](netboxipaddressclaim.md) pointing at it.
 
 ## `spec`
 

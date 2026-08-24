@@ -109,7 +109,7 @@ power, modules, cabling), circuits and VPN deliberately last.
 | `ipam` | `NetBoxVRF`, `NetBoxRouteTarget`, `NetBoxVLAN`, `NetBoxVLANGroup`, `NetBoxPrefix`, `NetBoxIPAddress` | M3 |
 | `virtualization` | `NetBoxClusterType`, `NetBoxClusterGroup`, `NetBoxCluster`, `NetBoxVirtualMachine`, `NetBoxVMInterface`, `NetBoxVirtualDisk` | M4 |
 | `dcim` | `NetBoxManufacturer`, `NetBoxDeviceRole`, `NetBoxDeviceType`, `NetBoxPlatform`, `NetBoxDevice`, `NetBoxInterface` | M4 |
-| Claims | `NetBoxIPAddressClaim`, `NetBoxPrefixClaim`, `NetBoxIPRangeClaim` | M6 |
+| Claims | [`NetBoxIPAddressClaim`](docs/reference/netboxipaddressclaim.md), `NetBoxPrefixClaim`, `NetBoxIPRangeClaim` | M6 |
 | Physical plant, wireless, circuits, VPN | ~70 further kinds | M9–M10 |
 
 ## Relationship to `netbox-community/netbox-operator`

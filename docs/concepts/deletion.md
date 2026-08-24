@@ -59,7 +59,21 @@ to `Retain`, everything else defaults to `Delete`.
 | `NetBoxIPRange` | `Retain` |
 | `NetBoxVLAN` | `Retain` |
 | `NetBoxVRF` | `Retain` |
+| `NetBoxIPAddressClaim` | `Retain`, and **there is no field** — see below |
 | every other kind (`NetBoxTag`, `NetBoxSite`, the catalogue kinds, …) | `Delete` |
+
+A claim goes one step further and carries no `deletionPolicy` at all
+([#182](https://github.com/ricardomolendijk/netbox-operator/issues/182)). A single-valued knob
+is not one, and `Retain` is the value that makes its deterministic allocation identity worth
+having: delete the claim, re-apply the same manifest, get the same address back. What stops
+that from being a silent leak is that the operator **reports** it — deleting a claim emits an
+`AddressRetained` Event naming the address, the NetBox id and the identity, and increments
+`netbox_operator_allocations_retained_total`. The operator never deletes an object it cannot
+prove is unused, and it cannot prove that of an allocated address; to free one, delete it in
+NetBox ([claims](claims.md#deleting-a-claim)).
+
+That deletion pass makes no NetBox call whatsoever, which is worth saying next to everything
+else on this page: a claim's finalizer cannot get stuck, however unreachable NetBox is.
 
 The asymmetry is deliberate, and the reason it is honest rather than inconsistent is that the
 two groups hold different sorts of thing: **an address a claim allocated is *state*; a tag is

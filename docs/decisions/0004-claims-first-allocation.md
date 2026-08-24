@@ -2,7 +2,9 @@
 
 **Status:** Accepted · 2026-08-21
 **Amended:** 2026-08-24 — the inline form is sugar over a real claim CR, not a second
-allocation path ([#174](https://github.com/ricardomolendijk/netbox-operator/issues/174)), and
+allocation path ([#174](https://github.com/ricardomolendijk/netbox-operator/issues/174)), the
+inline key is `claimFrom` rather than `fromPrefixRef`
+([#183](https://github.com/ricardomolendijk/netbox-operator/issues/183)), and
 [exhaustion](#exhaustion) waits rather than failing terminally
 ([#178](https://github.com/ricardomolendijk/netbox-operator/issues/178)).
 
@@ -37,7 +39,7 @@ status:
   conditions: [{type: Ready, status: "True"}]
 ```
 
-## Why a separate kind rather than `spec.address` XOR `spec.fromPrefixRef`
+## Why a separate kind rather than `spec.address` XOR an allocation field
 
 1. **The lifecycles genuinely differ.** A resource is reconciled toward a fixed
    desired state forever. A claim does one irreversible thing and then stops. Encoding
@@ -68,8 +70,8 @@ spec:
   interfaces:
     - name: eth0
       addresses:
-        - fromPrefixRef: {name: mgmt-net}   # allocate one -> materialises a claim
-        - address: 10.0.0.9/24              # or state one  -> materialises an address
+        - claimFrom: {prefixRef: {name: mgmt-net}}  # allocate one -> materialises a claim
+        - address: 10.0.0.9/24                      # or state one  -> materialises an address
 ```
 
 One CR describes the whole VM, which is the ergonomics that were asked for. What makes it safe
@@ -94,9 +96,32 @@ written as its own `NetBoxIPAddressClaim`. Inline covers the common case; the st
 stays the complete one, which is what keeps the sugar from growing into a mirror of the claim
 spec.
 
-The inline key keeps the `fromPrefixRef` spelling
-[ADR-0003 rule 5](0003-ownership-and-references.md) already uses; #174 raised `claimFrom` as an
-alternative and it was not chosen.
+### The inline key is `claimFrom`, and it is nested
+
+**Decided** on
+[#183](https://github.com/ricardomolendijk/netbox-operator/issues/183): the inline key is
+`claimFrom`, carrying the pool reference inside it.
+
+```yaml
+addresses:
+  - claimFrom: {prefixRef: {name: mgmt-net}}
+```
+
+Not `fromPrefixRef`, which earlier drafts of this ADR and of
+[ADR-0003 rule 5](0003-ownership-and-references.md) used. The reason is the shape of what comes
+next rather than the spelling: a claim may allocate out of an ip-range as well as a prefix
+(`NetBoxIPRangeClaim`, NBO-064), and `fromPrefixRef` generalises only by growing a second
+sibling key that is mutually exclusive with the first — two flat fields, a CEL rule to keep
+them apart, and no place to put a third. `claimFrom` generalises by adding a member:
+
+```yaml
+- claimFrom: {ipRangeRef: {name: dhcp-pool}}
+```
+
+which is the same union shape a [generic reference](../concepts/generic-refs.md) already has,
+with exactly-one-of enforced inside one field instead of across several. It also reads as what
+it is — "claim from here" — where `fromPrefixRef` reads as a reference *to* a prefix, which is
+what `prefixRef` on the standalone claim already is.
 
 ## Correctness under concurrency
 
