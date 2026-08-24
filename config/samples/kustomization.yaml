@@ -3,3 +3,4 @@ kind: Kustomization
 resources:
 - netbox_v1alpha1_netboxendpoint.yaml
 - netbox_v1alpha1_netboxtag.yaml
+- netbox_v1alpha1_netboxsite.yaml

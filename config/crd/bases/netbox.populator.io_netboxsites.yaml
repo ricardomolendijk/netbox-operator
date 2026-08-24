@@ -1,0 +1,340 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.19.0
+  name: netboxsites.netbox.populator.io
+spec:
+  group: netbox.populator.io
+  names:
+    kind: NetBoxSite
+    listKind: NetBoxSiteList
+    plural: netboxsites
+    shortNames:
+    - nbsite
+    singular: netboxsite
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.slug
+      name: Slug
+      type: string
+    - jsonPath: .spec.status
+      name: Status
+      type: string
+    - jsonPath: .status.id
+      name: ID
+      type: integer
+    - jsonPath: .status.conditions[?(@.type=="Ready")].status
+      name: Ready
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          NetBoxSite is one dcim.Site in NetBox.
+
+          Namespaced like every kind in v1alpha1 (docs/decisions/0002-crd-scoping.md), which is
+          what makes a cross-namespace `slug` collision possible: NetBox's uniqueness on the column
+          is global and a namespace boundary does not partition it.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              NetBoxSiteSpec describes one dcim.Site.
+
+              NetBoxObjectSpec is inline, so endpointRef, onConflict and deletionPolicy are ordinary
+              spec fields that a user writes alongside the rest -- and the engine excludes exactly
+              those from the NetBox payload by reflecting over that struct.
+
+              Every optional foreign key dcim.Site has -- `region`, `group`, `tenant` and the `asns`
+              many-to-many (docs/netbox-schema.md -> dcim.Site) -- is deliberately absent rather than
+              declared and ignored. A reference becomes an id only in internal/resolver, which does not
+              exist until NBO-012, and a field that is accepted and does nothing is worse than a field
+              that is not there: `kubectl apply` reports success and NetBox never sees the value. They
+              arrive with the reference system in M2 (NBO-011, NBO-012) and M3 (NBO-021 for `tenant`).
+              `tags` is absent for the same reason -- it is a reference to a NetBoxTag, which is
+              NBO-011 -- and additionally has no entry in the digest to cite at all (NBO-073).
+            properties:
+              comments:
+                description: |-
+                  Comments is the site's long-form notes field.
+
+                  Also inherited from PrimaryModel, and a TextField rather than a CharField: it has no
+                  max_length, so there is no MaxLength marker to derive.
+                type: string
+              deletionPolicy:
+                default: Delete
+                description: |-
+                  DeletionPolicy is what happens to the NetBox object when this CR is deleted.
+
+                  Read fresh on every pass rather than latched when deletion starts, so switching it
+                  to Retain on an object whose delete NetBox keeps refusing is a way out of that
+                  state (docs/concepts/deletion.md).
+                enum:
+                - Delete
+                - Retain
+                type: string
+              description:
+                description: |-
+                  Description is free text shown next to the site.
+
+                  Declared on PrimaryModel rather than on dcim.Site, so docs/netbox-schema.md does not
+                  list it under `dcim.Site` -- see that file's preamble on inherited columns, which are
+                  as required and as writable as declared ones.
+                maxLength: 200
+                type: string
+              endpointRef:
+                description: |-
+                  EndpointRef names the NetBoxEndpoint to write through, in this object's own
+                  namespace. Required: there is no cluster-wide default endpoint, so an omitted
+                  reference cannot be resolved into one.
+                minLength: 1
+                type: string
+              facility:
+                description: |-
+                  Facility is the data-centre or campus designation within the site
+                  (docs/netbox-schema.md -> dcim.Site, `facility CharField len=50`).
+                maxLength: 50
+                type: string
+              latitude:
+                description: |-
+                  Latitude is the site's GPS latitude in decimal degrees, as a string.
+
+                  A string and not a float64: NetBox stores it as a DecimalField and returns it as a
+                  string, and an OpenAPI `number` round-trips through IEEE-754 on its way in and out of
+                  the API server, so the sixth decimal place -- roughly a tenth of a metre -- is not
+                  reliably what was written. The engine compares it numerically
+                  (internal/netbox/drift.go, scalarEqual), so `"51.9244"` and NetBox's `"51.924400"`
+                  are the same value and produce no PATCH.
+
+                  The pattern caps the fraction at six digits, which is dcim.Site's `decimal_places`.
+                  docs/netbox-schema.md shows no precision for any DecimalField -- that is the
+                  pre-NBO-071 defect its own preamble names, `latitude` included -- so the six comes
+                  from NBO-009 and the two integer digits from the -90..90 range CEL enforces.
+                pattern: ^-?[0-9]{1,2}(\.[0-9]{1,6})?$
+                type: string
+                x-kubernetes-validations:
+                - message: latitude must be between -90 and 90 degrees
+                  rule: double(self) >= -90.0 && double(self) <= 90.0
+              longitude:
+                description: |-
+                  Longitude is the site's GPS longitude in decimal degrees, as a string. A string for
+                  the same reason as Latitude.
+
+                  Three integer digits, not two: longitude runs to +-180. NBO-009 states both columns
+                  as `decimal(8,6)`, which would cap this at 99.999999 and reject every longitude east
+                  of Taipei; docs/netbox-schema.md records no precision either way (NBO-071), so the
+                  permissive reading is taken deliberately. If NetBox really does refuse three integer
+                  digits here it says so, and the site reports Ready=False, Reason=Invalid carrying
+                  NetBox's own message -- which is a great deal easier to diagnose than an admission
+                  rejection of a correct value.
+                pattern: ^-?[0-9]{1,3}(\.[0-9]{1,6})?$
+                type: string
+                x-kubernetes-validations:
+                - message: longitude must be between -180 and 180 degrees
+                  rule: double(self) >= -180.0 && double(self) <= 180.0
+              name:
+                description: |-
+                  Name is the site's label in the NetBox UI. Column-unique across NetBox
+                  (docs/netbox-schema.md -> dcim.Site, `name CharField REQ UNIQUE len=100`).
+                maxLength: 100
+                minLength: 1
+                type: string
+              onConflict:
+                default: Fail
+                description: OnConflict is what to do when NetBox already holds a
+                  matching object.
+                enum:
+                - Fail
+                - Adopt
+                - AdoptOnly
+                type: string
+              physicalAddress:
+                description: |-
+                  PhysicalAddress is the site's street address
+                  (docs/netbox-schema.md -> dcim.Site, `physical_address CharField len=200`).
+                maxLength: 200
+                type: string
+              shippingAddress:
+                description: |-
+                  ShippingAddress is where equipment for this site is delivered
+                  (docs/netbox-schema.md -> dcim.Site, `shipping_address CharField len=200`).
+                maxLength: 200
+                type: string
+              slug:
+                description: |-
+                  Slug is the site's URL-safe identifier, and this kind's natural key.
+
+                  NetBox enforces uniqueness on it globally (docs/netbox-schema.md -> dcim.Site,
+                  `slug SlugField REQ UNIQUE len=100`) while this CRD is namespaced
+                  (docs/decisions/0002-crd-scoping.md), so two NetBoxSites in different namespaces
+                  claiming one slug is one site and a Conflict -- not two sites.
+                maxLength: 100
+                minLength: 1
+                pattern: ^[-a-zA-Z0-9_]+$
+                type: string
+              status:
+                default: active
+                description: |-
+                  Status is the site's lifecycle state.
+
+                  Defaulted to NetBox's own default so the operator manages the field from the first
+                  reconcile: a defaulted field that never reaches a payload is a field the operator can
+                  never correct.
+                enum:
+                - planned
+                - staging
+                - active
+                - decommissioning
+                - retired
+                type: string
+            required:
+            - endpointRef
+            - name
+            - slug
+            type: object
+          status:
+            description: |-
+              NetBoxObjectStatus is the part of every object CR's status that the engine owns. It is
+              the only thing the operator writes: the spec belongs to Git
+              (docs/decisions/0005-gitops-coexistence.md).
+            properties:
+              adopted:
+                description: Adopted reports that the engine took over an object it
+                  did not create.
+                type: boolean
+              conditions:
+                description: Conditions follow the standard Kubernetes vocabulary.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              deletionAttempts:
+                description: |-
+                  DeletionAttempts counts the deletes NetBox refused because something still
+                  references the object.
+
+                  It is a status field rather than in-memory state because a controller has no memory
+                  between passes: the exponential backoff on a protected delete has to be computed
+                  from a count that survives a requeue, a leader election and a restart. Non-zero
+                  only while a CR is terminating.
+                format: int32
+                type: integer
+              id:
+                description: |-
+                  ID is the NetBox primary key. Zero until the object provably exists server-side --
+                  a DryRun write is reported and never sent, so it leaves this empty rather than
+                  inventing an id that nothing would ever match.
+                format: int64
+                type: integer
+              lastAppliedHash:
+                description: |-
+                  LastAppliedHash is a digest of the last payload NetBox accepted. NetBox
+                  canonicalises some values on write, so the request and the response legitimately
+                  differ; this is the record of what was actually sent.
+                type: string
+              lastSyncTime:
+                description: |-
+                  LastSyncTime is when the engine last wrote to NetBox. Unset until it does, and
+                  untouched by a reconcile that found nothing to do -- otherwise every resync would
+                  bump the resourceVersion of every object in the cluster.
+                format: date-time
+                type: string
+              naturalKey:
+                additionalProperties:
+                  type: string
+                description: |-
+                  NaturalKey is the lookup that actually located the object, filter by filter. The
+                  first thing anyone needs when asking why an object was adopted, or was not.
+                type: object
+              observedGeneration:
+                description: |-
+                  ObservedGeneration is the spec generation this status refers to. Always set,
+                  because `kubectl wait` lies without it.
+                format: int64
+                type: integer
+              url:
+                description: URL is the object's absolute NetBox URL, as returned
+                  by the API.
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

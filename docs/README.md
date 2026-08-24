@@ -27,6 +27,7 @@ One page per CRD: every field, every condition, every way it fails.
 |---|---|
 | [`NetBoxEndpoint`](reference/netboxendpoint.md) | How to point the operator at a NetBox: URL, token Secret, TLS, dry run, rate limit, and the `>=4.2, <5.0` version gate |
 | [`NetBoxTag`](reference/netboxtag.md) | The first NetBox object kind: `slug` as a natural key, adoption and `Conflict`, `objectTypes` as content-type strings, and what happens when two namespaces claim one slug |
+| [`NetBoxSite`](reference/netboxsite.md) | A choice column and two decimals that need no per-kind handling, a globally-unique slug over namespaced CRDs, and which of `dcim.Site`'s foreign keys are deliberately absent |
 
 ### The shape of a reference page
 
