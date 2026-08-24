@@ -425,7 +425,19 @@ type NetBoxObjectSpec struct {
 	// EndpointRef names the NetBoxEndpoint to write through, in this object's own
 	// namespace. Required: there is no cluster-wide default endpoint, so an omitted
 	// reference cannot be resolved into one.
+	//
+	// **Immutable.** Pointing a CR at a different NetBox is not a mutation of the object, it
+	// is a different object: the natural key is looked up in whichever NetBox this names, so
+	// an edit here would leave the old NetBox holding an object nothing manages and would
+	// adopt or create a second one in the new one, with the CR's status.id switching between
+	// the two. Edit it by deleting the CR -- which lets spec.deletionPolicy do what it says
+	// about the object being left behind -- and re-applying it.
+	//
+	// A CEL transition rule and not the admission webhook, which is the whole layer-1 test:
+	// it needs `self` and `oldSelf` and no second object, so the API server enforces it
+	// unconditionally and it survives every webhook in the cluster being down (NBO-044).
 	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="endpointRef is immutable; pointing a CR at a different NetBox is a different object, so delete this one and re-apply it"
 	EndpointRef string `json:"endpointRef"`
 
 	// OnConflict is what to do when NetBox already holds a matching object.
