@@ -571,21 +571,25 @@ func stubCustomField(obj netbox.Object, name string) string {
 	return value
 }
 
-// extrasID is the NetBox id of one provenance definition, for a test that has to stamp an
-// object the operator did not create.
-func (s *netboxStubServer) extrasID(endpoint, slug string) int {
+// managedTagID is the NetBox id of the provenance tag definition, for a test that has to
+// stamp an object the operator did not create -- which is how an orphan is staged.
+//
+// No slug parameter: the only tag the operator ever writes is the one its own bootstrap
+// created, and reading its id from the stub's store rather than from a literal is what keeps
+// the seeded stamp and the engine's stamp the same tag.
+func (s *netboxStubServer) managedTagID() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	for _, defined := range s.extras[endpoint] {
-		if fmt.Sprint(defined["slug"]) == slug || fmt.Sprint(defined["name"]) == slug {
+	for _, defined := range s.extras["extras/tags"] {
+		if fmt.Sprint(defined["slug"]) == provenance.DefaultTag {
 			if id, ok := defined.ID(); ok {
 				return id
 			}
 		}
 	}
 
-	s.t.Fatalf("stub has no %s named %q", endpoint, slug)
+	s.t.Fatalf("stub has no extras/tags named %q", provenance.DefaultTag)
 
 	return 0
 }

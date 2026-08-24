@@ -150,7 +150,7 @@ func TestSweepReportsOrphansAndWritesNothing(t *testing.T) {
 
 	live := fetchSite(ns, "live")
 	writesBefore := len(stub.recorded())
-	tagID := stub.extrasID("extras/tags", provenance.DefaultTag)
+	tagID := stub.managedTagID()
 
 	// Everything below is in NetBox with no CR anywhere.
 	orphan := seedSite(stub, tagID, "orphan", "prod-eu", "netboxsite/"+ns+"/gone")
@@ -229,7 +229,7 @@ func TestSweepGraceHoldsBackTheFirstSighting(t *testing.T) {
 	stampingEndpoint(t, ns, target, managedBy(nil))
 	eventually(t, "endpoint ready", func() bool { return endpointIsReady(ns, "homelab") })
 
-	tagID := stub.extrasID("extras/tags", provenance.DefaultTag)
+	tagID := stub.managedTagID()
 	orphan := seedSite(stub, tagID, "orphan", "prod-eu", "netboxsite/"+ns+"/gone")
 
 	makeSweep(t, ns, "cautious", func(s *netboxv1alpha1.NetBoxSweep) {
@@ -265,7 +265,7 @@ func TestSweepRefusalPreservesFindings(t *testing.T) {
 	stampingEndpoint(t, ns, target, managedBy(nil))
 	eventually(t, "endpoint ready", func() bool { return endpointIsReady(ns, "homelab") })
 
-	tagID := stub.extrasID("extras/tags", provenance.DefaultTag)
+	tagID := stub.managedTagID()
 	orphan := seedSite(stub, tagID, "orphan", "prod-eu", "netboxsite/"+ns+"/gone")
 
 	sweep := makeSweep(t, ns, "nightly", nil)
@@ -310,7 +310,7 @@ func TestSweepSuspendKeepsTheReport(t *testing.T) {
 	stampingEndpoint(t, ns, target, managedBy(nil))
 	eventually(t, "endpoint ready", func() bool { return endpointIsReady(ns, "homelab") })
 
-	tagID := stub.extrasID("extras/tags", provenance.DefaultTag)
+	tagID := stub.managedTagID()
 	orphan := seedSite(stub, tagID, "orphan", "prod-eu", "netboxsite/"+ns+"/gone")
 
 	makeSweep(t, ns, "nightly", nil)
@@ -407,7 +407,7 @@ func TestSweepRefusesADryRunEndpoint(t *testing.T) {
 
 			eventually(t, "endpoint ready", func() bool { return endpointIsReady(ns, "homelab") })
 
-			tagID := stub.extrasID("extras/tags", provenance.DefaultTag)
+			tagID := stub.managedTagID()
 			seedSite(stub, tagID, "orphan", "prod-eu", "netboxsite/"+ns+"/gone")
 
 			makeSweep(t, ns, "nightly", nil)
@@ -434,7 +434,7 @@ func TestSweepTwoNamespacesOneNetBox(t *testing.T) {
 		eventually(t, "endpoint ready in "+ns, func() bool { return endpointIsReady(ns, "homelab") })
 	}
 
-	tagID := stub.extrasID("extras/tags", provenance.DefaultTag)
+	tagID := stub.managedTagID()
 	orphans := map[string]int64{
 		first:  seedSite(stub, tagID, "orphan-a", "prod-eu", "netboxsite/"+first+"/gone"),
 		second: seedSite(stub, tagID, "orphan-b", "prod-eu", "netboxsite/"+second+"/gone"),

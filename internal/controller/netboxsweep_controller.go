@@ -101,7 +101,9 @@ func (r *NetBoxSweepReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	before := sweep.Status.DeepCopy()
 
 	if sweep.Spec.Suspend {
-		return r.suspended(ctx, sweep, before)
+		// No requeue: an edit to spec.suspend is a watch event on this object, so there is
+		// nothing a timer would notice that the watch does not.
+		return ctrl.Result{}, r.suspended(ctx, sweep, before)
 	}
 
 	setSweepCondition(sweep, netboxv1alpha1.ConditionSweepSuspended, metav1.ConditionFalse,
@@ -136,16 +138,14 @@ func (r *NetBoxSweepReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 // last real run settled on.
 func (r *NetBoxSweepReconciler) suspended(ctx context.Context, sweep *netboxv1alpha1.NetBoxSweep,
 	before *netboxv1alpha1.NetBoxSweepStatus,
-) (ctrl.Result, error) {
+) error {
 	metrics.SweepRuns.WithLabelValues(netboxv1alpha1.ReasonSweepSuspended).Inc()
 
 	sweep.Status.NextRunTime = nil
 	setSweepCondition(sweep, netboxv1alpha1.ConditionSweepSuspended, metav1.ConditionTrue,
 		netboxv1alpha1.ReasonSweepSuspended, "spec.suspend is true; findings are preserved")
 
-	// No requeue: an edit to spec.suspend is a watch event on this object, so there is
-	// nothing a timer would notice that the watch does not.
-	return ctrl.Result{}, r.writeStatus(ctx, sweep, before)
+	return r.writeStatus(ctx, sweep, before)
 }
 
 // refuse records a run that did not happen, with the reason and zero changes to the
