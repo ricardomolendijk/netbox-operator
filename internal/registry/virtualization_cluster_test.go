@@ -147,8 +147,14 @@ func TestClusterScopeIsTheSharedUnion(t *testing.T) {
 
 	// Rule 4 names exactly one containment ref, and for a scoped kind it is the scope: NetBox
 	// itself deletes a site's clusters with it (`_site on_delete=CASCADE`).
-	if d.ContainmentRef != "scope" {
-		t.Errorf("ContainmentRef = %q, want scope", d.ContainmentRef)
+	// Empty, and deliberately. This test asserted "scope" when it was written, and
+	// Validate() then refused the descriptor at boot once NBO-193's ErrContainmentNotCascade
+	// landed -- correctly. `clusters` is a GenericRelation on dcim.Region and dcim.SiteGroup
+	// only, not on dcim.Site or dcim.Location, so deleting a region takes its clusters and
+	// deleting a site does not. One CascadeOnDelete flag cannot say both, and an owner
+	// reference correct for half the scopes promises a cascade the server never performs.
+	if d.ContainmentRef != "" {
+		t.Errorf("ContainmentRef = %q, want empty: the scope union's members disagree on cascade", d.ContainmentRef)
 	}
 }
 

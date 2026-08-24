@@ -136,6 +136,16 @@ func virtualizationClusterDescriptor() Descriptor {
 		// Kubernetes garbage collection waits for *every* owner: adding `typeRef` or
 		// `groupRef` would turn "delete the site and the cluster goes" into "delete all
 		// three", and NetBox's PROTECT on both would refuse the delete anyway.
-		ContainmentRef: "scope",
+		// No ContainmentRef, and the reason is the limitation NBO-193 recorded rather than an
+		// oversight: a generic FK's cascade is a fact about the *referring* model, and this
+		// union's members disagree. `clusters` is declared as a GenericRelation on dcim.Region
+		// and dcim.SiteGroup only -- not on dcim.Site or dcim.Location
+		// (docs/netbox-schema.md) -- so deleting a site does not take its clusters, while
+		// deleting a region does.
+		//
+		// One flag cannot say both, and an owner reference correct for half the scopes is worse
+		// than none: a Site-scoped cluster would promise a cascade the server never performs.
+		// So this Kind gets no containment parent until the Descriptor can express cascade per
+		// union member.
 	}
 }

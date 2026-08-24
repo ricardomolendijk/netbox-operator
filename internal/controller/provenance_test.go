@@ -21,7 +21,7 @@ import (
 // assertion that can catch a kind being dropped from the provenance stamp.
 var stampedObjectTypes = []string{
 	"dcim.location", "dcim.region", "dcim.site", "dcim.sitegroup",
-	"ipam.prefix", "ipam.routetarget", "ipam.vrf",
+	"ipam.prefix", "ipam.routetarget", "ipam.vlan", "ipam.vlangroup", "ipam.vrf",
 	"tenancy.tenant", "tenancy.tenantgroup",
 	"virtualization.cluster", "virtualization.clustergroup", "virtualization.clustertype",
 }

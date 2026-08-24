@@ -1,0 +1,61 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxVLAN
+metadata:
+  # A DNS-1123 label. `spec.name` below keeps the literal NetBox string, spaces and
+  # parentheses included; the two are unrelated.
+  name: vlan-1-mgmt-default
+  namespace: default
+spec:
+  # The NetBoxEndpoint to write through, in this namespace. There is no cluster-wide
+  # default endpoint; see config/samples/netbox_v1alpha1_netboxendpoint.yaml.
+  endpointRef: homelab
+
+  # Set explicitly on every IPAM object. The envelope's default is Delete, and the per-Kind
+  # default this Kind wants (docs/concepts/deletion.md) needs #199 to land first.
+  deletionPolicy: Retain
+
+  # Required. 1-4094; 0 and 4095 are reserved by the standard and rejected at admission.
+  vid: 1
+
+  # Required, and free text -- this is the literal value from ../inventory.yaml.
+  name: MGMT (Default)
+
+  # A REAL foreign key, unlike NetBoxPrefix. `ipam.VLAN.site` is a ForeignKey to dcim.Site,
+  # so this is written under the key `site` as an integer id and no scope_type/scope_id
+  # appears in the request body. NetBoxPrefix is the exact opposite: it has no `site` column
+  # at all and writing one returns 201 and sets nothing.
+  #
+  # Also this Kind's containment parent, so in one namespace `kubectl delete netboxsite`
+  # takes the VLAN with it.
+  siteRef:
+    name: home
+
+  # The only identity a database constraint backs: `unique_group_vid`. With it set the
+  # lookup is `?group_id=<id>&vid=1`. Without it the lookup is `?site_id=<id>&vid=1` with
+  # `group_id` pinned to null -- a convention, not a constraint, so two VLANs with the same
+  # vid on one site are a legal server state and are reported as a Conflict.
+  # groupRef:
+  #   name: house-vlans-rtm
+
+  # A choice field: active, reserved or deprecated. No `container` -- that is ipam.Prefix's
+  # set, and the two are otherwise identical. NetBox returns it as {"value","label"}.
+  status: active
+
+  # ipam.Role is an object, not a choice column -- unlike NetBoxIPAddress.role. The Kind
+  # itself is NBO-055, so a name-mode ref reports RefKindUnavailable today while `slug`,
+  # `lookup` and `id` resolve against NetBox now.
+  # roleRef:
+  #   slug: management
+
+  # A self-reference, so it is deferred: left out of the create payload and applied by a
+  # follow-up PATCH, with Ready=False/DeferredFieldPending in between.
+  # qinqSVLANRef:
+  #   name: vlan-4000-svlan
+  # qinqRole: cvlan
+
+  # on_delete=PROTECT: this reference blocks deletion of that tenant in NetBox.
+  # tenantRef:
+  #   name: donkerslootstraat
+
+  description: Management VLAN
+  comments: Managed by netbox-operator.

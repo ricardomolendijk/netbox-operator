@@ -2,6 +2,7 @@ package netbox
 
 import (
 	"encoding/json"
+	"maps"
 	"testing"
 )
 
@@ -154,6 +155,33 @@ func TestDriftNormalisations(t *testing.T) {
 			live:    Object{"custom_fields": map[string]any{"unrelated": "x"}},
 			desired: Object{"custom_fields": map[string]any{"managed_by": "netbox-operator"}},
 			want:    []string{"custom_fields"},
+		},
+		{
+			name:    "6d. a nil asks for a value NetBox holds to be removed, so it drifts",
+			live:    Object{"custom_fields": map[string]any{"audit_ticket": "NET-42"}},
+			desired: Object{"custom_fields": map[string]any{"audit_ticket": nil}},
+			want:    []string{"custom_fields"},
+		},
+		{
+			name:    "6e. a nil against the null NetBox returns is settled, not a hot loop",
+			live:    Object{"custom_fields": map[string]any{"audit_ticket": nil, "other": "x"}},
+			desired: Object{"custom_fields": map[string]any{"audit_ticket": nil}},
+			want:    nil,
+		},
+		{
+			// The whole point of the null being a *different* value from the empty string:
+			// a spec asking for "" against a NetBox holding null has work to do, and the
+			// reverse does too. Collapsing the two would make one of them unexpressible.
+			name:    "6f. an empty string is not the same request as a removal",
+			live:    Object{"custom_fields": map[string]any{"audit_ticket": nil}},
+			desired: Object{"custom_fields": map[string]any{"audit_ticket": ""}},
+			want:    []string{"custom_fields"},
+		},
+		{
+			name:    "6g. a removal of a custom field that never had a value is no work at all",
+			live:    Object{"custom_fields": map[string]any{}},
+			desired: Object{"custom_fields": map[string]any{"audit_ticket": nil}},
+			want:    nil,
 		},
 		{
 			name: "7. generic FK pair equal produces no drift",
@@ -537,3 +565,86 @@ func TestHashIsOrderIndependentForMapKeys(t *testing.T) {
 // Drift needs a *Client, nbctl plan (NBO-038) can no longer reuse it and it stops being
 // exhaustively unit-testable. Breaking it fails the build rather than a test.
 var _ func(Object, Object, FieldRules) Object = Drift
+
+// TestCustomFieldRemovalSettles is the acceptance test for #196: a removal has to reach
+// NetBox once and then stop.
+//
+// The table cases above check one comparison each. This one runs the loop the operator
+// actually runs -- diff, PATCH, read back, diff again -- because the failure this feature
+// can produce is not a wrong comparison, it is a *pair* of correct-looking comparisons that
+// never agree: a null that NetBox stores as something the next read reports as different
+// PATCHes the same object for as long as the CR exists.
+//
+// netbox mirrors NetBox 4.6's own two steps, both quoted where they live:
+//
+//   - Write: CustomFieldsDataField.to_internal_value merges the submitted map over the
+//     stored one -- `data = {**self.parent.instance.custom_field_data, **data}`
+//     (extras/api/customfields.py) -- so a key the PATCH does not name keeps its value and
+//     a key it sets to null becomes null. CustomFieldsMixin.clean then validates it, and
+//     `validate` returns immediately for `None` (extras/models/customfields.py); save()
+//     re-applies a custom field's default only `if cf.name not in custom_field_data`
+//     (netbox/models/features.py), and the key *is* in it, so a null is not defaulted back.
+//   - Read: CustomFieldsDataField.to_representation emits every custom field defined for
+//     the object type, each as `cf.deserialize(obj.get(cf.name))`, and deserialize returns
+//     None unchanged. So a removed value reads back as an explicit null, indistinguishable
+//     from one that was never set.
+func TestCustomFieldRemovalSettles(t *testing.T) {
+	// Every custom field defined for this object type in NetBox. to_representation answers
+	// all of them, which is why the operator can never treat the container as its own.
+	defined := []string{"audit_ticket", "managed_by", "someone_elses"}
+
+	// What NetBox holds before the removal: a value the operator wrote, its own stamp, and
+	// somebody else's field it must not touch.
+	stored := map[string]any{
+		"audit_ticket": "NET-42", "managed_by": "netbox-operator", "someone_elses": "keep me",
+	}
+
+	desired := Object{"custom_fields": map[string]any{
+		"audit_ticket": nil, "managed_by": "netbox-operator",
+	}}
+
+	drift := Drift(read(defined, stored), desired, FieldRules{})
+	sent, ok := drift["custom_fields"].(map[string]any)
+	if !ok {
+		t.Fatalf("first pass did not PATCH custom_fields, so the removal never leaves: %v", drift)
+	}
+	if value, present := sent["audit_ticket"]; !present || value != nil {
+		t.Fatalf("the PATCH carries audit_ticket=%v (present=%t), want an explicit null", value, present)
+	}
+	if _, present := sent["someone_elses"]; present {
+		t.Fatalf("the PATCH names someone_elses; unmanaged custom fields must be left alone")
+	}
+
+	stored = write(stored, sent)
+
+	if got := stored["someone_elses"]; got != "keep me" {
+		t.Errorf("someone_elses = %v after the PATCH, want it untouched", got)
+	}
+
+	// Twice, because a diff that alternates rather than converges passes a single check.
+	for pass := 2; pass <= 3; pass++ {
+		if got := Drift(read(defined, stored), desired, FieldRules{}); len(got) != 0 {
+			t.Fatalf("pass %d would PATCH %v -- the removal never settles", pass, got)
+		}
+	}
+}
+
+// write is CustomFieldsDataField.to_internal_value: the submitted keys merged over the
+// stored ones, so a null overwrites and an unnamed key survives.
+func write(stored, patch map[string]any) map[string]any {
+	merged := maps.Clone(stored)
+	maps.Copy(merged, patch)
+
+	return merged
+}
+
+// read is CustomFieldsDataField.to_representation: every custom field defined for the object
+// type, with null for the ones holding no value -- whether they were emptied or never set.
+func read(defined []string, stored map[string]any) Object {
+	fields := make(map[string]any, len(defined))
+	for _, name := range defined {
+		fields[name] = stored[name]
+	}
+
+	return Object{"custom_fields": fields}
+}

@@ -34,6 +34,8 @@ rules:
   - netboxtags
   - netboxtenantgroups
   - netboxtenants
+  - netboxvlangroups
+  - netboxvlans
   - netboxvrfs
   verbs:
   - get
@@ -56,6 +58,8 @@ rules:
   - netboxtags/finalizers
   - netboxtenantgroups/finalizers
   - netboxtenants/finalizers
+  - netboxvlangroups/finalizers
+  - netboxvlans/finalizers
   - netboxvrfs/finalizers
   verbs:
   - update
@@ -75,6 +79,8 @@ rules:
   - netboxtags/status
   - netboxtenantgroups/status
   - netboxtenants/status
+  - netboxvlangroups/status
+  - netboxvlans/status
   - netboxvrfs/status
   verbs:
   - get

@@ -224,6 +224,30 @@ Deleting a site that devices or prefixes still reference will be refused by NetB
 protected foreign key, reported as `Deleting=False, Reason=Protected` with the blockers
 named. That is expected, not a bug: delete what references it first.
 
+### `customFields`
+
+| | |
+|---|---|
+| Type | `map[string]string`, values may be `null` |
+| Required | no |
+
+NetBox custom-field values, by custom-field name. Every key must already exist as an
+`extras.CustomField` covering `dcim.site`, or NetBox rejects the whole payload.
+
+```yaml
+spec:
+  customFields:
+    owner_team: platform   # write this value
+    rack_audit: ""         # write the empty string
+    audit_ticket: null     # remove this custom field's value
+```
+
+Only the keys listed are written and compared; every other custom field on the site is left
+exactly as NetBox has it, so an absent or empty map manages nothing rather than clearing
+everything. `null` and `""` are different requests. See
+[field ownership](../concepts/field-ownership.md#the-exception-that-keeps-its-own-rules-customfields)
+for why the container is not exhaustive and what NetBox does with the null.
+
 ## `status`
 
 | Field | Type | Meaning |
