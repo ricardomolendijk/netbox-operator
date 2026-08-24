@@ -164,6 +164,7 @@ func newObjectController(mgr ctrl.Manager, endpoints reconciler.Endpoints, kind 
 			Refs:       &resolver.Resolver{Objects: writer, Grants: writer},
 			Status:     statusWriter{writer},
 			Finalizers: finalizerWriter{writer},
+			Owners:     ownerWriter{writer},
 			Events:     mgr.GetEventRecorderFor(kind.name),
 			Scheme:     mgr.GetScheme(),
 			// Descriptors is left nil deliberately: the engine then reads the
@@ -279,27 +280,55 @@ type finalizerWriter struct{ client.Client }
 
 // UpdateFinalizers writes obj's finalizer list, and nothing else.
 //
-// A merge patch scoped to metadata.finalizers rather than an Update, because an Update
-// sends the whole object back -- spec included -- and the engine must never write a spec.
-// The patch carries the object's resourceVersion, so it is still optimistically
-// concurrent: a finalizer list computed from a stale read is rejected rather than applied
-// over somebody else's.
-//
 // A nil list marshals to `null`, which a merge patch reads as "remove the key". That is
 // the same outcome as an empty list and is what the deletion path wants.
 func (w finalizerWriter) UpdateFinalizers(ctx context.Context, obj client.Object) error {
+	return patchMetadata(ctx, w.Client, obj, "finalizers", obj.GetFinalizers())
+}
+
+// ownerWriter persists an object's metadata.ownerReferences.
+//
+// A separate type from finalizerWriter even though both patch one metadata field, because
+// the engine holds them as separate interfaces for exactly that reason: what a writer is
+// named is what it may write (reconciler/owners.go, and the same argument in the comment on
+// statusWriter).
+type ownerWriter struct{ client.Client }
+
+// UpdateOwnerReferences writes obj's owner references, and nothing else.
+//
+// The whole list, because a merge patch replaces a list rather than merging it -- there is no
+// per-entry patch for an array of objects with no merge key. That is safe here only because
+// the list being sent was built by appending to the one this object was read with
+// (reconciler.addOwner), so an owner reference somebody else set is carried back verbatim
+// rather than dropped. The resourceVersion below is the other half of that: a list computed
+// from a stale read is rejected outright rather than applied over a concurrent addition.
+func (w ownerWriter) UpdateOwnerReferences(ctx context.Context, obj client.Object) error {
+	return patchMetadata(ctx, w.Client, obj, "ownerReferences", obj.GetOwnerReferences())
+}
+
+// patchMetadata writes one field of obj's metadata and nothing else.
+//
+// A merge patch scoped to that field rather than an Update, because an Update sends the whole
+// object back -- spec included -- and the engine must never write a spec. The patch carries
+// the object's resourceVersion, so it is still optimistically concurrent: a value computed
+// from a stale read is rejected rather than applied over somebody else's.
+//
+// One function for both fields so that the shape stays one decision. specGuard.Patch admits a
+// patch whose body is nothing but `metadata`, and a second hand-rolled patch body is a second
+// chance to put something else in there.
+func patchMetadata(ctx context.Context, c client.Client, obj client.Object, field string, value any) error {
 	patch, err := json.Marshal(map[string]any{"metadata": map[string]any{
-		"finalizers":      obj.GetFinalizers(),
+		field:             value,
 		"resourceVersion": obj.GetResourceVersion(),
 	}})
 	if err != nil {
-		return fmt.Errorf("encoding the finalizer patch for %s/%s: %w",
-			obj.GetNamespace(), obj.GetName(), err)
+		return fmt.Errorf("encoding the %s patch for %s/%s: %w",
+			field, obj.GetNamespace(), obj.GetName(), err)
 	}
 
-	if err := w.Patch(ctx, obj, client.RawPatch(types.MergePatchType, patch)); err != nil {
-		return fmt.Errorf("patching the finalizers of %s/%s: %w",
-			obj.GetNamespace(), obj.GetName(), err)
+	if err := c.Patch(ctx, obj, client.RawPatch(types.MergePatchType, patch)); err != nil {
+		return fmt.Errorf("patching the %s of %s/%s: %w",
+			field, obj.GetNamespace(), obj.GetName(), err)
 	}
 
 	return nil

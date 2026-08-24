@@ -11,6 +11,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	netboxv1alpha1 "github.com/ricardomolendijk/netbox-operator/api/v1alpha1"
@@ -112,7 +113,8 @@ func TestSpecGuardRefusesSpecWrites(t *testing.T) {
 		{
 			// A CR the operator materialised is the operator's own output rather than Git's
 			// input, so nothing reverts it and there is no fight to prevent (NBO-032,
-			// NBO-036). Keyed on the owner reference, which only the operator sets.
+			// NBO-036). Keyed on the *controller* owner reference, which only the operator's
+			// own materialisation sets (ADR-0003 rule 3).
 			name: "an Update on a CR the operator generated is allowed",
 			obj: &netboxv1alpha1.NetBoxTag{ObjectMeta: metav1.ObjectMeta{
 				Namespace: "team-a", Name: "generated",
@@ -120,6 +122,7 @@ func TestSpecGuardRefusesSpecWrites(t *testing.T) {
 					APIVersion: netboxv1alpha1.GroupVersion.String(),
 					Kind:       "NetBoxVirtualMachine",
 					Name:       "vm",
+					Controller: ptr.To(true),
 				}},
 			}},
 			write: func(_ *testing.T, guard specGuard, obj client.Object) error {
@@ -127,13 +130,35 @@ func TestSpecGuardRefusesSpecWrites(t *testing.T) {
 			},
 		},
 		{
+			// The row that keeps ADR-0003 rule 4 from disabling this guard across a cluster.
+			// A containment owner reference is in this API group and is *not* the controller:
+			// it goes on an ordinary hand-written CR whose parent happens to be in the same
+			// namespace, and that CR's spec is still Git's. Before the controller check, every
+			// prefix with a same-namespace siteRef would have looked operator-generated.
+			name: "a non-controller owner reference in our own group is not our doing",
+			obj: &netboxv1alpha1.NetBoxTag{ObjectMeta: metav1.ObjectMeta{
+				Namespace: "team-a", Name: "contained",
+				OwnerReferences: []metav1.OwnerReference{{
+					APIVersion: netboxv1alpha1.GroupVersion.String(),
+					Kind:       "NetBoxSite",
+					Name:       "home",
+				}},
+			}},
+			write: func(_ *testing.T, guard specGuard, obj client.Object) error {
+				return guard.Update(context.Background(), obj)
+			},
+			wantRefused: true,
+		},
+		{
 			// An owner reference to something outside this API group is somebody else's
-			// ownership, not evidence that the operator created the object.
+			// ownership, not evidence that the operator created the object -- even when it is
+			// that object's controller.
 			name: "an owner reference from another group is not our doing",
 			obj: &netboxv1alpha1.NetBoxTag{ObjectMeta: metav1.ObjectMeta{
 				Namespace: "team-a", Name: "adopted",
 				OwnerReferences: []metav1.OwnerReference{{
 					APIVersion: "apps/v1", Kind: "Deployment", Name: "something",
+					Controller: ptr.To(true),
 				}},
 			}},
 			write: func(_ *testing.T, guard specGuard, obj client.Object) error {

@@ -287,6 +287,7 @@ func TestStatusWriterIsTheOnlyObjectWriter(t *testing.T) {
 		"Refs":        true,
 		"Status":      true,
 		"Finalizers":  true,
+		"Owners":      true,
 		"Events":      true,
 		"Scheme":      true,
 	}
@@ -312,6 +313,22 @@ func TestStatusWriterIsTheOnlyObjectWriter(t *testing.T) {
 	refs := reflect.TypeFor[RefResolver]()
 	if refs.NumMethod() != 1 || refs.Method(0).Name != "ResolveAll" {
 		t.Errorf("RefResolver has %d methods, want only ResolveAll", refs.NumMethod())
+	}
+
+	// The two metadata writers are each named for the one field they may write, which is the
+	// whole reason they are separate interfaces rather than methods on one. A second method
+	// on either is a route to a field nobody reviewed.
+	for _, writer := range []struct {
+		name   string
+		typ    reflect.Type
+		method string
+	}{
+		{"FinalizerWriter", reflect.TypeFor[FinalizerWriter](), "UpdateFinalizers"},
+		{"OwnerWriter", reflect.TypeFor[OwnerWriter](), "UpdateOwnerReferences"},
+	} {
+		if writer.typ.NumMethod() != 1 || writer.typ.Method(0).Name != writer.method {
+			t.Errorf("%s has %d methods, want only %s", writer.name, writer.typ.NumMethod(), writer.method)
+		}
 	}
 }
 

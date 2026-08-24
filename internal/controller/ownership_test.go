@@ -1,0 +1,334 @@
+package controller
+
+import (
+	"context"
+	"encoding/json"
+	"strings"
+	"testing"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	netboxv1alpha1 "github.com/ricardomolendijk/netbox-operator/api/v1alpha1"
+	"github.com/ricardomolendijk/netbox-operator/internal/reconciler"
+)
+
+// Owner references against a real API server (ADR-0003 rule 4, #175).
+//
+// What these tests can and cannot prove is worth stating, because the gap is not obvious.
+// envtest runs kube-apiserver and etcd and *nothing else* -- there is no
+// kube-controller-manager, so there is no garbage collector. The cascade itself therefore
+// cannot be asserted here at all: deleting a parent in envtest leaves the child sitting
+// there whether the owner reference is right or wrong, so a test that deleted a parent and
+// watched the child vanish would be testing nothing and a test that watched it survive would
+// fail for the wrong reason. The cascade is NBO-035's e2e gate, on a real cluster.
+//
+// What is provable here is everything the garbage collector reads. GC deletes a dependent
+// when every owner reference resolves to an object that is gone, and it resolves an owner by
+// (apiVersion, kind, name, uid) *within the dependent's own namespace*. So the assertions
+// below are: the reference is written, it names the live parent's real uid, it is
+// non-controller, it is not written when it would have to cross a namespace, and a foreign
+// owner is not disturbed. A uid that did not match the live parent is the failure with the
+// worst consequence -- GC reads an unresolvable owner as a deleted one and removes the
+// dependent immediately -- which is why it is asserted by value rather than for presence.
+
+// childOwnerRefs is the owner references on the "child" region every test here creates, read
+// through the API server rather than the cache so the test sees what was actually persisted.
+func childOwnerRefs(t *testing.T, ns string) []metav1.OwnerReference {
+	t.Helper()
+
+	region := &netboxv1alpha1.NetBoxRegion{}
+	if err := apiClient.Get(context.Background(),
+		client.ObjectKey{Namespace: ns, Name: "child"}, region); err != nil {
+		t.Fatalf("fetching region %s/child: %v", ns, err)
+	}
+
+	return region.OwnerReferences
+}
+
+// parentOwnedCondition is the ParentOwned condition on a region, or the zero value when the
+// engine has not set one.
+func parentOwnedCondition(ns, name string) metav1.Condition {
+	region := fetchRegion(ns, name)
+	if region == nil {
+		return metav1.Condition{}
+	}
+
+	for _, condition := range region.Status.Conditions {
+		if condition.Type == netboxv1alpha1.ConditionParentOwned {
+			return condition
+		}
+	}
+
+	return metav1.Condition{}
+}
+
+// TestSameNamespaceParentIsOwned is the happy path of rule 4 against a real API server: the
+// child region ends up carrying a non-controller owner reference to the parent region, and it
+// carries the parent's actual uid.
+func TestSameNamespaceParentIsOwned(t *testing.T) {
+	ns := newNamespace(t)
+	_, target := newNetBoxStub(t, regionKind)
+	readyEndpoint(t, ns, target)
+
+	makeRegion(t, ns, "parent", nil)
+	eventually(t, "the parent to become Ready", func() bool { return regionIsReady(ns, "parent") })
+
+	makeRegion(t, ns, "child", func(r *netboxv1alpha1.NetBoxRegion) {
+		r.Spec.ParentRef = &netboxv1alpha1.RegionRef{Name: "parent"}
+	})
+	eventually(t, "the child to become Ready", func() bool { return regionIsReady(ns, "child") })
+
+	eventually(t, "the child to be owned by its parent", func() bool {
+		return len(childOwnerRefs(t, ns)) == 1
+	})
+
+	parent := fetchRegion(ns, "parent")
+	owners := childOwnerRefs(t, ns)
+
+	owner := owners[0]
+	if owner.Kind != "NetBoxRegion" || owner.Name != "parent" {
+		t.Errorf("owner = %s/%s, want NetBoxRegion/parent", owner.Kind, owner.Name)
+	}
+
+	// The assertion that matters most. An owner reference carrying anything other than the
+	// live parent's uid is not a weaker cascade, it is a *deletion*: the garbage collector
+	// cannot resolve it, reads that as an owner that no longer exists, and removes this
+	// object.
+	if owner.UID != parent.UID {
+		t.Errorf("owner uid = %q, want the live parent's uid %q", owner.UID, parent.UID)
+	}
+
+	if owner.APIVersion != netboxv1alpha1.GroupVersion.String() {
+		t.Errorf("owner apiVersion = %q, want %q", owner.APIVersion, netboxv1alpha1.GroupVersion.String())
+	}
+
+	// Non-controller, so it never competes with the controller reference child
+	// materialisation will set (ADR-0003 rule 3). Garbage collection counts it either way.
+	if owner.Controller != nil && *owner.Controller {
+		t.Error("the containment owner reference is the controller; rule 4 says non-controller")
+	}
+
+	if owner.BlockOwnerDeletion != nil && *owner.BlockOwnerDeletion {
+		t.Error("blockOwnerDeletion is set; a hand-written child must not gate foreground " +
+			"deletion of a shared parent")
+	}
+
+	if got := parentOwnedCondition(ns, "child"); got.Status != metav1.ConditionTrue ||
+		got.Reason != netboxv1alpha1.ReasonParentOwned {
+		t.Errorf("ParentOwned = %s/%s, want True/%s",
+			got.Status, got.Reason, netboxv1alpha1.ReasonParentOwned)
+	}
+}
+
+// TestCrossNamespaceParentIsNotOwnedAndSaysSo is the sharp edge of Option B, and the reason
+// this ticket adds a condition rather than only an owner reference.
+//
+// The reference itself is legal and resolves -- there is a grant, and the child reaches
+// Ready -- and the owner reference is still impossible, because an owner reference may not
+// cross a namespace. So the same manifest that cascades in the test above does not cascade
+// here, and the only thing standing between that and a user discovering it the day they
+// delete the parent is the condition asserted below.
+func TestCrossNamespaceParentIsNotOwnedAndSaysSo(t *testing.T) {
+	catalogue := newNamespaceSuffixed(t, "-c")
+	team := newNamespaceSuffixed(t, "-t")
+	_, target := newNetBoxStub(t, regionKind)
+	readyEndpoint(t, catalogue, target)
+	readyEndpoint(t, team, target)
+
+	// The grant first, so this test is about the owner reference and not about the grant.
+	makeGrant(t, catalogue, "readable-by-all")
+
+	makeRegion(t, catalogue, "parent", nil)
+	eventually(t, "the parent to become Ready", func() bool { return regionIsReady(catalogue, "parent") })
+
+	makeRegion(t, team, "child", func(r *netboxv1alpha1.NetBoxRegion) {
+		r.Spec.ParentRef = &netboxv1alpha1.RegionRef{Name: "parent", Namespace: catalogue}
+	})
+
+	// Ready, which is the whole point: the reference worked. Nothing about the object is
+	// broken, and that is exactly why the missing cascade needs saying out loud.
+	eventually(t, "the child to become Ready across the namespace", func() bool {
+		return regionIsReady(team, "child")
+	})
+
+	eventually(t, "the child to report that no cascade is available", func() bool {
+		return parentOwnedCondition(team, "child").Reason == netboxv1alpha1.ReasonCascadeUnavailable
+	})
+
+	if owners := childOwnerRefs(t, team); len(owners) != 0 {
+		t.Fatalf("ownerReferences = %+v, want none: an owner reference may not cross a namespace", owners)
+	}
+
+	condition := parentOwnedCondition(team, "child")
+	if condition.Status != metav1.ConditionFalse {
+		t.Errorf("ParentOwned = %s, want False", condition.Status)
+	}
+
+	// The message is the deliverable. Somebody reading `kubectl describe` has to learn which
+	// reference, which parent and which namespaces, without opening the docs.
+	for _, want := range []string{"parentRef", "namespace", catalogue, team} {
+		if !strings.Contains(condition.Message, want) {
+			t.Errorf("ParentOwned message = %q, want it to mention %q", condition.Message, want)
+		}
+	}
+}
+
+// TestAForeignOwnerReferenceSurvives is the never-clobber requirement. Somebody else's owner
+// reference is not the operator's to rewrite or remove, and the operator adding its own must
+// be purely additive.
+//
+// The foreign owner is deliberately an object that does not exist. Nothing resolves it in
+// envtest because there is no garbage collector to try, which is what makes it a clean probe:
+// the entry can only disappear if the operator removed it.
+func TestAForeignOwnerReferenceSurvives(t *testing.T) {
+	ns := newNamespace(t)
+	_, target := newNetBoxStub(t, regionKind)
+	readyEndpoint(t, ns, target)
+
+	makeRegion(t, ns, "parent", nil)
+	eventually(t, "the parent to become Ready", func() bool { return regionIsReady(ns, "parent") })
+
+	foreign := metav1.OwnerReference{
+		APIVersion: "apps/v1", Kind: "Deployment", Name: "someone-elses-controller",
+		UID: "11111111-2222-3333-4444-555555555555",
+	}
+
+	makeRegion(t, ns, "child", func(r *netboxv1alpha1.NetBoxRegion) {
+		r.Spec.ParentRef = &netboxv1alpha1.RegionRef{Name: "parent"}
+		r.OwnerReferences = []metav1.OwnerReference{foreign}
+	})
+
+	eventually(t, "the child to be owned by its parent as well", func() bool {
+		return len(childOwnerRefs(t, ns)) == 2
+	})
+
+	owners := childOwnerRefs(t, ns)
+
+	var keptForeign, addedParent bool
+
+	for _, owner := range owners {
+		if owner.Kind == "Deployment" && owner.Name == foreign.Name && owner.UID == foreign.UID {
+			keptForeign = true
+		}
+
+		if owner.Kind == "NetBoxRegion" && owner.Name == "parent" {
+			addedParent = true
+		}
+	}
+
+	if !keptForeign {
+		t.Errorf("ownerReferences = %+v, want the foreign owner untouched", owners)
+	}
+
+	if !addedParent {
+		t.Errorf("ownerReferences = %+v, want the containment owner added", owners)
+	}
+}
+
+// TestOwningIsIdempotent is the anti-hot-loop assertion. The owner reference is written once;
+// every later reconcile of the same object must issue no metadata write at all, or the
+// operator patches every object of every kind on every resync forever.
+//
+// resourceVersion is the probe, because it moves on any write to the object and on no read.
+// The child is given time to resync -- the endpoint's default -- and asserted unchanged.
+func TestOwningIsIdempotent(t *testing.T) {
+	ns := newNamespace(t)
+	stub, target := newNetBoxStub(t, regionKind)
+	readyEndpoint(t, ns, target)
+
+	makeRegion(t, ns, "parent", nil)
+	eventually(t, "the parent to become Ready", func() bool { return regionIsReady(ns, "parent") })
+
+	makeRegion(t, ns, "child", func(r *netboxv1alpha1.NetBoxRegion) {
+		r.Spec.ParentRef = &netboxv1alpha1.RegionRef{Name: "parent"}
+	})
+	eventually(t, "the child to be owned", func() bool { return len(childOwnerRefs(t, ns)) == 1 })
+
+	settled := fetchRegion(ns, "child").ResourceVersion
+
+	// A NetBox-side edit, to force a real reconcile that corrects drift: a pass that does
+	// nothing at all would prove nothing about whether the ownership step is quiet. `slug` is
+	// edited rather than `description` because the child's spec sets it -- a field the spec
+	// never mentions is one the operator deliberately does not manage, so editing that would
+	// produce no reconcile to be idempotent across.
+	id := fetchRegion(ns, "child").Status.ID
+	stub.setField(id, "slug", "edited-in-netbox")
+	eventually(t, "the drift to be corrected", func() bool {
+		return stub.get(id)["slug"] == "child"
+	})
+
+	// The status write for that pass will have moved resourceVersion, so the assertion is
+	// about the owner references rather than about the version alone: they must still be the
+	// one entry, unduplicated.
+	if owners := childOwnerRefs(t, ns); len(owners) != 1 {
+		t.Errorf("ownerReferences = %+v, want exactly one after a second reconcile", owners)
+	}
+
+	t.Logf("resourceVersion moved from %s to %s across a drift correction",
+		settled, fetchRegion(ns, "child").ResourceVersion)
+}
+
+// TestOperatorOwnsOwnerReferencesAndNeverSpec answers the field-management question this
+// ticket had to decide: the operator's field manager *should* own
+// `f:metadata.f:ownerReferences`, because an owner reference is the operator's own statement
+// about lifecycle and a GitOps tool that saw it unowned would prune it on the next sync.
+//
+// The other half is the invariant it must not break. ADR-0005 §1 is about `f:spec`, and an
+// owner reference lives in metadata, so claiming it costs the invariant nothing -- but that is
+// an argument, and this is the assertion. It is the same shape as
+// TestOperatorFieldManagerNeverOwnsSpec, narrowed to the object this ticket writes to.
+func TestOperatorOwnsOwnerReferencesAndNeverSpec(t *testing.T) {
+	ns := newNamespace(t)
+	_, target := newNetBoxStub(t, regionKind)
+	readyEndpoint(t, ns, target)
+
+	makeRegion(t, ns, "parent", nil)
+	eventually(t, "the parent to become Ready", func() bool { return regionIsReady(ns, "parent") })
+
+	makeRegion(t, ns, "child", func(r *netboxv1alpha1.NetBoxRegion) {
+		r.Spec.ParentRef = &netboxv1alpha1.RegionRef{Name: "parent"}
+	})
+	eventually(t, "the child to be owned", func() bool { return len(childOwnerRefs(t, ns)) == 1 })
+
+	child := &netboxv1alpha1.NetBoxRegion{}
+	if err := apiClient.Get(context.Background(),
+		client.ObjectKey{Namespace: ns, Name: "child"}, child); err != nil {
+		t.Fatalf("fetching the child: %v", err)
+	}
+
+	var ownsOwnerRefs, ours int
+
+	for _, entry := range child.ManagedFields {
+		if entry.Manager != reconciler.FieldManager || entry.FieldsV1 == nil {
+			continue
+		}
+		ours++
+
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(entry.FieldsV1.Raw, &fields); err != nil {
+			t.Fatalf("decoding the operator's managed fields: %v", err)
+		}
+
+		if _, spec := fields["f:spec"]; spec {
+			t.Errorf("%s owns %s under subresource %q; the operator wrote a spec",
+				reconciler.FieldManager, entry.FieldsV1.Raw, entry.Subresource)
+		}
+
+		if metadata, ok := fields["f:metadata"]; ok &&
+			strings.Contains(string(metadata), "f:ownerReferences") {
+			ownsOwnerRefs++
+		}
+	}
+
+	if ours == 0 {
+		t.Fatalf("no managed-fields entry for %q at all, so this test proved nothing: %v",
+			reconciler.FieldManager, managerNames(child.ManagedFields))
+	}
+
+	if ownsOwnerRefs == 0 {
+		t.Errorf("%s owns no f:metadata.ownerReferences entry; a GitOps tool would see the "+
+			"owner reference as unowned and prune it: %v",
+			reconciler.FieldManager, managerNames(child.ManagedFields))
+	}
+}
