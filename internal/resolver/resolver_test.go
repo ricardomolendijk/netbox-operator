@@ -38,6 +38,10 @@ func TestResolve(t *testing.T) {
 		readErr error
 		netBox  *fakeNetBox
 
+		// grants are the NetBoxRefGrants the cluster holds, which only a cross-namespace
+		// reference consults.
+		grants []netboxv1alpha1.NetBoxRefGrant
+
 		want Result
 
 		// wantCause is the sentinel the reference is expected to be blocked by. Zero means
@@ -74,6 +78,7 @@ func TestResolve(t *testing.T) {
 			field:    regionField(),
 			ref:      netboxv1alpha1.ObjectRef{Name: "emea", Namespace: "catalogue"},
 			referrer: types.NamespacedName{Namespace: "team-a", Name: "ams"},
+			grants:   []netboxv1alpha1.NetBoxRefGrant{catalogueGrant("catalogue")},
 			objects: []target{{
 				gvk: regionGVK, namespace: "catalogue", name: "emea", id: 31,
 				ready: metav1.ConditionTrue, reason: netboxv1alpha1.ReasonSynced,
@@ -82,6 +87,18 @@ func TestResolve(t *testing.T) {
 				ID: 31, ObjectType: "dcim.region", Mode: ModeName,
 				Target: types.NamespacedName{Namespace: "catalogue", Name: "emea"},
 			},
+		},
+		{
+			// Default deny, and the message is the deliverable: somebody meeting this for the
+			// first time has to be able to fix it without opening the docs, so it names the
+			// object to create, the namespace to create it in, and the wildcard that scales.
+			name:        "name mode across a namespace with no grant is denied",
+			field:       regionField(),
+			ref:         netboxv1alpha1.ObjectRef{Name: "emea", Namespace: "catalogue"},
+			referrer:    types.NamespacedName{Namespace: "team-a", Name: "ams"},
+			objects:     []target{{gvk: regionGVK, namespace: "catalogue", name: "emea", id: 31}},
+			wantCause:   ErrRefDenied,
+			wantMessage: `create a NetBoxRefGrant in "catalogue"`,
 		},
 		{
 			name:        "name mode with no such CR is not found",
@@ -293,7 +310,9 @@ func TestResolve(t *testing.T) {
 				nb = &fakeNetBox{}
 			}
 
-			resolver := &Resolver{Objects: reader, Kinds: kinds()}
+			resolver := &Resolver{
+				Objects: reader, Kinds: kinds(), Grants: &fakeGrants{grants: tc.grants},
+			}
 
 			got, err := resolver.Resolve(context.Background(), Request{
 				NetBox: nb, Referrer: tc.referrer, ReferrerGVK: tc.referrerGVK,

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -248,4 +249,118 @@ func idRef(id int64) netboxv1alpha1.ObjectRef {
 
 func namespacedName(namespace, name string) types.NamespacedName {
 	return types.NamespacedName{Namespace: namespace, Name: name}
+}
+
+// fakeGrants answers grant lists and namespace label reads from canned state, and counts
+// both -- because "a same-namespace reference reads nothing" is an assertion about the counts
+// and not about the answers.
+type fakeGrants struct {
+	grants []netboxv1alpha1.NetBoxRefGrant
+
+	// labels are the extra labels per namespace. Every namespace also carries
+	// kubernetes.io/metadata.name, exactly as one the API server created does, so a grant
+	// selecting by name needs no fixture.
+	labels map[string]map[string]string
+
+	// listErr and nsErr are the reads failing for reasons of their own, which must not be
+	// reported as a denial.
+	listErr error
+	nsErr   error
+
+	lists   int
+	nsReads int
+}
+
+func (f *fakeGrants) List(_ context.Context, list client.ObjectList, opts ...client.ListOption) error {
+	f.lists++
+
+	if f.listErr != nil {
+		return f.listErr
+	}
+
+	grants, ok := list.(*netboxv1alpha1.NetBoxRefGrantList)
+	if !ok {
+		return fmt.Errorf("fakeGrants was handed a %T rather than a NetBoxRefGrantList", list)
+	}
+
+	options := &client.ListOptions{}
+	for _, opt := range opts {
+		opt.ApplyToList(options)
+	}
+
+	for _, candidate := range f.grants {
+		if options.Namespace != "" && candidate.Namespace != options.Namespace {
+			continue
+		}
+
+		grants.Items = append(grants.Items, candidate)
+	}
+
+	return nil
+}
+
+func (f *fakeGrants) Get(_ context.Context, key client.ObjectKey, obj client.Object, _ ...client.GetOption) error {
+	f.nsReads++
+
+	if f.nsErr != nil {
+		return f.nsErr
+	}
+
+	live, ok := obj.(*corev1.Namespace)
+	if !ok {
+		return fmt.Errorf("fakeGrants was handed a %T rather than a Namespace", obj)
+	}
+
+	live.SetName(key.Name)
+	live.SetLabels(namespaceLabels(key.Name, f.labels[key.Name]))
+
+	return nil
+}
+
+// namespaceLabels is what a real Namespace carries: whatever was set on it, plus the name
+// label the API server adds to every namespace.
+func namespaceLabels(name string, extra map[string]string) map[string]string {
+	set := map[string]string{corev1.LabelMetadataName: name}
+	for key, value := range extra {
+		set[key] = value
+	}
+
+	return set
+}
+
+// grantIn is one NetBoxRefGrant in the namespace being referenced, which is the only
+// namespace a grant is ever read from.
+func grantIn(
+	namespace, name string, from []netboxv1alpha1.RefGrantFrom, to []netboxv1alpha1.RefGrantTo,
+) netboxv1alpha1.NetBoxRefGrant {
+	return netboxv1alpha1.NetBoxRefGrant{
+		ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: name},
+		Spec:       netboxv1alpha1.NetBoxRefGrantSpec{From: from, To: to},
+	}
+}
+
+// catalogueGrant is the shape ADR-0002 asks for: one object, no `to`, readable by every
+// namespace. It is the fixture most of these tests want, because it is the one most clusters
+// will actually hold.
+func catalogueGrant(namespace string) netboxv1alpha1.NetBoxRefGrant {
+	return grantIn(namespace, "readable-by-all", []netboxv1alpha1.RefGrantFrom{fromAll()}, nil)
+}
+
+// fromAll admits every namespace in the cluster.
+func fromAll() netboxv1alpha1.RefGrantFrom {
+	return netboxv1alpha1.RefGrantFrom{Namespaces: netboxv1alpha1.NamespacesAll}
+}
+
+// fromLabelled selects the referring namespaces by an ordinary label.
+func fromLabelled(key, value string) netboxv1alpha1.RefGrantFrom {
+	return netboxv1alpha1.RefGrantFrom{
+		Namespaces: netboxv1alpha1.NamespacesSelector,
+		Selector:   &metav1.LabelSelector{MatchLabels: map[string]string{key: value}},
+	}
+}
+
+// fromNamespaceNamed selects one namespace by name, which needs no extra field: every
+// Namespace carries kubernetes.io/metadata.name.
+func fromNamespaceNamed(name string) netboxv1alpha1.RefGrantFrom {
+	return fromLabelled(corev1.LabelMetadataName, name)
 }

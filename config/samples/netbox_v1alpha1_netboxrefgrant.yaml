@@ -1,0 +1,34 @@
+# A NetBoxRefGrant lives in the namespace being *referenced*, and says who may reference it.
+#
+# The first one is the shape almost every cluster wants and the shape ADR-0002 asks for: one
+# object, three lines of spec, making a shared catalogue namespace readable by every namespace
+# there is. The second is the narrow form, and the one exception -- lending a NetBoxEndpoint
+# lends the token Secret behind it, so it is never covered by an empty `kinds` list and has to
+# be named.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxRefGrant
+metadata:
+  name: catalogue-readable-by-all
+  namespace: netbox-catalog
+spec:
+  from:
+    - namespaces: All
+---
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxRefGrant
+metadata:
+  name: lend-the-shared-endpoint
+  namespace: netbox-catalog
+spec:
+  from:
+    # Selecting by name needs no extra field: the API server labels every Namespace with
+    # `kubernetes.io/metadata.name`. A `matchExpressions` `In` covers several of them.
+    - namespaces: Selector
+      selector:
+        matchLabels:
+          kubernetes.io/metadata.name: team-a
+  to:
+    - kinds:
+        - NetBoxEndpoint
+      names:
+        - shared

@@ -134,7 +134,10 @@ func newObjectController(mgr ctrl.Manager, endpoints reconciler.Endpoints, kind 
 			// everything else here: the reference target it fetches is another kind's CR, and
 			// the one route to the API server is what makes "the operator never writes a spec"
 			// checkable rather than merely intended.
-			Refs:       &resolver.Resolver{Objects: writer},
+			// Grants is the same client for the same reason: authorising a cross-namespace
+			// reference is two more reads -- the grants in the target namespace, and the
+			// referring namespace's labels -- and both go through the one guarded route.
+			Refs:       &resolver.Resolver{Objects: writer, Grants: writer},
 			Status:     statusWriter{writer},
 			Finalizers: finalizerWriter{writer},
 			Events:     mgr.GetEventRecorderFor(kind.name),

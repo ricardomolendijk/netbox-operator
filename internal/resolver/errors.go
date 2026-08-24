@@ -41,10 +41,13 @@ var (
 
 	// ErrRefDenied is a cross-namespace reference with no NetBoxRefGrant permitting it.
 	//
-	// Declared here and produced by NBO-014, which lands the grant: the classification, the
-	// condition reason and the requeue policy belong with the rest of the table rather than
-	// arriving with the feature, so that adding the check is a call site and not a new
-	// vocabulary.
+	// Only `name` mode can produce it. The other three reach NetBox directly and no grant
+	// gates them: a slug is resolved with the referring namespace's own endpoint and token,
+	// so there is no Kubernetes namespace on the far side to authorise against.
+	//
+	// The classification, the condition reason and the requeue policy were declared here
+	// with the rest of the table before the check existed, so landing the grant (NBO-014)
+	// was a call site rather than a new vocabulary.
 	ErrRefDenied = errors.New("denied")
 
 	// ErrRefCycle is a reference that cannot resolve because it depends on itself.

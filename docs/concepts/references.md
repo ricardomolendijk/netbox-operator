@@ -5,11 +5,12 @@ ever sees it.
 
 > **Status.** The `ObjectRef` type, its validation and the typed aliases are built
 > (NBO-011), and so is resolution: all four modes, the typed errors and the condition
-> vocabulary below (NBO-012). What is not built yet: **watches**
+> vocabulary below (NBO-012). Cross-namespace `name` references are **default deny** and
+> need a [`NetBoxRefGrant`](../reference/netboxrefgrant.md) (NBO-014). What is not built
+> yet: **watches**
 > ([#25](https://github.com/ricardomolendijk/netbox-operator/issues/25)) — until they land,
 > a reference that is waiting is retried on the endpoint's resync rather than woken by an
-> event; **grants** ([#26](https://github.com/ricardomolendijk/netbox-operator/issues/26)) —
-> a cross-namespace reference is resolved without one; **deferred application**
+> event, and that includes waiting for a grant; **deferred application**
 > ([#27](https://github.com/ricardomolendijk/netbox-operator/issues/27)); and **cycle
 > detection over a graph** ([#28](https://github.com/ricardomolendijk/netbox-operator/issues/28))
 > — only a reference to the referring object itself is caught today.
@@ -51,9 +52,10 @@ catalogue namespace is the ordinary shape rather than an exotic one. `namespace`
 to the referring object's own, and may only be set together with `name` — a slug or a
 lookup is resolved against NetBox, where Kubernetes namespaces do not exist.
 
-Crossing a namespace will require a `NetBoxRefGrant` in the target namespace
-([NBO-014 (#26)](https://github.com/ricardomolendijk/netbox-operator/issues/26)). Until
-that lands, the field is accepted and validated but the grant is not checked.
+Crossing a namespace requires a [`NetBoxRefGrant`](../reference/netboxrefgrant.md) in the
+**target** namespace. There is no grant to write for the common case of staying put: a
+reference that resolves to the referrer's own namespace is never authorised against
+anything. See [crossing a namespace](#crossing-a-namespace) below.
 
 ## How a reference is resolved
 
@@ -63,7 +65,7 @@ anything on its way to failing.
 
 | Mode | What the operator does | Costs |
 |---|---|---|
-| `name` | Reads the target CR in `namespace` (default: the referrer's) and takes its `.status.id`. | One cache read. No NetBox call at all. |
+| `name` | Reads the target CR in `namespace` (default: the referrer's) and takes its `.status.id`. | One cache read. No NetBox call at all. Crossing a namespace adds a grant list, and a `Namespace` read only if some grant selects by label. |
 | `slug` | `GET /api/<target endpoint>/?slug=<slug>`. | One NetBox read. |
 | `lookup` | `GET /api/<target endpoint>/?<filter>`, keys in sorted order so the request is stable. | One NetBox read. |
 | `id` | `GET /api/<target endpoint>/<id>/`, to verify the object exists. | One NetBox read. |
@@ -96,6 +98,76 @@ different NetBox, and the operator does not currently compare the two. Until it 
 (`ErrRefEndpointMismatch`, which arrives with the endpoint work), point references at
 namespaces that use the same NetBox.
 
+## Crossing a namespace
+
+A `name` reference that resolves into another namespace is **denied unless that namespace
+grants it**, with a [`NetBoxRefGrant`](../reference/netboxrefgrant.md) living **in the
+namespace being referenced**. The full field reference is on that page; what matters here is
+where the check sits and what it does not cover.
+
+The grant lives in the target namespace because that is the only direction in which it is a
+capability rather than a claim. A grant in the *referring* namespace would be an object
+anybody could write about somebody else's namespace, which authorises nothing. Read every
+grant as "*this* namespace is readable by …".
+
+This is everyday machinery rather than a security nicety. Every kind is namespaced, so
+`deviceTypeRef`, `manufacturerRef`, `tags` and every other catalogue reference from a team
+namespace into a shared `netbox-catalog` namespace crosses one
+([ADR-0002](../decisions/0002-crd-scoping.md), cost 2) — which is why the wildcard form
+exists and is the one to reach for:
+
+```yaml
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxRefGrant
+metadata:
+  name: catalogue-readable-by-all
+  namespace: netbox-catalog     # the namespace being referenced
+spec:
+  from:
+    - namespaces: All           # All | Selector
+```
+
+That is one object per catalogue namespace, and it does not need editing when a team is
+onboarded or when this operator learns a new kind. Narrower audiences use
+`namespaces: Selector` with a label selector over the **referring `Namespace`'s** labels;
+narrower targets use `to: [{kinds: […], names: […]}]`.
+
+### Three things about the check
+
+**Same-namespace references are free.** A reference that does not leave its own namespace
+returns before anything is read — no grant list, no `Namespace` read. It keys on the
+namespace the reference *resolves to*, so writing `namespace:` explicitly with your own
+namespace in it is still free.
+
+**The grant is checked before the target is read.** A denied reference makes zero reads in
+the target namespace, so "denied" and "not found" cannot be told apart. Otherwise the
+condition message would be an existence oracle for a namespace the referrer has no access
+to.
+
+**`NetBoxEndpoint` is never covered by an omitted `kinds` list.** A catalogue reference hands
+over an id; an `endpointRef` hands over use of another namespace's token Secret, which is a
+capability rather than a lookup. Lending one has to be spelled out —
+`to: [{kinds: [NetBoxEndpoint], names: [shared]}]` — so that the wide, ergonomic grant every
+catalogue namespace wants cannot quietly lend credentials as well. See
+[why `NetBoxEndpoint` is the exception](../reference/netboxrefgrant.md#why-netboxendpoint-is-the-exception).
+
+### A grant is not NetBox authorisation
+
+**A grant protects the Kubernetes reference graph, and nothing in NetBox.** Only `name` mode
+is gated, because it is the only mode with a Kubernetes namespace on the far side. A `slug`,
+`lookup` or `id` reaches NetBox directly, using the *referring* namespace's own endpoint and
+token — there is no namespace to authorise against and no grant anywhere that can gate it.
+
+So a namespace denied `{name: emea, namespace: netbox-catalog}` can write `{slug: emea}` and
+get the same id, if its own token may read `dcim.region`. That is the correct boundary rather
+than a hole: the grant says who may depend on your *CRs*; NetBox's own object permissions are
+the only thing that says who may read *NetBox*. If an object must not be readable from a
+namespace, that is a permission on that namespace's token.
+
+Revoking a grant likewise does not clear what was already written: the referrer stops
+resolving the reference and reports it, and the live NetBox value is left alone, exactly as
+for any reference that stops resolving.
+
 ## What happens when it does not resolve
 
 Every failure is one of six causes. Each maps to exactly one `RefsResolved` reason and one
@@ -107,7 +179,7 @@ question a `kubectl wait` is asking.
 | Nothing to point at | `RefNotFound` | On the resync for a missing CR; **1 min** for a missing NetBox object | A CR's creation is an event the operator receives. NetBox announces nothing, so a timer is the only thing that will notice. |
 | Target exists, has no id yet | `RefNotReady` | On the resync (an event, once #25 lands) | The target's own reconcile is what changes this. |
 | Several NetBox objects match | `RefAmbiguous` | **10 min** | Only a human can say which one was meant. |
-| Cross-namespace, no grant | `RefDenied` | On the resync (a grant event, once #26 lands) | Writing the grant is the fix. |
+| Cross-namespace, no grant | `RefDenied` | On the resync (a grant event, once #25 lands) | Writing the grant is the fix. |
 | The reference points at itself | `RefCycle` | Only on a spec change | No order of reconciles resolves it. |
 | Target Kind has no descriptor, or its CRD is not installed | `RefKindUnavailable` | **10 min** | The manifest is correct; the fix is an operator upgrade. |
 
@@ -184,9 +256,13 @@ you wrote and the object it pointed at. From there:
   referrer's, not to the one the catalogue lives in.
 - `RefNotFound` on a `slug`, `lookup` or `id` → NetBox does not hold it. Nothing will
   announce it appearing, so this retries on a timer.
+- `RefDenied` → the message names the `NetBoxRefGrant` to create and the namespace to create
+  it in. If you already have one, check it is in the namespace being *referenced* and not the
+  one referring.
 - `RefAmbiguous` → the message names every matching id and what NetBox calls each one
-  (`id 12 (EMEA), id 19 (Emea)`). Replace the `slug` with a `lookup` that adds whatever
-  distinguishes them, or with the `id`.
+  (`id 12 (EMEA), id 19 (Emea)`). That display is usually the whole answer — `EMEA` versus
+  `Emea` is the cause. Replace the `slug` with a `lookup` that adds whatever distinguishes
+  them, or with the `id`.
 - `RefKindUnavailable` → the operator has no descriptor for that Kind, or the CRD is not
   installed. Your manifest is fine.
 

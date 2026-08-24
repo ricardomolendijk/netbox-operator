@@ -103,6 +103,14 @@ type Resolver struct {
 
 	// Kinds resolves a target Kind's Descriptor. Nil means the package-level registry.
 	Kinds Descriptors
+
+	// Grants reads the NetBoxRefGrants that authorise a cross-namespace `name` reference.
+	//
+	// Nil is not "no check": a cross-namespace reference then fails with ErrNoGrantReader
+	// rather than resolving. A default-deny feature that switches itself off when a field is
+	// left unset is not one, and the failure has to be a wiring bug the operator reports
+	// rather than a silent allow (see grants.go).
+	Grants GrantReader
 }
 
 // Request is one reference to resolve.
@@ -288,6 +296,12 @@ func (r *Resolver) byName(ctx context.Context, req Request, target registry.Desc
 	// Resolution this returns.
 	if key == req.Referrer && req.Field.Target == req.ReferrerGVK {
 		return Result{}, req.blocked(ErrRefCycle, "the reference points at the referring object itself")
+	}
+
+	// Before the read, not after: a namespace the referrer has no grant into must not be
+	// readable even to the extent of learning whether an object is in it (grants.go).
+	if err := r.authorise(ctx, req, key); err != nil {
+		return Result{}, err
 	}
 
 	live := &unstructured.Unstructured{}
@@ -488,7 +502,8 @@ func modeOf(ref netboxv1alpha1.ObjectRef) Mode {
 // referrer's.
 //
 // Defaulting rather than requiring it is what makes a single-namespace manifest terse, and
-// crossing a namespace explicit -- which is what NBO-014's grant check will hang off.
+// crossing a namespace explicit -- which is what the grant check hangs off: a reference that
+// resolves to the referrer's own namespace is never authorised against anything.
 func (req Request) namespace() string {
 	if req.Ref.Namespace != "" {
 		return req.Ref.Namespace
