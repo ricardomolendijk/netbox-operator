@@ -77,6 +77,9 @@ Longer form, one page each:
 - [Provenance](docs/operations/provenance.md) — the tag and custom fields the operator
   stamps onto every object it manages, how the definitions get created, and how to turn the
   whole thing off.
+- [Sweeps](docs/operations/sweeps.md) — what this cluster has left behind in NetBox, why the
+  answer is a report and never a deletion, and why a sweep only ever considers objects
+  stamped with its own cluster id.
 
 Full index: [`docs/README.md`](docs/README.md). Decisions and their rationale:
 [`docs/decisions/README.md`](docs/decisions/README.md). Running it, including what the

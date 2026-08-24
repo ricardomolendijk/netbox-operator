@@ -1,0 +1,371 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.19.0
+  name: netboxsweeps.netbox.kubeforge.org
+spec:
+  group: netbox.kubeforge.org
+  names:
+    kind: NetBoxSweep
+    listKind: NetBoxSweepList
+    plural: netboxsweeps
+    shortNames:
+    - nbsweep
+    singular: netboxsweep
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.endpointRef
+      name: Endpoint
+      type: string
+    - jsonPath: .status.summary.orphans
+      name: Orphans
+      type: integer
+    - jsonPath: .status.summary.suspected
+      name: Suspected
+      type: integer
+    - jsonPath: .status.summary.unattributed
+      name: Unattributed
+      type: integer
+    - jsonPath: .status.conditions[?(@.type=="Ready")].status
+      name: Ready
+      type: string
+    - jsonPath: .status.conditions[?(@.type=="Ready")].reason
+      name: Reason
+      type: string
+    - jsonPath: .status.lastRunTime
+      name: Last Run
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          NetBoxSweep reports NetBox objects that this namespace's CRs left behind, and **never
+          deletes one**.
+
+          The situation it exists for is real and has two causes: a CR removed from Git while the
+          operator or the cluster was down, so no finalizer ever ran; and `deletionPolicy: Retain`,
+          where leaving the object behind is the point. Either way the object still carries this
+          cluster's provenance stamp and there is no CR left to reconcile it, so nothing in the
+          operator will ever look at it again.
+
+          **Reporting, not reclaiming.** A leaked NetBox object is visible, costs nothing but a row,
+          and is reclaimable by hand at any time. An object freed by mistake may already have been
+          handed to somebody else, and no undo exists for that. So this kind lists what it found and
+          stops; `nbctl adopt` and a human are the remedy. See docs/operations/sweeps.md.
+
+          Namespaced, like every kind in v1alpha1 (ADR-0002), and here that is a safety property
+          rather than a consequence: the blast radius of a sweep is one namespace's findings,
+          authorising one is ordinary namespaced RBAC, and the NetBoxEndpoint it scans through is
+          itself namespaced -- so a sweep in `team-a` cannot reach a NetBox that `team-a` cannot
+          already write to.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              NetBoxSweepSpec is one scheduled, read-only scan for NetBox objects this namespace has
+              left behind.
+            properties:
+              endpointRef:
+                description: |-
+                  EndpointRef names the NetBoxEndpoint to scan through, in this sweep's own namespace.
+                  The endpoint is where both halves of the scope come from: its `spec.managedBy.tag`
+                  and its `clusterID`.
+                minLength: 1
+                type: string
+              gracePeriod:
+                default: 1h
+                description: |-
+                  GracePeriod is how long an object must have been continuously unclaimed before it is
+                  reported as Orphaned rather than Suspected.
+
+                  It exists because the two states that look identical from NetBox -- "the CR is gone"
+                  and "the CR is between a delete and a re-apply" -- are told apart only by waiting.
+                  Zero disables it, and every finding is then reported as Orphaned on its first
+                  sighting.
+                type: string
+              interval:
+                default: 24h
+                description: |-
+                  Interval is how often to scan. The default is deliberately a day rather than the
+                  endpoint's resync period: one run lists every stamped object of every listed kind,
+                  so a sweep on a resync cadence is a standing load on somebody's NetBox in exchange
+                  for a report nobody reads that often. An orphan is not urgent -- it is a leak, and
+                  leaks are counted daily.
+                type: string
+              kinds:
+                description: |-
+                  Kinds is the Kubernetes Kinds to scan, and there is no wildcard. Scanning a kind is
+                  an explicit act: a wildcard would silently start listing every one of the ~120 kinds
+                  in the catalogue the moment a new one shipped, which is a load change nobody asked
+                  for on somebody else's NetBox.
+
+                  A kind this build does not carry refuses the whole run rather than being skipped --
+                  see ReasonSweepUnknownKind.
+                items:
+                  maxLength: 63
+                  pattern: ^NetBox[A-Za-z0-9]+$
+                  type: string
+                maxItems: 128
+                minItems: 1
+                type: array
+                x-kubernetes-list-type: atomic
+              maxFindings:
+                default: 100
+                description: |-
+                  MaxFindings caps `status.findings`. Beyond it `status.findingsTruncated` is set and
+                  `status.summary` still carries true counts.
+
+                  The cap is not a nicety: an etcd object has a size limit, and a status carrying fifty
+                  thousand findings does not get rejected on its own -- it takes the CR with it. The
+                  full list always reaches the debug log.
+                format: int32
+                maximum: 1000
+                minimum: 1
+                type: integer
+              suspend:
+                default: false
+                description: |-
+                  Suspend stops scheduling without deleting the object or its findings. The lever to
+                  pull when a sweep is generating load at the wrong moment.
+                type: boolean
+              timeout:
+                default: 10m
+                description: |-
+                  Timeout bounds one whole run, every kind together. Exceeding it is a refused run
+                  with no findings written, never a partial report.
+                type: string
+            required:
+            - endpointRef
+            - kinds
+            type: object
+          status:
+            description: |-
+              NetBoxSweepStatus is the whole point of the kind: the record of what this cluster has
+              left behind in NetBox, in a form that is still there hours later.
+            properties:
+              conditions:
+                description: Conditions follow the standard Kubernetes vocabulary.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              findings:
+                description: |-
+                  Findings are the objects the last completed run could not match to a live CR,
+                  capped at spec.maxFindings and ordered so that the cap drops the least actionable:
+                  Orphaned first, then Suspected, then Unattributed, and within each by kind and
+                  NetBox id.
+
+                  **A refused run leaves this alone.** An empty findings list has to mean "the last
+                  complete scan found nothing", never "the last scan could not see anything" -- read
+                  `Ready` and `lastRunTime` to tell which you are looking at.
+                items:
+                  description: SweepFinding is one NetBox object this sweep could
+                    not match to a live CR.
+                  properties:
+                    display:
+                      description: |-
+                        Display is NetBox's own `display` string for the object, which is what the NetBox UI
+                        shows and therefore the only field a human can search on.
+                      type: string
+                    firstSeen:
+                      description: |-
+                        FirstSeen is when this sweep first found the object unclaimed, carried forward from
+                        the previous run's status. It is the clock the grace period is measured against, so
+                        it uses one clock -- the operator's -- and never NetBox's `last_updated`.
+
+                        It lives in `status`, so a controller restart does not reset it. If `status` is lost
+                        the clock restarts, which fails in the safe direction: a finding goes back to
+                        Suspected rather than forward to Orphaned.
+                      format: date-time
+                      type: string
+                    kind:
+                      description: |-
+                        Kind is the Kubernetes Kind whose descriptor found it, which is also the kind of CR
+                        that would have to exist for it not to be a finding.
+                      type: string
+                    netboxID:
+                      description: |-
+                        NetBoxID is the object's NetBox primary key. With Kind, this is the pair that
+                        identifies a finding across runs and carries FirstSeen forward.
+                      format: int64
+                      type: integer
+                    owner:
+                      description: |-
+                        Owner is the `k8s_owner` stamp as NetBox holds it: `<kind>/<namespace>/<name>` of
+                        the CR that last wrote this object. Empty on an Unattributed finding, which is what
+                        makes it unattributable.
+                      type: string
+                    reason:
+                      description: Reason is why this object is a finding.
+                      enum:
+                      - Orphaned
+                      - Suspected
+                      - Unattributed
+                      type: string
+                    uid:
+                      description: |-
+                        UID is the `k8s_uid` stamp: the `metadata.uid` of the CR that wrote the object. It
+                        is what separates "the CR was deleted" from "the CR was deleted and reapplied" --
+                        the second has a new UID, so the old object is genuinely orphaned even though a CR
+                        of that name exists.
+                      type: string
+                    url:
+                      description: |-
+                        URL is the object's absolute NetBox API URL, copied verbatim from the list response.
+                        Paste it into a browser and NetBox redirects to the object.
+                      type: string
+                  required:
+                  - firstSeen
+                  - kind
+                  - netboxID
+                  - reason
+                  type: object
+                type: array
+                x-kubernetes-list-type: atomic
+              findingsTruncated:
+                description: FindingsTruncated reports that the last run had more
+                  findings than the cap.
+                type: boolean
+              lastRunDuration:
+                description: LastRunDuration is how long the last completed run took,
+                  as a duration string.
+                type: string
+              lastRunTime:
+                description: |-
+                  LastRunTime is when the last **completed** run finished. A refused run does not move
+                  it, so the gap between it and now is how stale the findings are.
+                format: date-time
+                type: string
+              nextRunTime:
+                description: NextRunTime is when the controller intends to run again.
+                format: date-time
+                type: string
+              observedGeneration:
+                description: ObservedGeneration is the spec generation this status
+                  refers to.
+                format: int64
+                type: integer
+              summary:
+                description: Summary is the true counts from the last completed run.
+                properties:
+                  claimed:
+                    description: |-
+                      Claimed is the objects matched to a live CR in this namespace, by NetBox id or by
+                      `k8s_uid`. These are the healthy ones.
+                    format: int32
+                    type: integer
+                  foreign:
+                    description: |-
+                      Foreign is objects stamped for another namespace of this same cluster. Counted and
+                      never listed: they are not this sweep's business, and the count exists only so that
+                      `scanned` adds up and nobody reads a gap as a lost object.
+                    format: int32
+                    type: integer
+                  orphans:
+                    description: 'Orphans is confirmed orphans: unclaimed for longer
+                      than spec.gracePeriod.'
+                    format: int32
+                    type: integer
+                  scanned:
+                    description: Scanned is the stamped NetBox objects examined, across
+                      every listed kind.
+                    format: int32
+                    type: integer
+                  suspected:
+                    description: Suspected is unclaimed objects still inside their
+                      grace period.
+                    format: int32
+                    type: integer
+                  unattributed:
+                    description: Unattributed is stamped objects with no usable owner
+                      stamp.
+                    format: int32
+                    type: integer
+                required:
+                - claimed
+                - foreign
+                - orphans
+                - scanned
+                - suspected
+                - unattributed
+                type: object
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

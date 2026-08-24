@@ -153,6 +153,18 @@ func run() error {
 		return fmt.Errorf("setting up the object controllers: %w", err)
 	}
 
+	// The sweep reads NetBox and the CRs of every kind it is asked about, and writes
+	// nothing to either -- so it takes the manager's plain client rather than the
+	// field-owned one every writer above uses (NBO-046).
+	if err := (&controller.NetBoxSweepReconciler{
+		Client:   mgr.GetClient(),
+		Clients:  clients,
+		Scheme:   mgr.GetScheme(),
+		Recorder: mgr.GetEventRecorderFor("netboxsweep-controller"),
+	}).SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("setting up the NetBoxSweep controller: %w", err)
+	}
+
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		return fmt.Errorf("adding healthz check: %w", err)
 	}

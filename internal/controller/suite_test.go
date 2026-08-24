@@ -118,6 +118,16 @@ func startManager(cfg *rest.Config) (func(), error) {
 		return nil, fmt.Errorf("object controllers: %w", err)
 	}
 
+	sweeps := &NetBoxSweepReconciler{
+		Client:   mgr.GetClient(),
+		Clients:  clients,
+		Scheme:   mgr.GetScheme(),
+		Recorder: mgr.GetEventRecorderFor("netboxsweep-controller"),
+	}
+	if err := sweeps.SetupWithManager(mgr); err != nil {
+		return nil, fmt.Errorf("sweep controller: %w", err)
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		if err := mgr.Start(ctx); err != nil {

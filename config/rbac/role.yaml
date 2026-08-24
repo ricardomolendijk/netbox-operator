@@ -76,6 +76,7 @@ rules:
   - netboxroutetargets/status
   - netboxsitegroups/status
   - netboxsites/status
+  - netboxsweeps/status
   - netboxtags/status
   - netboxtenantgroups/status
   - netboxtenants/status
@@ -91,6 +92,7 @@ rules:
   resources:
   - netboxendpoints
   - netboxrefgrants
+  - netboxsweeps
   verbs:
   - get
   - list

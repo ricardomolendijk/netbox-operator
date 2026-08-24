@@ -293,6 +293,69 @@ usual cause, and a restore that dropped them is the other.
 sum by (kind) (rate(netbox_operator_spec_ownership_untracked_total[15m])) > 0
 ```
 
+### `netbox_operator_sweep_findings`
+
+| | |
+|---|---|
+| Type | Gauge |
+| Labels | `kind`, `reason` (`Orphaned`, `Suspected`, `Unattributed`) |
+| Cardinality | ~120 kinds × 3 reasons = **360** worst case |
+
+NetBox objects the last completed [`NetBoxSweep`](sweeps.md) run could not match to a live
+CR: the stamped objects this cluster has left behind.
+
+A gauge and not a counter, because the question is how many are outstanding *now* and the
+same orphan is found again by every run — a counter would turn one leaked address into a
+rising line forever. Every scanned kind is set on every completed run, **zeros included**, so
+an orphan somebody adopts or deletes by hand shows up as the series returning to zero and an
+alert on it clears by itself.
+
+A **refused** run does not touch it. Zeroing on refusal would report "no orphans" for the one
+state in which the sweep could not see anything, which is the failure mode the whole feature
+is shaped around.
+
+**Alert on:** orphans existing at all. Not urgent, and not nothing.
+
+```promql
+sum by (kind) (netbox_operator_sweep_findings{reason="Orphaned"}) > 0
+```
+
+> **Limitation.** Not labelled by the sweep's namespace or name, because those are user input
+> and nothing in this document is labelled by user input. The consequence is that two sweeps
+> covering one kind in two namespaces write the same series and the last run wins.
+> `NetBoxSweep.status.findings` is the authoritative record; one sweep per kind per cluster is
+> the configuration that makes this metric mean what it says.
+
+### `netbox_operator_sweep_runs_total`
+
+| | |
+|---|---|
+| Type | Counter |
+| Labels | `result` |
+| Cardinality | **10** series, whatever the cluster does |
+
+Sweep runs by the condition reason they settled on: `Complete`, or one of the refusal reasons
+(`EndpointDryRun`, `DriftOff`, `ProvenanceDisabled`, `Truncated`, `Timeout`, …). The full
+table is in [sweeps.md](sweeps.md#when-a-sweep-refuses-to-run).
+
+It is the freshness half of `netbox_operator_sweep_findings`. A findings gauge sitting at zero
+is either a clean cluster or a sweep that has been refused since the last time it could see
+anything, and from metrics alone the only way to tell them apart is that `Complete` here has
+stopped increasing.
+
+**Alert on:** a sweep that has not completed a run in two intervals, and on repeated
+refusals.
+
+```promql
+increase(netbox_operator_sweep_runs_total{result="Complete"}[2d]) == 0
+
+sum by (result) (rate(netbox_operator_sweep_runs_total{result!="Complete"}[1h])) > 0
+```
+
+`Truncated` is the one to page on rather than to graph: it means a list paginated past the
+client's page cap, so the operator saw a partial set of NetBox — and a partial set makes live
+objects look absent.
+
 ## Cardinality
 
 A label whose value set is unbounded turns a metric into an outage: every distinct value
@@ -310,6 +373,7 @@ are:
 | `code` | A closed set, unexpected statuses collapsed to their class | 16 |
 | `field` | NetBox API column names, from a Descriptor's field map | tens per model |
 | `targetKind`, `referrerKind` | Kind names from a Descriptor, paired only where a field map declares a reference | a few hundred pairs |
+| `reason` | The sweep finding reasons in `api/v1alpha1` | 3 |
 
 Worst case, with every kind implemented and every path and status exercised, is roughly
 **25 000 series**. Realistically a cluster using a handful of kinds against one NetBox
@@ -400,6 +464,19 @@ namespace's Event retention, and the standing state belongs in a condition eithe
 There is deliberately **no** Event for a transient failure. A 500 or a timeout resolves on
 its own, and an Event for each one is noise at cluster scale — those show up in
 `api_requests_total` and in the `Ready=False/APIError` condition.
+
+### On a `NetBoxSweep`
+
+| Reason | Type | When |
+|---|---|---|
+| `OrphansFound` | Normal | A completed run confirmed at least one orphan. Normal rather than Warning: an orphan is a fact about NetBox, not a malfunction of the operator, and it is reported so somebody can decide what to do about it |
+| `SweepRefused` | Warning | A run did not happen, so the findings in `status` are older than they look. The message names the refusal reason and when the findings were last true. Emitted on the transition only, so a NetBox that is down does not fill the namespace |
+
+Neither is a substitute for `status`. Events age out — an hour by default — and a
+[sweep's](sweeps.md) whole value is that "what has this cluster left behind in NetBox" is
+still answerable tomorrow, so `status.findings` is the record and these two are the
+notification. Never read a missing Event as a missing orphan.
+
 
 ## Logging
 
@@ -515,3 +592,5 @@ per-request cost at `info`.
   why `detected` and `corrected` are separate counters.
 - [`NetBoxEndpoint` reference](../reference/netboxendpoint.md) — every condition and reason
   the endpoint Events are named after.
+- [Sweeps](sweeps.md) — what `sweep_findings` is counting, why a refused run deliberately
+  leaves the gauge alone, and why the authoritative record is a `status` and not a metric.

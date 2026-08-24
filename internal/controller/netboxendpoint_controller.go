@@ -450,7 +450,17 @@ func resyncPeriod(e *netboxv1alpha1.NetBoxEndpoint) time.Duration {
 func transitioned(e *netboxv1alpha1.NetBoxEndpoint, condType string,
 	status metav1.ConditionStatus, reason string,
 ) bool {
-	existing := meta.FindStatusCondition(e.Status.Conditions, condType)
+	return conditionTransitioned(e.Status.Conditions, condType, status, reason)
+}
+
+// conditionTransitioned is transitioned over a bare condition list, for the kinds whose
+// status is not a NetBoxEndpoint's. One implementation rather than one per controller,
+// because "the message is deliberately excluded" is the part that is easy to get wrong and
+// the part that decides whether an Event re-fires on every retry.
+func conditionTransitioned(conditions []metav1.Condition, condType string,
+	status metav1.ConditionStatus, reason string,
+) bool {
+	existing := meta.FindStatusCondition(conditions, condType)
 
 	return existing == nil || existing.Status != status || existing.Reason != reason
 }

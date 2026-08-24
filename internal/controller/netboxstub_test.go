@@ -313,7 +313,7 @@ func (s *netboxStubServer) list(w http.ResponseWriter, r *http.Request) {
 	// Ordered by id rather than by map iteration, so a query matching more than one object
 	// answers the same way on every run and an ambiguity test cannot pass by luck.
 	for _, id := range slices.Sorted(maps.Keys(s.objects)) {
-		if stubMatches(s.objects[id], query, s.key) {
+		if s.stubMatches(s.objects[id], query) {
 			results = append(results, s.objects[id])
 		}
 	}
@@ -481,22 +481,113 @@ func netboxShape(obj netbox.Object) netbox.Object {
 	return out
 }
 
-// stubMatches applies the filters the engine sends. Only exact equality on the natural key
-// is needed, plus the limit the client always adds.
-func stubMatches(obj netbox.Object, query url.Values, key string) bool {
+// stubMatches applies the filters the operator sends: exact equality on the natural key,
+// the provenance tag by slug, and a custom field by value.
+//
+// The last two are here for NetBoxSweep, and they have to be real rather than ignored: a
+// sweep that forgot `?tag=` or `?cf_k8s_cluster=` would still pass every test against a stub
+// that answered every query with everything -- and those two filters are the entire reason a
+// sweep cannot report a hand-made object or another cluster's healthy ones. A filter the
+// stub does not recognise is ignored, as before.
+func (s *netboxStubServer) stubMatches(obj netbox.Object, query url.Values) bool {
 	for name, values := range query {
-		if name == "limit" || name == "offset" {
-			continue
-		}
-		if name != key {
-			continue
-		}
-		if fmt.Sprint(obj[name]) != values[0] {
-			return false
+		switch {
+		case name == "limit" || name == "offset":
+		case name == "tag":
+			if !s.hasTag(obj, values[0]) {
+				return false
+			}
+		case strings.HasPrefix(name, "cf_"):
+			if stubCustomField(obj, strings.TrimPrefix(name, "cf_")) != values[0] {
+				return false
+			}
+		case name == s.key:
+			if fmt.Sprint(obj[name]) != values[0] {
+				return false
+			}
 		}
 	}
 
 	return true
+}
+
+// hasTag reports whether obj carries the tag with this slug.
+//
+// The id-to-slug direction comes from the stub's own extras.Tag store, because that is the
+// direction the wire uses: the engine writes `tags` as a list of ids, and only the tag store
+// knows which slug an id is. An object seeded with nested `{"slug": ...}` entries -- which is
+// the shape NetBox reads back -- matches too, so a test can seed a tagged object without
+// looking an id up first. The caller holds the lock.
+func (s *netboxStubServer) hasTag(obj netbox.Object, slug string) bool {
+	for _, tag := range asStubList(obj[provenance.TagsField]) {
+		if fmt.Sprint(tag["slug"]) == slug {
+			return true
+		}
+	}
+
+	for _, id := range netbox.IDsOf(obj[provenance.TagsField]) {
+		for _, defined := range s.extras["extras/tags"] {
+			stored, ok := defined.ID()
+			if ok && stored == id && fmt.Sprint(defined["slug"]) == slug {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// asStubList reads a `tags` value in the nested shape NetBox returns it in, and yields
+// nothing for the list-of-ids shape the engine writes.
+func asStubList(value any) []netbox.Object {
+	entries, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+
+	out := make([]netbox.Object, 0, len(entries))
+	for _, entry := range entries {
+		if nested, ok := entry.(map[string]any); ok {
+			out = append(out, nested)
+		}
+	}
+
+	return out
+}
+
+// stubCustomField reads one custom field off an object, as a string. An absent container or
+// key reads as empty, which is what NetBox's `?cf_x=` matches nothing against.
+func stubCustomField(obj netbox.Object, name string) string {
+	fields, ok := obj[provenance.CustomFieldsField].(map[string]any)
+	if !ok {
+		return ""
+	}
+
+	value, ok := fields[name].(string)
+	if !ok {
+		return ""
+	}
+
+	return value
+}
+
+// extrasID is the NetBox id of one provenance definition, for a test that has to stamp an
+// object the operator did not create.
+func (s *netboxStubServer) extrasID(endpoint, slug string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, defined := range s.extras[endpoint] {
+		if fmt.Sprint(defined["slug"]) == slug || fmt.Sprint(defined["name"]) == slug {
+			if id, ok := defined.ID(); ok {
+				return id
+			}
+		}
+	}
+
+	s.t.Fatalf("stub has no %s named %q", endpoint, slug)
+
+	return 0
 }
 
 // seed puts an object into NetBox without the operator having created it, for adoption

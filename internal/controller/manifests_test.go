@@ -147,9 +147,14 @@ func forbidsEmptyValue(property map[string]any) (string, bool) {
 	return "pattern " + pattern + " does not match the empty string", true
 }
 
-// objectCRDs are the generated CRDs of the kinds the engine reconciles: the ones with a
-// `spec.endpointRef`, which is what makes a kind a NetBox object rather than operator
+// objectCRDs are the generated CRDs of the kinds the engine reconciles: the ones whose spec
+// embeds NetBoxObjectSpec, which is what makes a kind a NetBox object rather than operator
 // configuration.
+//
+// Keyed on `onConflict` rather than on `endpointRef`. An endpoint reference alone is not the
+// distinction: NetBoxSweep names one and reconciles nothing (NBO-046), so it has no field a
+// user clears and no NetBox column to leave alone -- and every object kind gets `onConflict`
+// from the shared envelope, so the marker cannot be forgotten by a kind that does reconcile.
 func objectCRDs(t *testing.T) []string {
 	t.Helper()
 
@@ -162,7 +167,7 @@ func objectCRDs(t *testing.T) []string {
 
 	for _, path := range paths {
 		properties, _ := crdSpecSchema(t, path)["properties"].(map[string]any)
-		if _, ok := properties["endpointRef"]; ok {
+		if _, ok := properties["onConflict"]; ok {
 			out = append(out, path)
 		}
 	}
