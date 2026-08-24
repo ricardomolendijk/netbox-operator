@@ -46,7 +46,7 @@ var nestedGroups = []struct {
 			}},
 			{
 				Fields:     []KeyField{{Filter: "name", Spec: "name"}},
-				NullFields: []NullField{{Filter: "parent_id", Spec: "parentRef"}},
+				NullFields: []NullField{{Filter: "parent_id", Spec: "parentRef", Column: NullColumnRef}},
 			},
 		},
 		// dcim.Region.parent is on_delete=CASCADE and is the only FK this kind has, so the
@@ -66,7 +66,7 @@ var nestedGroups = []struct {
 			}},
 			{
 				Fields:     []KeyField{{Filter: "name", Spec: "name"}},
-				NullFields: []NullField{{Filter: "parent_id", Spec: "parentRef"}},
+				NullFields: []NullField{{Filter: "parent_id", Spec: "parentRef", Column: NullColumnRef}},
 			},
 		},
 		// dcim.SiteGroup.parent is on_delete=CASCADE too, and this kind had no containment
@@ -91,7 +91,7 @@ var nestedGroups = []struct {
 					{Filter: "site_id", Spec: "siteRef"},
 					{Filter: "name", Spec: "name"},
 				},
-				NullFields: []NullField{{Filter: "parent_id", Spec: "parentRef"}},
+				NullFields: []NullField{{Filter: "parent_id", Spec: "parentRef", Column: NullColumnRef}},
 			},
 		},
 		// The one kind here with *two* cascading FKs and one slot: `site` and `parent` are both

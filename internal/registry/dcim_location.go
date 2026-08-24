@@ -92,7 +92,7 @@ func dcimLocationDescriptor() Descriptor {
 					{Filter: "site_id", Spec: "siteRef"},
 					{Filter: "name", Spec: "name"},
 				},
-				NullFields: []NullField{{Filter: "parent_id", Spec: "parentRef"}},
+				NullFields: []NullField{{Filter: "parent_id", Spec: "parentRef", Column: NullColumnRef}},
 			},
 		},
 

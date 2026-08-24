@@ -153,7 +153,7 @@ and it is read straight off the schema:
 
 | Kind | `meta.constraints` | Column-level `UNIQUE` | Natural keys |
 |---|---|---|---|
-| `dcim.Region` | `(parent, name)`, `(name)` where `parent IS NULL`, `(parent, slug)`, `(slug)` where `parent IS NULL` | none | two, one pinning `parent_id__isnull` |
+| `dcim.Region` | `(parent, name)`, `(name)` where `parent IS NULL`, `(parent, slug)`, `(slug)` where `parent IS NULL` | none | two, one pinning `parent_id=null` |
 | `tenancy.TenantGroup` | **none** | `name`, `slug` | one, `slug` |
 
 So there is **no `parent_id` filter of any kind** in this kind's lookup — neither a matched

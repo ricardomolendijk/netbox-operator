@@ -107,7 +107,7 @@ func ipamPrefixDescriptor() Descriptor {
 			},
 			{
 				Fields:     []KeyField{{Filter: "prefix", Spec: "prefix"}},
-				NullFields: []NullField{{Filter: "vrf_id", Spec: "vrfRef"}},
+				NullFields: []NullField{{Filter: "vrf_id", Spec: "vrfRef", Column: NullColumnRef}},
 			},
 		},
 

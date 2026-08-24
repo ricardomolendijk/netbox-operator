@@ -87,7 +87,7 @@ func TestIPAddressNaturalKeysPinTheGlobalTable(t *testing.T) {
 		}},
 		{
 			Fields:     []KeyField{{Filter: "address", Spec: "address"}},
-			NullFields: []NullField{{Filter: "vrf_id", Spec: "vrfRef"}},
+			NullFields: []NullField{{Filter: "vrf_id", Spec: "vrfRef", Column: NullColumnRef}},
 		},
 	}
 	if !reflect.DeepEqual(d.NaturalKeys, want) {
@@ -112,11 +112,15 @@ func TestIPAddressNaturalKeysPinTheGlobalTable(t *testing.T) {
 	global := SpecState{Declared: []string{"address"}, Resolved: []string{"address"}}
 	got := d.Candidates(global)
 	if len(got) != 1 || len(got[0].NullFields) != 1 {
-		t.Fatalf("Candidates(global) = %+v, want the vrf_id__isnull candidate", got)
+		t.Fatalf("Candidates(global) = %+v, want the vrf-pinned candidate", got)
 	}
 
-	if param := got[0].NullFields[0].Param(); param != "vrf_id__isnull" {
-		t.Errorf("null filter = %q, want vrf_id__isnull", param)
+	// NBO-206: a foreign key has no `__isnull` and no `__empty` parameter -- NetBox registers
+	// only negation on an FK filter -- so the pin is the sentinel value. Asserted through the
+	// renderer rather than a Param() helper, because one spelling and one place that chooses
+	// it is the whole point of that fix.
+	if pin := got[0].NullFields[0]; pin.Filter != "vrf_id" || pin.Column != NullColumnRef {
+		t.Errorf("null pin = %+v, want vrf_id as a ref column", pin)
 	}
 }
 

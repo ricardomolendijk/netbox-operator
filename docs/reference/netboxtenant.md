@@ -39,7 +39,7 @@ spec:
 ```
 
 That is a **groupless** tenant, looked up as
-`?group_id__isnull=true&slug=donkerslootstraat`.
+`?group_id=null&slug=donkerslootstraat`.
 
 ## Full example
 
@@ -184,12 +184,12 @@ Two candidates, tried in this order, straight out of `tenancy.Tenant.meta.constr
 | # | Candidate | Query | Applicable when |
 |---|---|---|---|
 | 1 | `(group, slug)` — `unique_group_slug` | `?group_id=<id>&slug=<slug>` | `groupRef` **resolves** to an id |
-| 2 | `slug` where `group IS NULL` — `unique_slug` | `?group_id__isnull=true&slug=<slug>` | `groupRef` was **never declared** |
+| 2 | `slug` where `group IS NULL` — `unique_slug` | `?group_id=null&slug=<slug>` | `groupRef` was **never declared** |
 
 The order is not a fallback chain. Candidate 2 is not "what to try if 1 fails" — it is the
 identity of a *different* object, a groupless tenant.
 
-`group_id__isnull=true` is **pinned, never omitted**, and that is the whole point. A query
+`group_id=null` is **pinned, never omitted**, and that is the whole point. A query
 with `group_id` merely left out asks "this slug in any group", so every groupless tenant
 would match every tenant of that slug anywhere, adopt one, and then PATCH the group off it.
 See [lookups](../concepts/lookups.md#why-a-null-filter-is-pinned-and-never-omitted). This is
@@ -209,7 +209,7 @@ Identical to every other kind — `id`, `url`, `naturalKey`, `adopted`, `lastApp
 cleared.
 
 `status.naturalKey` is worth reading on this kind in particular: it records which candidate
-ran, filter by filter, so `{"group_id__isnull": "true", "slug": "donkerslootstraat"}` tells
+ran, filter by filter, so `{"group_id": "null", "slug": "donkerslootstraat"}` tells
 you the engine treated the tenant as groupless.
 
 `status.deletionAttempts` is the other one. It counts refusals, not passes, so it is how far
@@ -349,7 +349,7 @@ catalogue namespace holding the tenants plus a [`NetBoxRefGrant`](netboxrefgrant
 team namespaces point at them.
 
 Two tenants with *different* slugs never collide, groupless or not — the pinned
-`group_id__isnull` narrows the query and `slug` still distinguishes them.
+`group_id=null` narrows the query and `slug` still distinguishes them.
 
 ### Renaming can 409
 
@@ -407,7 +407,7 @@ acme                acme                         8    True    5m
 - [`NetBoxTenantGroup`](netboxtenantgroup.md) — the kind `groupRef` points at
 - [Deletion](../concepts/deletion.md) — the finalizer, and a `PROTECT`-blocked delete in full
 - [Errors and retries](../concepts/errors-and-retries.md) — which NetBox failure becomes which typed error
-- [Lookups](../concepts/lookups.md) — why `group_id__isnull` is pinned rather than omitted
+- [Lookups](../concepts/lookups.md) — why `group_id=null` is pinned rather than omitted
 - [References](../concepts/references.md) — the four ref modes and crossing a namespace
 - [Field ownership](../concepts/field-ownership.md) — omitting `description` versus emptying it
 - [ADR-0003](../decisions/0003-ownership-and-references.md) — why a NetBox FK is not an owner reference

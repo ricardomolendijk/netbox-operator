@@ -154,14 +154,14 @@ Two candidates, tried in this order, from `dcim.Location.meta.constraints`:
 | # | Candidate | Query | Applicable when |
 |---|---|---|---|
 | 1 | `(site, parent, name)` | `?site_id=<id>&parent_id=<id>&name=<name>` | `siteRef` **and** `parentRef` resolve |
-| 2 | `(site, name)` where `parent IS NULL` | `?site_id=<id>&parent_id__isnull=true&name=<name>` | `siteRef` resolves and `parentRef` was **never declared** |
+| 2 | `(site, name)` where `parent IS NULL` | `?site_id=<id>&parent_id=null&name=<name>` | `siteRef` resolves and `parentRef` was **never declared** |
 
 Both start at `site`, because every constraint NetBox declares on the model does. That is the
 substantive difference from [`NetBoxRegion`](netboxregion.md): a location's name is unique
 *within a site*, never globally, so a lookup with `site_id` merely omitted would match a
 location of that name in somebody else's site — and adopting it would PATCH it into this one.
 
-`parent_id__isnull=true` is pinned rather than omitted, for the same reason it is on the other
+`parent_id=null` is pinned rather than omitted, for the same reason it is on the other
 two nested-group kinds. See
 [lookups](../concepts/lookups.md#why-a-null-filter-is-pinned-and-never-omitted).
 

@@ -111,13 +111,13 @@ func ipamVLANDescriptor() Descriptor {
 					{Filter: "site_id", Spec: "siteRef"},
 					{Filter: "vid", Spec: "vid"},
 				},
-				NullFields: []NullField{{Filter: "group_id", Spec: "groupRef"}},
+				NullFields: []NullField{{Filter: "group_id", Spec: "groupRef", Column: NullColumnRef}},
 			},
 			{
 				Fields: []KeyField{{Filter: "vid", Spec: "vid"}},
 				NullFields: []NullField{
-					{Filter: "group_id", Spec: "groupRef"},
-					{Filter: "site_id", Spec: "siteRef"},
+					{Filter: "group_id", Spec: "groupRef", Column: NullColumnRef},
+					{Filter: "site_id", Spec: "siteRef", Column: NullColumnRef},
 				},
 			},
 		},

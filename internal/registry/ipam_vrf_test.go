@@ -104,7 +104,7 @@ func TestVRFNaturalKeysFallFromRDToName(t *testing.T) {
 		{Fields: []KeyField{{Filter: "rd", Spec: "rd"}}},
 		{
 			Fields:     []KeyField{{Filter: "name", Spec: "name"}},
-			NullFields: []NullField{{Filter: "rd", Spec: "rd"}},
+			NullFields: []NullField{{Filter: "rd", Spec: "rd", Column: NullColumnChar}},
 		},
 	}
 	if !reflect.DeepEqual(d.NaturalKeys, wantKeys) {
