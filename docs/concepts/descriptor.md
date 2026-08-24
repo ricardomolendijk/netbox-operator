@@ -52,12 +52,34 @@ golden output contains no `{{if eq .Model "…"}}`.
 | `ReadOnly` | `[]string` | Fields the operator must never write. | `["_depth", "_children", "created", "last_updated", "url", "display"]` |
 | `M2M` | `[]string` | Many-to-many fields written as a list of NetBox object IDs. | `["import_targets", "export_targets"]` |
 | `ObjectTypeLists` | `[]string` | Many-to-many fields onto `contenttypes.ContentType`, written as `app_label.model` strings. | `["object_types"]` |
-| `GenericFKs` | `[]GenericFKSpec` | The polymorphic `*_type` / `*_id` column pairs on this kind. | `{scope_type, scope_id, [dcim.region dcim.sitegroup dcim.site dcim.location]}` |
+| `GenericFKs` | `[]GenericFKSpec` | The polymorphic `*_type` / `*_id` column pairs on this kind. | `registry.ScopeFK("scope")` |
 | `ContainmentRef` | `string` | The one spec ref whose target gets a non-controller owner reference. Empty for catalogue kinds. | `siteRef` |
 
-`GenericFKSpec` is three fields — `TypeField`, `IDField` and `AllowedTypes`, the last in the
-same spelling as `ObjectType`. It drives resolver dispatch and ref watches, so adding a
-member to the union stays a data change.
+`GenericFKSpec` is six fields:
+
+| Field | What it is |
+|---|---|
+| `TypeField` | the content-type column — `scope_type`, `assigned_object_type` |
+| `IDField` | the object-id column — `scope_id`, `assigned_object_id` |
+| `Spec` | the **one** CR spec field behind the pair. One spec field writes two columns, which is why it is declared here and not in `Fields` |
+| `AllowedTypes` | the object types NetBox permits in `TypeField`, in the same spelling as `ObjectType` |
+| `Members` | the union's own fields, each with the Kind it resolves against: `{Field: "siteRef", Target: v1alpha1.SiteRef{}.TargetGVK()}` |
+| `Cached` | the read-only denormalised columns NetBox maintains from the pair — `_region`, `_site_group`, `_site`, `_location` |
+
+`Members` is what drives resolver dispatch and the ref watches, so adding a member to the
+union stays a data change. It is optional for the same reason `Field.Target` is: a pair whose
+legal targets have no CRD yet — `ipam.IPAddress.assigned_object` points at interfaces and
+FHRP groups — would otherwise have to name GVKs nobody has built. A pair with no members
+resolves to nothing and is reported unresolved.
+
+`AllowedTypes` is deliberately *not* derived from `Members`. It is the referring kind's
+statement of what NetBox accepts in its own type column, and the value actually written comes
+off the **target's** `ObjectType`; `Registry.Validate` checks the two against each other,
+which only means something while they are stated independently.
+
+The scope union is written once, in `internal/registry/scope.go`, so a scoped kind says
+`GenericFKs: []GenericFKSpec{ScopeFK("scope")}` and cannot get the content-type spelling
+wrong. See [scopes.md](scopes.md).
 
 Four entries in that table are worth spelling out.
 
@@ -380,7 +402,9 @@ by matching a message.
 | `ErrRecreateOnWithoutRecreate` | `RecreateOn` set on a kind whose strategy is `Patch` |
 | `ErrFieldClassConflict` | a field in both `M2M` and `ObjectTypeLists` |
 | `ErrEmptyField` | an empty string in `ReadOnly`, `M2M`, `ObjectTypeLists` or `RecreateOn`, or a `Deferred` entry with no `APIField` |
-| `ErrInvalidGenericFK` | a `GenericFKSpec` missing its `TypeField`, its `IDField`, or its `AllowedTypes` |
+| `ErrInvalidGenericFK` | a `GenericFKSpec` missing its `TypeField`, its `IDField` or its `AllowedTypes`; or a `Members` entry with no `Field` or no target `Kind`; or the same member field declared twice |
+| `ErrCachedNotReadOnly` | a `GenericFKSpec.Cached` column that is not also in `ReadOnly` |
+| `ErrGenericFKTypeMismatch` | a union member whose **registered** target kind reports an `ObjectType` the pair's `AllowedTypes` does not list. Reported by `Registry.Validate`, since the answer lives on another descriptor; a target with no descriptor yet is skipped |
 | `ErrDuplicateGVK` | the same GVK registered twice; the first registration wins, and `Registry.Validate` reports the collision as well |
 
 ### The one thing it deliberately permits

@@ -19,10 +19,13 @@ How the engine behaves, and why.
 | [Errors and retries](concepts/errors-and-retries.md) | Which NetBox failure becomes which typed error, what gets retried and where, and why more than one lookup match is an error rather than a guess |
 | [Lookups](concepts/lookups.md) | How a natural key becomes a query string, why `?name__ie=` exists, and why a null filter is pinned rather than omitted |
 | [References](concepts/references.md) | How one object points at another, the four resolution modes, what the API server rejects before a bad reference reaches the operator, and what it takes to cross a namespace |
+| [Scopes](concepts/scopes.md) | Why NetBox 4.2 replaced `site` with a polymorphic `(scope_type, scope_id)` pair, why writing `site` returns 201 and sets nothing, the four legal targets, and why NetBox scope has nothing to do with Kubernetes CRD scope |
 
 ## Reference
 
-One page per CRD: every field, every condition, every way it fails.
+One page per CRD: every field, every condition, every way it fails. Plus one page per **shared
+field type** — a type reused by many kinds, documented once instead of repeated on each of
+their pages.
 
 | Page | Answers |
 |---|---|
@@ -30,6 +33,7 @@ One page per CRD: every field, every condition, every way it fails.
 | [`NetBoxRegion`](reference/netboxregion.md) | The first kind whose identity depends on a reference: two natural keys, why a top-level region is a different identity rather than a missing filter, and why a child region waits instead of guessing |
 | [`NetBoxTag`](reference/netboxtag.md) | The first NetBox object kind: `slug` as a natural key, adoption and `Conflict`, `objectTypes` as content-type strings, and what happens when two namespaces claim one slug |
 | [`NetBoxSite`](reference/netboxsite.md) | A choice column and two decimals that need no per-kind handling, a globally-unique slug over namespaced CRDs, and which of `dcim.Site`'s foreign keys are deliberately absent |
+| [`ScopeRef`](reference/scoperef.md) | A shared field type rather than a CRD: `spec.scope` on every scoped kind — the four members, what each writes to `scope_type`, the three meanings of absent/empty/set, and what happens while `NetBoxSiteGroup` and `NetBoxLocation` do not exist |
 | [`NetBoxRefGrant`](reference/netboxrefgrant.md) | The kind that describes no NetBox object: which namespaces may reference into this one, the wildcard and selector forms that keep one grant per catalogue namespace, why `NetBoxEndpoint` is the one exception, and why a grant is not NetBox authorisation |
 
 ### The shape of a reference page

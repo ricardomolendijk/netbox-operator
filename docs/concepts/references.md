@@ -569,12 +569,13 @@ and the resolver reads it from the *type* rather than from a switch on the field
 | `RegionRef` | `NetBoxRegion` | `dcim.Region` | `dcim/regions` |
 | `SiteRef` | `NetBoxSite` | `dcim.Site` | `dcim/sites` |
 | `SiteGroupRef` | `NetBoxSiteGroup` | `dcim.SiteGroup` | `dcim/site-groups` |
+| `LocationRef` | `NetBoxLocation` | `dcim.Location` | `dcim/locations` |
 | `TenantRef` | `NetBoxTenant` | `tenancy.Tenant` | `tenancy/tenants` |
 
 Model and endpoint spellings are from `docs/netbox-schema.md` and its endpoint map. Only
-`NetBoxTag` and `NetBoxSite` exist as Kinds so far; the other three aliases are declared
-ahead of their Kinds because a reference is declarable before its target is implemented,
-and the remaining ~40 arrive with the generator
+`NetBoxTag`, `NetBoxSite` and `NetBoxRegion` exist as Kinds so far; the other three aliases
+are declared ahead of their Kinds because a reference is declarable before its target is
+implemented, and the remaining ~40 arrive with the generator
 ([NBO-042 (#66)](https://github.com/ricardomolendijk/netbox-operator/issues/66)).
 
 Each alias implements `RefTarget`:
@@ -586,9 +587,16 @@ type RefTarget interface {
 }
 ```
 
-A compile-time assertion covers all five, so an alias that forgets its methods fails the
+A compile-time assertion covers every alias, so one that forgets its methods fails the
 build rather than the first reconcile that needs it. The table above is pinned by a unit
 test — if the two disagree, that test fails.
+
+## A reference whose target is a union
+
+`scope` on a scoped kind is one spec field that writes two NetBox columns and may point at
+any of four Kinds. It is still a reference — same resolver, same modes, same grant check,
+same watches — but it is declared on the `Descriptor`'s `GenericFKs` rather than in `Fields`,
+because a `Field` maps one spec name to one API name. See [scopes.md](scopes.md).
 
 ## How the descriptor sees a reference
 
@@ -612,7 +620,7 @@ A `Target` on a field that is not a `Ref` is rejected at manager start
 produces a field the resolver ignores and the engine writes to NetBox verbatim.
 
 The converse — a `Ref` with no `Target` — is still not rejected at start, because a typed
-alias exists for five Kinds and a descriptor may legitimately declare a reference to a Kind
+alias exists for six Kinds and a descriptor may legitimately declare a reference to a Kind
 that has none yet. The resolver reports such a field as `RefKindUnavailable`, with a message
 that says the descriptor names no target rather than blaming the manifest, and the object
 does not reach `Ready`. Turning the check into a boot failure waits for the aliases the
