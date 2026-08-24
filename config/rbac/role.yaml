@@ -36,6 +36,8 @@ rules:
   - netboxroutetargets/status
   - netboxsites/status
   - netboxtags/status
+  - netboxtenantgroups/status
+  - netboxtenants/status
   - netboxvrfs/status
   verbs:
   - get
@@ -48,6 +50,8 @@ rules:
   - netboxroutetargets
   - netboxsites
   - netboxtags
+  - netboxtenantgroups
+  - netboxtenants
   - netboxvrfs
   verbs:
   - get
@@ -62,6 +66,8 @@ rules:
   - netboxroutetargets/finalizers
   - netboxsites/finalizers
   - netboxtags/finalizers
+  - netboxtenantgroups/finalizers
+  - netboxtenants/finalizers
   - netboxvrfs/finalizers
   verbs:
   - update

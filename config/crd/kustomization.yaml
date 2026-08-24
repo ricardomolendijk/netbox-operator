@@ -6,5 +6,7 @@ resources:
 - bases/netbox.kubeforge.org_netboxtags.yaml
 - bases/netbox.kubeforge.org_netboxsites.yaml
 - bases/netbox.kubeforge.org_netboxrefgrants.yaml
+- bases/netbox.kubeforge.org_netboxtenantgroups.yaml
+- bases/netbox.kubeforge.org_netboxtenants.yaml
 - bases/netbox.kubeforge.org_netboxroutetargets.yaml
 - bases/netbox.kubeforge.org_netboxvrfs.yaml

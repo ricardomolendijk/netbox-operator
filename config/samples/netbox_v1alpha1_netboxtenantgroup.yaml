@@ -1,0 +1,23 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxTenantGroup
+metadata:
+  name: houses
+  namespace: default
+spec:
+  # The NetBoxEndpoint to write through, in this namespace. There is no cluster-wide
+  # default endpoint; see config/samples/netbox_v1alpha1_netboxendpoint.yaml.
+  endpointRef: homelab
+
+  # The default, spelled out. A shared catalogue kind is the one place Adopt really hurts:
+  # if another namespace already claims this slug, two CRs reconcile one NetBox object and
+  # PATCH `description` back and forth forever. Fail says so instead.
+  onConflict: Fail
+
+  name: Houses
+  slug: houses
+  description: One group per physical address
+
+  # No parentRef, which makes this a top-level group -- and unlike a NetBoxRegion, that is
+  # the *same* natural key rather than a different one. tenancy.TenantGroup declares no
+  # meta.constraints and is column-unique on `slug`, so the lookup is `?slug=houses` with
+  # no `parent_id` filter of any kind. See docs/reference/netboxtenantgroup.md.
