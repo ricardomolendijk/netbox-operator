@@ -190,8 +190,11 @@ watching the object: an unconditional write bumps `resourceVersion` every `resyn
 forever and wakes every watcher, which is an Argo CD refresh and an audit entry per
 endpoint per interval for a change that is not one. `resyncPeriod` uses
 `spec.resyncPeriod` when positive and otherwise
-falls back to 10 minutes — belt and braces, since the CRD already defaults the field to
-`10m` (`api/v1alpha1/netboxendpoint_types.go:107`–`:110`).
+falls back to `internal/reconciler`'s `DefaultResync` — belt and braces, since the CRD
+already defaults the field to `10m`
+(`api/v1alpha1/netboxendpoint_types.go:107`–`:110`). It borrows the engine's constant
+rather than restating the literal, so the two halves of the binary cannot end up with
+different notions of "the default".
 
 ## Tiered backoff, and why
 
@@ -215,6 +218,31 @@ the answer could possibly change.
 The same logic runs the other way for `ProbeFailed`. A NetBox that is restarting is back
 in well under 10 minutes, and 30 seconds of staleness in the `Ready` condition is the
 cost of finding out.
+
+### Every requeue carries jitter
+
+Both requeues — the success path's `resyncPeriod` and every tier `failureBackoff` picks —
+are returned through `internal/reconciler`'s `Jitter`, the same ±10% spread the engine
+applies to object requeues (`docs/concepts/engine.md`). Every requeue delay quoted anywhere
+on this page is therefore the *centre* of a range rather than an exact interval: a 30s tier
+requeues somewhere in 27s–33s, a 10m one in 9m–11m.
+
+The reason is the one the engine already wrote down. Endpoints arrive in a manifest applied
+all at once, so they reconcile in the same pass, and a bare `RequeueAfter` keeps them
+aligned for the life of the process — lab, staging and prod re-probing in lockstep, and
+every endpoint pointed at the same NetBox hitting `/api/status/` at the same instant. The
+blast radius is smaller than the engine's, because endpoints are few and the probe is
+cheap, but two components of one binary should not disagree about a convention one of them
+has already reasoned through. There is one `Jitter`, exported from the engine's package and
+called by both.
+
+±10% and not full jitter, deliberately. The NetBox client uses full jitter — uniform in
+`[0, backoff]` — for HTTP retries, where collapsing a delay to nearly nothing is harmless
+and de-synchronising is the entire point (`docs/concepts/errors-and-retries.md`). Here the
+delay carries meaning: the tiers exist to say how likely a retry is to help, and a
+10-minute wait that jitters down to 4 would be a worse experience than one that stays at
+10, as well as demoting the tier into the one below it. A tenth either way spreads the
+schedule without ever moving an interval out of its tier.
 
 ## Why NetBox being down is never a returned error
 
@@ -359,6 +387,8 @@ CR in the cluster, which is exactly what typing the error was meant to prevent
 | NetBox unreachable, 5xx, timeout, non-NetBox URL | condition, requeue 30s | Somebody else's outage. Must not touch the operator's error rate. |
 | Version outside `[4.2.0, 5.0.0)`, or unparseable | condition, requeue 10m | Cannot self-correct. Fast retries are noise. |
 | Everything succeeded | conditions `True`, requeue after `resyncPeriod` | Periodic re-probe catches a NetBox upgrade, a revoked token, an expired certificate. |
+
+Every delay in the table is jittered by ±10%, for the reason above.
 | `Status().Update` fails | return the error, **and no `RequeueAfter`** | A conflict means the object moved under us; exponential backoff and a fresh read is the right answer. Returning a `Result` too would discard it silently. |
 
 The through-line: **return an error only for a failure of the operator's own

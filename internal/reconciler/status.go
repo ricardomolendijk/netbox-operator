@@ -101,7 +101,7 @@ func (p *pass) finish(ctx context.Context, requeue time.Duration) (ctrl.Result, 
 	if equality.Semantic.DeepEqual(p.before, status) {
 		logf.FromContext(ctx).V(1).Info("status unchanged; not writing", "action", "none")
 
-		return ctrl.Result{RequeueAfter: jitter(requeue)}, nil
+		return ctrl.Result{RequeueAfter: Jitter(requeue)}, nil
 	}
 
 	if err := p.engine.Status.UpdateStatus(ctx, p.obj); err != nil {
@@ -114,7 +114,7 @@ func (p *pass) finish(ctx context.Context, requeue time.Duration) (ctrl.Result, 
 			p.obj.GetNamespace(), p.obj.GetName(), err)
 	}
 
-	return ctrl.Result{RequeueAfter: jitter(requeue)}, nil
+	return ctrl.Result{RequeueAfter: Jitter(requeue)}, nil
 }
 
 // resync is this endpoint's drift re-check interval.
@@ -142,10 +142,17 @@ func (p *pass) driftResync() time.Duration {
 	return p.resync()
 }
 
-// jitter spreads a requeue by up to a tenth either way, so that objects created together
+// Jitter spreads a requeue by up to a tenth either way, so that objects created together
 // -- a whole manifest applied at once -- do not resync in lockstep for the rest of their
 // lives and turn one NetBox into the bottleneck.
-func jitter(d time.Duration) time.Duration {
+//
+// Exported because the endpoint controller requeues on its own timers and needs the same
+// spread for the same reason. One definition rather than two: two components of one binary
+// disagreeing about a convention this package has already written down is how the
+// convention stops being one. A tenth either way is deliberately narrow -- unlike the full
+// jitter the NetBox client uses for retry backoff, it spreads a schedule without moving an
+// interval out of the tier its caller chose.
+func Jitter(d time.Duration) time.Duration {
 	if d <= 0 {
 		return 0
 	}

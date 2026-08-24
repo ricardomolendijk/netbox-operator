@@ -23,6 +23,7 @@ import (
 	netboxv1alpha1 "github.com/ricardomolendijk/netbox-operator/api/v1alpha1"
 	"github.com/ricardomolendijk/netbox-operator/internal/metrics"
 	"github.com/ricardomolendijk/netbox-operator/internal/netbox"
+	"github.com/ricardomolendijk/netbox-operator/internal/reconciler"
 )
 
 // secretRefIndex indexes endpoints by the Secret they read, so a Secret event can find
@@ -170,7 +171,7 @@ func (r *NetBoxEndpointReconciler) ready(ctx context.Context, e *netboxv1alpha1.
 		// must never be returned together or a status conflict silently loses the resync.
 		return ctrl.Result{}, err
 	}
-	return ctrl.Result{RequeueAfter: resyncPeriod(e)}, nil
+	return ctrl.Result{RequeueAfter: reconciler.Jitter(resyncPeriod(e))}, nil
 }
 
 // readToken fetches the API token and the Secret's resourceVersion, which is what makes
@@ -317,11 +318,14 @@ func (r *NetBoxEndpointReconciler) fail(ctx context.Context, e *netboxv1alpha1.N
 	if err := r.writeStatus(ctx, e, before); err != nil {
 		return ctrl.Result{}, err
 	}
-	return ctrl.Result{RequeueAfter: failureBackoff(reason)}, nil
+	return ctrl.Result{RequeueAfter: reconciler.Jitter(failureBackoff(reason))}, nil
 }
 
 // failureBackoff spaces out retries by how likely a retry is to help. A version mismatch
 // will not fix itself, so re-probing every 30 seconds is pure noise.
+//
+// The tier is the interval's intent; callers requeue on reconciler.Jitter of it, which
+// spreads endpoints that failed together without moving any of them out of their tier.
 func failureBackoff(reason string) time.Duration {
 	switch reason {
 	case netboxv1alpha1.ReasonVersionUnsupported, netboxv1alpha1.ReasonVersionUnparseable:
@@ -368,11 +372,16 @@ func reasonForConfig(err error) string {
 	return netboxv1alpha1.ReasonInvalidConfig
 }
 
+// resyncPeriod is how long until the next re-probe. The fallback exists only for an object
+// that reached the controller without the CRD default applied -- a hand-built object in a
+// test, or a spec written before the field existed -- and it borrows the engine's constant
+// rather than restating it, so the two halves of the binary cannot drift to different
+// notions of "the default".
 func resyncPeriod(e *netboxv1alpha1.NetBoxEndpoint) time.Duration {
 	if e.Spec.ResyncPeriod.Duration > 0 {
 		return e.Spec.ResyncPeriod.Duration
 	}
-	return 10 * time.Minute
+	return reconciler.DefaultResync
 }
 
 // transitioned reports whether writing this condition would change the endpoint's state.

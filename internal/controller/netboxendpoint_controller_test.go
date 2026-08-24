@@ -9,13 +9,16 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	netboxv1alpha1 "github.com/ricardomolendijk/netbox-operator/api/v1alpha1"
+	"github.com/ricardomolendijk/netbox-operator/internal/reconciler"
 )
 
 // netboxStub is a NetBox that answers GET /api/status/ however the test needs.
@@ -506,11 +509,11 @@ func TestUnchangedReconcileWritesNoStatus(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	reconciler, _ := fakeReconciler(t, endpointFor(srv.URL), credentialSecret())
-	counter := &countingClient{Client: reconciler.Client}
-	reconciler.Client = counter
+	r, _ := fakeReconciler(t, endpointFor(srv.URL), credentialSecret())
+	counter := &countingClient{Client: r.Client}
+	r.Client = counter
 
-	reconcileOnce(t, reconciler)
+	reconcileOnce(t, r)
 	if counter.statusWrites != 1 {
 		t.Fatalf("status writes on the first reconcile = %d, want 1: an endpoint that has "+
 			"never been reconciled must report something", counter.statusWrites)
@@ -518,7 +521,7 @@ func TestUnchangedReconcileWritesNoStatus(t *testing.T) {
 
 	const resyncs = 10
 	for range resyncs {
-		reconcileOnce(t, reconciler)
+		reconcileOnce(t, r)
 	}
 	if counter.statusWrites != 1 {
 		t.Errorf("status writes after %d unchanged resyncs = %d, want 1",
@@ -531,7 +534,7 @@ func TestUnchangedReconcileWritesNoStatus(t *testing.T) {
 	old := netboxStub(t, "3.7.8", http.StatusOK)
 	current := &netboxv1alpha1.NetBoxEndpoint{}
 	key := client.ObjectKey{Namespace: "default", Name: "homelab"}
-	if err := reconciler.Get(context.Background(), key, current); err != nil {
+	if err := r.Get(context.Background(), key, current); err != nil {
 		t.Fatalf("re-reading the endpoint: %v", err)
 	}
 	current.Spec.URL = old.URL
@@ -539,21 +542,112 @@ func TestUnchangedReconcileWritesNoStatus(t *testing.T) {
 	// spec change, and a zero on both sides would make the observedGeneration assertion
 	// below true without asserting anything.
 	current.Generation = 7
-	if err := reconciler.Update(context.Background(), current); err != nil {
+	if err := r.Update(context.Background(), current); err != nil {
 		t.Fatalf("updating the endpoint: %v", err)
 	}
 
-	reconcileOnce(t, reconciler)
+	reconcileOnce(t, r)
 	if counter.statusWrites != 2 {
 		t.Errorf("status writes after a genuine change = %d, want 2", counter.statusWrites)
 	}
 
 	// And skipping a write must not mean skipping observedGeneration: it is what
 	// `kubectl wait` reads, and the pass that writes has to stamp the generation it saw.
-	after := mustFetch(t, reconciler.Client, "default", "homelab")
+	after := mustFetch(t, r.Client, "default", "homelab")
 	if after.Status.ObservedGeneration != after.Generation {
 		t.Errorf("status.observedGeneration = %d, want %d",
 			after.Status.ObservedGeneration, after.Generation)
+	}
+}
+
+// TestRequeuesAreJittered is the regression test for endpoints probing in lockstep. A
+// manifest applied at once reconciles every endpoint in it in the same pass, and a bare
+// RequeueAfter keeps that alignment for the life of the process -- so lab, staging and prod
+// re-probe together forever, and every endpoint pointed at one NetBox hits it at the same
+// instant. The engine has spread its requeues since it was written; this is the controller
+// using that same spread rather than growing a second one.
+//
+// The assertions are on the bounds and on the spread, never on a drawn value: that the
+// intervals differ is the whole property, and pinning one would only restate
+// reconciler.Jitter. Both outcomes are covered because both requeue -- an endpoint whose
+// token was revoked retries on a timer exactly as a healthy one resyncs on one.
+func TestRequeuesAreJittered(t *testing.T) {
+	// Enough endpoints that an all-identical draw is not something that happens: the
+	// spread is a fifth of the tier wide at nanosecond resolution. Every assertion below
+	// holds for any draw, so the count buys confidence without buying flakiness.
+	const endpoints = 8
+
+	tests := []struct {
+		name string
+		// status is what the stubbed NetBox answers GET /api/status/ with. tier is the
+		// interval the controller picks before jitter, and floor is the tier below it,
+		// which jitter must never reach -- a 2m retry that lands at 30s has been demoted
+		// into another tier, and then the tiers distinguish nothing.
+		status int
+		tier   time.Duration
+		floor  time.Duration
+	}{
+		{
+			name:   "endpoints that became ready together resync apart",
+			status: http.StatusOK,
+			tier:   reconciler.DefaultResync,
+			floor:  2 * time.Minute,
+		},
+		{
+			name:   "endpoints whose token was refused retry apart",
+			status: http.StatusUnauthorized,
+			tier:   2 * time.Minute,
+			floor:  30 * time.Second,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := netboxStub(t, "4.6.8", tc.status)
+
+			// One reconciler over all of them, created in one pass, which is the shape the
+			// defect has: not one endpoint reconciled repeatedly, but several reconciled
+			// once each.
+			objects := []client.Object{credentialSecret()}
+			for i := range endpoints {
+				e := endpointFor(srv.URL)
+				e.Name = fmt.Sprintf("nb-%d", i)
+				objects = append(objects, e)
+			}
+			r, _ := fakeReconciler(t, objects...)
+
+			seen := map[time.Duration]bool{}
+			for i := range endpoints {
+				result, err := r.Reconcile(context.Background(), ctrl.Request{
+					NamespacedName: client.ObjectKey{
+						Namespace: "default", Name: fmt.Sprintf("nb-%d", i),
+					},
+				})
+				if err != nil {
+					t.Fatalf("Reconcile() = %v; netbox availability is a condition, not a "+
+						"controller failure", err)
+				}
+
+				low, high := tc.tier-tc.tier/10, tc.tier+tc.tier/10
+				if result.RequeueAfter < low || result.RequeueAfter > high {
+					t.Fatalf("requeueAfter = %s, want %s +/- 10%%: jitter spreads a "+
+						"schedule, it does not choose a new interval",
+						result.RequeueAfter, tc.tier)
+				}
+				if result.RequeueAfter <= tc.floor {
+					t.Fatalf("requeueAfter = %s, at or below the %s tier below it: jitter "+
+						"must not demote an interval into another tier",
+						result.RequeueAfter, tc.floor)
+				}
+				seen[result.RequeueAfter] = true
+			}
+
+			if len(seen) < 2 {
+				t.Errorf("%d endpoints reconciled in one pass produced %d distinct "+
+					"requeue intervals, want more than one: they will probe in lockstep "+
+					"for the life of the process", endpoints, len(seen))
+			}
+		})
 	}
 }
 
