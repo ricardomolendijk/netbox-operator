@@ -98,7 +98,7 @@ spec:
   platformRef:
     slug: debian-12
   clusterRef:
-    name: homelab-k3s        # NBO-028; no owner reference either way
+    name: homelab-k3s        # a real Kind, and still no owner reference
 
   assetTag: RTM-0001
   serial: 10000000abcdef01
@@ -245,11 +245,11 @@ on_delete=SET_NULL`. `NetBoxPlatform` is NBO-027; `slug`, `lookup` and `id` work
 
 | | |
 |---|---|
-| Type | `*ClusterRef` → `NetBoxCluster` |
+| Type | `*ClusterRef` → [`NetBoxCluster`](netboxcluster.md) |
 | Required | no |
 
 The virtualization cluster this device is a host in. `cluster ForeignKey ->
-virtualization.Cluster on_delete=SET_NULL`. `NetBoxCluster` is NBO-028.
+virtualization.Cluster on_delete=SET_NULL`.
 
 A containment-*shaped* reference that adds **no owner reference**. `SET_NULL` leaves the device
 row alive with the column cleared, so an owner reference would garbage-collect a CR whose
@@ -594,7 +594,7 @@ needs when two devices share a name — `kubectl get nbdev` is where you see tha
 | `kubectl apply` rejected, `metadata.name` | admission | uppercase or an underscore copied from `spec.name` | `metadata.name` is a DNS-1123 label; `spec.name` keeps the literal string |
 | `Ready=False`, `Reason=WaitingForKey` | reconcile, **zero lookups and zero writes** | `siteRef` has not resolved, so no candidate applies | Apply the site. The device re-enqueues on its own |
 | `Ready=False`, `Reason=WaitingForRef` naming `tenantRef` | reconcile, zero writes | the tenant does not exist yet | Expected. Do **not** remove `tenantRef` to unblock it — that changes the object's identity |
-| `Ready=False`, `Reason=WaitingForRef` with `RefKindUnavailable` | reconcile | `deviceTypeRef`, `roleRef`, `platformRef`, `clusterRef` or an address ref in `name` mode | Those Kinds are NBO-025/027/028. Use `slug`, `lookup` or `id` meanwhile |
+| `Ready=False`, `Reason=WaitingForRef` with `RefKindUnavailable` | reconcile | `deviceTypeRef`, `roleRef`, `platformRef` or an address ref in `name` mode | Those Kinds are NBO-025 and NBO-027. Use `slug`, `lookup` or `id` meanwhile |
 | `Ready=False`, `Reason=DeferredFieldPending` | reconcile | an address reference has not been PATCHed yet | Expected and transient. `status.deferredPending` names which |
 | `Ready=False`, `Reason=Conflict` naming an `assetTag` | reconcile, zero writes | another CR, possibly in another namespace, claims that asset tag | The column is globally unique. The message names the winner |
 | `Ready=False`, `Reason=Conflict`, two ids | reconcile, zero writes | two devices matched the candidate | Should not happen on candidates 2 and 3 — the constraints forbid it. Check `status.naturalKey` for what was searched |
@@ -611,6 +611,7 @@ needs when two devices share a name — `kubectl get nbdev` is where you see tha
   model whose cascade runs the other way
 - [`NetBoxSite`](netboxsite.md) — half the identity, and the parent that does *not* cascade
 - [`NetBoxTenant`](netboxtenant.md) — the other half, when it is set
+- [`NetBoxCluster`](netboxcluster.md) — the containment-shaped reference that is not a parent
 - [Ownership](../concepts/ownership.md) — why a `PROTECT`-ed foreign key gets no owner
   reference, and what the absence of `ParentOwned` means
 - [Lookups](../concepts/lookups.md) — `?name__ie=`, and why a null filter is pinned rather

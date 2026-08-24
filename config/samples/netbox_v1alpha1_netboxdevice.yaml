@@ -69,7 +69,6 @@ spec:
   # A containment-shaped reference that is deliberately not a containment parent:
   # on_delete=SET_NULL leaves the device row alive with the column cleared, so an owner
   # reference here would garbage-collect a CR whose NetBox object still exists.
-  # NetBoxCluster is NBO-028.
   # clusterRef:
   #   name: homelab-k3s
 
