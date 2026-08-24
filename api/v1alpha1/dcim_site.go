@@ -79,18 +79,30 @@ type NetBoxSiteSpec struct {
 
 	// Facility is the data-centre or campus designation within the site
 	// (docs/netbox-schema.md -> dcim.Site, `facility CharField len=50`).
+	//
+	// Omit it to leave NetBox's own value alone; set it to `""` to clear the value in
+	// NetBox. The two are different intents and the operator can tell them apart
+	// (docs/concepts/field-ownership.md).
 	// +kubebuilder:validation:MaxLength=50
 	// +optional
 	Facility string `json:"facility,omitempty"`
 
 	// PhysicalAddress is the site's street address
 	// (docs/netbox-schema.md -> dcim.Site, `physical_address CharField len=200`).
+	//
+	// Omit it to leave NetBox's own value alone; set it to `""` to clear the value in
+	// NetBox. The two are different intents and the operator can tell them apart
+	// (docs/concepts/field-ownership.md).
 	// +kubebuilder:validation:MaxLength=200
 	// +optional
 	PhysicalAddress string `json:"physicalAddress,omitempty"`
 
 	// ShippingAddress is where equipment for this site is delivered
 	// (docs/netbox-schema.md -> dcim.Site, `shipping_address CharField len=200`).
+	//
+	// Omit it to leave NetBox's own value alone; set it to `""` to clear the value in
+	// NetBox. The two are different intents and the operator can tell them apart
+	// (docs/concepts/field-ownership.md).
 	// +kubebuilder:validation:MaxLength=200
 	// +optional
 	ShippingAddress string `json:"shippingAddress,omitempty"`
@@ -133,6 +145,10 @@ type NetBoxSiteSpec struct {
 	// Declared on PrimaryModel rather than on dcim.Site, so docs/netbox-schema.md does not
 	// list it under `dcim.Site` -- see that file's preamble on inherited columns, which are
 	// as required and as writable as declared ones.
+	//
+	// Omit it to leave NetBox's own value alone; set it to `""` to clear the value in
+	// NetBox. The two are different intents and the operator can tell them apart
+	// (docs/concepts/field-ownership.md).
 	// +kubebuilder:validation:MaxLength=200
 	// +optional
 	Description string `json:"description,omitempty"`
@@ -141,6 +157,10 @@ type NetBoxSiteSpec struct {
 	//
 	// Also inherited from PrimaryModel, and a TextField rather than a CharField: it has no
 	// max_length, so there is no MaxLength marker to derive.
+	//
+	// Omit it to leave NetBox's own value alone; set it to `""` to clear the value in
+	// NetBox. The two are different intents and the operator can tell them apart
+	// (docs/concepts/field-ownership.md).
 	// +optional
 	Comments string `json:"comments,omitempty"`
 }

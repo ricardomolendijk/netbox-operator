@@ -214,10 +214,10 @@ colour NetBox rejects gives `Ready=False, Reason=Invalid`.
 
 Free text shown next to the tag.
 
-**If it is wrong.** Over 200 characters is rejected at admission. Worth knowing: an
-**empty** description is not managed rather than being pushed as empty, so setting
-`description` and then removing it again leaves the old value in NetBox. See
-[what "spec omission" actually means](#spec-omission-is-go-level-not-yaml-level).
+**If it is wrong.** Over 200 characters is rejected at admission. Worth knowing: `description:
+""` and no `description` key are two different instructions — the first clears NetBox's
+description, the second leaves it alone. See
+[what "spec omission" actually means](#spec-omission-is-yaml-level).
 
 ### `spec.weight`
 
@@ -411,24 +411,24 @@ NetBox returns the list as `app_label.model` strings on this endpoint and as nes
 `{app_label, model}` objects on some others; both read shapes reduce to the same set, so
 neither produces a permanent diff.
 
-### `spec` omission is Go-level, not YAML-level
+### `spec` omission is YAML-level
 
-"Only fields present in the spec are sent" is implemented as "only non-zero Go fields are
-sent": the engine reads a spec through `json.Marshal` of the stored object, and `omitempty`
-collapses *absent* and *empty* into the same thing.
+"Only fields present in the spec are sent" means present in *your manifest*, not non-zero in
+Go. For a `NetBoxTag`:
 
-For a `NetBoxTag` that means:
+- No `description` at all leaves NetBox's description exactly as it is.
+- `description: ""` clears it. The two are different instructions, and the operator tells
+  them apart from `metadata.managedFields` rather than from the Go value — which is what
+  makes an empty string expressible at all.
+- `objectTypes: []` clears the object-type restriction; omitting `objectTypes` leaves
+  whatever NetBox holds.
+- `color` and `weight` carry a `+kubebuilder:default`, so they are never absent and are
+  always managed. That is the reason they have one, and it is unrelated to the above.
 
-- `description: ""` and no `description` at all are indistinguishable. Neither is sent, so
-  a description that has been set once cannot be cleared through this CR — edit it in
-  NetBox, or set it to a single space.
-- `objectTypes: []` likewise cannot clear a restriction that is already in NetBox.
-- `color` and `weight` are **not** affected, because both carry a `+kubebuilder:default`, so
-  they are always present and always managed. That is the reason they have one.
-
-This is a property of the shared engine rather than of tags, and it is the trade that lets
-the operator co-exist with humans editing the same object
-([ADR-0005](../decisions/0005-gitops-coexistence.md)).
+This is a property of the shared engine rather than of tags. See
+[field ownership](../concepts/field-ownership.md), which also covers the one case where the
+old behaviour survives: an object that reaches the operator with no field-ownership metadata
+at all.
 
 ### What the operator never writes
 
@@ -485,7 +485,7 @@ either it has not created one yet, or it refused to. `kubectl get nbtag` works t
 | Drift reported and never corrected | `Ready=False, Reason=ReportPending`, `Synced=False, Reason=DriftReported`, `DriftDetected=True` | the endpoint is `driftMode: Report`, which sends nothing at all | Set `driftMode: Correct`. See [gitops](../operations/gitops.md) |
 | A colour edited in the NetBox UI is never corrected | `Ready=True`, `DriftDetected=False`, and NetBox still holds the edit | the endpoint is `driftMode: Off`, so nothing re-checks on a timer | Set `driftMode: Correct`, or touch the CR |
 | A colour edited in the NetBox UI comes back | `Ready=True, Synced=True, Reason=DriftCorrected` | working as designed: a UI edit is drift | Change `spec.color`, or set the endpoint to `DryRun` while you investigate |
-| A description set in NetBox is not removed by clearing `spec.description` | `Ready=True, Synced=True, Reason=NoDrift` | an empty string is indistinguishable from an absent field | See [`spec` omission is Go-level](#spec-omission-is-go-level-not-yaml-level) |
+| A description set in NetBox is not removed by setting `spec.description: ""` | `Ready=True, Synced=True, Reason=NoDrift` | nothing claims the field, so the operator read the empty string as "not set". Either the key was deleted rather than emptied, or this object has no field-ownership metadata | Check `netbox_operator_spec_ownership_untracked_total` and see [field ownership](../concepts/field-ownership.md) |
 | Two tags in NetBox where there should be one | `Ready=True` on both CRs | two `NetBoxTag`s with **different** slugs — `slug` is the natural key, `name` is not | Give them the same slug and delete one CR, or accept both |
 | `kubectl delete` hangs | `Deleting=False, Reason=Protected` | NetBox refuses the delete while something is still tagged with it. The message names what | Untag those objects. The retry backs off from 10s to 5m and unblocks itself |
 | `kubectl delete` hangs, endpoint down | `Deleting=False, Reason=WaitingForEndpoint` | the finalizer stays on rather than orphaning the tag | Bring the endpoint back; or accept the orphan with `netbox.kubeforge.org/skip-finalizer=true` |

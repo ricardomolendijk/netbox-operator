@@ -318,6 +318,13 @@ func (p *pass) build(ctx context.Context) error {
 		return err
 	}
 
+	// Before the payload is built: a field the user explicitly emptied is missing from the
+	// marshalled spec, and putting it back is what lets an empty value clear a NetBox one
+	// (NBO-079). Everything downstream then sees an ordinary value.
+	owned := ownershipOf(p.obj)
+	p.reportUntrackedOwnership(ctx, owned)
+	spec.restoreEmpty(p.obj, owned)
+
 	desired, state, refs, err := spec.desired(p.desc)
 	if err != nil {
 		return err
@@ -333,6 +340,29 @@ func (p *pass) build(ctx context.Context) error {
 	p.deferred = newDeferral(p.desc, p.state, p.desired)
 
 	return nil
+}
+
+// reportUntrackedOwnership records that this object carries no spec ownership metadata, so
+// the pass fell back to reading intent off the Go zero value.
+//
+// Not silent, because the consequence is silent: on such an object an explicitly-empty
+// string, bool or plain number is indistinguishable from an absent one, so clearing it in
+// Git changes nothing in NetBox and no condition disagrees. That is the bug NBO-079 fixes,
+// and this counter is how an operator finds out it is still happening.
+//
+// A metric rather than an Info line, because it is true on every reconcile of such an
+// object rather than once: a log line here would be one per object per resync forever, and
+// CONTRIBUTING.md is explicit that a reconcile which changes nothing logs at debug. The
+// debug line carries the diagnosis for whoever turns verbosity up
+// (docs/operations/observability.md).
+func (p *pass) reportUntrackedOwnership(ctx context.Context, owned specOwnership) {
+	if owned.tracked {
+		return
+	}
+
+	metrics.SpecOwnershipUntracked.WithLabelValues(p.desc.GVK.Kind).Inc()
+	logf.FromContext(ctx).V(1).Info("no spec field ownership to read; managing non-zero fields only",
+		"action", "fallback", "fieldManager", FieldManager)
 }
 
 // match is the live object the engine will act on, and how it was found.

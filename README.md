@@ -58,7 +58,7 @@ loop rather than a tree walk. Consequences:
 | **Refs, not IDs** | You never type a NetBox integer ID. `vlanRef: {name: vlan-mgmt}` points at a sibling CR; the resolver reads that CR's `.status.id`. |
 | **Convenience is sugar** | A `NetBoxVirtualMachine` may declare interfaces and addresses inline; the controller materialises them as real child CRs with owner references. Nothing is hidden. |
 | **The operator only touches what it owns** | Adoption of pre-existing NetBox objects is explicit and opt-in. There is no global prune. |
-| **Spec omission means "don't manage"** | Only fields present in the spec are sent, so the operator co-exists with humans editing the same object. |
+| **Spec omission means "don't manage"** | A field you never set is left as NetBox has it, so the operator co-exists with humans editing the same object. A field you set to empty *is* sent, and clears NetBox's value: absent, empty and set are three states, and the operator tells them apart from `metadata.managedFields` rather than from the Go value. See [field ownership](docs/concepts/field-ownership.md). |
 | **Never crash, never lie** | Every failure becomes a Condition, an Event and a backed-off requeue. `status.id` is set only once the object provably exists server-side. |
 
 Longer form, one page each:

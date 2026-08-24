@@ -3,6 +3,7 @@ package reconciler
 import (
 	"context"
 	"errors"
+	"maps"
 	"slices"
 	"testing"
 
@@ -38,15 +39,26 @@ type fakeRef struct {
 
 // fakeSpec is a generated kind's spec: the shared envelope inline, plus one field of each
 // shape the engine has to handle.
+//
+// One field per shape NBO-079 has to answer for -- string, int, bool, slice, map -- and
+// `omitempty` on all of them, because that is what a real kind carries and it is precisely
+// what makes an empty value invisible: `description: ""` marshals to nothing at all. The
+// engine puts the value back from metadata.managedFields, so the fixture models the problem
+// rather than being edited around it. Weight is the pointer shape as well, which needs no
+// ownership metadata: a nil pointer is already a state of its own.
 type fakeSpec struct {
 	netboxv1alpha1.NetBoxObjectSpec `json:",inline"`
 
-	Name        string   `json:"name,omitempty"`
-	Slug        string   `json:"slug,omitempty"`
-	Color       string   `json:"color,omitempty"`
-	Weight      *int64   `json:"weight,omitempty"`
-	ObjectTypes []string `json:"objectTypes,omitempty"`
-	ParentRef   *fakeRef `json:"parentRef,omitempty"`
+	Name         string            `json:"name,omitempty"`
+	Slug         string            `json:"slug,omitempty"`
+	Color        string            `json:"color,omitempty"`
+	Description  string            `json:"description,omitempty"`
+	Priority     int64             `json:"priority,omitempty"`
+	Enabled      bool              `json:"enabled,omitempty"`
+	Weight       *int64            `json:"weight,omitempty"`
+	ObjectTypes  []string          `json:"objectTypes,omitempty"`
+	LocalContext map[string]string `json:"localContextData,omitempty"`
+	ParentRef    *fakeRef          `json:"parentRef,omitempty"`
 
 	// PrimaryIP4Ref is the deferred reference NBO-015 is about: dcim.Device's
 	// `primary_ip4` needs an address that needs an interface that needs the Device, so no
@@ -77,6 +89,7 @@ func (f *fakeKind) DeepCopyObject() runtime.Object {
 	f.DeepCopyInto(&out.ObjectMeta)
 	out.Status = *f.Status.DeepCopy()
 	out.Spec.ObjectTypes = slices.Clone(f.Spec.ObjectTypes)
+	out.Spec.LocalContext = maps.Clone(f.Spec.LocalContext)
 
 	return &out
 }
@@ -127,8 +140,12 @@ func fakeDescriptor() registry.Descriptor {
 			{Spec: "name", API: "name"},
 			{Spec: "slug", API: "slug"},
 			{Spec: "color", API: "color"},
+			{Spec: "description", API: "description"},
+			{Spec: "priority", API: "priority"},
+			{Spec: "enabled", API: "enabled"},
 			{Spec: "weight", API: "weight"},
 			{Spec: "objectTypes", API: "object_types"},
+			{Spec: "localContextData", API: "local_context_data"},
 			{Spec: "parentRef", API: "parent", Ref: true},
 		},
 		NaturalKeys:     []registry.NaturalKey{{Fields: []registry.KeyField{{Filter: "slug", Spec: "slug"}}}},
