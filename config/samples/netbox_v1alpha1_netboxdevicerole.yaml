@@ -1,0 +1,27 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxDeviceRole
+metadata:
+  name: router
+  namespace: default
+spec:
+  endpointRef: homelab
+  onConflict: Fail
+  deletionPolicy: Delete
+
+  name: Router
+  slug: router
+
+  # NetBox's own default, written out so the operator manages the column from the first
+  # reconcile rather than leaving it to whatever NetBox chose.
+  color: 9e9e9e
+
+  # NetBox defaults this to true, so leaving the key out leaves the role usable by virtual
+  # machines. Written explicitly here because `dcim.DeviceRole` is what
+  # `virtualization.VirtualMachine.role` points at as well -- there is no VM-specific role
+  # model.
+  vmRole: true
+
+  description: Routes between networks
+
+  # No parentRef, so this is a top-level role -- a *different* identity rather than the same
+  # identity with a filter missing. The lookup is `?parent_id__isnull=true&slug=router`.

@@ -20,7 +20,8 @@ import (
 // adding a CustomFieldable kind adds a line here, and that is deliberate -- it is the only
 // assertion that can catch a kind being dropped from the provenance stamp.
 var stampedObjectTypes = []string{
-	"dcim.location", "dcim.region", "dcim.site", "dcim.sitegroup",
+	"dcim.devicerole", "dcim.devicetype", "dcim.location", "dcim.manufacturer",
+	"dcim.platform", "dcim.region", "dcim.site", "dcim.sitegroup",
 	"ipam.prefix", "ipam.routetarget", "ipam.vrf",
 	"tenancy.tenant", "tenancy.tenantgroup",
 }

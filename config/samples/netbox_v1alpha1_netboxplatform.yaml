@@ -1,0 +1,20 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxPlatform
+metadata:
+  name: unifi-os
+  namespace: default
+spec:
+  endpointRef: homelab
+  onConflict: Fail
+  deletionPolicy: Delete
+
+  name: UniFi OS
+  slug: unifi-os
+  description: Ubiquiti's device operating system
+
+  # Part of the identity on this kind, and the surprising part: dcim.Platform's constraints are
+  # keyed on `manufacturer`, not on `parent`. With this set the lookup is
+  # `?manufacturer_id=<id>&slug=unifi-os`; without it, `?manufacturer_id__isnull=true&slug=unifi-os`.
+  # Those are two different objects.
+  manufacturerRef:
+    name: ubiquiti

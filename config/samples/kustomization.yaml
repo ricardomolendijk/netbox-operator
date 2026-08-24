@@ -13,3 +13,7 @@ resources:
 - netbox_v1alpha1_netboxtenant.yaml
 - netbox_v1alpha1_netboxroutetarget.yaml
 - netbox_v1alpha1_netboxvrf.yaml
+- netbox_v1alpha1_netboxmanufacturer.yaml
+- netbox_v1alpha1_netboxdevicerole.yaml
+- netbox_v1alpha1_netboxdevicetype.yaml
+- netbox_v1alpha1_netboxplatform.yaml

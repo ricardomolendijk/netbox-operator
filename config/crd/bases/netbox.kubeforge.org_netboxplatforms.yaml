@@ -1,0 +1,491 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.19.0
+  name: netboxplatforms.netbox.kubeforge.org
+spec:
+  group: netbox.kubeforge.org
+  names:
+    kind: NetBoxPlatform
+    listKind: NetBoxPlatformList
+    plural: netboxplatforms
+    shortNames:
+    - nbplatform
+    singular: netboxplatform
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.slug
+      name: Slug
+      type: string
+    - jsonPath: .spec.manufacturerRef.name
+      name: Manufacturer
+      type: string
+    - jsonPath: .status.id
+      name: ID
+      type: integer
+    - jsonPath: .status.conditions[?(@.type=="Ready")].status
+      name: Ready
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          NetBoxPlatform is one dcim.Platform in NetBox.
+
+          Namespaced like every kind in v1alpha1 (docs/decisions/0002-crd-scoping.md). A
+          `platformRef` or `defaultPlatformRef` from a team namespace into the catalogue namespace is
+          a cross-namespace reference and needs a NetBoxRefGrant -- see
+          docs/reference/netboxplatform.md.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              NetBoxPlatformSpec describes one dcim.Platform.
+
+              The operating system or firmware a device runs -- `dcim.Device.platform` and
+              `dcim.DeviceType.default_platform` both point here (docs/netbox-schema.md).
+
+              A `NestedGroupModel` whose uniqueness is **not** scoped by its own tree, which makes it the
+              odd one out among the four nested-group kinds shipped so far. `meta.constraints` is keyed
+              on `manufacturer`, not on `parent`, so `parent` is a plain attribute here while
+              `manufacturer` is identity -- the exact opposite of dcim.DeviceRole. Getting it backwards
+              means adopting the wrong platform.
+            properties:
+              deletionPolicy:
+                default: Delete
+                description: |-
+                  DeletionPolicy is what happens to the NetBox object when this CR is deleted.
+
+                  Read fresh on every pass rather than latched when deletion starts, so switching it
+                  to Retain on an object whose delete NetBox keeps refusing is a way out of that
+                  state (docs/concepts/deletion.md).
+                enum:
+                - Delete
+                - Retain
+                type: string
+              description:
+                description: |-
+                  Description is free text shown next to the platform.
+
+                  Inherited from NestedGroupModel (docs/netbox-schema.md -> dcim.Platform, `description
+                  (NestedGroupModel) CharField len=200`).
+
+                  Omit it to leave NetBox's own value alone; set it to `""` to clear the value in
+                  NetBox. The two are different intents and the operator can tell them apart
+                  (docs/concepts/field-ownership.md).
+                maxLength: 200
+                type: string
+              endpointRef:
+                description: |-
+                  EndpointRef names the NetBoxEndpoint to write through, in this object's own
+                  namespace. Required: there is no cluster-wide default endpoint, so an omitted
+                  reference cannot be resolved into one.
+                minLength: 1
+                type: string
+              manufacturerRef:
+                description: |-
+                  ManufacturerRef limits this platform to one vendor's devices
+                  (docs/netbox-schema.md -> dcim.Platform, `manufacturer ForeignKey ->
+                  dcim.Manufacturer on_delete=PROTECT`).
+
+                  Part of this kind's identity, and the surprising half of it: leaving it unset makes a
+                  *vendor-neutral* platform, which is a different natural key rather than the same key
+                  with a filter omitted, so the lookup pins `manufacturer_id__isnull=true` instead of
+                  dropping the filter (docs/concepts/lookups.md). Declaring it and having it not resolve
+                  yet makes neither candidate applicable, and the engine waits rather than adopting an
+                  unrelated vendor-neutral platform of the same slug.
+
+                  PROTECT, so NetBox refuses to delete a manufacturer while a platform points at it.
+                properties:
+                  id:
+                    description: |-
+                      ID is a literal NetBox primary key: the escape hatch, and the only place in the API
+                      where a raw id is accepted.
+
+                      A pointer so that `id: 0` is distinguishable from unset. NetBox primary keys start
+                      at 1, so zero is never a real object and has to be rejected rather than silently
+                      treated as "no id".
+                    format: int64
+                    minimum: 1
+                    type: integer
+                  lookup:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      Lookup is a raw NetBox API filter, for an object no slug identifies -- a VLAN is
+                      `{vid: "20", site: "home"}` because its identity is a pair.
+
+                      `q` is rejected by the CEL rules along with the pagination and formatting
+                      parameters. It is NetBox's fuzzy search, and a fuzzy filter behind a reference that
+                      must identify exactly one object would make ambiguity the normal case rather than
+                      an error.
+                    maxProperties: 8
+                    type: object
+                  name:
+                    description: |-
+                      Name of a CR of the target Kind, resolved through that CR's `.status.id`.
+
+                      This is the mode to prefer: it is the only one that expresses a dependency the
+                      operator can wait on, which is what lets a graph applied in any order converge.
+                    maxLength: 253
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                    type: string
+                  namespace:
+                    description: |-
+                      Namespace of that CR. Defaults to the referring object's namespace.
+
+                      Load-bearing on the common path rather than an edge case: every Kind is namespaced
+                      in v1alpha1 (docs/decisions/0002-crd-scoping.md), so a team namespace pointing at a
+                      shared catalogue namespace is the normal shape. Crossing a namespace requires a
+                      NetBoxRefGrant in the target namespace (NBO-014).
+                    maxLength: 63
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                    type: string
+                  slug:
+                    description: |-
+                      Slug looks the object up in NetBox directly, for objects the operator does not
+                      manage. No CR needs to exist.
+
+                      Bounded at 100 characters because that is what NetBox's own column allows:
+                      `slug SlugField len=100` on every OrganizationalModel, NestedGroupModel and
+                      PrimaryModel (docs/netbox-schema.md -> dcim.Site, dcim.Region, extras.Tag).
+                    maxLength: 100
+                    pattern: ^[-a-zA-Z0-9_]+$
+                    type: string
+                type: object
+                x-kubernetes-validations:
+                - message: exactly one of name, slug, lookup or id must be set
+                  rule: '[has(self.name) && size(self.name) > 0, has(self.slug) &&
+                    size(self.slug) > 0, has(self.lookup) && size(self.lookup) > 0,
+                    has(self.id)].filter(x, x).size() == 1'
+                - message: namespace may only be set together with name
+                  rule: '!has(self.namespace) || (has(self.name) && size(self.name)
+                    > 0)'
+                - message: lookup keys must be lowercase NetBox filter names
+                  rule: '!has(self.lookup) || self.lookup.all(k, k.matches(''^[a-z][a-z0-9_]*$''))'
+                - message: lookup may not set pagination, formatting or fuzzy-search
+                    parameters
+                  rule: '!has(self.lookup) || self.lookup.all(k, !(k in [''limit'',''offset'',''format'',''brief'',''ordering'',''q'']))'
+                - message: lookup values are limited to 200 characters
+                  rule: '!has(self.lookup) || self.lookup.all(k, size(self.lookup[k])
+                    <= 200)'
+              name:
+                description: |-
+                  Name is the platform's name, as NetBox displays it.
+
+                  Inherited from NestedGroupModel (docs/netbox-schema.md -> dcim.Platform, `name
+                  (NestedGroupModel) CharField REQ len=100`) and not column-unique: `meta.constraints`
+                  scopes it per manufacturer, with a separate constraint for manufacturer-less
+                  platforms.
+                maxLength: 100
+                minLength: 1
+                type: string
+              onConflict:
+                default: Fail
+                description: OnConflict is what to do when NetBox already holds a
+                  matching object.
+                enum:
+                - Fail
+                - Adopt
+                - AdoptOnly
+                type: string
+              parentRef:
+                description: |-
+                  ParentRef nests this platform under another one
+                  (docs/netbox-schema.md -> dcim.Platform, `parent (NestedGroupModel) TreeForeignKey ->
+                  dcim.Platform on_delete=CASCADE`).
+
+                  Outside the identity, unlike on every other nested-group kind: no constraint on
+                  dcim.Platform mentions `parent`, so a platform is findable by its slug whatever its
+                  place in the tree. That is what makes this reference safe to *defer* -- the engine
+                  creates the platform top-level and PATCHes `parent` on when the reference resolves,
+                  so a parent and a child applied in one batch converge without a resync.
+                properties:
+                  id:
+                    description: |-
+                      ID is a literal NetBox primary key: the escape hatch, and the only place in the API
+                      where a raw id is accepted.
+
+                      A pointer so that `id: 0` is distinguishable from unset. NetBox primary keys start
+                      at 1, so zero is never a real object and has to be rejected rather than silently
+                      treated as "no id".
+                    format: int64
+                    minimum: 1
+                    type: integer
+                  lookup:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      Lookup is a raw NetBox API filter, for an object no slug identifies -- a VLAN is
+                      `{vid: "20", site: "home"}` because its identity is a pair.
+
+                      `q` is rejected by the CEL rules along with the pagination and formatting
+                      parameters. It is NetBox's fuzzy search, and a fuzzy filter behind a reference that
+                      must identify exactly one object would make ambiguity the normal case rather than
+                      an error.
+                    maxProperties: 8
+                    type: object
+                  name:
+                    description: |-
+                      Name of a CR of the target Kind, resolved through that CR's `.status.id`.
+
+                      This is the mode to prefer: it is the only one that expresses a dependency the
+                      operator can wait on, which is what lets a graph applied in any order converge.
+                    maxLength: 253
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                    type: string
+                  namespace:
+                    description: |-
+                      Namespace of that CR. Defaults to the referring object's namespace.
+
+                      Load-bearing on the common path rather than an edge case: every Kind is namespaced
+                      in v1alpha1 (docs/decisions/0002-crd-scoping.md), so a team namespace pointing at a
+                      shared catalogue namespace is the normal shape. Crossing a namespace requires a
+                      NetBoxRefGrant in the target namespace (NBO-014).
+                    maxLength: 63
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                    type: string
+                  slug:
+                    description: |-
+                      Slug looks the object up in NetBox directly, for objects the operator does not
+                      manage. No CR needs to exist.
+
+                      Bounded at 100 characters because that is what NetBox's own column allows:
+                      `slug SlugField len=100` on every OrganizationalModel, NestedGroupModel and
+                      PrimaryModel (docs/netbox-schema.md -> dcim.Site, dcim.Region, extras.Tag).
+                    maxLength: 100
+                    pattern: ^[-a-zA-Z0-9_]+$
+                    type: string
+                type: object
+                x-kubernetes-validations:
+                - message: exactly one of name, slug, lookup or id must be set
+                  rule: '[has(self.name) && size(self.name) > 0, has(self.slug) &&
+                    size(self.slug) > 0, has(self.lookup) && size(self.lookup) > 0,
+                    has(self.id)].filter(x, x).size() == 1'
+                - message: namespace may only be set together with name
+                  rule: '!has(self.namespace) || (has(self.name) && size(self.name)
+                    > 0)'
+                - message: lookup keys must be lowercase NetBox filter names
+                  rule: '!has(self.lookup) || self.lookup.all(k, k.matches(''^[a-z][a-z0-9_]*$''))'
+                - message: lookup may not set pagination, formatting or fuzzy-search
+                    parameters
+                  rule: '!has(self.lookup) || self.lookup.all(k, !(k in [''limit'',''offset'',''format'',''brief'',''ordering'',''q'']))'
+                - message: lookup values are limited to 200 characters
+                  rule: '!has(self.lookup) || self.lookup.all(k, size(self.lookup[k])
+                    <= 200)'
+              slug:
+                description: |-
+                  Slug is the platform's URL-safe identifier, and this kind's natural key.
+
+                  Unique *per manufacturer* (docs/netbox-schema.md -> dcim.Platform, `meta.constraints`:
+                  `..._manufacturer_slug` on `(manufacturer, slug)`, plus `..._slug` on `(slug)` with
+                  `condition=Q(manufacturer__isnull=True)`). Two platforms called `ios` under different
+                  manufacturers are two legitimate objects, and both reconcile Ready.
+                maxLength: 100
+                minLength: 1
+                pattern: ^[-a-zA-Z0-9_]+$
+                type: string
+            required:
+            - endpointRef
+            - name
+            - slug
+            type: object
+          status:
+            description: |-
+              NetBoxObjectStatus is the part of every object CR's status that the engine owns. It is
+              the only thing the operator writes: the spec belongs to Git
+              (docs/decisions/0005-gitops-coexistence.md).
+            properties:
+              adopted:
+                description: Adopted reports that the engine took over an object it
+                  did not create.
+                type: boolean
+              conditions:
+                description: Conditions follow the standard Kubernetes vocabulary.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              deferredPending:
+                description: |-
+                  DeferredPending are the CR spec fields the engine has declared deferred and has not
+                  yet written to NetBox: a `primary_ip4` whose address does not exist yet, or one that
+                  was stripped from the create and is waiting for its follow-up PATCH.
+
+                  A status field rather than only a condition message. The intermediate state is
+                  legitimate and can be long-lived -- a reference that never resolves stays here
+                  forever, on purpose -- so "what is this object still waiting to write" has to be
+                  answerable from `kubectl get -o yaml` and greppable across a namespace, which a
+                  sentence inside a condition is not (docs/concepts/object-lifecycle.md).
+
+                  Spec field names rather than NetBox column names, because it is the spelling the
+                  user wrote and the one the RefsResolved message already uses.
+                items:
+                  type: string
+                type: array
+                x-kubernetes-list-type: atomic
+              deletionAttempts:
+                description: |-
+                  DeletionAttempts counts the deletes NetBox refused because something still
+                  references the object.
+
+                  It is a status field rather than in-memory state because a controller has no memory
+                  between passes: the exponential backoff on a protected delete has to be computed
+                  from a count that survives a requeue, a leader election and a restart. Non-zero
+                  only while a CR is terminating.
+                format: int32
+                type: integer
+              id:
+                description: |-
+                  ID is the NetBox primary key. Zero until the object provably exists server-side --
+                  a DryRun write is reported and never sent, so it leaves this empty rather than
+                  inventing an id that nothing would ever match.
+                format: int64
+                type: integer
+              lastAppliedHash:
+                description: |-
+                  LastAppliedHash is a digest of the last payload NetBox accepted. NetBox
+                  canonicalises some values on write, so the request and the response legitimately
+                  differ; this is the record of what was actually sent.
+                type: string
+              lastSyncTime:
+                description: |-
+                  LastSyncTime is when the engine last wrote to NetBox. Unset until it does, and
+                  untouched by a reconcile that found nothing to do -- otherwise every resync would
+                  bump the resourceVersion of every object in the cluster.
+                format: date-time
+                type: string
+              naturalKey:
+                additionalProperties:
+                  type: string
+                description: |-
+                  NaturalKey is the lookup that actually located the object, filter by filter. The
+                  first thing anyone needs when asking why an object was adopted, or was not.
+                type: object
+              observedGeneration:
+                description: |-
+                  ObservedGeneration is the spec generation this status refers to. Always set,
+                  because `kubectl wait` lies without it.
+                format: int64
+                type: integer
+              provenance:
+                description: |-
+                  Provenance is the stamp this object carries in NetBox: the tag and the custom fields
+                  the engine wrote, as it wrote them.
+
+                  Unset when the endpoint's spec.managedBy is unset, and unset for a kind whose NetBox
+                  model carries neither `tags` nor `custom_fields` -- extras.Tag is one, so a
+                  NetBoxTag is managed and unstamped by construction. That is the state NetBoxSweep
+                  (NBO-046) reports and never deletes; see docs/operations/provenance.md.
+                properties:
+                  clusterID:
+                    description: ClusterID is the cluster identifier written into
+                      the cluster custom field.
+                    type: string
+                  customFields:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      CustomFields are the custom fields written, as NetBox names to the values sent.
+                      Empty for a kind whose NetBox model has no `custom_fields` column.
+
+                      These keys are also the only ones compared: NetBox merges a partial `custom_fields`
+                      PATCH and returns every custom field defined for the object type, including ones the
+                      operator knows nothing about, so it compares the keys it sets and leaves the rest
+                      alone. `custom_fields` therefore has two states rather than the three every other
+                      optional field has -- absent or empty means "manage nothing", not "clear everything",
+                      and a value written here cannot be removed through this API
+                      (docs/concepts/field-ownership.md, #171).
+                    type: object
+                  tag:
+                    description: |-
+                      Tag is the tag's slug, written by id. Empty for a kind whose NetBox model has no
+                      `tags` column.
+                    type: string
+                type: object
+              url:
+                description: URL is the object's absolute NetBox URL, as returned
+                  by the API.
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
