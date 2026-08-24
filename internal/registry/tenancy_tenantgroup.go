@@ -49,6 +49,18 @@ func tenancyTenantGroupDescriptor() Descriptor {
 			{
 				Spec: "parentRef", API: "parent", Class: ClassRefOne,
 				Target: netboxv1alpha1.TenantGroupRef{}.TargetGVK(),
+				// `parent TreeForeignKey -> tenancy.TenantGroup on_delete=CASCADE`
+				// (docs/netbox-schema.md -> tenancy.TenantGroup). Declared because the flag is
+				// a fact about the column, not a switch: this Kind has no ContainmentRef and by
+				// the cascade rule of ADR-0003 rule 4 it should have this one. Reported rather
+				// than changed here -- #198 covers the three dcim nested groups, and this is a
+				// fourth Kind with the same defect.
+				//
+				// Sharper here than anywhere else, too: unlike the dcim nested groups, this
+				// Kind's single natural key is `slug` alone and does not read `parent`, so a
+				// child whose parent is gone still has an applicable candidate and the
+				// create-if-absent step really does fire.
+				CascadeOnDelete: true,
 			},
 		},
 

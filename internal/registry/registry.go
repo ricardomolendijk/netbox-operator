@@ -206,6 +206,16 @@ type GenericFKSpec struct {
 	// them, so a member the API accepts and NetBox would reject cannot ship.
 	Members []GenericFKMember
 
+	// CascadeOnDelete says NetBox deletes *this* object when the object this pair points at
+	// is deleted, which for a generic FK is a `GenericRelation` on the target model rather
+	// than an `on_delete` on the column (docs/netbox-schema.md). dcim.Site declares
+	// `prefixes GenericRelation`, so deleting a site deletes the prefixes scoped to it.
+	//
+	// Same meaning and same job as Field.CascadeOnDelete: it is what lets a polymorphic
+	// reference be a containment parent under ADR-0003 rule 4, and validateContainment
+	// refuses one that does not cascade.
+	CascadeOnDelete bool
+
 	// Cached are the read-only denormalised columns NetBox maintains from this pair:
 	// `_region`, `_site_group`, `_site` and `_location` for CachedScopeMixin
 	// (docs/netbox-schema.md -> dcim.CachedScopeMixin). Each must also appear in
@@ -324,6 +334,12 @@ type Descriptor struct {
 	// the site or the VRF" into "delete both"
 	// (docs/decisions/0003-ownership-and-references.md rule 4). Empty when the kind has no
 	// containment parent, which is every catalogue kind.
+	//
+	// Which one it is, is not a judgement per Kind: it is whichever FK the *server*
+	// cascades, and validateContainment rejects a ref whose Field.CascadeOnDelete is false.
+	// A Kind with no cascading FK gets no containment parent and no cascade -- which is a
+	// consequence rather than a gap, since NetBox refuses that deletion anyway
+	// (docs/concepts/ownership.md).
 	ContainmentRef string
 }
 

@@ -39,9 +39,9 @@ because an object has at most one controller and it belongs to whatever created 
 garbage collection counts a non-controller owner exactly the same, so the cascade works
 either way.
 
-`NetBoxRegion.parentRef` is the containment parent in this build. It is not an aesthetic
-choice: `dcim.Region.parent` is `on_delete=CASCADE` in NetBox, so deleting a region deletes
-its descendants server-side. Without the owner reference the child CR outlives the row it
+`NetBoxRegion.parentRef` is the containment parent. It is not an aesthetic choice:
+`dcim.Region.parent` is `on_delete=CASCADE` in NetBox, so deleting a region deletes its
+descendants server-side. Without the owner reference the child CR outlives the row it
 described, finds nothing at `status.id` next reconcile, and the engine's create-if-absent
 step **recreates the region NetBox deliberately deleted**. The general rule is *a
 server-side cascade implies an owner reference*.
@@ -49,6 +49,52 @@ server-side cascade implies an owner reference*.
 Only one containment reference per kind, ever. Garbage collection deletes a dependent once
 *every* owner is gone, so two containment owners would silently mean "survives until both
 parents are deleted" while the manifest reads like "delete either one".
+
+## Which reference is the parent: whichever the server cascades
+
+The containment parent is not the reference that reads most like a container. It is the one
+NetBox itself deletes through, and the descriptor says which that is — `CascadeOnDelete` on the
+field, taken straight from `on_delete` in `docs/netbox-schema.md`. `Validate` refuses a
+`ContainmentRef` whose foreign key does not cascade, so this is a boot failure rather than a
+convention somebody can forget.
+
+| Kind | Parent | Because |
+|---|---|---|
+| `NetBoxRegion` | `parentRef` | `parent` is `CASCADE`, and it is the only reference |
+| `NetBoxSiteGroup` | `parentRef` | same model, same `CASCADE` |
+| `NetBoxLocation` | `siteRef` | `site` **and** `parent` are both `CASCADE`; `site` is the required one |
+| `NetBoxPrefix` | `scopeRef` | every scope target deletes its prefixes; `vrf` is `PROTECT` |
+| `NetBoxDevice` | *none* | every reference on it is `PROTECT` or `SET_NULL` |
+
+`NetBoxLocation` is the only kind so far where two references qualify and there is one slot, so
+it needs a tiebreak. `siteRef` wins on three counts: `site` is required, so every location has
+one, where a containment parent on the optional `parentRef` would leave every top-level
+location with no owner reference at all; deleting a site cascades to *every* location in it,
+nested ones included, so it is the larger deletion; and the parent path is covered by identity
+rather than by ownership — every one of this kind's natural-key candidates reads `parent_id` or
+pins it null, so a location whose `parentRef` stops resolving has no usable identity and the
+engine waits instead of creating. Choosing `parentRef` would trade all three away.
+
+### When no foreign key qualifies
+
+**A kind whose only plausible parent is a `PROTECT` or `SET_NULL` foreign key gets no owner
+reference and no cascade.** `NetBoxDevice` is the example, and it is not a small one:
+`dcim.Device.site` reads exactly like a device's container and is `on_delete=PROTECT`. So
+`kubectl delete netboxsite hq` does not remove the `NetBoxDevice` CRs in that site, and those
+objects carry no `ParentOwned` condition at all — the same *absent* row as a catalogue kind,
+because from the mechanism's point of view they are the same case: no containment parent.
+
+This is a stated consequence rather than a gap, and the argument is that the alternative is
+worse. NetBox **refuses** to delete a site that still has devices (`PROTECT` becomes
+`Deleting=False, Reason=Protected` — see [deletion](deletion.md)). An owner reference there
+would promise a cascade the server will not perform: garbage collection would delete the device
+CR, its finalizer's `DELETE` would be rejected, and the row would outlive the object that
+described it. A `SET_NULL` foreign key is the same mistake in the other direction — the row
+survives with the column cleared, and the CR that described it has been deleted.
+
+So the practical answer for those kinds is `kubectl delete` on the objects themselves, or a
+label selector, in the order NetBox's own constraints allow. There is nothing for the operator
+to do that would be safe, and saying so here is the whole of the mitigation.
 
 ## The namespace rule
 
@@ -203,12 +249,22 @@ ContainmentRef: "siteRef",
 ```
 
 Validated at boot: it must be a spec field this descriptor declares, it must be a reference,
-and it must not be to-many. There is no per-kind ownership code and no `switch` on Kind
-anywhere in the mechanism — which is enforced, not merely intended (`forbidigo`).
+it must not be to-many, and **its foreign key must cascade** — `CascadeOnDelete` on the field,
+which is `on_delete=CASCADE` in NetBox:
+
+```go
+{Spec: "parentRef", API: "parent", Class: ClassRefOne, CascadeOnDelete: true},
+```
+
+Getting that last one wrong is a boot failure (`ErrContainmentNotCascade`) rather than a
+cascade that does the wrong thing in production. There is no per-kind ownership code and no
+`switch` on Kind anywhere in the mechanism — which is enforced, not merely intended
+(`forbidigo`).
 
 Leave it empty for a kind with no containment parent. Every catalogue kind does: a catalogue
 is not a parent, and those references usually cross namespaces anyway, where an owner
-reference is illegal.
+reference is illegal. So does any kind whose references are all `PROTECT` or `SET_NULL` —
+see [when no foreign key qualifies](#when-no-foreign-key-qualifies).
 
 ## See also
 

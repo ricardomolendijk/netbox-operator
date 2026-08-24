@@ -51,10 +51,17 @@ func dcimLocationDescriptor() Descriptor {
 			{
 				Spec: "siteRef", API: "site", Class: ClassRefOne,
 				Target: netboxv1alpha1.SiteRef{}.TargetGVK(),
+				// `site ForeignKey REQ -> dcim.Site on_delete=CASCADE`
+				// (docs/netbox-schema.md -> dcim.Location).
+				CascadeOnDelete: true,
 			},
 			{
 				Spec: "parentRef", API: "parent", Class: ClassRefOne,
 				Target: netboxv1alpha1.LocationRef{}.TargetGVK(),
+				// `parent TreeForeignKey -> dcim.Location on_delete=CASCADE`, also a cascade.
+				// Declared truthfully even though it is not the containment parent: the flag
+				// is a fact about the column, and the tiebreak below is what reads it.
+				CascadeOnDelete: true,
 			},
 		},
 
@@ -91,18 +98,30 @@ func dcimLocationDescriptor() Descriptor {
 
 		UpdateStrategy: UpdatePatch,
 
-		// `site` and not `parentRef`: NetBox deletes a site's locations with it
-		// (`site ForeignKey REQ on_delete=CASCADE`), so the site is the containment parent
-		// and deleting the NetBoxSite should cascade to the CRs the same way. Exactly one
-		// field may carry it, because Kubernetes garbage collection waits for every owner
-		// reference (docs/decisions/0003-ownership-and-references.md rule 4) -- `parent` is
-		// also CASCADE in NetBox and still gets none.
+		// The only Kind so far with **two** cascading parents and one slot, so the cascade rule
+		// of ADR-0003 rule 4 does not settle it on its own: `site` and `parent` are both
+		// `on_delete=CASCADE`. The tiebreak, and why it lands on `siteRef` (#193, #198):
 		//
-		// Declared here and not yet acted on: nothing in this build writes an owner
-		// reference, so no cascade happens today. Stating it is still the right move -- the
-		// mechanism reads this field, and a kind that had to be revisited to declare its
-		// containment parent later is exactly the per-kind edit a Descriptor exists to
-		// avoid.
+		//  1. `site` is REQ and `parent` is not. A containment ref the spec may leave unset
+		//     gives *no* owner reference to every top-level location -- the common shape --
+		//     while `siteRef` is set on every location there can be, so it is the choice that
+		//     protects every object of this Kind rather than a subset. It is also what
+		//     ADR-0003 already asks for: the containment ref is normally the required FK.
+		//  2. Deleting the site cascades to every location in it, nested ones included, so its
+		//     rows are a strict superset of what deleting any one parent location takes. Owning
+		//     by the site therefore covers the larger deletion, and `kubectl delete netboxsite`
+		//     garbage-collects the whole location tree.
+		//  3. The parent-deletion path is not left unguarded, which is what makes this a
+		//     tiebreak rather than a trade. Every candidate below reads `parent_id` or pins it
+		//     null, so a child whose `parentRef` no longer resolves has *no applicable
+		//     candidate* at all: locate() returns errNoCandidate and the engine waits. The
+		//     create-if-absent resurrection the rule exists to prevent is already unreachable
+		//     on that path -- unlike dcim.SiteGroup and dcim.Region, whose parent is in their
+		//     natural keys for the same reason, or tenancy.TenantGroup, whose is not.
+		//
+		// Switching to `parentRef` would trade all three away: top-level locations would carry
+		// no owner reference, `kubectl delete netboxsite` would stop removing location CRs, and
+		// the required FK -- the one that is always there -- would be the one with no cascade.
 		ContainmentRef: "siteRef",
 
 		// The four columns every ChangeLoggedModel carries, plus MPTT's two denormalised

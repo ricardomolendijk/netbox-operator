@@ -56,7 +56,7 @@ golden output contains no `{{if eq .Model "…"}}`.
 | `ReadOnly` | `[]string` | Fields the operator must never write. | `["_depth", "_children", "created", "last_updated", "url", "display"]` |
 | `Fields` | `[]Field` | The spec-to-API map, and the field classes. See [field classes](#field-classes). | `{Spec: "importTargets", API: "import_targets", Class: RefMany, Target: …}` |
 | `GenericFKs` | `[]GenericFKSpec` | The polymorphic `*_type` / `*_id` column pairs on this kind. | `registry.ScopeFK("scope")` |
-| `ContainmentRef` | `string` | The one spec ref whose target gets a non-controller owner reference. Empty for catalogue kinds. | `siteRef` |
+| `ContainmentRef` | `string` | The one spec ref whose target gets a non-controller owner reference — whichever ref the server cascades. Empty for a catalogue kind, and for any kind whose refs are all `PROTECT`. | `siteRef` |
 
 `GenericFKSpec` is six fields. `TypeField` and `IDField` are the two columns; `Spec` is the
 one CR field they are both written from — declared here rather than in `Fields`, because a
@@ -313,11 +313,20 @@ owner is gone, so two containment owners give AND semantics: the object survives
 parents are deleted. A user reading the manifest expects OR — "delete the site *or* the VRF
 and the prefix goes" — and the gap shows up only as an object that refuses to disappear.
 
-So each kind nominates exactly one, and it is normally the required FK: `siteRef` for
-`NetBoxDevice`, `scopeRef` for `NetBoxCluster` and `NetBoxPrefix`, `parentRef` for the
-nested-group kinds, `assignedObject` for `NetBoxIPAddress`. Catalogue references contribute
-none — a catalogue is not a parent — so an empty `ContainmentRef` is the normal value for a
-catalogue kind.
+**Which** one it is, is not a per-kind judgement: it is whichever foreign key the *server*
+cascades. Each `Field` carries `CascadeOnDelete`, read straight off `on_delete` in
+`docs/netbox-schema.md`, and `Validate` rejects a `ContainmentRef` whose field has it false
+(`ErrContainmentNotCascade`). So `parentRef` for the nested-group kinds, `scopeRef` for
+`NetBoxPrefix`, `assignedObject` for `NetBoxIPAddress` — and **none** for `NetBoxDevice`, whose
+`siteRef` reads like a container and is `on_delete=PROTECT`. Catalogue references contribute
+none either, so an empty `ContainmentRef` is the normal value for a catalogue kind.
+[Ownership](ownership.md#when-no-foreign-key-qualifies) states what a kind with no qualifying
+foreign key gives up.
+
+`NetBoxLocation` is the one kind where two refs qualify — `site` and `parent` are both
+`CASCADE` — and it takes `siteRef`, because `site` is the *required* one and a containment
+parent on an optional ref leaves every top-level object unowned. The full argument is in
+`internal/registry/dcim_location.go`.
 
 `NetBoxIPAddress` is on that list for a correctness reason rather than an aesthetic one, and
 [ADR-0003](../decisions/0003-ownership-and-references.md) sets out the argument: NetBox
@@ -461,6 +470,8 @@ by matching a message.
 | `ErrTargetNotRef` | a `Target` on a field whose class is not `RefOne` or `RefMany` |
 | `ErrToManyNaturalKey` | a natural-key candidate that matches on, or pins to null, a `RefMany` field |
 | `ErrContainmentToMany` | a `ContainmentRef` naming a `RefMany` field |
+| `ErrContainmentNotCascade` | a `ContainmentRef` naming a field with `CascadeOnDelete: false` — an owner reference on a `PROTECT`-ed foreign key promises a cascade NetBox refuses to perform |
+| `ErrCascadeNotRef` | `CascadeOnDelete` on a field whose class is not `RefOne` or `RefMany`; `on_delete` is a property of a foreign key |
 | `ErrEmptyField` | an empty string in `ReadOnly` or `RecreateOn`, a `Deferred` entry with no `APIField`, or an empty column in `GenericFKSpec.Cached` |
 | `ErrInvalidGenericFK` | a `GenericFKSpec` missing its `TypeField`, its `IDField`, its `AllowedTypes` or its `Members` |
 | `ErrInvalidGenericFKMember` | a `Members` entry with no `Spec` or no target `Kind`, or the same member `Spec` declared twice |

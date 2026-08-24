@@ -225,9 +225,9 @@ spec:
                   (internal/registry/dcim_location.go, ContainmentRef): NetBox deletes a site's locations
                   with it (`on_delete=CASCADE`), so the site is the containment parent under
                   docs/decisions/0003-ownership-and-references.md rule 4, and exactly one field may be --
-                  which is why `parentRef` is not. The owner reference rule 4 calls for is not written by
-                  any code in this build; the declaration is what a kind can state, and the mechanism
-                  that reads it is NBO-014's remaining half.
+                  which is why `parentRef` is not, even though `parent` is `CASCADE` too. The Descriptor
+                  carries the whole tiebreak; the short version is that `site` is the required FK, so it
+                  is the one every location has.
 
                   Until it resolves, no natural-key candidate is applicable -- both start at `site` --
                   so the object reports RefsResolved=False naming this field and makes no NetBox write

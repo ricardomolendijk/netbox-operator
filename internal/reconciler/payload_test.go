@@ -273,7 +273,11 @@ func TestEnvelopeFieldsAreDerived(t *testing.T) {
 func scopedDescriptor() registry.Descriptor {
 	d := fakeDescriptor()
 	d.ReadOnly = append(slices.Clone(d.ReadOnly), registry.ScopeCacheColumns()...)
-	d.GenericFKs = []registry.GenericFKSpec{registry.ScopeFK("scope")}
+	scope := registry.ScopeFK("scope")
+	// As ipam.Prefix carries it: every scope target declares a `prefixes` GenericRelation, so
+	// the pair cascades and may therefore be the containment parent.
+	scope.CascadeOnDelete = true
+	d.GenericFKs = []registry.GenericFKSpec{scope}
 	d.ContainmentRef = "scope"
 
 	return d

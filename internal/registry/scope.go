@@ -34,6 +34,16 @@ func ScopeCacheColumns() []string {
 // A kind that has the pair and no caches -- ipam.VLANGroup declares `scope_type` /
 // `scope_id` on the model itself -- clears Cached on the returned value; a kind that has
 // them must also carry ScopeCacheColumns() in ReadOnly, which Validate enforces.
+//
+// CascadeOnDelete is deliberately left false here and set by the caller, for the same reason
+// Cached is cleared by the caller: it is not a property of the union, it is a property of the
+// *referring* kind. The scope cascade is a GenericRelation on each target model, and which
+// ones exist differs per relation -- `prefixes` and `vlan_groups` are declared on all four of
+// dcim.Region, dcim.SiteGroup, dcim.Site and dcim.Location, while `clusters` and
+// `wireless_lans` are declared only on the first two (docs/netbox-schema.md). So ipam.Prefix
+// may set it and virtualization.Cluster may not, and defaulting it either way would be wrong
+// for half the callers. One flag per pair also cannot express a union whose members disagree;
+// such a kind gets no containment parent at all.
 func ScopeFK(spec string) GenericFKSpec {
 	return GenericFKSpec{
 		TypeField: ScopeTypeField,
