@@ -1,0 +1,22 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxVirtualDisk
+metadata:
+  name: dns-disk0
+  namespace: default
+spec:
+  endpointRef: homelab
+
+  # Required, and half the identity, exactly as on NetBoxVMInterface.
+  virtualMachineRef:
+    name: dns
+
+  # Required. Case-sensitive: ComponentModel's constraint carries no Lower().
+  name: disk0
+
+  # Required, and not a pointer: NetBox will not take a null size. MB or MiB per the
+  # instance's DISK_BASE_UNIT, and the same unit as NetBoxVirtualMachine.spec.disk -- which
+  # is what makes the two comparable. Set one or the other, never both with different
+  # totals: NetBox rejects a VM `disk` that disagrees with the sum of its virtual disks.
+  size: 20480
+
+  description: Root disk

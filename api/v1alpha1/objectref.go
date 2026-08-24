@@ -159,6 +159,41 @@ type (
 
 	// VRFRef points at a NetBoxVRF (ipam.VRF, ipam/vrfs).
 	VRFRef ObjectRef
+
+	// ClusterRef points at a NetBoxCluster (virtualization.Cluster,
+	// virtualization/clusters).
+	//
+	// Declared here by NBO-029, which needs it for a VM's `cluster`, while NBO-028 lands
+	// the Kind. Until then it resolves to RefKindUnavailable, which is the honest answer:
+	// the manifest is correct and the fix is an operator that carries the Kind.
+	ClusterRef ObjectRef
+
+	// VirtualMachineRef points at a NetBoxVirtualMachine (virtualization.VirtualMachine,
+	// virtualization/virtual-machines).
+	VirtualMachineRef ObjectRef
+
+	// DeviceRef points at a NetBoxDevice (dcim.Device, dcim/devices). The Kind lands with
+	// NBO-030; the alias is what `virtualization.VirtualMachine.device` points at.
+	DeviceRef ObjectRef
+
+	// DeviceRoleRef points at a NetBoxDeviceRole (dcim.DeviceRole, dcim/device-roles).
+	//
+	// dcim.DeviceRole and not ipam.Role, and not a virtualization-specific role either:
+	// `virtualization.VirtualMachine.role` is a foreign key to the DCIM model
+	// (docs/netbox-schema.md -> virtualization.VirtualMachine), which is why
+	// `DeviceRole.vm_role` exists and defaults to true. Kind lands with NBO-027.
+	DeviceRoleRef ObjectRef
+
+	// PlatformRef points at a NetBoxPlatform (dcim.Platform, dcim/platforms). Kind lands
+	// with NBO-027.
+	PlatformRef ObjectRef
+
+	// IPAddressRef points at a NetBoxIPAddress (ipam.IPAddress, ipam/ip-addresses).
+	//
+	// What a `primary_ip4` / `primary_ip6` is, and therefore always a deferred field where
+	// it appears: the address needs an interface that needs the object that carries the
+	// address (docs/concepts/object-lifecycle.md). Kind lands with NBO-025.
+	IPAddressRef ObjectRef
 )
 
 // TargetGVK reports the Kind this reference resolves against.
@@ -263,6 +298,54 @@ func (r VRFRef) TargetGVK() schema.GroupVersionKind { return GroupVersion.WithKi
 // AsObjectRef returns the underlying reference.
 func (r VRFRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
 
+// TargetGVK reports the Kind this reference resolves against.
+func (r ClusterRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxCluster")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r ClusterRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r VirtualMachineRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxVirtualMachine")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r VirtualMachineRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r DeviceRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxDevice")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r DeviceRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r DeviceRoleRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxDeviceRole")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r DeviceRoleRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r PlatformRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxPlatform")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r PlatformRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r IPAddressRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxIPAddress")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r IPAddressRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
 // Compile-time proof that every alias satisfies RefTarget. An alias that forgets its
 // methods fails the build here rather than at the first reconcile that needs it.
 var (
@@ -280,4 +363,10 @@ var (
 	_ RefTarget = VLANRef{}
 	_ RefTarget = RouteTargetRef{}
 	_ RefTarget = VRFRef{}
+	_ RefTarget = ClusterRef{}
+	_ RefTarget = VirtualMachineRef{}
+	_ RefTarget = DeviceRef{}
+	_ RefTarget = DeviceRoleRef{}
+	_ RefTarget = PlatformRef{}
+	_ RefTarget = IPAddressRef{}
 )

@@ -13,3 +13,6 @@ resources:
 - bases/netbox.kubeforge.org_netboxtenants.yaml
 - bases/netbox.kubeforge.org_netboxroutetargets.yaml
 - bases/netbox.kubeforge.org_netboxvrfs.yaml
+- bases/netbox.kubeforge.org_netboxvirtualmachines.yaml
+- bases/netbox.kubeforge.org_netboxvminterfaces.yaml
+- bases/netbox.kubeforge.org_netboxvirtualdisks.yaml
