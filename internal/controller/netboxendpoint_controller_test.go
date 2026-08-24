@@ -280,8 +280,22 @@ func TestUnlabelledSecretIsInvisibleAndNamesTheLabel(t *testing.T) {
 	}
 }
 
+// TestSecretRotationRebuildsTheClientWithoutRestart asserts what rotation is for: change
+// the Secret and the next request to NetBox carries the new token, with no restart in
+// between. The token reaching NetBox is the behaviour, so the token reaching NetBox is what
+// is asserted.
+//
+// It deliberately does not compare client pointers across the rotation, which is what it
+// used to do and what made it NBO-091's flake. Reconcile sends the probe that proves the
+// new token *before* it publishes the new client, so "wait for the new token, then read the
+// cache" reads the cache while the reconcile that will replace the entry is still in
+// flight: it gets the pre-rotation client back and reports that the same client survived a
+// rotation, which is a bug the controller does not have. Stalling that window by 500ms
+// fails the old assertion every time. The eviction it was reaching for is in-memory
+// bookkeeping with no cluster in it, and TestClientCachePutEvictsThePreviousClient checks
+// it exactly instead.
 func TestSecretRotationRebuildsTheClientWithoutRestart(t *testing.T) {
-	k8s, cache, ns := k8sClient, clients, newNamespace(t)
+	k8s, ns := k8sClient, newNamespace(t)
 	var seen atomic.Value
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		seen.Store(r.Header.Get("Authorization"))
@@ -296,26 +310,18 @@ func TestSecretRotationRebuildsTheClientWithoutRestart(t *testing.T) {
 		v, _ := seen.Load().(string)
 		return v == "Token first-token"
 	})
-	firstClient, _, _ := cache.Lookup(ns, "rotate")
 
 	secret.Data["token"] = []byte("second-token")
 	if err := k8s.Update(context.Background(), secret); err != nil {
 		t.Fatalf("rotating secret: %v", err)
 	}
 
+	// The whole chain, in one condition: the Secret watch delivered, the endpoint
+	// reconciled, and the client it built reached NetBox with the rotated token.
 	eventually(t, "second token used", func() bool {
 		v, _ := seen.Load().(string)
 		return v == "Token second-token"
 	})
-	// The cache is keyed on the Secret's resourceVersion, so a rotation cannot leave the
-	// old client reachable.
-	secondClient, _, ok := cache.Lookup(ns, "rotate")
-	if !ok {
-		t.Fatal("no client after rotation")
-	}
-	if firstClient == secondClient {
-		t.Error("the same client instance survived a token rotation")
-	}
 }
 
 // TestCABundleKeyDefaultsToCACrt guards a defaulting bug: SecretKeyRef is shared by
