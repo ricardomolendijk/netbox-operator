@@ -288,24 +288,20 @@ func TestIPAddressAssignmentIsWrittenAsAPairOrNotAtAll(t *testing.T) {
 			refs.Reason, netboxv1alpha1.ReasonRefKindUnavailable)
 	}
 
-	// The object is still created: an unresolved optional reference does not block the write
-	// (issue #132), it is left out of it.
-	var assigned netbox.Object
-
+	// Nothing is written for it. This test asserted the opposite until NBO-195 (answered C):
+	// an unresolved *optional* reference used to be left out of the write and the object
+	// created without it, which is what #132 established. A declared reference is now a
+	// precondition for the write, so a declared-but-unresolvable `assignedObject` means the
+	// address is not created at all.
+	//
+	// The reason that is better here specifically: the pair is this object's whole assignment.
+	// Creating the address unassigned and assigning it on a later pass is two writes and a
+	// window in which NetBox holds a floating address, and #195 removed the accident that made
+	// the behaviour depend on whether the reference happened to be in the natural key.
 	for _, sent := range posts(stub) {
 		if sent["address"] == "10.0.21.2/24" {
-			assigned = sent
-		}
-	}
-
-	if assigned == nil {
-		t.Fatalf("no POST for the assigned address; posts = %+v", posts(stub))
-	}
-
-	for _, column := range []string{"assigned_object_type", "assigned_object_id"} {
-		if value, present := assigned[column]; present {
-			t.Errorf("POST %s = %v, want the column absent: the reference did not resolve",
-				column, value)
+			t.Errorf("POST for the assigned address = %+v, want none: its declared "+
+				"assignedObject did not resolve", sent)
 		}
 	}
 }

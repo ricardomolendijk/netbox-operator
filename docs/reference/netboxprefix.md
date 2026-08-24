@@ -187,19 +187,27 @@ The three states are all meaningful and all different:
 `<= 1` rather than `== 1`, because an unscoped prefix is legal: neither column carries a real
 `REQ` ([the `REQ` trap](../concepts/generic-refs.md#the-req-trap-in-the-schema-digest)).
 
-Two of the four members point at Kinds this build does not have —
-`NetBoxSiteGroup` and `NetBoxLocation`. Using one reports `RefsResolved=False`,
-`Reason=RefKindUnavailable` naming the field, and the pair is **left out of the payload**
-rather than guessed at. That is the designed outcome: the member is declared before its Kind
-exists precisely so it cannot be silently dropped.
+All four members have a Kind in this build. `NetBoxSiteGroup` and `NetBoxLocation` were the two
+that did not when this page was written, and the union declared them anyway — a member declared
+before its Kind exists cannot be silently dropped, which is the point of declaring it early.
+
+**A declared scope is a precondition for the write.** A `scope` the operator cannot resolve
+means **no `POST` and no `PATCH` at all**, not a prefix created with the pair omitted. See
+[a declared reference is a precondition](../concepts/reconciliation.md#a-declared-reference-is-a-precondition-for-the-write)
+— this kind is the one the rule was decided on
+([#195](https://github.com/ricardomolendijk/netbox-operator/issues/195)). It is worth spelling
+out here because `prefix` alone is this kind's identity, so the operator *could* create the row
+without the scope and used to: NetBox then held an unscoped prefix, reporting the omission
+loudly but indistinguishable from a finished one to anything reading NetBox. A prefix with no
+`scope` key is still created on the first pass; that is a global prefix, not a half-filled one.
 
 **If it is wrong.** Two members is an admission rejection. An unresolvable member is
-`RefsResolved=False` with `RefKindUnavailable`, `RefNotFound` or `RefNotReady`, and
-`Ready=False, Reason=WaitingForRef`. A `scope_type` NetBox refuses for this model is a `400`,
-surfaced as `Ready=False, Reason=Invalid` carrying NetBox's own field error verbatim, with a
-long backoff — retrying an invalid payload before the spec changes is pointless. CEL makes
-that last case unreachable through `ScopeRef`, which is why it is the one path documented and
-not demonstrated.
+`RefsResolved=False` with `RefKindUnavailable`, `RefNotFound` or `RefNotReady` naming the
+member, and `Ready=False, Reason=WaitingForRef` — and nothing in NetBox. A `scope_type` NetBox
+refuses for this model is a `400`, surfaced as `Ready=False, Reason=Invalid` carrying NetBox's
+own field error verbatim, with a long backoff — retrying an invalid payload before the spec
+changes is pointless. CEL makes that last case unreachable through `ScopeRef`, which is why it
+is the one path documented and not demonstrated.
 
 ### `spec.vrfRef`
 
@@ -506,11 +514,11 @@ observability half of the populator bug: it is now visible in one command.
 | `kubectl apply` rejected, message naming host bits | admission, nothing stored | `spec.prefix` has host bits set | Write the network address. `10.0.20.5/24` → `10.0.20.0/24`. |
 | `kubectl apply` rejected, "must be a CIDR" | admission | a bare address, a mask out of range, or not an address at all | Add the prefix length; check the family. |
 | `kubectl apply` rejected, "at most one of regionRef…" | admission | two members of `spec.scope` | A prefix has one scope. Pick one. |
-| `Ready=False`, `Reason=WaitingForRef`, `RefsResolved` names `scope` | reconcile | the scope target is unresolvable | `RefKindUnavailable` on `siteGroupRef` / `locationRef` is expected in this build. Otherwise check the target CR exists and is Ready. |
-| `Ready=False`, `Reason=WaitingForKey`, `vrfRef` set | reconcile, zero writes | the VRF does not exist yet, so neither candidate applies | Expected while the VRF is being created. Apply it; the prefix re-enqueues on its own. |
+| `Ready=False`, `Reason=WaitingForRef`, `RefsResolved` names `scope` | reconcile, **zero writes** | the scope the spec declares does not resolve | A declared reference is a precondition for the write. Check the target CR exists and holds a `status.id`. |
+| `Ready=False`, `Reason=WaitingForRef`, `vrfRef` set | reconcile, zero writes | the VRF does not exist yet | Expected while the VRF is being created. Apply it; the prefix re-enqueues on its own. |
 | `Ready=False`, `Reason=Conflict` | reconcile, zero writes | more than one NetBox prefix matched | Legitimate if the VRF has `enforce_unique: false`. `status.naturalKey` shows what was searched; the message names every candidate id. Use `id` mode to pin one. |
 | `Ready=False`, `Reason=Invalid` | reconcile, long backoff | NetBox returned a `400` | The message is NetBox's own field error, verbatim. Fix the spec; the operator will not retry a payload it already knows is refused. |
-| The prefix exists in NetBox but `scope_type` is `null` | `Ready=False`, `RefsResolved=False` | the scope was left out of the payload because it did not resolve | This is the loud version of the populator bug. Resolve the reference; do not add a `site` key anywhere. |
+| The prefix exists in NetBox but `scope_type` is `null` | `Ready=False`, `RefsResolved=False` | it was created before the `scope` was added to the spec, and the new scope does not resolve | The operator no longer creates a prefix whose declared scope is unresolved, so this is a prefix that pre-dates the scope. Resolve the reference; do not add a `site` key anywhere. |
 | A second prefix appeared after an edit | — | `spec.prefix` or `spec.vrfRef` was changed | See [renaming changes identity](#renaming-changes-identity). |
 | Terminating forever, `Deleting` `Reason=Protected` | finalizer | addresses or child objects still reference the prefix | Delete them, or switch to `deletionPolicy: Retain` to drop the finalizer without asking NetBox. |
 | `deletionPolicy` was not set and the prefix is gone | — | the envelope default is `Delete` | Set `deletionPolicy: Retain`. See [`spec.deletionPolicy`](#specdeletionpolicy). |

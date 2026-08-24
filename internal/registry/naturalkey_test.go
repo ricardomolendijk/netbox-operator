@@ -79,7 +79,9 @@ func TestNullPinRendersPerColumnClass(t *testing.T) {
 // to fail the boot rather than pick one.
 func TestNullPinWithNoColumnClassIsRejected(t *testing.T) {
 	key := NaturalKey{
-		Fields:     []KeyField{{Filter: "name", Spec: "name"}},
+		Fields: []KeyField{{Filter: "name", Spec: "name"}},
+		// Deliberately no Column: this is the fixture that proves the zero value is not a
+		// default. Do not "fix" it by declaring one.
 		NullFields: []NullField{{Filter: "parent_id", Spec: "parentRef"}},
 	}
 	if err := key.Validate(); !errors.Is(err, ErrUnknownNullColumn) {

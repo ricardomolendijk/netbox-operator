@@ -23,7 +23,8 @@ import (
 // writes custom fields onto the ipam.ipaddress it allocates, so `ipam.ipaddress` is in the
 // stamped set with no Descriptor of its own behind it (registry.ClaimObjectTypes).
 var stampedObjectTypes = []string{
-	"dcim.location", "dcim.region", "dcim.site", "dcim.sitegroup",
+	"dcim.devicerole", "dcim.devicetype", "dcim.location", "dcim.manufacturer",
+	"dcim.platform", "dcim.region", "dcim.site", "dcim.sitegroup",
 	"ipam.ipaddress", "ipam.prefix", "ipam.routetarget", "ipam.vlan", "ipam.vlangroup",
 	"ipam.vrf",
 	"tenancy.tenant", "tenancy.tenantgroup",

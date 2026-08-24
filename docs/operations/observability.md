@@ -312,16 +312,25 @@ and misleading to publish is worse than no number ([claims](../concepts/claims.m
 | Labels | `kind` |
 | Cardinality | 3 series |
 
-NetBox objects the operator stopped tracking because their claim was deleted, and deliberately
-did not delete. A claim always retains
-([#182](https://github.com/ricardomolendijk/netbox-operator/issues/182)), and this is the
-metric half of reporting it: the `AddressRetained` Event ages out of its namespace within the
-hour, and "how many addresses has this cluster left behind" has to stay answerable afterwards.
+NetBox objects the operator stopped tracking because their claim was deleted, and did not
+delete. This is the metric half of reporting them: the `AddressRetained` Event ages out of its
+namespace within the hour, and "how many addresses has this cluster left behind" has to stay
+answerable afterwards.
 
-Not an alert on its own — deleting a claim is a normal thing to do — but worth graphing next to
-`allocations_total{result="allocated"}`. A cluster that retains as fast as it allocates is
-leaking addresses into NetBox at that rate, and each one is findable by its
-`cf_k8s_allocation_identity`.
+Three things increment it, and they are not equally normal
+([#225](https://github.com/ricardomolendijk/netbox-operator/issues/225)):
+
+| Cause | How normal |
+|---|---|
+| `spec.deletionPolicy: Retain` | a deliberate choice. `Normal`/`AddressRetained`. |
+| a non-writing endpoint (`driftMode: Report`, `mode: DryRun`) | expected for that endpoint. `Warning`/`AddressRetained`. |
+| a `Delete` the operator **gave up on** after 8 failed attempts | a leak nobody asked for. `Warning`/`AddressRetained`, and always worth looking at. |
+
+Not an alert on its own — retaining on purpose is a normal thing to do — but worth graphing
+next to `allocations_total{result="allocated"}`, and worth alerting on when the cluster uses the
+default `Delete` everywhere, because then every increment is the third row. A cluster that
+retains as fast as it allocates is leaking addresses into NetBox at that rate, and each one is
+findable by its `cf_k8s_allocation_identity`.
 
 ```promql
 # Retained addresses over the last day, by claim kind.

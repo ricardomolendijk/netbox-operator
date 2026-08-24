@@ -186,7 +186,11 @@ func TestEngineReconcile(t *testing.T) {
 			wantWrites:  1,
 		},
 		{
-			name:       "an unresolvable parent leaves no candidate, and nothing is written",
+			// Nothing written, as before issue #195 -- but now for the reference rather than
+			// for the key it happened to be part of. The old reason was WaitingForKey,
+			// reached one step later in locate(); the rule now fires before the lookup, so
+			// this kind and the one below report the same thing for the same cause.
+			name:       "an unresolvable parent in the natural key writes nothing",
 			descriptor: parentedDescriptor(),
 			object: func() *fakeKind {
 				obj := fakeObject()
@@ -197,7 +201,8 @@ func TestEngineReconcile(t *testing.T) {
 			client:      func(*testing.T) *fakeClient { return &fakeClient{} },
 			wantMethods: nil,
 			wantReady:   metav1.ConditionFalse,
-			wantReason:  netboxv1alpha1.ReasonWaitingForKey,
+			wantReason:  netboxv1alpha1.ReasonWaitingForRef,
+			wantMessage: "parentRef",
 			wantRefs:    netboxv1alpha1.ReasonNotImplemented,
 			wantRequeue: testResync,
 			wantWrites:  1,
@@ -349,12 +354,15 @@ func TestEngineReconcile(t *testing.T) {
 			noRefsCondition: true,
 		},
 		{
-			// The object is created without the reference and reports Ready=False, which is
-			// issue #132: on a kind whose identity does not include the reference, reporting
-			// Ready would make `kubectl wait --for=condition=Ready` pass over a field NetBox
-			// never received. TestUnresolvedRefKeepsTheObjectFromReadiness is the dedicated
-			// case; this one holds the line for the whole outcome table.
-			name: "a declared reference that does not resolve is created without it and is not Ready",
+			// Issue #195: the reference is outside this kind's natural key, so the engine
+			// *could* create the object without it -- and does not. A reference the spec
+			// declares is a precondition for the write, which is what makes the case above
+			// and this one one rule instead of two accidents.
+			//
+			// Issue #132's guarantee survives inside it: whatever the engine does, an object
+			// with a dropped reference does not reach Ready. See
+			// TestUnresolvedDeclaredRefWithholdsTheWrite for the dedicated case.
+			name: "a declared reference that does not resolve withholds the write entirely",
 			object: func() *fakeKind {
 				obj := fakeObject()
 				obj.Spec.ParentRef = &fakeRef{Name: "europe"}
@@ -364,15 +372,11 @@ func TestEngineReconcile(t *testing.T) {
 			client: func(*testing.T) *fakeClient {
 				return &fakeClient{created: liveTag(7)}
 			},
-			wantMethods: []string{"GETONE", "POST"},
-			wantPayload: netbox.Object{"name": "Managed", "slug": "managed", "color": "9e9e9e"},
-			wantID:      7,
+			wantMethods: nil,
 			wantReady:   metav1.ConditionFalse,
 			wantReason:  netboxv1alpha1.ReasonWaitingForRef,
 			wantMessage: "parentRef",
-			wantSynced:  netboxv1alpha1.ReasonDriftCorrected,
 			wantRefs:    netboxv1alpha1.ReasonNotImplemented,
-			wantEvents:  []string{"Normal/Created"},
 			wantRequeue: testResync,
 			wantWrites:  1,
 		},

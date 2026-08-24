@@ -354,6 +354,12 @@ func TestDeferIfUnresolvedRidesTheCreate(t *testing.T) {
 
 // TestDeferIfUnresolvedWaitsWhenItDoesNotResolve is the same mode's other half: the object is
 // still created, and the field is reported pending rather than dropped.
+//
+// It is also the deferral exception to issue #195 asserted from the outside. Every other kind
+// withholds the whole write over a declared reference that did not resolve; a deferred field
+// does not, because it exists precisely so the object can be created first and PATCHed after.
+// A #195 that had no exception would turn this test's create into zero writes, and
+// TestDeferredFieldThatNeverResolvesDoesNotSpin's DeferAlways case into a permanent deadlock.
 func TestDeferIfUnresolvedWaitsWhenItDoesNotResolve(t *testing.T) {
 	obj := fakeObject()
 	obj.Spec.ParentRef = &fakeRef{Name: "europe"}
@@ -364,6 +370,10 @@ func TestDeferIfUnresolvedWaitsWhenItDoesNotResolve(t *testing.T) {
 
 	if _, err := engine.Reconcile(context.Background(), obj); err != nil {
 		t.Fatalf("Reconcile() = %v", err)
+	}
+
+	if got := nb.methods(); len(got) == 0 || got[len(got)-1] != "POST" {
+		t.Fatalf("netbox calls = %v, want the object created: a deferred field is not a precondition", got)
 	}
 
 	if _, sent := nb.writes()[0].payload["parent"]; sent {

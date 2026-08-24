@@ -409,13 +409,23 @@ func TestACascadeDeletedParentDoesNotRecreateItsChild(t *testing.T) {
 
 	stub.cascade(childID)
 
-	// Half two. `status.id` clears only on a pass that fetched the row, got a 404 and fell
-	// through to the natural key -- so this is the gate that a reconcile really reached the
-	// point where a create-if-absent would have happened.
-	eventually(t, "the child to notice its row is gone", func() bool {
+	// Half two, and the gate changed with NBO-195. It used to be `status.id == 0`, on the
+	// reasoning that the id clears only on a pass that fetched the row, 404'd and fell through
+	// to the natural key -- i.e. a pass that reached the point where a create-if-absent would
+	// have happened.
+	//
+	// A declared reference is now a precondition for the write, so with the parent CR gone the
+	// child's `parentRef` no longer resolves and the engine stops *before* the lookup. The id
+	// therefore never clears, and the old gate waits forever for a state that is now
+	// unreachable -- because resurrection is prevented one step earlier than it used to be,
+	// which is a stronger guarantee rather than a weaker one.
+	//
+	// So the gate is the condition the new rule sets. It proves a reconcile ran and got as far
+	// as the reference check, which is all the count below needs.
+	eventually(t, "the child to report its parent unresolved", func() bool {
 		region := fetchRegion(ns, "child")
 
-		return region != nil && region.Status.ID == 0
+		return region != nil && regionRefsReason(region) == netboxv1alpha1.ReasonRefNotFound
 	})
 
 	if got := stub.countByKey("child"); got != 0 {
@@ -627,4 +637,17 @@ func TestATenantGroupChildIsOwnedByItsCascadingParent(t *testing.T) {
 	t.Logf("the cascaded row came back as status.id %d (was %d): with `slug` the whole "+
 		"natural key, the owner reference is the only thing between the child CR and a row "+
 		"NetBox deleted on purpose", fetchTenantGroup(ns, "child").Status.ID, childID)
+}
+
+// regionRefsReason returns the RefsResolved reason, which is where a region whose parentRef
+// stopped resolving says so. Same shape as prefixRefsReason; kept local to the file that needs
+// it rather than promoted, since only this test reads a region's ref reason.
+func regionRefsReason(region *netboxv1alpha1.NetBoxRegion) string {
+	for _, c := range region.Status.Conditions {
+		if c.Type == netboxv1alpha1.ConditionRefsResolved {
+			return c.Reason
+		}
+	}
+
+	return ""
 }
