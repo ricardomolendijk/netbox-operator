@@ -1,0 +1,34 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxVRF
+metadata:
+  name: donkerslootstraat
+  namespace: default
+spec:
+  # The NetBoxEndpoint to write through, in this namespace. There is no cluster-wide
+  # default endpoint; see config/samples/netbox_v1alpha1_netboxendpoint.yaml.
+  endpointRef: homelab
+
+  # `name` is NOT unique in NetBox: ipam.VRF carries no UNIQUE on the column and declares
+  # no meta.constraints, so two VRFs may share this name.
+  name: Donkerslootstraat (RTM)
+
+  # `rd` is unique, which makes it this object's natural key. With it set the lookup is
+  # `?rd=65000:10` and nothing else. Omit it and the lookup falls back to
+  # `?name=...&rd__isnull=true`, which can match more than one VRF and is then a Conflict.
+  rd: "65000:10"
+
+  # A pointer field in Go, so that omitting it and setting it to `false` are different
+  # instructions: NetBox's own default is true, and a plain bool would turn it off on every
+  # VRF the operator adopted.
+  enforceUnique: true
+
+  # The two to-many references. NetBox replaces a many-to-many wholesale on PATCH, so the
+  # listed set is the set: omit the field to leave NetBox's route targets alone, write `[]`
+  # to clear them. The order is not data -- the ids are sent sorted and deduplicated.
+  importTargets:
+    - name: rt-65000-10-import
+  exportTargets:
+    - name: rt-65000-11-export
+
+  description: Per-house VRF, so identical 10.0.x.0/24 ranges do not collide
+  comments: Managed by netbox-operator.
