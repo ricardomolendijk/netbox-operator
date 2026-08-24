@@ -98,8 +98,21 @@ type Endpoint struct {
 
 // Endpoints hands out the client for one NetBoxEndpoint by namespace and name. A miss
 // means the endpoint is not Ready, which is a wait rather than a failure.
+//
+// The context is the reconcile's own: an implementation reads Kubernetes objects to answer,
+// so it needs the cancellation the reconcile worker is subject to and the request-scoped
+// logger everything else on this path logs through (CONTRIBUTING.md, "Logging"). Today's
+// implementation answers from an informer cache and cannot block, but a signature that
+// cannot be cancelled is one that makes a blocking read unnoticeable: the controller runs a
+// single worker by default, so one uncancellable read stalls every object of the kind
+// (NBO-080).
+//
+// Still (Endpoint, bool) rather than (Endpoint, error), because the engine has exactly two
+// things it can do -- use the endpoint, or wait for it -- and a third return it cannot act
+// on differently is a wider seam for no behaviour. An implementation that could not find
+// out says so in the log, with the context this now carries.
 type Endpoints interface {
-	Endpoint(namespace, name string) (Endpoint, bool)
+	Endpoint(ctx context.Context, namespace, name string) (Endpoint, bool)
 }
 
 // Descriptors is where per-kind facts come from.
@@ -197,7 +210,7 @@ func (e *Engine) Reconcile(ctx context.Context, obj Object) (ctrl.Result, error)
 		return ctrl.Result{}, err
 	}
 
-	endpoint, ok := e.Endpoints.Endpoint(obj.GetNamespace(), obj.NetBoxSpec().EndpointRef)
+	endpoint, ok := e.Endpoints.Endpoint(ctx, obj.GetNamespace(), obj.NetBoxSpec().EndpointRef)
 	if !ok {
 		return p.stop(ctx, fmt.Errorf("%w: netboxendpoint %q in namespace %q",
 			errEndpointNotReady, obj.NetBoxSpec().EndpointRef, obj.GetNamespace()))

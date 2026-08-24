@@ -630,6 +630,57 @@ func TestTruncatedLookupCreatesNothing(t *testing.T) {
 	}
 }
 
+// TestEndpointLookupIsCancellable is the assertion NBO-080 exists for. The signature change
+// is not the point -- a context nobody can act on is decoration -- so this drives a provider
+// that answers only once its context is cancelled, and requires the reconcile to come back.
+//
+// Before the context was threaded there was nothing for a provider to select on: the
+// reconcile worker would sit in a read it could not interrupt, and an object controller runs
+// a single worker by default, so every object of the kind would queue behind it. Manager
+// shutdown, a leader-election handover and a per-reconcile deadline all express themselves
+// as a cancelled context and as nothing else.
+func TestEndpointLookupIsCancellable(t *testing.T) {
+	endpoints := &blockingEndpoints{entered: make(chan struct{})}
+	engine := &Engine{
+		Descriptors: fakeDescriptors{descriptor: fakeDescriptor(), registered: true},
+		Endpoints:   endpoints,
+		Status:      &fakeStatus{},
+		Finalizers:  &fakeFinalizers{},
+		Scheme:      fakeScheme(t),
+	}
+
+	ctx, stop := context.WithCancel(context.Background())
+	defer stop()
+
+	returned := make(chan error, 1)
+
+	go func() {
+		_, err := engine.Reconcile(ctx, adoptedObject())
+		returned <- err
+	}()
+
+	// Stopped once the provider is demonstrably inside the lookup, so the test cannot pass
+	// by cancelling before the reconcile ever reached it.
+	<-endpoints.entered
+	stop()
+
+	select {
+	case err := <-returned:
+		// A provider that says "no endpoint" is WaitingForEndpoint, which is a wait rather
+		// than a failure, so this is still not a returned error.
+		if err != nil {
+			t.Errorf("Reconcile() = %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Reconcile did not return once its context was cancelled: " +
+			"the endpoint lookup is not interruptible")
+	}
+
+	if !endpoints.cancelled {
+		t.Error("the endpoint provider never observed the cancellation")
+	}
+}
+
 // mentions reports whether any condition message on obj contains want. Conditions are the
 // only channel a user has for a failure the engine deliberately does not return.
 func mentions(obj Object, want string) bool {
