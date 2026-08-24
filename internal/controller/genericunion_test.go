@@ -60,6 +60,35 @@ func TestUnionCELShapes(t *testing.T) {
 			wantReject: "at most one of interfaceRef",
 		},
 		{
+			// The scope union: four members, same nullable shape. An unscoped object is
+			// legal, which is why the rule is `<= 1` and not `== 1`.
+			name: "scope pair accepts no member at all",
+			spec: map[string]any{
+				"scopePair":    map[string]any{},
+				"requiredPair": map[string]any{"deviceRef": map[string]any{"name": "sw1"}},
+			},
+		},
+		{
+			name: "scope pair accepts exactly one member",
+			spec: map[string]any{
+				"scopePair":    map[string]any{"siteRef": map[string]any{"name": "ams"}},
+				"requiredPair": map[string]any{"deviceRef": map[string]any{"name": "sw1"}},
+			},
+		},
+		{
+			// The failure ScopeRef exists to make unrepresentable: two scopes at once, of
+			// which the operator would otherwise have to silently pick one.
+			name: "scope pair rejects two members",
+			spec: map[string]any{
+				"scopePair": map[string]any{
+					"regionRef": map[string]any{"name": "emea"},
+					"siteRef":   map[string]any{"name": "ams"},
+				},
+				"requiredPair": map[string]any{"deviceRef": map[string]any{"name": "sw1"}},
+			},
+			wantReject: "at most one of regionRef",
+		},
+		{
 			name:       "required pair rejects no member at all",
 			spec:       map[string]any{"requiredPair": map[string]any{}},
 			wantReject: "exactly one of deviceRef",
@@ -116,23 +145,38 @@ var celRule = regexp.MustCompile(`XValidation:rule="([^"]*)"`)
 
 // TestUnionCELRuleMatchesTheAPIType keeps the fixture honest.
 //
-// The fixture exists only because IPAssignment is on no CRD yet, so it is standing in for a
-// rule it does not own. A fixture that drifted from the type would prove the API server
+// The fixture exists only because no CRD embeds these unions yet, so it is standing in for
+// rules it does not own. A fixture that drifted from its type would prove the API server
 // enforces something the API does not ask for -- which is worse than no test, because it reads
 // as coverage.
+//
+// One row per union, and the comparison is on the rule *string*: the point is that the bytes
+// the API server compiled are the bytes the marker on the Go type carries.
 func TestUnionCELRuleMatchesTheAPIType(t *testing.T) {
-	source, err := os.ReadFile(filepath.Join("..", "..", "api", "v1alpha1", "genericref.go"))
-	if err != nil {
-		t.Fatalf("reading the union's Go source: %v", err)
-	}
+	for _, tc := range []struct {
+		union  string
+		source string
+		goType string
+	}{
+		{union: "nullablePair", source: "genericref.go", goType: "IPAssignment"},
+		{union: "scopePair", source: "scope.go", goType: "ScopeRef"},
+	} {
+		t.Run(tc.union, func(t *testing.T) {
+			body, err := os.ReadFile(filepath.Join("..", "..", "api", "v1alpha1", tc.source))
+			if err != nil {
+				t.Fatalf("reading the union's Go source: %v", err)
+			}
 
-	rules := celRule.FindAllStringSubmatch(string(source), -1)
-	if len(rules) != 1 {
-		t.Fatalf("genericref.go declares %d CEL rules, want the one on IPAssignment", len(rules))
-	}
+			rules := celRule.FindAllStringSubmatch(string(body), -1)
+			if len(rules) != 1 {
+				t.Fatalf("%s declares %d CEL rules, want the one on %s", tc.source, len(rules), tc.goType)
+			}
 
-	if got := fixtureRule(t, "nullablePair"); got != rules[0][1] {
-		t.Errorf("the fixture's nullable rule is\n  %s\nand IPAssignment's is\n  %s", got, rules[0][1])
+			if got := fixtureRule(t, tc.union); got != rules[0][1] {
+				t.Errorf("the fixture's %s rule is\n  %s\nand %s's is\n  %s",
+					tc.union, got, tc.goType, rules[0][1])
+			}
+		})
 	}
 }
 

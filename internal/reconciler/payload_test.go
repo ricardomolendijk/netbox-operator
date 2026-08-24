@@ -272,16 +272,8 @@ func TestEnvelopeFieldsAreDerived(t *testing.T) {
 // NetBox 4.2 (docs/decisions/0003-ownership-and-references.md rule 2).
 func scopedDescriptor() registry.Descriptor {
 	d := fakeDescriptor()
-	d.GenericFKs = []registry.GenericFKSpec{{
-		TypeField:    "scope_type",
-		IDField:      "scope_id",
-		AllowedTypes: []string{"dcim.site", "dcim.region"},
-		Spec:         "scope",
-		Members: []registry.GenericFKMember{
-			{Spec: "siteRef", Target: netboxv1alpha1.SiteRef{}.TargetGVK()},
-			{Spec: "regionRef", Target: netboxv1alpha1.RegionRef{}.TargetGVK()},
-		},
-	}}
+	d.ReadOnly = append(slices.Clone(d.ReadOnly), registry.ScopeCacheColumns()...)
+	d.GenericFKs = []registry.GenericFKSpec{registry.ScopeFK("scope")}
 	d.ContainmentRef = "scope"
 
 	return d

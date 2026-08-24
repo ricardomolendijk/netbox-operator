@@ -84,12 +84,24 @@ var (
 	// that makes a disagreement a boot failure rather than a condition on somebody's
 	// object. It can only run over registered Kinds: a member naming a Kind this build does
 	// not carry yet is checked the first time a manifest uses it (NBO-019).
+	//
+	// It is what stops `scope_type` from being written with a spelling NetBox rejects, or --
+	// worse -- one it accepts for a different model.
 	ErrMemberTypeNotAllowed = errors.New("union member's object type is not in allowedTypes")
 
 	// ErrDuplicateObjectType is returned when two descriptors claim one `app_label.model`
 	// string. It would make the reverse lookup ambiguous, and an ambiguous answer there is
 	// a generic FK resolved against the wrong Kind.
 	ErrDuplicateObjectType = errors.New("duplicate object type")
+
+	// ErrCachedNotReadOnly is returned for a denormalised column a generic FK declares
+	// that is not also in ReadOnly.
+	//
+	// The check exists because writing one is the failure this whole mechanism is about:
+	// NetBox maintains `_site` from `(scope_type, scope_id)` and ignores an attempt to set
+	// it, so a descriptor that treats it as writable produces a field the operator sends
+	// forever and NetBox drops every time.
+	ErrCachedNotReadOnly = errors.New("cached generic-FK column is not read-only")
 )
 
 // objectTypePattern is the Django ContentType spelling: `model` is lowercased and
@@ -193,6 +205,16 @@ type GenericFKSpec struct {
 	// `*_type` column, and Members is what this CRD offers a user. Validate cross-checks
 	// them, so a member the API accepts and NetBox would reject cannot ship.
 	Members []GenericFKMember
+
+	// Cached are the read-only denormalised columns NetBox maintains from this pair:
+	// `_region`, `_site_group`, `_site` and `_location` for CachedScopeMixin
+	// (docs/netbox-schema.md -> dcim.CachedScopeMixin). Each must also appear in
+	// Descriptor.ReadOnly, which Validate enforces.
+	//
+	// Declared per pair rather than as a constant because not every pair has them:
+	// ipam.IPAddress's `assigned_object` maintains no caches at all, and ipam.VLANGroup
+	// declares `scope_type` / `scope_id` on the model itself and carries none either.
+	Cached []string
 }
 
 // MemberFor returns the union member a CR spec field selects.
@@ -478,7 +500,7 @@ func (d Descriptor) validateGenericFKs() error {
 			}
 		}
 
-		errs = append(errs, validateGenericFKMembers(generic))
+		errs = append(errs, validateGenericFKMembers(generic), d.validateGenericFKCaches(generic))
 	}
 
 	return errors.Join(errs...)
@@ -496,7 +518,10 @@ func validateGenericFKMembers(generic GenericFKSpec) error {
 	seen := make(map[string]struct{}, len(generic.Members))
 
 	for _, member := range generic.Members {
-		if member.Spec == "" || member.Target.Empty() {
+		// Keyed on Kind rather than on GVK.Empty(): a target carrying a group and a version
+		// and no Kind is not empty and is not resolvable either, and it is the shape a
+		// half-written member actually has.
+		if member.Spec == "" || member.Target.Kind == "" {
 			errs = append(errs, fmt.Errorf("%w: %+v on %s", ErrInvalidGenericFKMember, member, generic.TypeField))
 
 			continue
@@ -508,6 +533,27 @@ func validateGenericFKMembers(generic GenericFKSpec) error {
 		}
 
 		seen[member.Spec] = struct{}{}
+	}
+
+	return errors.Join(errs...)
+}
+
+// validateGenericFKCaches ties the pair's denormalised columns to ReadOnly, so that a kind
+// declaring `_site` as a cache and forgetting it in ReadOnly fails the boot rather than
+// PATCHing a column NetBox ignores on every resync.
+func (d Descriptor) validateGenericFKCaches(generic GenericFKSpec) error {
+	errs := make([]error, 0, len(generic.Cached))
+
+	for _, column := range generic.Cached {
+		if column == "" {
+			errs = append(errs, fmt.Errorf("%w: cached on %s", ErrEmptyField, generic.Spec))
+
+			continue
+		}
+
+		if !slices.Contains(d.ReadOnly, column) {
+			errs = append(errs, fmt.Errorf("%w: %s", ErrCachedNotReadOnly, column))
+		}
 	}
 
 	return errors.Join(errs...)
@@ -656,8 +702,12 @@ func (r *Registry) validateUnionTypes(d Descriptor) error {
 				continue
 			}
 
-			errs = append(errs, fmt.Errorf("%w: %s -> %s is %q, allowed are %v",
-				ErrMemberTypeNotAllowed, generic.Spec, member.Spec, target.ObjectType, generic.AllowedTypes))
+			// The referring descriptor is named too: the member field alone does not say
+			// which kind declared it, and a boot failure has to point at the descriptor a
+			// human has to edit.
+			errs = append(errs, fmt.Errorf("descriptor %s: %w: %s.%s -> %s is %q, allowed are %v",
+				d.GVK, ErrMemberTypeNotAllowed, generic.Spec, member.Spec,
+				member.Target.Kind, target.ObjectType, generic.AllowedTypes))
 		}
 	}
 

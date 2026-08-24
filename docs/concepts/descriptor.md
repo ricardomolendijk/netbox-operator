@@ -55,10 +55,10 @@ golden output contains no `{{if eq .Model "…"}}`.
 | `Deferred` | `[]DeferredField` | Fields kept out of the create payload and applied by a follow-up PATCH. | `{APIField: "primary_ip4", Mode: "Always"}` |
 | `ReadOnly` | `[]string` | Fields the operator must never write. | `["_depth", "_children", "created", "last_updated", "url", "display"]` |
 | `Fields` | `[]Field` | The spec-to-API map, and the field classes. See [field classes](#field-classes). | `{Spec: "importTargets", API: "import_targets", Class: RefMany, Target: …}` |
-| `GenericFKs` | `[]GenericFKSpec` | The polymorphic `*_type` / `*_id` column pairs on this kind. | `{scope_type, scope_id, scope, [dcim.region dcim.sitegroup dcim.site dcim.location], [regionRef siteGroupRef siteRef locationRef]}` |
+| `GenericFKs` | `[]GenericFKSpec` | The polymorphic `*_type` / `*_id` column pairs on this kind. | `registry.ScopeFK("scope")` |
 | `ContainmentRef` | `string` | The one spec ref whose target gets a non-controller owner reference. Empty for catalogue kinds. | `siteRef` |
 
-`GenericFKSpec` is five fields. `TypeField` and `IDField` are the two columns; `Spec` is the
+`GenericFKSpec` is six fields. `TypeField` and `IDField` are the two columns; `Spec` is the
 one CR field they are both written from — declared here rather than in `Fields`, because a
 `Field` maps one spec name to one API name and this reference has two. `AllowedTypes` is what
 NetBox accepts in the type column, in the same spelling as `ObjectType`. `Members` is the
@@ -66,10 +66,21 @@ resolver's dispatch table: one entry per union member, each naming the CR field 
 it and the *Kind* it resolves against — the Kind and never the type string, so the
 `app_label.model` spelling stays written down in exactly one place.
 
-The last two are cross-checked at boot in both directions, so a union that offers a target
-NetBox would reject in that column fails to start. Adding a member to a union is therefore a
-change to `api/v1alpha1` and this table and nothing else. See
-[Generic references](generic-refs.md).
+`AllowedTypes` and `Members` are cross-checked at boot in both directions, so a union that
+offers a target NetBox would reject in that column fails to start. Adding a member to a union
+is therefore a change to `api/v1alpha1` and this table and nothing else.
+
+`Cached` is the sixth: the **read-only denormalised columns NetBox maintains from the pair**,
+`_region` / `_site_group` / `_site` / `_location` for `CachedScopeMixin`. Every column named
+there must also be in `ReadOnly`, which `Validate` enforces — writing one does not fail, it
+silently no-ops, so the operator would PATCH it on every resync forever. It is per pair rather
+than a constant because not every pair has caches: `ipam.IPAddress.assigned_object` has none,
+and `ipam.VLANGroup` declares `scope_type` / `scope_id` on the model itself and carries none
+either.
+
+NetBox's scope pair is written down once, in `internal/registry/scope.go`, so a scoped kind
+says `GenericFKs: []GenericFKSpec{registry.ScopeFK("scope")}` and cannot get the content-type
+spelling or the cache list wrong. See [Generic references](generic-refs.md).
 
 Four entries in that table are worth spelling out.
 
@@ -432,8 +443,12 @@ by matching a message.
 | `ErrTargetNotRef` | a `Target` on a field whose class is not `RefOne` or `RefMany` |
 | `ErrToManyNaturalKey` | a natural-key candidate that matches on, or pins to null, a `RefMany` field |
 | `ErrContainmentToMany` | a `ContainmentRef` naming a `RefMany` field |
-| `ErrEmptyField` | an empty string in `ReadOnly` or `RecreateOn`, or a `Deferred` entry with no `APIField` |
-| `ErrInvalidGenericFK` | a `GenericFKSpec` missing its `TypeField`, its `IDField`, or its `AllowedTypes` |
+| `ErrEmptyField` | an empty string in `ReadOnly` or `RecreateOn`, a `Deferred` entry with no `APIField`, or an empty column in `GenericFKSpec.Cached` |
+| `ErrInvalidGenericFK` | a `GenericFKSpec` missing its `TypeField`, its `IDField`, its `AllowedTypes` or its `Members` |
+| `ErrInvalidGenericFKMember` | a `Members` entry with no `Spec` or no target `Kind`, or the same member `Spec` declared twice |
+| `ErrCachedNotReadOnly` | a `GenericFKSpec.Cached` column that is not also in `ReadOnly` |
+| `ErrMemberTypeNotAllowed` | a union member whose **registered** target Kind reports an `ObjectType` the pair's `AllowedTypes` does not list. Reported by `Registry.Validate`, since the answer lives on another descriptor; a target with no descriptor yet is skipped |
+| `ErrDuplicateObjectType` | two descriptors claiming one `app_label.model` string, which would make the `ObjectType` → GVK reverse index ambiguous |
 | `ErrDuplicateGVK` | the same GVK registered twice; the first registration wins, and `Registry.Validate` reports the collision as well |
 
 There is no check that a field is to-many for resolution and scalar for comparison, because

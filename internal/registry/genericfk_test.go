@@ -84,6 +84,14 @@ func TestValidateUnionMembers(t *testing.T) {
 			wantErr: ErrInvalidGenericFKMember,
 		},
 		{
+			// Checked on Kind rather than on GVK.Empty(): a target carrying a group and a
+			// version and no Kind is not empty, is not resolvable either, and is the shape a
+			// half-written member actually has.
+			name:    "a member with a group and a version and no kind",
+			members: []GenericFKMember{{Spec: "siteRef", Target: testGVK("")}},
+			wantErr: ErrInvalidGenericFKMember,
+		},
+		{
 			name: "two members claiming one spec field",
 			members: []GenericFKMember{
 				{Spec: "siteRef", Target: testGVK("NetBoxSite")},

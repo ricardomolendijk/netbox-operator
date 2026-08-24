@@ -477,7 +477,7 @@ func TestNoResolverReportsRatherThanDrops(t *testing.T) {
 // keys of the payload and never on the condition alone.
 func TestResolvedGenericFKWritesBothColumns(t *testing.T) {
 	obj := fakeObject()
-	obj.Spec.Scope = &fakeScope{SiteRef: &fakeRef{Name: "ams"}}
+	obj.Spec.Scope = &netboxv1alpha1.ScopeRef{SiteRef: &netboxv1alpha1.SiteRef{Name: "ams"}}
 
 	nb := &fakeClient{created: liveTag(7)}
 	engine := engineWith(t, scopedDescriptor(), nb, &fakeRefs{resolution: resolver.Resolution{
@@ -509,7 +509,7 @@ func TestResolvedGenericFKWritesBothColumns(t *testing.T) {
 // null against a `scope_type` that still names a model is a rejected payload at best.
 func TestEmptyGenericFKClearsBothColumns(t *testing.T) {
 	obj := fakeObject()
-	obj.Spec.Scope = &fakeScope{}
+	obj.Spec.Scope = &netboxv1alpha1.ScopeRef{}
 
 	nb := &fakeClient{created: liveTag(7)}
 	engine := engineWith(t, scopedDescriptor(), nb, &fakeRefs{resolution: resolver.Resolution{
@@ -590,7 +590,7 @@ func TestClaimedButAbsentGenericFKWritesNeitherColumn(t *testing.T) {
 // target is reported, both columns are left alone, and nothing comes back on a timer.
 func TestRefusedGenericFKIsTerminalAndWritesNothingToTheColumns(t *testing.T) {
 	obj := fakeObject()
-	obj.Spec.Scope = &fakeScope{SiteRef: &fakeRef{Name: "ams"}}
+	obj.Spec.Scope = &netboxv1alpha1.ScopeRef{SiteRef: &netboxv1alpha1.SiteRef{Name: "ams"}}
 
 	err := &resolver.Error{
 		Cause: resolver.ErrRefTypeNotAllowed, Field: "scope",

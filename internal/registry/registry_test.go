@@ -235,19 +235,8 @@ func clusterDescriptor() Descriptor {
 			}},
 		},
 		UpdateStrategy: UpdatePatch,
-		ReadOnly:       []string{"_site", "created", "last_updated", "url", "display"},
-		GenericFKs: []GenericFKSpec{{
-			TypeField:    "scope_type",
-			IDField:      "scope_id",
-			AllowedTypes: []string{"dcim.region", "dcim.sitegroup", "dcim.site", "dcim.location"},
-			Spec:         "scope",
-			Members: []GenericFKMember{
-				{Spec: "regionRef", Target: testGVK("NetBoxRegion")},
-				{Spec: "siteGroupRef", Target: testGVK("NetBoxSiteGroup")},
-				{Spec: "siteRef", Target: testGVK("NetBoxSite")},
-				{Spec: "locationRef", Target: testGVK("NetBoxLocation")},
-			},
-		}},
+		ReadOnly:       append(ScopeCacheColumns(), "created", "last_updated", "url", "display"),
+		GenericFKs:     []GenericFKSpec{ScopeFK("scope")},
 		ContainmentRef: "scope",
 	}
 }
@@ -471,7 +460,10 @@ func TestDescriptorValidateDeferredNaturalKey(t *testing.T) {
 				d.NaturalKeys, d.Fields, d.GenericFKs = cluster.NaturalKeys, cluster.Fields, cluster.GenericFKs
 				d.Deferred = nil
 				d.ContainmentRef = cluster.ContainmentRef
-				d.ReadOnly = append(d.ReadOnly, "_site")
+				// The pair's caches come along too: GenericFKSpec.Cached insists every one
+				// of them is read-only, and `_site` -- the column this case is about -- is
+				// one of the four.
+				d.ReadOnly = append(d.ReadOnly, ScopeCacheColumns()...)
 			},
 		},
 	}

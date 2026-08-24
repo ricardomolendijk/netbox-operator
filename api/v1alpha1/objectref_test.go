@@ -20,6 +20,7 @@ func TestRefAliasTargets(t *testing.T) {
 		{"region", RegionRef{}, "NetBoxRegion"},
 		{"site", SiteRef{}, "NetBoxSite"},
 		{"siteGroup", SiteGroupRef{}, "NetBoxSiteGroup"},
+		{"location", LocationRef{}, "NetBoxLocation"},
 		{"tenant", TenantRef{}, "NetBoxTenant"},
 		{"interface", InterfaceRef{}, "NetBoxInterface"},
 		{"vmInterface", VMInterfaceRef{}, "NetBoxVMInterface"},

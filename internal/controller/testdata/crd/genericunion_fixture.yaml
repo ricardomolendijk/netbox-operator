@@ -1,11 +1,12 @@
-# A test-only CRD carrying both generic-FK union shapes, so the CEL rules NBO-019 specifies
-# are proved against a real API server rather than read and believed.
+# A test-only CRD carrying every generic-FK union shape, so the CEL rules NBO-018 and NBO-019
+# specify are proved against a real API server rather than read and believed.
 #
 # It exists because no shipped Kind carries a polymorphic pair yet: v1alpha1.IPAssignment
-# lands here ahead of NetBoxIPAddress (NBO-025), and a CEL rule on a type no CRD embeds is
-# never compiled by anything. The `<= 1` rule below is asserted byte-identical to the one on
-# IPAssignment by TestUnionCELRuleMatchesTheAPIType, so this fixture cannot drift away from
-# the type it stands in for.
+# lands here ahead of NetBoxIPAddress (NBO-025) and v1alpha1.ScopeRef ahead of the first
+# scoped kind, and a CEL rule on a type no CRD embeds is never compiled by anything. Each rule
+# below is asserted byte-identical to the one on its Go type by
+# TestUnionCELRuleMatchesTheAPIType, so this fixture cannot drift away from what it stands in
+# for.
 #
 # Its group is deliberately not netbox.kubeforge.org: nothing here is API surface, and a
 # fixture sharing the real group could be mistaken for one.
@@ -51,6 +52,31 @@ spec:
                       properties:
                         name: {type: string}
                     fhrpGroupRef:
+                      type: object
+                      properties:
+                        name: {type: string}
+                # NetBox's scope pair (v1alpha1.ScopeRef): the nullable shape again, with
+                # four members. `<= 1` and not `== 1` -- neither `scope_type` nor `scope_id`
+                # carries REQ, and a globally-scoped object is legal and common.
+                scopePair:
+                  type: object
+                  x-kubernetes-validations:
+                    - rule: "[has(self.regionRef), has(self.siteGroupRef), has(self.siteRef), has(self.locationRef)].filter(x, x).size() <= 1"
+                      message: at most one of regionRef, siteGroupRef, siteRef or locationRef may be set
+                  properties:
+                    regionRef:
+                      type: object
+                      properties:
+                        name: {type: string}
+                    siteGroupRef:
+                      type: object
+                      properties:
+                        name: {type: string}
+                    siteRef:
+                      type: object
+                      properties:
+                        name: {type: string}
+                    locationRef:
                       type: object
                       properties:
                         name: {type: string}

@@ -369,3 +369,43 @@ func TestEveryAllowedTypeIsWatched(t *testing.T) {
 		}
 	}
 }
+
+// TestUnavailableMemberKindIsReportedInEveryMode is the answer to "surely `slug` still works":
+// it does not, and the reason is structural rather than an omission.
+//
+// All four modes need the target's REST endpoint -- `slug` and `lookup` to query it, `id` to
+// verify the row is there, `name` to read the CR that holds the id -- and the only thing that
+// holds an endpoint is the target's Descriptor. So a member whose Kind this build does not
+// carry is RefKindUnavailable in every mode, not just the two that read the cluster.
+//
+// NBO-018 and NBO-019 reached this independently for their own unions; it is asserted once,
+// here, because it is a property of a member with no Descriptor and not of any one union.
+func TestUnavailableMemberKindIsReportedInEveryMode(t *testing.T) {
+	// tenantRef is the declared member kinds() registers no Descriptor for -- the same
+	// position NetBoxSiteGroup and NetBoxLocation are in for the scope union until M4.
+	for name, ref := range map[string]any{
+		"name":   map[string]any{"name": "acme"},
+		"slug":   map[string]any{"slug": "acme"},
+		"lookup": map[string]any{"lookup": map[string]any{"name": "acme"}},
+		"id":     map[string]any{"id": int64(4)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			nb := &fakeNetBox{
+				list: []netbox.Object{{"id": float64(4)}}, get: netbox.Object{"id": float64(4)},
+			}
+			r := &Resolver{Objects: &fakeReader{}, Kinds: kinds(), Grants: &fakeGrants{}}
+
+			_, err := r.ResolveGenericFK(context.Background(),
+				genericRequest(nb, map[string]any{"tenantRef": ref}))
+			if !errors.Is(err, ErrRefKindUnavailable) {
+				t.Fatalf("ResolveGenericFK error = %v, want ErrRefKindUnavailable", err)
+			}
+
+			// And not one request on the way to that answer: without a Descriptor there is
+			// no endpoint to send it to, so a request here would be aimed at a guess.
+			if len(nb.calls) != 0 {
+				t.Errorf("netbox calls = %v, want none", nb.calls)
+			}
+		})
+	}
+}

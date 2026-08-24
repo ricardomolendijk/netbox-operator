@@ -74,18 +74,15 @@ type fakeSpec struct {
 	// apply order sets it at create time.
 	PrimaryIP4Ref *fakeRef `json:"primaryIP4Ref,omitempty"`
 
-	// Scope is the polymorphic reference NBO-019 is about: one spec field that writes the
-	// two columns of a generic foreign key.
-	Scope *fakeScope `json:"scope,omitempty"`
+	// Scope is the polymorphic reference NBO-018 and NBO-019 share: one spec field that
+	// writes the two columns of a generic foreign key.
+	//
+	// The real v1alpha1.ScopeRef rather than a fake union, because it is the only
+	// generic-FK union any Kind carries today and a second fake of the same shape is how the
+	// two implementations of it got built in the first place.
+	Scope *netboxv1alpha1.ScopeRef `json:"scope,omitempty"`
 
 	Unmapped string `json:"unmapped,omitempty"`
-}
-
-// fakeScope is a generic-FK union, in the shape v1alpha1.IPAssignment has: one typed member
-// per legal target, at most one set.
-type fakeScope struct {
-	SiteRef   *fakeRef `json:"siteRef,omitempty"`
-	RegionRef *fakeRef `json:"regionRef,omitempty"`
 }
 
 // fakeKind is a stand-in for a generated kind.
@@ -111,6 +108,7 @@ func (f *fakeKind) DeepCopyObject() runtime.Object {
 	out.Spec.ObjectTypes = slices.Clone(f.Spec.ObjectTypes)
 	out.Spec.LocalContext = maps.Clone(f.Spec.LocalContext)
 	out.Spec.ASNRefs = slices.Clone(f.Spec.ASNRefs)
+	out.Spec.Scope = f.Spec.Scope.DeepCopy()
 
 	return &out
 }

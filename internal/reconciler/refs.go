@@ -209,9 +209,10 @@ func (p *pass) applyResolved(resolution resolver.Resolution) (resolved, notes []
 //
 // Not written into p.spec, unlike applyRef: a natural key filtering on one of these needs two
 // filters, and there is no single value to offer. No descriptor names a generic FK in a
-// natural key yet; the one that does -- ipam.VLANGroup, unique on
-// (scope_type, scope_id, slug) -- lands with NBO-018, and until then params() refuses such a
-// candidate loudly rather than sending a lookup with half an identity.
+// natural key yet -- not even the scoped kinds NBO-018 added, whose keys are all on scalars.
+// The first that will is ipam.VLANGroup, unique on (scope_type, scope_id, slug), and until it
+// arrives params() refuses such a candidate loudly rather than sending a lookup with half an
+// identity. See docs/concepts/generic-refs.md, "Natural keys".
 func (p *pass) applyGenericFK(pair registry.GenericFKSpec, refs resolver.FieldRefs) {
 	p.desired[pair.TypeField], p.desired[pair.IDField] = genericFKValues(refs)
 	p.state.Resolved = append(p.state.Resolved, pair.Spec)
