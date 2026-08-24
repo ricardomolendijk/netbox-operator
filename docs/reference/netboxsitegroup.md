@@ -66,8 +66,8 @@ A runnable pair is [`../../config/samples/netbox_v1alpha1_netboxsitegroup.yaml`]
 
 ## `spec`
 
-`endpointRef`, `onConflict` and `deletionPolicy` come from the shared envelope and behave
-identically on every kind — see [`NetBoxTag`](netboxtag.md#specendpointref) for the full
+`endpointRef`, `onConflict`, `deletionPolicy` and `customFields` come from the shared
+envelope and behave identically on every kind — see [`NetBoxTag`](netboxtag.md#specendpointref) for the full
 treatment of each.
 
 ### `spec.name`

@@ -216,3 +216,112 @@ func managerNames(entries []metav1.ManagedFieldsEntry) string {
 
 	return strings.Join(names, ", ")
 }
+
+// siteCustomFields is what NetBox holds in the custom-field container for one site.
+func siteCustomFields(stub *netboxStubServer, id int64) map[string]any {
+	fields, _ := stub.get(id)["custom_fields"].(map[string]any)
+
+	return fields
+}
+
+// TestServerSideApplyCanRemoveACustomField is #196 end to end: a `null` under
+// spec.customFields removes exactly one custom field's value and then stops.
+//
+// Only reproducible here, and for a reason a unit test cannot reach: the API server *prunes*
+// a null whose schema is not nullable, silently and before validation, so with the wrong CRD
+// the operator would never be handed the null at all and the feature would fail by quietly
+// doing nothing (hack/crd-nullable.sh). The payload-level test asserts what the engine does
+// with a null it was given; this one asserts it is given one.
+func TestServerSideApplyCanRemoveACustomField(t *testing.T) {
+	ns := newNamespace(t)
+	stub, target := newNetBoxStub(t, siteKind)
+	readyEndpoint(t, ns, target)
+
+	applySite(t, ns, "cfremove",
+		`,"status":"active","customFields":{"audit_ticket":"NET-42","owner_team":"network"}`)
+	eventually(t, "the site to be Ready", func() bool { return siteIsReady(ns, "cfremove") })
+
+	id := fetchSite(ns, "cfremove").Status.ID
+	if got := siteCustomFields(stub, id)["audit_ticket"]; got != "NET-42" {
+		t.Fatalf("audit_ticket = %v, want the NET-42 the apply carried", got)
+	}
+
+	// A custom field a human set in the NetBox UI. No manifest names it, so nothing below
+	// may touch it -- the removal has to be one key's intent, not the container's.
+	unmanaged := map[string]any{"someone_elses": "keep me"}
+	for name, value := range siteCustomFields(stub, id) {
+		unmanaged[name] = value
+	}
+	stub.setField(id, "custom_fields", unmanaged)
+
+	// The value deleted from the manifest, the key kept. `""` here would be a different
+	// request: set the custom field to the empty string.
+	applySite(t, ns, "cfremove",
+		`,"status":"active","customFields":{"audit_ticket":null,"owner_team":"network"}`)
+
+	eventually(t, "audit_ticket to be removed", func() bool {
+		value, present := siteCustomFields(stub, id)["audit_ticket"]
+
+		return present && value == nil
+	})
+
+	fields := siteCustomFields(stub, id)
+	if got := fields["owner_team"]; got != "network" {
+		t.Errorf("owner_team = %v, want it left alone", got)
+	}
+	if got := fields["someone_elses"]; got != "keep me" {
+		t.Errorf("someone_elses = %v, want the unmanaged custom field untouched", got)
+	}
+
+	// And it settles. A removal NetBox reports back as something the comparison finds
+	// different is a PATCH per resync for the lifetime of the object, which is the failure
+	// this feature had to be designed around rather than the one it had to avoid once.
+	writes := len(stub.recorded())
+	waitResyncs(t, 4)
+
+	if got := len(stub.recorded()); got != writes {
+		t.Errorf("netbox received %d writes, want %d: the removal never settles", got, writes)
+	}
+}
+
+// TestServerSideApplyEmptyCustomFieldsClearsNothing is the interaction between #196's
+// per-key null and #121's three states, and it is the one that could have gone wrong.
+//
+// Field ownership gives every other optional field a third state by *emptying* it: a claimed
+// `description: ""` clears NetBox's, and this page's own table says a map is cleared with
+// `{}`. `customFields` now has three states too, but by a different mechanism -- per key,
+// inside the map -- and the two must not be read as one. An emptied map still means "manage
+// nothing", because reading it as "clear everything" would null out every custom field
+// another writer on that NetBox owns, on every reconcile.
+//
+// Adoption rather than creation, so the values under test are ones the operator did not
+// write and has no claim on -- which is the case where clearing them would be worst.
+func TestServerSideApplyEmptyCustomFieldsClearsNothing(t *testing.T) {
+	ns := newNamespace(t)
+	stub, target := newNetBoxStub(t, siteKind)
+	readyEndpoint(t, ns, target)
+
+	id := stub.seed(netbox.Object{
+		"name": "Home", "slug": "cfempty", "status": "active",
+		"custom_fields": map[string]any{"audit_ticket": "NET-42", "owner_team": "network"},
+	})
+
+	applySite(t, ns, "cfempty", `,"status":"active","customFields":{}`)
+	eventually(t, "the site to be Ready", func() bool { return siteIsReady(ns, "cfempty") })
+	waitResyncs(t, 4)
+
+	if fields := siteCustomFields(stub, id); fields["audit_ticket"] != "NET-42" ||
+		fields["owner_team"] != "network" {
+		t.Errorf("custom_fields = %v, want both values untouched: an emptied map manages nothing",
+			fields)
+	}
+
+	// Stronger than checking the values survived: the container is never named at all, so
+	// there is no window in which it was emptied and put back.
+	for _, write := range stub.recorded() {
+		if _, named := write.Payload["custom_fields"]; named {
+			t.Errorf("a %s named custom_fields (%v); an emptied map must send nothing",
+				write.Method, write.Payload)
+		}
+	}
+}

@@ -63,6 +63,12 @@ var (
 	// descriptor bug, and the reason the field map is explicit.
 	errUnmappedField = errors.New("spec field is not in the descriptor's field map")
 
+	// errNoCustomFields is spec.customFields set on a kind whose NetBox model carries no
+	// `custom_fields` column -- extras.Tag is one. Its own sentinel rather than
+	// errUnmappedField: the field is in no descriptor's field map by design, so "not in the
+	// field map" would send the reader looking for a mapping bug that is not there.
+	errNoCustomFields = errors.New("this kind's NetBox model has no custom_fields column")
+
 	// errUnfilterable is a natural-key filter whose spec field holds no value a query can
 	// carry.
 	errUnfilterable = errors.New("natural-key filter has no value")
@@ -226,7 +232,8 @@ func classifyInvalid(err error, resync time.Duration) (outcome, bool) {
 		return conflict, true
 	case errors.As(err, &validation):
 		return invalid, true
-	case errors.Is(err, errUnmappedField), errors.Is(err, errUnfilterable), errors.Is(err, errNoObjectID):
+	case errors.Is(err, errUnmappedField), errors.Is(err, errNoCustomFields),
+		errors.Is(err, errUnfilterable), errors.Is(err, errNoObjectID):
 		return invalid, true
 	default:
 		return outcome{}, false
