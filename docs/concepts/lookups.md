@@ -62,3 +62,47 @@ top-level Region adopt an unrelated one, and the follow-up `PATCH` reparents it.
 So `vrf_id` is always either matched against a value or pinned to null, never left out,
 and the value NetBox wants for that pin is the literal `true`. `1`, `True` and an empty
 string leave the filter silently unapplied, which looks exactly like the omitted case.
+
+## Duplicate addresses, and what `allowDuplicate` does to the natural key
+
+**Decided** on
+[#177](https://github.com/ricardomolendijk/netbox-operator/issues/177), and not built yet.
+
+`ipam.VRF.enforce_unique` is a boolean with **`default=True`** (`docs/netbox-schema.md` →
+`ipam.VRF`). In a VRF with it set, NetBox rejects a second identical address. With it false —
+and in the global table, where the instance-wide `ENFORCE_GLOBAL_UNIQUE` setting decides —
+NetBox accepts duplicates, and some networks need that: anycast addresses, VRRP/HSRP virtual
+addresses, and the same address legitimately present in two disconnected L3 domains. So a
+duplicate is sometimes an error and sometimes the whole point, and **NetBox decides which**,
+through configuration the operator does not own.
+
+**The operator therefore has no opinion by default.** It sends the create and NetBox accepts or
+rejects it. A lookup that matches more than one object stays an
+[`AmbiguousError`](errors-and-retries.md#why-ambiguity-is-an-error) naming the candidates —
+never a guess, because picking one means adopting and then rewriting an address that belongs to
+somebody else, which is the worst outcome available.
+
+That leaves anycast expressible only by never letting two CRs describe the same address, so
+there is one field on top: **`allowDuplicate`**. A CR that sets it declares that it expects
+company at that address, which turns a multi-match from an error into "create another one" and
+puts the intent in the manifest where a reader can see it.
+
+**The reason the field is decided now rather than added later: it changes the natural key.** For
+an address that may legitimately exist several times, the address is not an identity —
+`ipam.IPAddress` has no `meta.constraints` at all, and nothing else about two identical
+addresses distinguishes them. So a duplicate-permitting CR identifies its object by the
+[provenance stamp](../operations/provenance.md#what-gets-written) as well, because that is the
+only thing that says *which of these is mine*. Natural keys are the hardest thing to change
+after objects exist in the wild — a CR that has been adopting by address cannot start adopting
+by address-plus-provenance without re-adopting everything it owns — which is why this had to be
+settled before `NetBoxIPAddress` shipped rather than after.
+
+**`allowDuplicate` with no provenance stamp to match on refuses.** An object created before the
+operator, or by another tool, carries no stamp; the operator then cannot tell which of the
+matches is its own, and that is exactly the moment when creating one more copy is worst. It
+reports and waits for a human instead.
+
+Rejected: **reading the VRF's `enforce_unique` and behaving accordingly.** It reads well and it
+cannot work — the flag is visible for a VRF and `ENFORCE_GLOBAL_UNIQUE` is not visible at all,
+so the operator would be right in the VRF case and guessing in the global one, with a silent
+failure and no way for a reader to tell the two apart.

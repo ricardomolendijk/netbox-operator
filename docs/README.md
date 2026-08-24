@@ -14,13 +14,13 @@ How the engine behaves, and why.
 | Page | Answers |
 |---|---|
 | [The Descriptor](concepts/descriptor.md) | What per-kind facts the engine needs, why they are data rather than code, and how natural keys establish identity before a `status.id` exists |
-| [Deletion](concepts/deletion.md) | What `deletionPolicy: Delete` and `Retain` each do, why the finalizer goes on before the first write and comes off after the last one, what a `PROTECT`-blocked delete looks like and how to get out of it |
+| [Deletion](concepts/deletion.md) | What `deletionPolicy: Delete` and `Retain` each do, which kinds default to `Retain` and why, why the finalizer goes on before the first write and comes off after the last one, what a `PROTECT`-blocked delete looks like and how to get out of it |
 | [Drift detection](concepts/drift.md) | Why what NetBox returns is not what you wrote, and the eight comparison rules that stop a reconcile loop from PATCHing forever |
 | [Field ownership](concepts/field-ownership.md) | The three states of an optional field -- absent, empty, set -- how to write each, how `metadata.managedFields` tells them apart, and what happens when there is no ownership metadata to read |
 | [Generic references](concepts/generic-refs.md) | What a polymorphic foreign key is, why the `app_label.model` spelling is written down once, why the schema digest's `REQ` on a `GenericForeignKey` row must be ignored, how a `*_type` / `*_id` pair is kept atomic, and NetBox's scope pair — including why writing `site` returns `201` and sets nothing |
 | [Errors and retries](concepts/errors-and-retries.md) | Which NetBox failure becomes which typed error, what gets retried and where, and why more than one lookup match is an error rather than a guess |
-| [Lookups](concepts/lookups.md) | How a natural key becomes a query string, why `?name__ie=` exists, and why a null filter is pinned rather than omitted |
-| [References](concepts/references.md) | How one object points at another, the four resolution modes, what the API server rejects before a bad reference reaches the operator, and what it takes to cross a namespace |
+| [Lookups](concepts/lookups.md) | How a natural key becomes a query string, why `?name__ie=` exists, why a null filter is pinned rather than omitted, and what `allowDuplicate` does to the natural key of an address that may legitimately exist twice |
+| [References](concepts/references.md) | How one object points at another, the four resolution modes, what the API server rejects before a bad reference reaches the operator, what it takes to cross a namespace, and why a namespace does not imply a tenant |
 
 ## Reference
 
@@ -78,8 +78,8 @@ Dated records of decisions that are expensive to reverse. Index and status:
 |---|---|
 | [0001 — API group and kind naming](decisions/0001-api-group-and-kind-naming.md) | Why the group is `netbox.kubeforge.org` and every kind is prefixed `NetBox` |
 | [0002 — CRD scoping](decisions/0002-crd-scoping.md) | Why every kind is namespaced in `v1alpha1`, what that costs, and what would have to change to revisit it |
-| [0003 — Ownership and references](decisions/0003-ownership-and-references.md) | How a NetBox foreign key differs from a Kubernetes owner reference, where the operator adds each, and why inline child sugar is in `v1alpha1` on terms that let `v1beta1` drop it |
-| [0004 — Claims-first allocation](decisions/0004-claims-first-allocation.md) | Why "allocate me an address" is a separate kind rather than a mode of `NetBoxIPAddress` |
+| [0003 — Ownership and references](decisions/0003-ownership-and-references.md) | How a NetBox foreign key differs from a Kubernetes owner reference, where the operator adds each, what cross-namespace containment gives up as a result, and why inline child sugar is in `v1alpha1` on terms that let `v1beta1` drop it |
+| [0004 — Claims-first allocation](decisions/0004-claims-first-allocation.md) | Why "allocate me an address" is a separate kind rather than a mode of `NetBoxIPAddress`, why the inline form is sugar over a real claim, and why an exhausted pool waits rather than failing |
 | [0005 — Coexisting with Flux and Argo CD](decisions/0005-gitops-coexistence.md) | Why Git is authoritative, why a NetBox UI edit is drift rather than a competing opinion, and why there is no write-back |
 
 ## Operations
