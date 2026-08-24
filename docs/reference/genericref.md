@@ -72,7 +72,9 @@ Some NetBox pairs are nullable and some are not, and the union follows the colum
 ### `IPAssignment`
 
 What an IP address is attached to. `assigned_object_type` / `assigned_object_id` on
-`ipam.IPAddress`, both nullable — an unassigned address is legal.
+`ipam.IPAddress`, both nullable — an unassigned address is legal. Carried by
+[`NetBoxIPAddress.spec.assignedObject`](netboxipaddress.md#assignedobject), the first shipped
+CRD to embed a union.
 
 | Member | Target Kind | NetBox object type |
 |---|---|---|

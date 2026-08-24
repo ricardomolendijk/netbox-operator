@@ -22,6 +22,31 @@ Implemented in `internal/reconciler/finalizer.go`.
 leak nobody asked for. `Retain` is for the two cases where the NetBox object outliving the CR
 is the *point*: migrating off the operator, and an object that is shared with something else.
 
+### Except for IPAM, where the default is `Retain`
+
+Deleting a tag or a site destroys *configuration*, which is cheap to recreate. Deleting an
+IPAM object destroys *state*: an `ipam.IPAddress` that is deleted is free for reallocation, so
+if a claim allocated it ([ADR-0004](../decisions/0004-claims-first-allocation.md)) deleting the
+CR hands somebody else an address this cluster believes it owns — and a `kubectl delete
+namespace` would do it to a whole range at once. That asymmetry is real, so it is encoded
+rather than averaged away (decision
+[#176](https://github.com/ricardomolendijk/netbox-operator/issues/176)).
+
+| Kind | Default | Why |
+|---|---|---|
+| [`NetBoxIPAddress`](../reference/netboxipaddress.md) | `Retain` | Deleting frees the address for reallocation, and if a claim allocated it that is destructive with no undo |
+| [`NetBoxTag`](../reference/netboxtag.md), [`NetBoxSite`](../reference/netboxsite.md), [`NetBoxRegion`](../reference/netboxregion.md) | `Delete` | Configuration: cheap to delete, cheap to recreate |
+
+Every other Kind defaults to `Delete`, and the IPAM Kinds still to come
+(`NetBoxPrefix`, `NetBoxIPRange`, `NetBoxVLAN`, `NetBoxVRF`) will join the first row.
+
+The default is **not** a `+kubebuilder:default` marker, and cannot be: `deletionPolicy` is
+declared once, on the envelope every Kind embeds, so a marker there would give ~120 Kinds one
+answer. The per-Kind value is data on the Kind's Descriptor
+(`registry.Descriptor.RetainOnDelete`), which the engine reads when the spec states nothing.
+One consequence worth knowing: `kubectl explain <kind>.spec.deletionPolicy` prints no default,
+so this table is where the answer lives.
+
 ```yaml
 spec:
   endpointRef: homelab
