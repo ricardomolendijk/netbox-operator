@@ -14,6 +14,7 @@ import (
 
 	netboxv1alpha1 "github.com/ricardomolendijk/netbox-operator/api/v1alpha1"
 	"github.com/ricardomolendijk/netbox-operator/internal/metrics"
+	"github.com/ricardomolendijk/netbox-operator/internal/registry"
 )
 
 // TestMaterialiseNames is the acceptance criterion in one assertion: a VM `dns` with an
@@ -714,5 +715,76 @@ func TestMaterialiseIgnoresPlainKinds(t *testing.T) {
 
 	if conditionOf(obj, netboxv1alpha1.ConditionChildrenReady).Type != "" {
 		t.Error("a kind with no inline children carries a ChildrenReady condition")
+	}
+}
+
+// TestDeleteWaitsForItsChildren is what actually orders a cascade. blockOwnerDeletion only
+// bites under foreground propagation and `kubectl delete` defaults to background, so under the
+// default the garbage collector removes a parent and its children concurrently -- and a parent
+// whose NetBox object went first would be refused with PROTECT while its interfaces still
+// exist. Correct end state, wrong route, wrong condition.
+func TestDeleteWaitsForItsChildren(t *testing.T) {
+	t.Parallel()
+
+	nb := &fakeClient{}
+	children := newFakeChildren()
+	children.plant(childGVK, "dns-eth0",
+		ourMarkers("parent-uid"),
+		map[string]string{netboxv1alpha1.OwnedByPathAnnotation: "spec.interfaces[eth0]"},
+		ourOwnerRef("parent-uid"))
+
+	parent := inlineParent(inlineChild{key: "eth0"})
+	parent.DeletionTimestamp = &metav1.Time{Time: metav1.Now().Time}
+	parent.Finalizers = []string{netboxv1alpha1.Finalizer}
+	// Delete rather than the fixture's Retain: Retain drops the finalizer with no NetBox call
+	// at all, so there would be nothing for the wait to order.
+	parent.Spec.DeletionPolicy = netboxv1alpha1.DeletionDelete
+	parent.Status.Children = []netboxv1alpha1.ChildStatus{
+		{Path: "spec.interfaces[eth0]", Kind: childGVK.Kind, Name: "dns-eth0", Ready: true},
+	}
+
+	engine := &Engine{
+		Descriptors: fakeDescriptors{
+			descriptor: registry.Descriptor{GVK: inlineGVK, Endpoint: "virtualization/virtual-machines"},
+			registered: true,
+		},
+		Endpoints:  fakeEndpoints{endpoint: Endpoint{Client: nb, Resync: testResync}, ready: true},
+		Status:     &fakeStatus{},
+		Finalizers: &fakeFinalizers{},
+		Children:   children,
+		Scheme:     inlineScheme(t),
+	}
+
+	if _, err := engine.Reconcile(context.Background(), parent); err != nil {
+		t.Fatalf("Reconcile() = %v", err)
+	}
+
+	if methods := nb.methods(); len(methods) != 0 {
+		t.Errorf("netbox saw %v while a child CR was still in the cluster", methods)
+	}
+
+	if !slices.Contains(parent.GetFinalizers(), netboxv1alpha1.Finalizer) {
+		t.Error("the finalizer came off while a child was still here")
+	}
+
+	condition := inlineConditionOf(parent, netboxv1alpha1.ConditionDeleting)
+	if condition.Reason != netboxv1alpha1.ReasonPendingDependents {
+		t.Fatalf("Deleting reason = %q, want PendingDependents", condition.Reason)
+	}
+
+	if !strings.Contains(condition.Message, "dns-eth0") {
+		t.Errorf("the message does not name the child that is in the way: %s", condition.Message)
+	}
+
+	// The child gone, and the parent proceeds: the wait has to end, or a cascade never
+	// completes rather than completing in the wrong order.
+	delete(children.store, "NetBoxChildFake/dns-eth0")
+
+	if _, err := engine.Reconcile(context.Background(), parent); err != nil {
+		t.Fatalf("the second Reconcile() = %v", err)
+	}
+
+	if !slices.Contains(nb.methods(), "DELETE") {
+		t.Errorf("netbox saw %v once the child was gone, want the DELETE", nb.methods())
 	}
 }

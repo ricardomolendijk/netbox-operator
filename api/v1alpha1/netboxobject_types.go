@@ -385,6 +385,22 @@ const (
 	// send whoever set the annotation looking for a namespace problem that does not exist.
 	ReasonParentOwnershipDisabled = "ParentOwnershipDisabled"
 
+	// ReasonPendingDependents is on Deleting: the child CRs this object materialised are
+	// still in the cluster, so its own NetBox object is not deleted yet.
+	//
+	// This is what orders a cascade, and it is not the same thing as blockOwnerDeletion.
+	// That flag only takes effect under *foreground* propagation and `kubectl delete`
+	// defaults to background, so under the default the garbage collector removes a parent
+	// and its children concurrently. Without this wait the parent's NetBox object would
+	// often go first, which NetBox refuses with PROTECT while its interfaces still exist --
+	// the right end state, reached through a queue of 409s and a condition pointing at the
+	// wrong cause.
+	//
+	// Distinct from ReasonProtected for that reason: this is the operator waiting on
+	// Kubernetes objects it knows about, and that is NetBox refusing over a row the operator
+	// may know nothing about. The messages send a reader to different places.
+	ReasonPendingDependents = "PendingDependents"
+
 	// ReasonProtected is on Deleting: NetBox refused the delete because something still
 	// references the object. Nothing about this object can clear it -- the referring
 	// object has to go first -- so it is a backed-off requeue rather than a fast retry,
