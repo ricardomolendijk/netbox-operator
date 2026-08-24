@@ -237,8 +237,9 @@ func TestFilterValue(t *testing.T) {
 // than an error (docs/concepts/drift.md).
 func TestFieldRulesFromDescriptor(t *testing.T) {
 	d := scopedDescriptor()
-	d.M2M = []string{"tags"}
-	d.Arrays = []string{"vid_ranges"}
+	d.Fields = append(d.Fields,
+		registry.Field{Spec: "tagRefs", API: "tags", Class: registry.ClassRefMany},
+		registry.Field{Spec: "vidRanges", API: "vid_ranges", Class: registry.ClassArray})
 
 	rules := fieldRules(d)
 

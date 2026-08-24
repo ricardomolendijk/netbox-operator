@@ -31,7 +31,7 @@ func crossRef(name string) netboxv1alpha1.ObjectRef {
 // so this is the shape the endpoint work will use rather than one in the tree -- the rule has
 // to be in place before the field that can trip it, or the exception lands after the hole.
 func endpointField() registry.Field {
-	return registry.Field{Spec: "endpointRef", API: "endpoint", Ref: true, Target: endpointGVK}
+	return registry.Field{Spec: "endpointRef", API: "endpoint", Class: registry.ClassRefOne, Target: endpointGVK}
 }
 
 // kindsWithEndpoint is the descriptor source plus NetBoxEndpoint, so a reference to one can

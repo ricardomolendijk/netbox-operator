@@ -92,7 +92,7 @@ func (s specFields) desired(d registry.Descriptor) (netbox.Object, registry.Spec
 		field, mapped := d.FieldFor(name)
 
 		switch {
-		case mapped && field.Ref, !mapped && isGenericFK(d, name):
+		case mapped && field.Class.Ref(), !mapped && isGenericFK(d, name):
 			refs = append(refs, name)
 		case mapped:
 			desired[field.API] = value
@@ -164,7 +164,7 @@ func isGenericFK(d registry.Descriptor, spec string) bool {
 // needs. It is the whole of the engine's knowledge about how a field is compared, and it
 // is data every time.
 func fieldRules(d registry.Descriptor) netbox.FieldRules {
-	m2m := set(d.M2M)
+	m2m := set(d.M2MFields())
 
 	// `tags` is not in any descriptor's M2M list because no spec field maps onto it: it is
 	// the engine's own column, written by the provenance stamp (NBO-075). It still needs the
@@ -180,8 +180,8 @@ func fieldRules(d registry.Descriptor) netbox.FieldRules {
 
 	rules := netbox.FieldRules{
 		M2M:             m2m,
-		ObjectTypeLists: set(d.ObjectTypeLists),
-		Arrays:          set(d.Arrays),
+		ObjectTypeLists: set(d.ObjectTypeListFields()),
+		Arrays:          set(d.ArrayFields()),
 		GenericFKs:      make([]netbox.GenericFK, 0, len(d.GenericFKs)),
 	}
 

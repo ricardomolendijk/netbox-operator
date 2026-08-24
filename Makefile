@@ -77,8 +77,16 @@ test: manifests generate fmt vet envtest ## Run unit tests and envtest.
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" \
 		go test $$(go list ./... | grep -v /test/e2e) -coverprofile cover.out
 
+.PHONY: lint-schema
+lint-schema: ## Lint hack/*.py with ruff, the same check CI runs.
+	@if command -v ruff >/dev/null 2>&1; then \
+		ruff check hack/; \
+	else \
+		echo "ruff not installed (pip install ruff); CI will still run it."; \
+	fi
+
 .PHONY: test-schema
-test-schema: ## Run the schema extraction pipeline against test/fixtures/netbox-models.
+test-schema: lint-schema ## Run the schema extraction pipeline against test/fixtures/netbox-models.
 	python3 hack/test_digest.py
 
 .PHONY: test-e2e

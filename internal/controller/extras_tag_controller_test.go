@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -33,10 +34,27 @@ func readyEndpoint(t *testing.T, ns, target string) {
 // (gitops_test.go, NBO-065).
 func readyEndpointWith(t *testing.T, ns, target string, mutate func(*netboxv1alpha1.NetBoxEndpoint)) {
 	t.Helper()
-	makeSecret(t, k8sClient, ns, "nb-token", "valid-token")
+	readyEndpointNamed(t, ns, "homelab", target, mutate)
+}
+
+// readyEndpointNamed is readyEndpointWith for a test that needs two endpoints in one
+// namespace. `spec.endpointRef` is per object, so a catalogue object in `driftMode: Report`
+// and a team's object being applied for real is a two-endpoint namespace rather than a
+// two-namespace test (refreadiness_test.go, NBO-089).
+func readyEndpointNamed(
+	t *testing.T, ns, name, target string, mutate func(*netboxv1alpha1.NetBoxEndpoint),
+) {
+	t.Helper()
+
+	// One token secret per namespace, shared by however many endpoints the test needs: a
+	// second endpoint in the same namespace is a second endpoint, not a second credential.
+	if err := k8sClient.Get(context.Background(),
+		client.ObjectKey{Namespace: ns, Name: "nb-token"}, &corev1.Secret{}); err != nil {
+		makeSecret(t, k8sClient, ns, "nb-token", "valid-token")
+	}
 
 	endpoint := &netboxv1alpha1.NetBoxEndpoint{
-		ObjectMeta: metav1.ObjectMeta{Name: "homelab", Namespace: ns},
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
 		Spec: netboxv1alpha1.NetBoxEndpointSpec{
 			URL:            target,
 			TokenSecretRef: netboxv1alpha1.SecretKeyRef{Name: "nb-token"},
@@ -54,8 +72,8 @@ func readyEndpointWith(t *testing.T, ns, target string, mutate func(*netboxv1alp
 
 	t.Cleanup(func() { _ = k8sClient.Delete(context.Background(), endpoint) })
 
-	eventually(t, "an endpoint client in "+ns, func() bool {
-		_, _, ok := clients.Lookup(ns, "homelab")
+	eventually(t, "an endpoint client for "+ns+"/"+name, func() bool {
+		_, _, ok := clients.Lookup(ns, name)
 
 		return ok
 	})

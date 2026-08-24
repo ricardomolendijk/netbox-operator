@@ -41,13 +41,18 @@ const (
 // those from the NetBox payload by reflecting over that struct.
 //
 // Every optional foreign key dcim.Site has -- `region`, `group`, `tenant` and the `asns`
-// many-to-many (docs/netbox-schema.md -> dcim.Site) -- is deliberately absent rather than
-// declared and ignored. A reference becomes an id only in internal/resolver, which does not
-// exist until NBO-012, and a field that is accepted and does nothing is worse than a field
-// that is not there: `kubectl apply` reports success and NetBox never sees the value. They
-// arrive with the reference system in M2 (NBO-011, NBO-012) and M3 (NBO-021 for `tenant`).
-// `tags` is absent for the same reason -- it is a reference to a NetBoxTag, which is
-// NBO-011 -- and additionally has no entry in the digest to cite at all (NBO-073).
+// many-to-many (docs/netbox-schema.md -> dcim.Site) -- is still absent from this Kind, but
+// no longer for want of a resolver: internal/resolver landed in M2 and resolves references,
+// including to-many ones. What is left is per-field work on this Kind, and it waits on the
+// Kinds each field points at -- `group` on NetBoxSiteGroup (NBO-066), `tenant` on
+// NetBoxTenant (NBO-021), `asns` on NetBoxASN (NBO-055). A field that is accepted and does
+// nothing is worse than a field that is not there: `kubectl apply` reports success and
+// NetBox never sees the value.
+//
+// `tags` is the exception that is only waiting on this Kind: NetBoxTag exists, and the
+// digest now carries the row to cite it against (`tags (TagsMixin) NetBoxTaggableManagerField
+// M2M -> extras.Tag`), which it did not until the extractor was fixed to match NetBox's real
+// manager class.
 type NetBoxSiteSpec struct {
 	NetBoxObjectSpec `json:",inline"`
 
@@ -116,10 +121,11 @@ type NetBoxSiteSpec struct {
 	// (internal/netbox/drift.go, scalarEqual), so `"51.9244"` and NetBox's `"51.924400"`
 	// are the same value and produce no PATCH.
 	//
-	// The pattern caps the fraction at six digits, which is dcim.Site's `decimal_places`.
-	// docs/netbox-schema.md shows no precision for any DecimalField -- that is the
-	// pre-NBO-071 defect its own preamble names, `latitude` included -- so the six comes
-	// from NBO-009 and the two integer digits from the -90..90 range CEL enforces.
+	// The pattern caps the fraction at six digits and the integer part at two, both read
+	// straight off docs/netbox-schema.md -> dcim.Site: `latitude DecimalField decimal(8,6)`,
+	// so eight digits total with six after the point. (`longitude` is decimal(9,6), which is
+	// why its pattern allows three integer digits and this one does not.) The -90..90 range
+	// CEL enforces is the tighter constraint on top.
 	// +kubebuilder:validation:Pattern=`^-?[0-9]{1,2}(\.[0-9]{1,6})?$`
 	// +kubebuilder:validation:XValidation:rule="double(self) >= -90.0 && double(self) <= 90.0",message="latitude must be between -90 and 90 degrees"
 	// +optional

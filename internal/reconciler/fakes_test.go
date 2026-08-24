@@ -60,6 +60,15 @@ type fakeSpec struct {
 	LocalContext map[string]string `json:"localContextData,omitempty"`
 	ParentRef    *fakeRef          `json:"parentRef,omitempty"`
 
+	// ASNRefs is the to-many reference NBO-088 added: a list of references written as a list
+	// of NetBox ids, which is what dcim.Site's `asns`, ipam.VRF's `import_targets` and
+	// dcim.Interface's `wireless_lans` all are.
+	//
+	// Deliberately not `tags`. That column is the engine's own, stamped from
+	// Descriptor.Taggable rather than mapped from a spec field, and using it here would make
+	// the provenance tests unable to tell the two sources apart.
+	ASNRefs []fakeRef `json:"asnRefs,omitempty"`
+
 	// PrimaryIP4Ref is the deferred reference NBO-015 is about: dcim.Device's
 	// `primary_ip4` needs an address that needs an interface that needs the Device, so no
 	// apply order sets it at create time.
@@ -90,6 +99,7 @@ func (f *fakeKind) DeepCopyObject() runtime.Object {
 	out.Status = *f.Status.DeepCopy()
 	out.Spec.ObjectTypes = slices.Clone(f.Spec.ObjectTypes)
 	out.Spec.LocalContext = maps.Clone(f.Spec.LocalContext)
+	out.Spec.ASNRefs = slices.Clone(f.Spec.ASNRefs)
 
 	return &out
 }
@@ -144,14 +154,16 @@ func fakeDescriptor() registry.Descriptor {
 			{Spec: "priority", API: "priority"},
 			{Spec: "enabled", API: "enabled"},
 			{Spec: "weight", API: "weight"},
-			{Spec: "objectTypes", API: "object_types"},
+			{Spec: "objectTypes", API: "object_types", Class: registry.ClassObjectTypeList},
+			// The map shape for the three-state table (NBO-079). A map is compared as a value,
+			// so it is ClassValue; only its clearability is what NBO-079 added.
 			{Spec: "localContextData", API: "local_context_data"},
-			{Spec: "parentRef", API: "parent", Ref: true},
+			{Spec: "parentRef", API: "parent", Class: registry.ClassRefOne},
+			{Spec: "asnRefs", API: "asns", Class: registry.ClassRefMany},
 		},
-		NaturalKeys:     []registry.NaturalKey{{Fields: []registry.KeyField{{Filter: "slug", Spec: "slug"}}}},
-		UpdateStrategy:  registry.UpdatePatch,
-		ReadOnly:        []string{"created", "last_updated", "url", "display"},
-		ObjectTypeLists: []string{"object_types"},
+		NaturalKeys:    []registry.NaturalKey{{Fields: []registry.KeyField{{Filter: "slug", Spec: "slug"}}}},
+		UpdateStrategy: registry.UpdatePatch,
+		ReadOnly:       []string{"created", "last_updated", "url", "display"},
 	}
 }
 

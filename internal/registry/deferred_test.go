@@ -73,7 +73,7 @@ func keyFieldsWrittenAsReferences(d Descriptor) []string {
 			api := strings.TrimSuffix(field.Filter, "_id")
 
 			for _, mapped := range d.Fields {
-				if mapped.Ref && mapped.API == api && !slices.Contains(out, api) {
+				if mapped.Class.Ref() && mapped.API == api && !slices.Contains(out, api) {
 					out = append(out, api)
 				}
 			}

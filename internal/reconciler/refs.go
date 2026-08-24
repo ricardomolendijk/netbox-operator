@@ -90,28 +90,67 @@ func (p *pass) resolveRefs(ctx context.Context, declared []string) error {
 	// Descriptor order rather than map order: the resolved list ends up in a condition
 	// message, and a message that reorders itself between passes is unreviewable.
 	resolved := make([]string, 0, len(resolution.ByField))
+	notes := make([]string, 0, len(resolution.ByField))
 
 	for _, field := range p.desc.Fields {
-		result, ok := resolution.ByField[field.Spec]
+		refs, ok := resolution.ByField[field.Spec]
 		if !ok {
 			continue
 		}
 
-		p.applyRef(field, result)
+		p.applyRef(field, refs)
 		resolved = append(resolved, field.Spec)
+		notes = append(notes, unreadyTargets(field, refs)...)
 	}
 
 	if len(resolved) == len(declared) {
-		logf.FromContext(ctx).V(1).Info("resolved every reference", "action", "build", "refs", resolved)
+		logf.FromContext(ctx).V(1).Info("resolved every reference",
+			"action", "build", "refs", resolved, "unreadyTargets", notes)
 		p.condition(netboxv1alpha1.ConditionRefsResolved, true, netboxv1alpha1.ReasonAllResolved,
-			fmt.Sprintf("resolved %s", strings.Join(resolved, ", ")))
+			join(fmt.Sprintf("resolved %s", strings.Join(resolved, ", ")), notes))
 
 		return nil
 	}
 
-	p.reportUnresolved(ctx, resolution, declared, resolved)
+	p.reportUnresolved(ctx, resolution, declared, resolved, notes)
 
 	return nil
+}
+
+// unreadyTargets names the targets a resolved reference points at that are not Ready
+// themselves.
+//
+// Reported, not blocked, and that is NBO-089's decision: a reference needs its target to hold
+// an id, not to be Ready. `driftMode: Report` makes Ready=False the steady state of every
+// object at an endpoint by design, so blocking on it stalled every object pointing into an
+// adoption namespace for the length of the adoption. The resolver refuses only the target
+// states where the id is actually the wrong one (see resolver.targetFailures).
+//
+// It still has to be *said*, though. A referrer reporting Ready=True over an id whose object
+// is unfinished is exactly what somebody debugging needs told, and RefsResolved is the
+// condition they are already reading.
+func unreadyTargets(field registry.Field, refs resolver.FieldRefs) []string {
+	notes := make([]string, 0, len(refs))
+
+	for _, ref := range refs {
+		if ref.TargetNotReady == "" {
+			continue
+		}
+
+		notes = append(notes, fmt.Sprintf("%s -> %s: resolved, target not ready (%s)",
+			field.Spec, ref.Target, ref.TargetNotReady))
+	}
+
+	return notes
+}
+
+// join appends the notes to a message, and is the one place the separator is written.
+func join(message string, notes []string) string {
+	if len(notes) == 0 {
+		return message
+	}
+
+	return strings.Join(append([]string{message}, notes...), "; ")
 }
 
 // resolution runs the resolver, and reports nothing resolved when the engine has none.
@@ -141,13 +180,41 @@ func (p *pass) resolution(ctx context.Context) (resolver.Resolution, error) {
 // `(parent, name)` and filters on `parent_id`, so the lookup that decides whether to create
 // or adopt needs the id under `parentRef`. Writing it into the decoded spec is what "a
 // reference has become an id" means to every later step.
-func (p *pass) applyRef(field registry.Field, result resolver.Result) {
-	p.desired[field.API] = result.ID
+func (p *pass) applyRef(field registry.Field, refs resolver.FieldRefs) {
+	payload, filterable := refValues(field, refs)
 
-	// float64 because that is what every JSON number in a decoded spec is, and filterValue
-	// renders exactly those shapes. An int64 here would be dropped as unfilterable.
-	p.spec[field.Spec] = float64(result.ID)
+	p.desired[field.API] = payload
+	p.spec[field.Spec] = filterable
 	p.state.Resolved = append(p.state.Resolved, field.Spec)
+}
+
+// refValues renders resolved references twice: as the value NetBox is sent, and as the value
+// the decoded spec carries for a natural-key filter to read.
+//
+// A bare id for a to-one field and a list of ids for a to-many. The list is []any of float64
+// rather than []int64, and that is not cosmetic: netbox.IDsOf reads a desired M2M list
+// through asInt, which knows float64, int and string and not int64, so an []int64 would
+// compare as the empty set and the operator would PATCH the same list forever -- the hot
+// loop docs/concepts/drift.md opens by warning about.
+func refValues(field registry.Field, refs resolver.FieldRefs) (payload, filterable any) {
+	if !field.Class.ToMany() {
+		// float64 in the spec because that is what every JSON number in a decoded spec is, and
+		// filterValue renders exactly those shapes. An int64 there would be dropped as
+		// unfilterable.
+		return refs[0].ID, float64(refs[0].ID)
+	}
+
+	ids := refs.IDs()
+	list := make([]any, 0, len(ids))
+
+	for _, id := range ids {
+		list = append(list, float64(id))
+	}
+
+	// The same list on both sides. A to-many reference has no single value a query parameter
+	// could carry, and registry.ErrToManyNaturalKey rejects a descriptor that keys on one, so
+	// there is no filter here to render differently for.
+	return list, list
 }
 
 // reportUnresolved records the references that did not become ids.
@@ -157,7 +224,7 @@ func (p *pass) applyRef(field registry.Field, result resolver.Result) {
 // never saw is a generic foreign key, whose target is a union of Kinds rather than one and
 // whose dispatch is NBO-019.
 func (p *pass) reportUnresolved(
-	ctx context.Context, resolution resolver.Resolution, declared, resolved []string,
+	ctx context.Context, resolution resolver.Resolution, declared, resolved, notes []string,
 ) {
 	blocked := make([]string, 0, len(resolution.Blocked))
 	for _, blocker := range resolution.Blocked {
@@ -172,7 +239,7 @@ func (p *pass) reportUnresolved(
 		}
 	}
 
-	reason, message := resolution.Reason(), messageFor(resolution, dropped)
+	reason, message := resolution.Reason(), join(messageFor(resolution, dropped), notes)
 	if len(resolution.Blocked) == 0 {
 		reason = netboxv1alpha1.ReasonNotImplemented
 	}
