@@ -14,7 +14,6 @@ import (
 
 	netboxv1alpha1 "github.com/ricardomolendijk/netbox-operator/api/v1alpha1"
 	"github.com/ricardomolendijk/netbox-operator/internal/netbox"
-	"github.com/ricardomolendijk/netbox-operator/internal/registry"
 )
 
 // Deletion intervals. A refused delete is not a failure to retry harder: it will keep
@@ -171,7 +170,7 @@ func (p *pass) releaseWithoutDeleting() (release, bool) {
 		}, true
 	}
 
-	if deletionPolicyOf(p.obj, p.desc) == netboxv1alpha1.DeletionRetain {
+	if deletionPolicyOf(p.obj.NetBoxSpec().DeletionPolicy, p.desc.RetainOnDelete) == netboxv1alpha1.DeletionRetain {
 		return release{
 			event: netboxv1alpha1.EventRetained,
 			message: fmt.Sprintf("spec.deletionPolicy is Retain: netbox %s/%d is left in place",
@@ -359,21 +358,28 @@ func (p *pass) release(ctx context.Context, out release) (ctrl.Result, error) {
 	return ctrl.Result{}, nil
 }
 
-// deletionPolicyOf returns the object's deletion policy: the spec's when it states one, and
-// otherwise the default its kind declares.
+// deletionPolicyOf returns the effective deletion policy: the spec's when it states one, and
+// otherwise retainByDefault's answer.
 //
-// The default is not a CRD marker, and cannot be: spec.deletionPolicy is declared once on the
-// shared NetBoxObjectSpec, so a `+kubebuilder:default` there is the same value for every one
-// of ~120 kinds. Decision #176 made IPAM the exception -- deleting an ipam.IPAddress frees
-// the address for reallocation, which is destructive in a way deleting a tag is not -- so the
-// per-kind answer is data on the Descriptor, where every other per-kind fact lives.
-// docs/concepts/deletion.md carries the table.
-func deletionPolicyOf(obj Object, d registry.Descriptor) netboxv1alpha1.DeletionPolicy {
-	if policy := obj.NetBoxSpec().DeletionPolicy; policy != "" {
+// It takes the two values it reads rather than an Object and a Descriptor, because the
+// allocation engine needs exactly this rule over a Claim and a registry.ClaimDescriptor,
+// which are different types holding the same two facts (claim.go). One function that both
+// callers pass their own pair into is the only shape in which "unset means the kind's
+// default" cannot come to mean two different things -- and this rule is the last word on
+// whether the operator deletes somebody's data, so it existing twice is not acceptable.
+//
+// For an object CR the default is not a CRD marker, and cannot be: spec.deletionPolicy is
+// declared once on the shared NetBoxObjectSpec, so a `+kubebuilder:default` there is the same
+// value for every one of ~120 kinds (#186). Decision #176 made IPAM the exception -- deleting
+// an ipam.IPAddress frees the address for reallocation, which is destructive in a way deleting
+// a tag is not -- so the per-kind answer is data on the Descriptor, where every other per-kind
+// fact lives. docs/concepts/deletion.md carries the table.
+func deletionPolicyOf(policy netboxv1alpha1.DeletionPolicy, retainByDefault bool) netboxv1alpha1.DeletionPolicy {
+	if policy != "" {
 		return policy
 	}
 
-	if d.RetainOnDelete {
+	if retainByDefault {
 		return netboxv1alpha1.DeletionRetain
 	}
 

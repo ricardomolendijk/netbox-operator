@@ -140,9 +140,15 @@ const (
 	// The whole of the garbage-collection *reporting* path: the operator is about to stop
 	// tracking an object it can still name, so it says so, once, with everything a human
 	// needs to find it -- and never deletes it
-	// (https://github.com/ricardomolendijk/netbox-operator/issues/182). Retaining is what
-	// makes "rebuild from Git, keep my addresses" a guarantee rather than a coincidence;
-	// this Event is what stops the retained object from being invisible.
+	// (https://github.com/ricardomolendijk/netbox-operator/issues/182). This Event is what
+	// stops the retained object from being invisible.
+	//
+	// Two things reach it since #225 made `Delete` the default. `spec.deletionPolicy: Retain`
+	// is the deliberate one and it is a Normal Event. The other is a `Delete` the operator
+	// gave up on -- a refusal or an unreachable NetBox that outlasted the bounded retry --
+	// and that one is a Warning, because it is a leak nobody asked for rather than a choice
+	// somebody made. Same words either way: the address, the id and the identity are what a
+	// human needs in both cases.
 	EventAddressRetained = "AddressRetained"
 )
 
@@ -179,21 +185,22 @@ type NetBoxIPAddressClaimSpec struct {
 // ip-range claims embed the same one, which is what makes the engine generic over
 // registry.ClaimDescriptor rather than over a Kind.
 //
-// Deliberately *not* NetBoxObjectSpec. Two of that struct's three fields mean nothing to a
-// claim: `onConflict` is about adopting an object that matches a natural key, and a claim
-// has no natural key -- it adopts by allocation identity and by nothing else -- while
-// `deletionPolicy` is fixed at Retain (see NetBoxIPAddressClaim). A field that is accepted
-// and ignored is worse than a field that is not there.
+// Deliberately *not* NetBoxObjectSpec. `onConflict` means nothing to a claim: it is about
+// adopting an object that matches a natural key, and a claim has no natural key -- it adopts
+// by allocation identity and by nothing else. A field that is accepted and ignored is worse
+// than a field that is not there.
+//
+// `deletionPolicy` is restated here rather than inherited, and that is not duplication for
+// its own sake: it is the one field whose *default* differs between a claim and an object,
+// and declaring it here is what lets the marker below carry that default honestly. The
+// envelope's copy is inlined by ~120 kinds, so a marker on it could only give them all one
+// answer (#186); this struct is inlined only by claim kinds, which all want `Delete`.
 type NetBoxClaimSpec struct {
 	// EndpointRef names the NetBoxEndpoint to allocate through, in this claim's own
 	// namespace.
 	//
-	// Declared here rather than inherited from NetBoxObjectSpec, because two of that
-	// struct's three fields mean nothing to a claim. `onConflict` is about adopting an
-	// object that matches a natural key, and a claim has no natural key -- it adopts by
-	// allocation identity and by nothing else. `deletionPolicy` is fixed at Retain, see the
-	// type comment on NetBoxIPAddressClaim. A field that is accepted and ignored is worse
-	// than a field that is not there.
+	// Declared here rather than inherited from NetBoxObjectSpec: see the type comment above
+	// for why a claim does not embed that envelope.
 	//
 	// It also participates in the allocation identity: the same claim pointed at a different
 	// NetBox is a different allocation, and asking a second NetBox for the object of the
@@ -222,6 +229,32 @@ type NetBoxClaimSpec struct {
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]+$`
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="allocationIdentity is immutable; changing it points this claim at a different allocation"
 	AllocationIdentity string `json:"allocationIdentity,omitempty"`
+
+	// DeletionPolicy is what happens to the allocated NetBox object when this claim is
+	// deleted. The same two values and the same meanings as on every other kind
+	// (docs/concepts/deletion.md).
+	//
+	// **`Delete`, unlike the IPAM object kinds, and that asymmetry is the decision** (#225,
+	// reversing #182). A claim's CR is the only record that its allocation exists: "give me
+	// any free address out of mgmt-net" is not a statement about 10.0.20.37, and nothing in
+	// Git names that address. So when the claim goes, nothing refers to the address it was
+	// handed and it becomes litter that is invisible by construction. A NetBoxIPAddress with
+	// an explicit spec.address is the opposite -- a deliberate statement about one address,
+	// where Retain protects real intent -- and it still defaults to Retain (#176).
+	//
+	// The cost of this default, stated rather than sold: **a freed address can be reallocated
+	// immediately, so an accidental `kubectl delete` on a claim is unrecoverable.**
+	// Re-applying the same manifest derives the same allocation identity, but if something
+	// else has taken the address meanwhile the claim gets a different one, and whatever was
+	// configured to use the old address is now pointed at somebody else's. Under Retain that
+	// mistake was recoverable by hand. Set this to Retain on a claim whose address something
+	// outside Kubernetes depends on and cannot be told about.
+	//
+	// Read fresh on every pass rather than latched when deletion starts, so switching it to
+	// Retain on a claim whose delete NetBox keeps refusing is the way out of that state.
+	// +kubebuilder:default=Delete
+	// +optional
+	DeletionPolicy DeletionPolicy `json:"deletionPolicy,omitempty"`
 }
 
 // AllocationPool is the pool a claim allocated out of, as it was resolved.
@@ -316,6 +349,20 @@ type NetBoxClaimStatus struct {
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
+	// DeletionAttempts counts the deletes of the allocated object that did not succeed:
+	// refused by NetBox, failed, or not attempted because the endpoint was not Ready.
+	//
+	// A status field for the same reason NetBoxObjectStatus's is -- a controller has no
+	// memory between passes, so a backoff computed from a count has to survive a requeue, a
+	// leader election and a restart. Non-zero only while a claim is terminating.
+	//
+	// It is also the bound on that retry: past a fixed number of attempts the claim releases
+	// its finalizer anyway and reports the address as retained, because a claim's finalizer
+	// must not be able to wedge a namespace (#225). Counting anything other than a success
+	// here would make that bound unenforceable.
+	// +optional
+	DeletionAttempts int32 `json:"deletionAttempts,omitempty"`
+
 	// Conditions follow the standard Kubernetes vocabulary.
 	// +listType=map
 	// +listMapKey=type
@@ -327,14 +374,16 @@ type NetBoxClaimStatus struct {
 //
 // Namespaced like every kind in v1alpha1 (docs/decisions/0002-crd-scoping.md).
 //
-// **A claim always retains its NetBox object.** There is no `deletionPolicy` field: a
-// single-valued knob is not one, and Retain is the value that makes the deterministic
-// identity worth having -- delete the claim, re-apply the same manifest, get the same
-// address back. What stops that from being a silent leak is that the operator *reports*
-// it: deleting a claim emits the AddressRetained Event naming the address, the NetBox id and
-// the identity, and never deletes anything
-// (https://github.com/ricardomolendijk/netbox-operator/issues/182). To free the address,
-// delete the NetBox object.
+// **Deleting a claim frees its address.** `spec.deletionPolicy` defaults to `Delete`, because
+// the claim CR is the only record that the allocation exists -- nothing else in Git names the
+// address it was handed, so a retained address is litter nobody can attribute
+// (https://github.com/ricardomolendijk/netbox-operator/issues/225, reversing #182). Set
+// `deletionPolicy: Retain` on a claim whose address something outside Kubernetes depends on;
+// that path emits the AddressRetained Event naming the address, the NetBox id and the
+// identity, and calls NetBox not at all.
+//
+// The cost of the default, plainly: **a freed address can be reallocated immediately, so an
+// accidental `kubectl delete` is unrecoverable** where a leak was recoverable by hand.
 //
 // The printer columns are the three things a human wants side by side: what was asked for,
 // what was handed out, and whether it stuck.
