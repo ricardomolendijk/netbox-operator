@@ -33,8 +33,10 @@ rules:
   resources:
   - netboxendpoints/status
   - netboxregions/status
+  - netboxroutetargets/status
   - netboxsites/status
   - netboxtags/status
+  - netboxvrfs/status
   verbs:
   - get
   - patch
@@ -43,8 +45,10 @@ rules:
   - netbox.kubeforge.org
   resources:
   - netboxregions
+  - netboxroutetargets
   - netboxsites
   - netboxtags
+  - netboxvrfs
   verbs:
   - get
   - list
@@ -55,7 +59,9 @@ rules:
   - netbox.kubeforge.org
   resources:
   - netboxregions/finalizers
+  - netboxroutetargets/finalizers
   - netboxsites/finalizers
   - netboxtags/finalizers
+  - netboxvrfs/finalizers
   verbs:
   - update

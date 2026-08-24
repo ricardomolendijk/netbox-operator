@@ -134,6 +134,16 @@ type (
 
 	// FHRPGroupRef points at a NetBoxFHRPGroup (ipam.FHRPGroup, ipam/fhrp-groups).
 	FHRPGroupRef ObjectRef
+
+	// RouteTargetRef points at a NetBoxRouteTarget (ipam.RouteTarget, ipam/route-targets).
+	//
+	// The first alias used to-many: ipam.VRF's `import_targets` and `export_targets` are
+	// lists of these. One alias either way -- the resolver takes the target Kind off
+	// registry.Field.Target regardless of cardinality.
+	RouteTargetRef ObjectRef
+
+	// VRFRef points at a NetBoxVRF (ipam.VRF, ipam/vrfs).
+	VRFRef ObjectRef
 )
 
 // TargetGVK reports the Kind this reference resolves against.
@@ -204,6 +214,20 @@ func (r FHRPGroupRef) TargetGVK() schema.GroupVersionKind {
 // AsObjectRef returns the underlying reference.
 func (r FHRPGroupRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
 
+// TargetGVK reports the Kind this reference resolves against.
+func (r RouteTargetRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxRouteTarget")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r RouteTargetRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r VRFRef) TargetGVK() schema.GroupVersionKind { return GroupVersion.WithKind("NetBoxVRF") }
+
+// AsObjectRef returns the underlying reference.
+func (r VRFRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
 // Compile-time proof that every alias satisfies RefTarget. An alias that forgets its
 // methods fails the build here rather than at the first reconcile that needs it.
 var (
@@ -216,4 +240,6 @@ var (
 	_ RefTarget = InterfaceRef{}
 	_ RefTarget = VMInterfaceRef{}
 	_ RefTarget = FHRPGroupRef{}
+	_ RefTarget = RouteTargetRef{}
+	_ RefTarget = VRFRef{}
 )

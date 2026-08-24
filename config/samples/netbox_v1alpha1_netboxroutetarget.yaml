@@ -1,0 +1,27 @@
+# The two route targets the NetBoxVRF sample imports and exports. They are the far end of
+# ipam.VRF's two many-to-many relations and declare nothing about them: the relation is
+# written from the VRF side only.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxRouteTarget
+metadata:
+  name: rt-65000-10-import
+  namespace: default
+spec:
+  # The NetBoxEndpoint to write through, in this namespace. There is no cluster-wide
+  # default endpoint; see config/samples/netbox_v1alpha1_netboxendpoint.yaml.
+  endpointRef: homelab
+
+  # The natural key. NetBox enforces uniqueness on this column globally, so the first
+  # namespace to claim it gets it and a second CR with this name reports Conflict.
+  name: "65000:10"
+  description: Imported into the Donkerslootstraat VRF
+---
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxRouteTarget
+metadata:
+  name: rt-65000-11-export
+  namespace: default
+spec:
+  endpointRef: homelab
+  name: "65000:11"
+  description: Exported from the Donkerslootstraat VRF
