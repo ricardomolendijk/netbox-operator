@@ -150,9 +150,9 @@ holds. Absent, empty and set are three states and the operator tells them apart 
 `metadata.managedFields` — see [field ownership](../concepts/field-ownership.md), which also
 covers the one case where an empty value is still invisible.
 
-> `latitude` and `longitude` are the exception on this kind. Their validation pattern does
-> not match the empty string, so `latitude: ""` is rejected at admission and the value can
-> only be changed, not removed.
+> `latitude` and `longitude` are clearable too, and are the one pair that reaches NetBox as
+> `null` rather than as `""` — NetBox's nullable `DecimalField` rejects an empty string
+> outright ([issue #170](https://github.com/ricardomolendijk/netbox-operator/issues/170)).
 
 ### `physicalAddress`, `shippingAddress`
 
@@ -182,6 +182,10 @@ decimal without risking precision loss, and NetBox stores these as `DecimalField
 NetBox returns them padded to their `decimal_places` — write `"51.9244"` and read back
 `"51.924400"`. The operator compares them numerically, so that padding does not read as a
 change. If it did, this kind would PATCH on every reconcile.
+
+`latitude: ""` clears the coordinate, and is sent to NetBox as `null`: the column is
+nullable, and DRF parses `""` as a number and rejects it — so the empty string is the
+spelling in YAML and `null` is what goes over the wire (`registry.Field.EmptyIsNull`).
 
 ### `timeZone`
 

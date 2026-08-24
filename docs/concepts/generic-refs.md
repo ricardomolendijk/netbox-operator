@@ -14,8 +14,9 @@ new one is added without touching the engine.
 > `RefKindUnavailable` in all four modes. See [Kinds that do not exist
 > yet](#kinds-that-do-not-exist-yet).
 >
-> Not built: a generic FK is **not** followed by the cycle check, and does **not**
-> contribute an owner reference. Both are stated below with the reason.
+> Not built: a generic FK is **not** followed by the cycle check. It *does* contribute an
+> owner reference when it is the containment ref ([ownership](ownership.md)). Both are stated
+> below with the reason.
 
 ## What a generic foreign key is
 
@@ -302,11 +303,12 @@ A kind carrying the pair and no caches — `ipam.VLANGroup` declares `scope_type
 on the model itself — clears `Cached` on the returned value.
 
 Everything else about a scope is the mechanism above: the [three
-instructions](#resolution-one-union-one-pair), the [atomic pair](#why-the-pair-is-atomic), the
-[watches](#watches-what-makes-a-polymorphic-reference-converge), and
-`RefKindUnavailable` for `NetBoxSiteGroup` and `NetBoxLocation` until
-[their Kinds exist](#kinds-that-do-not-exist-yet)
-([NBO-066 (#79)](https://github.com/ricardomolendijk/netbox-operator/issues/79), NBO-048).
+instructions](#resolution-one-union-one-pair), the [atomic pair](#why-the-pair-is-atomic) and
+the [watches](#watches-what-makes-a-polymorphic-reference-converge). Unlike `IPAssignment`,
+every member of this union now has a Descriptor —
+[NBO-066 (#79)](https://github.com/ricardomolendijk/netbox-operator/issues/79) added
+`NetBoxSiteGroup` and `NetBoxLocation` — so none of the four reports
+[`RefKindUnavailable`](#kinds-that-do-not-exist-yet).
 
 ## What a generic FK deliberately does not do
 
@@ -317,10 +319,14 @@ and the reference PATCHed in later — it never blocks, and a ring through it is
 deadlock. A `REQ` pair does block, and the first one to ship (`ipam.Service`'s
 `parent_object_*`) has to declare that in its Descriptor for the walk to follow it.
 
-**It contributes no owner reference.** `docs/decisions/0003-ownership-and-references.md`
-§4 says a containment generic FK should contribute a non-controller owner reference, and
-`Descriptor.ContainmentRef` accepts a generic FK's spec field. Nothing in the engine writes
-owner references yet, for typed references either, so there is nothing here to extend.
+**It contributes an owner reference exactly as a typed reference does.**
+[ADR-0003](../decisions/0003-ownership-and-references.md) rule 4 has a containment generic FK
+contribute a non-controller owner reference, and `Descriptor.ContainmentRef` accepts a generic
+FK's spec field. This needed no separate implementation: `ResolveAll` files a resolved union
+under the *union's own* spec field, keyed the same way an ordinary reference is, so the
+ownership step reads it with the same lookup. A member whose target Kind is not registered is
+refused as `RefKindUnavailable` and therefore never owned — see
+[ownership](ownership.md#an-unregistered-target-kind).
 
 **It is not usable in a natural key yet.** A lookup on a polymorphic pair needs two filters
 and there is no single value to offer, so a resolved union is not written into the spec the

@@ -326,6 +326,11 @@ owner reference the CR outlives the object it described and the engine's create-
 step resurrects data NetBox deliberately deleted. The general rule is *server-side cascade
 implies an owner reference*.
 
+An owner reference is only legal inside one namespace, so declaring a `ContainmentRef` buys
+the cascade only for the objects whose parent is a namespace-local CR; everything else reports
+`ParentOwned=False, Reason=CascadeUnavailable` and says why. [Ownership](ownership.md) is the
+whole mechanism.
+
 ## Field classes
 
 Every entry in `Fields` carries a **class**, and the class is the single declaration of two

@@ -155,6 +155,22 @@ type Result struct {
 	// resolve against NetBox, where Kubernetes names do not exist.
 	Target types.NamespacedName
 
+	// TargetGVK and TargetUID identify that CR as an owner reference has to: by Kind and
+	// by uid, not by name. Set for ModeName only, for the same reason Target is.
+	//
+	// They are here because a `metav1.OwnerReference` needs a uid, and this is the one place
+	// in the operator that reads the target object at all. The alternative -- the engine
+	// fetching the target itself to learn its uid -- would be a second read of a CR in
+	// another namespace on a path with no grant check, which is precisely the leak NBO-092
+	// closed (grants.go, and the comment on authorise about ordering).
+	//
+	// Their absence is load-bearing rather than incidental: a reference resolved by `slug`,
+	// `lookup` or a raw `id` names a NetBox row and no Kubernetes object, so there is
+	// nothing an owner reference could point at. The containment owner reference of
+	// ADR-0003 rule 4 reads the zero uid as exactly that (reconciler/owners.go).
+	TargetGVK schema.GroupVersionKind
+	TargetUID types.UID
+
 	// TargetNotReady quotes the target's own Ready condition when the reference resolved
 	// against a target that is not Ready, and is empty otherwise.
 	//
@@ -561,7 +577,14 @@ func (r *Resolver) byName(ctx context.Context, req Request, target registry.Desc
 		return Result{}, req.targetFailed(key, state.detail)
 	}
 
-	result := Result{ID: id, ObjectType: target.ObjectType, Mode: ModeName, Target: key}
+	result := Result{
+		ID: id, ObjectType: target.ObjectType, Mode: ModeName, Target: key,
+		// The uid off the object that was just read, and the Kind off the descriptor entry
+		// that decided which object to read. Neither is guessed, and a uid read here cannot
+		// belong to a different object than the id read above it: both come from the one
+		// snapshot this pass took (passReader).
+		TargetGVK: req.Field.Target, TargetUID: live.GetUID(),
+	}
 	if notReady {
 		// Reported on the referrer rather than blocking it. Quoting the target's own words is
 		// the whole point either way: without them a human debugs the referrer for an hour

@@ -68,6 +68,10 @@ func TestResolve(t *testing.T) {
 			want: Result{
 				ID: 12, ObjectType: "dcim.region", Mode: ModeName,
 				Target: types.NamespacedName{Namespace: "team-a", Name: "emea"},
+				// The Kind and the uid an owner reference needs, carried off the object this
+				// mode read. Only `name` mode fills them: the other three resolve against a
+				// NetBox row that has no Kubernetes identity to report.
+				TargetGVK: regionGVK, TargetUID: "region-emea-uid",
 			},
 		},
 		{
@@ -81,11 +85,13 @@ func TestResolve(t *testing.T) {
 			grants:   []netboxv1alpha1.NetBoxRefGrant{catalogueGrant("catalogue")},
 			objects: []target{{
 				gvk: regionGVK, namespace: "catalogue", name: "emea", id: 31,
+				uid:   "catalogue-emea-uid",
 				ready: metav1.ConditionTrue, reason: netboxv1alpha1.ReasonSynced,
 			}},
 			want: Result{
 				ID: 31, ObjectType: "dcim.region", Mode: ModeName,
-				Target: types.NamespacedName{Namespace: "catalogue", Name: "emea"},
+				Target:    types.NamespacedName{Namespace: "catalogue", Name: "emea"},
+				TargetGVK: regionGVK, TargetUID: "catalogue-emea-uid",
 			},
 		},
 		{
@@ -420,7 +426,8 @@ func TestResolveAll(t *testing.T) {
 
 	want := FieldRefs{{
 		ID: 12, ObjectType: "dcim.region", Mode: ModeName,
-		Target: types.NamespacedName{Namespace: "team-a", Name: "emea"},
+		Target:    types.NamespacedName{Namespace: "team-a", Name: "emea"},
+		TargetGVK: regionGVK, TargetUID: "region-emea-uid",
 	}}
 	if got := resolution.ByField["regionRef"]; !reflect.DeepEqual(got, want) {
 		t.Errorf("ByField[regionRef] = %+v, want %+v", got, want)

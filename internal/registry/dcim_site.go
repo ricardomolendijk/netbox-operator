@@ -57,8 +57,12 @@ func dcimSiteDescriptor() Descriptor {
 			{Spec: "facility", API: "facility"},
 			{Spec: "physicalAddress", API: "physical_address"},
 			{Spec: "shippingAddress", API: "shipping_address"},
-			{Spec: "latitude", API: "latitude"},
-			{Spec: "longitude", API: "longitude"},
+			// EmptyIsNull on both: they are the only nullable non-text columns this kind
+			// maps, and NetBox rejects `""` for a DecimalField outright, so an emptied
+			// coordinate has to go over the wire as null to clear rather than to fail
+			// (#170).
+			{Spec: "latitude", API: "latitude", EmptyIsNull: true},
+			{Spec: "longitude", API: "longitude", EmptyIsNull: true},
 			{Spec: "description", API: "description"},
 			{Spec: "comments", API: "comments"},
 		},

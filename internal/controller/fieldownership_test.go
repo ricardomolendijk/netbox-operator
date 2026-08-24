@@ -95,6 +95,65 @@ func TestServerSideApplyLeavesAnUnclaimedDescriptionAlone(t *testing.T) {
 	}
 }
 
+// applySite is applyTag for a NetBoxSite, which is the kind that carries the two decimal
+// columns.
+func applySite(t *testing.T, ns, slug, specFields string) {
+	t.Helper()
+
+	body := []byte(`{"apiVersion":"netbox.kubeforge.org/v1alpha1","kind":"NetBoxSite",` +
+		`"metadata":{"name":"` + slug + `","namespace":"` + ns + `"},` +
+		`"spec":{"endpointRef":"homelab","onConflict":"Adopt","name":"Home","slug":"` + slug + `"` +
+		specFields + `}}`)
+
+	site := &netboxv1alpha1.NetBoxSite{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: slug},
+	}
+	if err := apiClient.Patch(context.Background(), site, client.RawPatch(types.ApplyPatchType, body),
+		client.FieldOwner("kustomize-controller"), client.ForceOwnership); err != nil {
+		t.Fatalf("applying site %s/%s: %v", ns, slug, err)
+	}
+
+	t.Cleanup(func() { _ = k8sClient.Delete(context.Background(), site) })
+}
+
+// TestServerSideApplyCanClearALatitude is #170: a coordinate could be set and never unset,
+// because the pattern admitted no value that meant "cleared".
+//
+// It reaches NetBox as `null` rather than as `""`, and that is the half worth asserting on
+// the wire: NetBox's latitude is a nullable DecimalField, which parses `""` as a number and
+// rejects it -- so a pattern that admitted the empty string without the payload turning it
+// into null would trade an admission failure for a failure on every write, which is worse
+// (registry.Field.EmptyIsNull).
+func TestServerSideApplyCanClearALatitude(t *testing.T) {
+	ns := newNamespace(t)
+	stub, target := newNetBoxStub(t, siteKind)
+	readyEndpoint(t, ns, target)
+
+	applySite(t, ns, "coords", `,"status":"active","latitude":"51.9244","longitude":"4.4777"`)
+	eventually(t, "the site to be Ready", func() bool { return siteIsReady(ns, "coords") })
+
+	id := fetchSite(ns, "coords").Status.ID
+	if got := stub.get(id)["latitude"]; got != "51.924400" {
+		t.Fatalf("latitude = %v, want the padded 51.924400 the apply carried", got)
+	}
+
+	// The line deleted from the manifest's value but not from the manifest: still claimed,
+	// so still managed, and now empty.
+	applySite(t, ns, "coords", `,"status":"active","latitude":"","longitude":"4.4777"`)
+
+	eventually(t, "the latitude cleared", func() bool {
+		value, present := stub.get(id)["latitude"]
+
+		return present && value == nil
+	})
+
+	// The other coordinate is untouched, so the clear is one field's intent rather than the
+	// whole payload going empty.
+	if got := stub.get(id)["longitude"]; got != "4.477700" {
+		t.Errorf("longitude = %v, want 4.477700 left alone", got)
+	}
+}
+
 // TestOperatorFieldManagerNeverOwnsSpec is ADR-0005 §1 as an assertion about the API server's
 // own bookkeeping, which is a stronger statement than counting the operator's calls.
 //

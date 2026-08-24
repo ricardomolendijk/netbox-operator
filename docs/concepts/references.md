@@ -767,9 +767,10 @@ and the resolver reads it from the *type* rather than from a switch on the field
 | `TenantGroupRef` | `NetBoxTenantGroup` | `tenancy.TenantGroup` | `tenancy/tenant-groups` |
 
 Model and endpoint spellings are from `docs/netbox-schema.md` and its endpoint map.
-`NetBoxTag`, `NetBoxSite`, `NetBoxRegion`, `NetBoxTenant` and `NetBoxTenantGroup` exist as
-Kinds so far; the remaining aliases are declared ahead of their Kinds because a reference is
-declarable before its target is implemented, and the remaining ~40 arrive with the generator
+`NetBoxTag`, `NetBoxSite`, `NetBoxRegion`, `NetBoxSiteGroup`, `NetBoxLocation`, `NetBoxTenant`
+and `NetBoxTenantGroup` exist as Kinds so far; the remaining aliases are declared ahead of
+their Kinds because a reference is declarable before its target is implemented, and the
+remaining ~40 arrive with the generator
 ([NBO-042 (#66)](https://github.com/ricardomolendijk/netbox-operator/issues/66)).
 
 Each alias implements `RefTarget`:

@@ -182,19 +182,46 @@ func TestReportModeOverridesApplyAtTheClient(t *testing.T) {
 func TestDriftModeOffDoesNotResync(t *testing.T) {
 	ns := newNamespace(t)
 	stub, target := newNetBoxStub(t, tagKind)
-	readyEndpointWith(t, ns, target, func(e *netboxv1alpha1.NetBoxEndpoint) {
+	readyEndpointNamed(t, ns, "unwatching", target, func(e *netboxv1alpha1.NetBoxEndpoint) {
 		e.Spec.DriftMode = netboxv1alpha1.DriftOff
 	})
-	makeTag(t, ns, "unwatched", func(tag *netboxv1alpha1.NetBoxTag) { tag.Spec.Color = "2196f3" })
+
+	// The positive control's endpoint: identical to the one above but for driftMode, on its
+	// own stub so that the two write counters cannot be confused for each other. It is what
+	// replaces the three-second sleep this test used to gate on -- a resync that has been
+	// *observed* is a stronger statement than a duration that has elapsed, and it fails
+	// loudly if drift correction stops working altogether rather than passing quietly
+	// (#164, and the shape #158 used to assert the absence of an event storm).
+	control, controlTarget := newNetBoxStub(t, tagKind)
+	readyEndpointNamed(t, ns, "correcting", controlTarget, nil)
+
+	makeTag(t, ns, "unwatched", func(tag *netboxv1alpha1.NetBoxTag) {
+		tag.Spec.EndpointRef = "unwatching"
+		tag.Spec.Color = "2196f3"
+	})
+	makeTag(t, ns, "watched", func(tag *netboxv1alpha1.NetBoxTag) {
+		tag.Spec.EndpointRef = "correcting"
+		tag.Spec.Color = "2196f3"
+	})
 
 	eventually(t, "Ready=True", func() bool { return tagIsReady(ns, "unwatched") })
+	eventually(t, "the control to be Ready=True", func() bool { return tagIsReady(ns, "watched") })
+
 	id := mustFetchTag(t, ns, "unwatched").Status.ID
+	controlID := mustFetchTag(t, ns, "watched").Status.ID
 
 	stub.setField(id, "color", "ff0000")
 
-	// The endpoint's resyncPeriod is one second, so this is several periods of the
-	// requeue that Off is meant to have suppressed.
-	time.Sleep(3 * time.Second)
+	// Two resyncs, counted rather than slept: each pass through the loop drifts the control
+	// and waits for the resync to put it back, so both endpoints -- same manager, same
+	// one-second period -- have had two intervals in which to re-check by the time the
+	// assertions below run.
+	for range 2 {
+		control.setField(controlID, "color", "ff0000")
+		eventually(t, "the control's drift to be corrected", func() bool {
+			return control.get(controlID)["color"] == "2196f3"
+		})
+	}
 
 	if got := stub.get(id)["color"]; got != "ff0000" {
 		t.Errorf("colour = %v; Off must not re-check netbox on a timer", got)

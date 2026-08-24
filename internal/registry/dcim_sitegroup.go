@@ -7,23 +7,29 @@ import (
 )
 
 // One init() per kind, so adding a kind is a new file and never an edit to shared logic.
-func init() { MustRegister(dcimRegionDescriptor()) }
+func init() { MustRegister(dcimSiteGroupDescriptor()) }
 
-// dcimRegionDescriptor is dcim.Region as data.
+// dcimSiteGroupDescriptor is dcim.SiteGroup as data.
 //
-// The first kind whose identity depends on a reference, which is why M2 is tested against
-// it: `parent` is a self-referential foreign key, and whether it is set decides *which*
-// natural key applies rather than merely changing one filter's value.
-func dcimRegionDescriptor() Descriptor {
+// The same shape as dcim.Region's descriptor, because the two models are the same model:
+// both are NestedGroupModels with the same inherited columns and the same four unique
+// constraints (docs/netbox-schema.md -> dcim.SiteGroup, bases and meta.constraints). That is
+// the point worth recording -- a second self-referential kind needed no new engine
+// behaviour, only a second file.
+//
+// It is also half of what NBO-018's scope union was missing: `siteGroupRef` resolved to
+// RefKindUnavailable in every mode until this Descriptor existed, since the endpoint every
+// mode needs is only held here.
+func dcimSiteGroupDescriptor() Descriptor {
 	return Descriptor{
-		GVK:        netboxv1alpha1.GroupVersion.WithKind("NetBoxRegion"),
-		Endpoint:   "dcim/regions",
-		ObjectType: "dcim.region",
+		GVK:        netboxv1alpha1.GroupVersion.WithKind("NetBoxSiteGroup"),
+		Endpoint:   "dcim/site-groups",
+		ObjectType: "dcim.sitegroup",
 		Scope:      apiextensionsv1.NamespaceScoped,
 
-		// dcim.Region is a NestedGroupModel (docs/netbox-schema.md -> dcim.Region, bases),
-		// which mixes in both TagsMixin and CustomFieldsMixin, so it carries the whole
-		// provenance stamp.
+		// dcim.SiteGroup is a NestedGroupModel (docs/netbox-schema.md -> dcim.SiteGroup,
+		// bases), which mixes in both TagsMixin and CustomFieldsMixin, so it carries the
+		// whole provenance stamp.
 		Taggable:        true,
 		CustomFieldable: true,
 
@@ -35,21 +41,25 @@ func dcimRegionDescriptor() Descriptor {
 			// map carries the write name, the natural keys below carry the filter name.
 			{
 				Spec: "parentRef", API: "parent", Class: ClassRefOne,
-				Target: netboxv1alpha1.RegionRef{}.TargetGVK(),
+				Target: netboxv1alpha1.SiteGroupRef{}.TargetGVK(),
 			},
 		},
 
 		// Two candidates, in this order, straight out of
-		// docs/netbox-schema.md -> dcim.Region.meta.constraints: unique on
+		// docs/netbox-schema.md -> dcim.SiteGroup.meta.constraints: unique on
 		// (parent, name), plus a separate unique on (name) conditioned on
 		// parent IS NULL.
 		//
-		// The order is not a fallback. A region with a parent is identified by the first
+		// The order is not a fallback. A group with a parent is identified by the first
 		// candidate and a top-level one by the second, and NaturalKey.Applicable is what
 		// keeps them apart: the second asserts `parentRef` was never declared, so a child
 		// whose parent has not been created yet matches neither and the engine waits.
-		// Falling through would find an unrelated top-level region of the same name, adopt
+		// Falling through would find an unrelated top-level group of the same name, adopt
 		// it, and the follow-up PATCH would reparent somebody else's data (NBO-015).
+		//
+		// `name` and not `slug`, as on dcim.Region: NetBox constrains (parent, slug) too,
+		// so a slug identifies a group no better than a name does, and a kind gets one
+		// identity.
 		NaturalKeys: []NaturalKey{
 			{
 				Fields: []KeyField{
@@ -62,23 +72,6 @@ func dcimRegionDescriptor() Descriptor {
 				NullFields: []NullField{{Filter: "parent_id", Spec: "parentRef"}},
 			},
 		},
-
-		// `parentRef` is the containment parent, so a sub-region gets a non-controller owner
-		// reference to its parent region and `kubectl delete` on the parent takes its
-		// children with it (ADR-0003 rule 4).
-		//
-		// Not a stylistic choice. `dcim.Region.parent` is a TreeForeignKey with
-		// `on_delete=CASCADE` (docs/netbox-schema.md -> dcim.Region), so deleting a region
-		// in NetBox deletes its descendants server-side. Without the owner reference the
-		// child CR outlives the row it described, finds nothing at status.id on the next
-		// reconcile, and the engine's create-if-absent step *recreates* the region NetBox
-		// deliberately deleted -- the same resurrection ADR-0003 describes for
-		// `assignedObject`, whose general rule is that a server-side cascade implies an
-		// owner reference.
-		//
-		// It is also the one FK this kind has, which satisfies "each kind nominates exactly
-		// one containment ref, and it is the required FK" without a choice to make.
-		ContainmentRef: "parentRef",
 
 		UpdateStrategy: UpdatePatch,
 
