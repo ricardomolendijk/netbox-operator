@@ -150,6 +150,12 @@ type (
 
 	// VLANRef points at a NetBoxVLAN (ipam.VLAN, ipam/vlans).
 	VLANRef ObjectRef
+	// RouteTargetRef points at a NetBoxRouteTarget (ipam.RouteTarget, ipam/route-targets).
+	//
+	// The first alias used to-many: ipam.VRF's `import_targets` and `export_targets` are
+	// lists of these. One alias either way -- the resolver takes the target Kind off
+	// registry.Field.Target regardless of cardinality.
+	RouteTargetRef ObjectRef
 
 	// VRFRef points at a NetBoxVRF (ipam.VRF, ipam/vrfs).
 	VRFRef ObjectRef
@@ -244,6 +250,14 @@ func (r VLANRef) TargetGVK() schema.GroupVersionKind { return GroupVersion.WithK
 func (r VLANRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
 
 // TargetGVK reports the Kind this reference resolves against.
+func (r RouteTargetRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxRouteTarget")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r RouteTargetRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
 func (r VRFRef) TargetGVK() schema.GroupVersionKind { return GroupVersion.WithKind("NetBoxVRF") }
 
 // AsObjectRef returns the underlying reference.
@@ -264,5 +278,6 @@ var (
 	_ RefTarget = FHRPGroupRef{}
 	_ RefTarget = RoleRef{}
 	_ RefTarget = VLANRef{}
+	_ RefTarget = RouteTargetRef{}
 	_ RefTarget = VRFRef{}
 )
