@@ -153,9 +153,20 @@ const (
 	// NetBoxRefGrant permitting it (NBO-014).
 	ReasonRefDenied = "RefDenied"
 
-	// ReasonRefCycle is on RefsResolved: the reference depends on itself, so no order of
-	// reconciles resolves it and only a spec change can.
+	// ReasonRefCycle is on RefsResolved: the references depend on each other, so no order of
+	// reconciles resolves them and only a spec change can. The message names the ring in
+	// order, starting and ending at the object reporting it, and every member of the ring
+	// reports it -- a user who saw it on one object and not on the other would conclude the
+	// other was fine.
 	ReasonRefCycle = "RefCycle"
+
+	// ReasonRefDepthExceeded is on RefsResolved: the reference graph around the object was
+	// too deep, or too wide, for the cycle check to walk to the end (NBO-016).
+	//
+	// Its own reason rather than RefCycle. A 40-deep Region tree told "you have a cycle"
+	// sends its author hunting for one that does not exist, and the fix here is to flatten
+	// the hierarchy rather than to break a ring.
+	ReasonRefDepthExceeded = "RefDepthExceeded"
 
 	// ReasonRefKindUnavailable is on RefsResolved: the target Kind has no descriptor, or
 	// its CRD is not installed. Distinct from RefNotFound because the manifest is correct

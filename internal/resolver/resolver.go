@@ -238,8 +238,25 @@ func (r *Resolver) ResolveAll(ctx context.Context, nb LookupClient, obj client.O
 	resolution := Resolution{ByField: make(map[string]Result, len(refs))}
 	referrer := types.NamespacedName{Namespace: obj.GetNamespace(), Name: obj.GetName()}
 
+	// One resolver for this pass, over one snapshot: the cycle check and the resolution below
+	// read the same objects, and reading each of them once is what keeps detection from
+	// doubling the reads a reconcile makes (see passReader).
+	// Grants is carried, not dropped. It was omitted when this was written -- grants landed
+	// on a sibling branch -- and the result was that every cross-namespace reference failed
+	// with ErrNoGrantReader instead of being denied, because authorise() reads it off the
+	// pass resolver rather than the outer one. Both branches' tests passed alone.
+	pass := &Resolver{Objects: newPassReader(r.Objects), Kinds: r.Kinds, Grants: r.Grants}
+
+	// The cycle check first, and before any NetBox call. A cycle means no NetBox request this
+	// pass could make would be useful -- the object cannot be created without the reference,
+	// and the reference cannot resolve without the object -- so the guard is also what makes
+	// "a cycle issues zero NetBox requests" structural rather than incidental.
+	if cycle := pass.checkFrom(ctx, RefNode{GVK: d.GVK, Key: referrer}, d, refs); cycle != nil {
+		return cycleResolution(resolution, cycle)
+	}
+
 	for _, declared := range refs {
-		result, err := r.Resolve(ctx, Request{
+		result, err := pass.Resolve(ctx, Request{
 			NetBox: nb, Referrer: referrer, ReferrerGVK: d.GVK,
 			Field: declared.field, Ref: declared.ref,
 		})
@@ -256,6 +273,104 @@ func (r *Resolver) ResolveAll(ctx context.Context, nb LookupClient, obj client.O
 	}
 
 	return resolution, nil
+}
+
+// cycleResolution reports a detected cycle as the object's only blocker.
+//
+// The only one, rather than one among the rest, for two reasons. It is the whole answer: no
+// other reference on this object matters until the ring is broken, and a cycle buried behind
+// two other blockers in a message is a cycle nobody reads. And stopping there is what keeps a
+// cycle free of NetBox reads, since resolving the remaining references would query NetBox for
+// every slug and lookup among them.
+func cycleResolution(resolution Resolution, cycle error) (Resolution, error) {
+	var refErr *Error
+	if !errors.As(cycle, &refErr) {
+		// Not a verdict at all: the cluster read behind the walk failed, which is the engine's
+		// backoff rather than a condition about the manifest.
+		return Resolution{}, cycle
+	}
+
+	resolution.Blocked = append(resolution.Blocked, blockerFor(refErr))
+
+	return resolution, nil
+}
+
+// passReader reads each object at most once per resolution pass.
+//
+// Two things, both of which the walk in cycle.go makes worth having. It bounds the read
+// amplification detection adds: the objects the walk visits are the objects resolution goes on
+// to read, so without it every `name` reference costs two reads instead of one. And it gives
+// one pass one snapshot, so the cycle a walk reported and the ids the resolution wrote cannot
+// come from two different versions of the same object.
+//
+// Per pass and never longer. A reference resolves off `.status.id`, which the owning
+// controller writes at its own pace, and a cache outliving the pass would hold an object at a
+// version whose id has since changed.
+type passReader struct {
+	inner Reader
+	seen  map[passKey]passEntry
+}
+
+// passKey identifies one read: the same name under two Kinds is two objects.
+type passKey struct {
+	gvk schema.GroupVersionKind
+	key types.NamespacedName
+}
+
+// passEntry is what a read returned, including the absence a not-found is.
+type passEntry struct {
+	object *unstructured.Unstructured
+	err    error
+}
+
+// newPassReader wraps a reader for the duration of one pass.
+func newPassReader(inner Reader) *passReader {
+	return &passReader{inner: inner, seen: map[passKey]passEntry{}}
+}
+
+// Get answers from this pass's snapshot, reading through on the first ask for an object.
+//
+// Errors come back exactly as the underlying reader produced them, cached ones included: the
+// difference between "no such object", "that Kind is not installed" and "the API server said
+// no" is classified downstream by readFailure, and wrapping them here would wrap them twice.
+func (p *passReader) Get(
+	ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption,
+) error {
+	live, ok := obj.(*unstructured.Unstructured)
+	if !ok {
+		// A typed object carries no Kind of its own to key the snapshot on. Nothing in this
+		// package asks for one; passing it through keeps the wrapper honest rather than clever.
+		return p.inner.Get(ctx, key, obj, opts...) //nolint:wrapcheck // a pass-through cache
+	}
+
+	entry, cached := p.seen[passKey{gvk: live.GroupVersionKind(), key: key}]
+	if !cached {
+		entry = p.read(ctx, key, live, opts...)
+	}
+
+	if entry.err != nil {
+		return entry.err
+	}
+
+	live.Object = entry.object.DeepCopy().Object
+
+	return nil
+}
+
+// read fetches one object and records what came back.
+func (p *passReader) read(
+	ctx context.Context, key client.ObjectKey, live *unstructured.Unstructured, opts ...client.GetOption,
+) passEntry {
+	gvk := live.GroupVersionKind()
+
+	entry := passEntry{err: p.inner.Get(ctx, key, live, opts...)}
+	if entry.err == nil {
+		entry.object = live.DeepCopy()
+	}
+
+	p.seen[passKey{gvk: gvk, key: key}] = entry
+
+	return entry
 }
 
 // Resolve resolves one reference to an (id, object type) pair.

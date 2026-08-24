@@ -215,7 +215,7 @@ table itself and why NetBox's wording is not something to match on.
 |---|---|---|
 | `Ready` | the object exists in NetBox and matches the spec | `Synced`, `WaitingForEndpoint`, `WaitingForKey`, `WaitingForRef`, `Conflict`, `AdoptOnly`, `Invalid`, `APIError`, `DryRunPending` |
 | `Synced` | the last write succeeded and nothing has drifted since | `NoDrift`, `DriftCorrected`, `DriftDetectedDryRun` |
-| `RefsResolved` | every reference resolved to an id | `AllResolved`, `RefNotFound`, `RefNotReady`, `RefAmbiguous`, `RefDenied`, `RefCycle`, `RefKindUnavailable`, `NotImplemented` |
+| `RefsResolved` | every reference resolved to an id | `AllResolved`, `RefNotFound`, `RefNotReady`, `RefAmbiguous`, `RefDenied`, `RefCycle`, `RefDepthExceeded`, `RefKindUnavailable`, `NotImplemented` |
 
 Requeues carry ±10% jitter, so a manifest applied all at once does not resync in lockstep
 for the rest of its life and turn one NetBox into the bottleneck.
