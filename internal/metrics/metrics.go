@@ -233,3 +233,22 @@ func ObserveReconcile(kind, result string, took time.Duration) {
 	ReconcileTotal.WithLabelValues(kind, result).Inc()
 	ReconcileDuration.WithLabelValues(kind).Observe(took.Seconds())
 }
+
+// RefEnqueueTotal counts referrer reconcile requests produced by an event on a reference
+// target: a target that gained a `status.id`, flipped `Ready`, started deleting or went
+// away, and -- with `targetKind` set to `NetBoxRefGrant` -- a grant that authorised a
+// reference which was denied a moment ago.
+//
+// It is the metric that says the watches are doing their job. A dependency graph applied
+// in reverse order converges through these enqueues rather than through the resync, so a
+// zero here while objects sit on `RefNotReady` means the watch, the field index or the
+// predicate is wrong -- and the resync will hide it by eventually converging anyway.
+//
+// Cardinality: targetKind x referrerKind, and the product is not the bound. A series
+// exists only for a pair the descriptor graph actually connects, which is one edge of
+// NetBox's foreign-key graph: a few hundred pairs across the full catalogue, not ~120^2.
+// Both halves are Kind names from a Descriptor, so neither is user input.
+var RefEnqueueTotal = factory.NewCounterVec(prometheus.CounterOpts{
+	Name: "netbox_operator_ref_enqueue_total",
+	Help: "Referrer reconciles enqueued by an event on a reference target.",
+}, []string{"targetKind", "referrerKind"})

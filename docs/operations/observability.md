@@ -35,7 +35,7 @@ add the flag and the scrape target in your own overlay until the Helm chart land
 
 ## Metrics
 
-Eight metrics. Nothing is exported that nobody would look at — a metric with no question
+Nine metrics. Nothing is exported that nobody would look at — a metric with no question
 behind it is a series budget spent on noise.
 
 ### `netbox_operator_reconcile_total`
@@ -240,6 +240,31 @@ Zero means nothing can be written to NetBox at all. Compare against the number o
 `NetBoxEndpoint` objects (from kube-state-metrics) to catch "three of four endpoints are
 up", which is invisible in the absolute number.
 
+### `netbox_operator_ref_enqueue_total`
+
+| | |
+|---|---|
+| Type | Counter |
+| Labels | `targetKind`, `referrerKind` |
+| Cardinality | one series per pair the schema connects — a few hundred, not ~120² |
+
+Referrer reconciles woken by an event on the object they reference: a target that gained a
+`status.id`, flipped `Ready`, started deleting or went away — and, with
+`targetKind="NetBoxRefGrant"`, a grant that authorised a reference which was being denied
+([references](../concepts/references.md#ordering-and-convergence)).
+
+This is how you tell that a dependency graph is converging on events rather than on the
+resync. A manifest applied in reverse order produces a burst here and then goes quiet; a
+graph that is only ever converging on `resyncPeriod` produces nothing at all while objects
+sit on `RefsResolved=False`.
+
+Both labels are Kind names from a `Descriptor`, so neither is user input, and a series
+exists only for a `(target, referrer)` pair that some kind's field map actually declares.
+
+**Alert on:** nothing, on its own — a busy cluster and an idle one both look reasonable. It
+is a diagnostic to read next to `netbox_operator_reconcile_total{result="waiting"}`: waiting
+objects and no enqueues is a watch that is matching nothing.
+
 ## Cardinality
 
 A label whose value set is unbounded turns a metric into an outage: every distinct value
@@ -256,6 +281,7 @@ are:
 | `method` | HTTP verbs the client uses | 4 |
 | `code` | A closed set, unexpected statuses collapsed to their class | 16 |
 | `field` | NetBox API column names, from a Descriptor's field map | tens per model |
+| `targetKind`, `referrerKind` | Kind names from a Descriptor, paired only where a field map declares a reference | a few hundred pairs |
 
 Worst case, with every kind implemented and every path and status exercised, is roughly
 **25 000 series**. Realistically a cluster using a handful of kinds against one NetBox

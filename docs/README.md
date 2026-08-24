@@ -84,6 +84,7 @@ Dated records of decisions that are expensive to reverse. Index and status:
 | [Coexisting with Flux and Argo CD](operations/gitops.md) | Why the operator never writes a `spec` and how that is enforced, the Argo CD `ignoreDifferences` and Flux `Kustomization` snippets that make it quiet, the three `driftMode` values, the cluster-rebuild walkthrough, and the NetBox permission model |
 | [Provenance](operations/provenance.md) | What `spec.managedBy` writes into every NetBox object the operator manages, how the tag and custom-field definitions get bootstrapped, why stamping is not mandatory, and what stops working when you turn it off |
 | [Observability](operations/observability.md) | Every metric with its labels, cardinality and what to alert on; which Events fire and when; the log levels and the stable key set, with `kubectl logs \| jq` recipes |
+| [Stuck references](operations/stuck-references.md) | Which condition says why an object is waiting for another one, what the reference metrics mean together, how to find an object's referrers by hand, and which references nothing will ever wake |
 | [NetBox schema reference](netbox-schema.md) | The authoritative field list every CRD is derived from: 159 models, 138 endpoints, machine-extracted from NetBox 4.6.8. Grep it; do not read it |
 | [Regenerating the schema](regenerating.md) | How to retarget a newer NetBox release, how to test the extraction pipeline without a NetBox checkout, and how to cross-check the AST walk against a live instance |
 

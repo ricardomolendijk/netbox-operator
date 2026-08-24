@@ -6,11 +6,11 @@ ever sees it.
 > **Status.** The `ObjectRef` type, its validation and the typed aliases are built
 > (NBO-011), and so is resolution: all four modes, the typed errors and the condition
 > vocabulary below (NBO-012). Cross-namespace `name` references are **default deny** and
-> need a [`NetBoxRefGrant`](../reference/netboxrefgrant.md) (NBO-014). What is not built
-> yet: **watches**
-> ([#25](https://github.com/ricardomolendijk/netbox-operator/issues/25)) — until they land,
-> a reference that is waiting is retried on the endpoint's resync rather than woken by an
-> event, and that includes waiting for a grant; and **deferred application**
+> need a [`NetBoxRefGrant`](../reference/netboxrefgrant.md) (NBO-014). **Watches** are
+> built too (NBO-013): a `name` reference that is waiting is woken by an event on the
+> object it is waiting for — or on the grant that authorises it — rather than by the
+> resync. See [Ordering and convergence](#ordering-and-convergence). What is not built
+> yet: **deferred application**
 > ([#27](https://github.com/ricardomolendijk/netbox-operator/issues/27)).
 >
 > **Grants** ([#26](https://github.com/ricardomolendijk/netbox-operator/issues/26)) and
@@ -101,6 +101,101 @@ different NetBox, and the operator does not currently compare the two. Until it 
 (`ErrRefEndpointMismatch`, which arrives with the endpoint work), point references at
 namespaces that use the same NetBox.
 
+## Ordering and convergence
+
+**Apply order does not matter.** A manifest applied backwards converges as fast as one
+applied in dependency order, and neither waits for a resync. That is the whole point of
+`name` mode, and it is not a property of the resolver on its own: something has to wake an
+object up when the thing it was waiting for arrives.
+
+That something is a watch, and it runs in three steps.
+
+1. **An index, on write.** Every object of a kind that declares a reference is indexed by
+   the objects it points at, as `<kindlower>/<namespace>/<name>` — a `NetBoxSite` with
+   `regionRef: {name: emea, namespace: netbox-catalog}` is indexed under
+   `netboxregion/netbox-catalog/emea`. The index is recomputed by the API server's cache on
+   every write, so a reference edited to point somewhere else stops matching the old target
+   immediately. There are no stale edges to clean up.
+2. **A watch, on the target's Kind.** Each kind watches every Kind it references. The
+   watches are registered once in the shared controller shell from the kind's
+   [`Descriptor`](descriptor.md), so a new kind inherits them without a line of code.
+3. **A re-enqueue.** When an event on a target is admitted, the operator queries the index
+   for that target and enqueues every referrer it finds — **across every namespace**, since
+   a team namespace pointing at a shared catalogue is the ordinary shape. Whether such a
+   reference is *allowed* to resolve is still decided at resolve time by the grant, which is
+   why enqueuing it costs nothing to be generous about.
+
+A five-level chain applied in reverse therefore converges in five reconciles rather than
+five resync periods — in the test suite, a child region reaches `Ready` about a tenth of a
+second after its parent appears, against a `resyncPeriod` of an hour.
+
+### Which events count
+
+Not all of them, and this is the part that has to be right. Every object in the cluster
+writes its status as it reconciles, so a watch that woke referrers on *any* update would
+enqueue one reconcile per reference per object per resync — at ~120 kinds, a storm the
+operator inflicts on itself.
+
+An event on a target is admitted when, and only when:
+
+| Event | Admitted | Why |
+|---|---|---|
+| Create | always | The target may already carry `status.id` — a manager restart replays every object as a Create. |
+| `status.id` appears, or changes | yes | This is the transition a waiting referrer exists for. A change means the object was recreated and the referrer is holding a dead id. |
+| The `Ready` condition's status changes | yes | Including its first appearance. |
+| `metadata.deletionTimestamp` is set | yes | A terminating target stops resolving, and its finalizer may hold it for a long time. |
+| Delete | always | The referrer has to report `RefNotFound` rather than stand on a stale id. |
+| `status.lastSyncTime`, `status.lastAppliedHash`, `observedGeneration`, `naturalKey`, `deferredPending` | **no** | None of them changes what a reference resolves to. |
+| Any other condition — `Synced`, `DriftDetected`, `RefsResolved` | **no** | Same. |
+| A spec edit on the *target* | **no** | A referrer resolves off the target's id, not off its description. |
+| Generic | no | It carries no before-and-after to compare. |
+
+Both halves of the pair are watched — the id *and* `Ready` — because
+[#142](https://github.com/ricardomolendijk/netbox-operator/issues/142) is open on which of
+them a reference should require. Whichever way that lands, the transition that matters is
+already the one that wakes the referrer.
+
+### A grant is an event too
+
+A `NetBoxRefGrant` written into a namespace re-enqueues the objects whose references reach
+into that namespace, so the remedy in a `RefDenied` message takes effect when you apply it.
+Referrers are found by a second index, over the namespaces an object's references cross
+into; a reference that stays in its own namespace is not in it, because a namespace does not
+grant itself access to itself.
+
+### What is not woken
+
+**Only `name` references have a reverse edge at all.** A `slug`, a `lookup` or an `id`
+terminates in NetBox, where there is no Kubernetes object an event could arrive for — so
+none of them is indexed and none of them is watched. A NetBox-side object appearing,
+changing or going away is noticed on the retry interval in the table above, and nothing
+else. That is the standing cost of not using a CR reference.
+
+**A target that exists and never becomes usable produces no event**, so a referrer waiting
+on one sits at `RefNotReady` indefinitely. That is intended: the fix is on the target, and a
+poll would hide a stuck graph rather than reveal it. `RefsResolved` on the referrer names
+the target, and the target's own `Ready` condition says what is wrong with it.
+
+### Seeing it
+
+`netbox_operator_ref_enqueue_total{targetKind,referrerKind}` counts the referrers woken by
+each kind of target. A dependency graph that is converging shows traffic here; one that is
+converging only on the resync does not, which is the difference between a working watch and
+a watch that is quietly matching nothing.
+
+The index itself is internal to the manager, and `kubectl --field-selector` cannot query it:
+the API server only exposes the selectable fields a CRD declares. To find an object's
+referrers by hand, read the `RefsResolved` message on the referrer — it names the target of
+every reference that did not resolve — or search the ref field across the cluster:
+
+```console
+$ kubectl get netboxregion -A \
+    -o jsonpath='{range .items[?(@.spec.parentRef.name=="emea")]}{.metadata.namespace}/{.metadata.name}{"\n"}{end}'
+```
+
+[Stuck references](../operations/stuck-references.md) is the operational version of this:
+which condition to read, what the metrics mean, and the two caveats on that `jsonpath`.
+
 ## Crossing a namespace
 
 A `name` reference that resolves into another namespace is **denied unless that namespace
@@ -180,10 +275,10 @@ question a `kubectl wait` is asking.
 
 | Cause | `RefsResolved` reason | Retried | Why that interval |
 |---|---|---|---|
-| Nothing to point at | `RefNotFound` | On the resync for a missing CR; **1 min** for a missing NetBox object | A CR's creation is an event the operator receives. NetBox announces nothing, so a timer is the only thing that will notice. |
-| Target exists, has no id yet | `RefNotReady` | On the resync (an event, once #25 lands) | The target's own reconcile is what changes this. |
+| Nothing to point at | `RefNotFound` | On the missing CR's creation; **1 min** for a missing NetBox object | A CR's creation is an event the operator receives. NetBox announces nothing, so a timer is the only thing that will notice. |
+| Target exists, has no id yet | `RefNotReady` | On the target's own event | The target's own reconcile is what changes this, and that reconcile's result is an event. |
 | Several NetBox objects match | `RefAmbiguous` | **10 min** | Only a human can say which one was meant. |
-| Cross-namespace, no grant | `RefDenied` | On the resync (a grant event, once #25 lands) | Writing the grant is the fix. |
+| Cross-namespace, no grant | `RefDenied` | On a grant event in the target namespace | Writing the grant is the fix, and writing it is what retries the reference. |
 | The references depend on each other | `RefCycle` | Only on a spec change | No order of reconciles resolves it. See [Cycles](#cycles). |
 | The graph is too deep, or too wide, to walk | `RefDepthExceeded` | Only on a spec change | A 33-hop chain is a mistake, and the walk will not guess past its cap. |
 | Target Kind has no descriptor, or its CRD is not installed | `RefKindUnavailable` | **10 min** | The manifest is correct; the fix is an operator upgrade. |

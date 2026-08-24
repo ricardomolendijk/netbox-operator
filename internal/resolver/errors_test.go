@@ -23,7 +23,7 @@ func TestClassify(t *testing.T) {
 	}{
 		{
 			// No timer at all: the target's own reconcile is what changes this, and NBO-013's
-			// watch will re-enqueue the referrer the moment it does.
+			// watch re-enqueues the referrer the moment it does.
 			name:       "not ready waits for an event",
 			err:        blocked(ErrRefNotReady, ModeName),
 			wantReason: netboxv1alpha1.ReasonRefNotReady,

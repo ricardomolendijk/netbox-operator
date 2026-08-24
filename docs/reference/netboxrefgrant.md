@@ -221,10 +221,11 @@ object**, not on the grant:
 | The referring CR's `RefsResolved` | `False`, `Reason=RefDenied`, message naming the grant to create |
 | The referring CR's `Ready` | `False`, `Reason=WaitingForRef` |
 
-`RefDenied` is not retried on a timer. Writing the grant is the fix, and the event that
-arrives when somebody writes it is what should wake the object up — until watches land
-([#25](https://github.com/ricardomolendijk/netbox-operator/issues/25)) the referring object
-re-checks on its endpoint's `resyncPeriod`.
+`RefDenied` is not retried on a timer, and does not need to be. Writing the grant is the
+fix, and the event that arrives when somebody writes it is what wakes the referring objects
+up: the operator watches grants and re-enqueues the objects whose references reach into the
+grant's namespace (NBO-013, and see
+[ordering and convergence](../concepts/references.md#ordering-and-convergence)).
 
 A denied reference makes **zero** reads in the target namespace and **zero** NetBox requests.
 The grant is checked before the target is read, so a denial cannot be told apart from a
@@ -326,8 +327,11 @@ Reconciling it would mean waking up, reading it, and doing nothing. It is read b
 `internal/resolver` at the moment a reference is resolved, and by nothing else — which is
 also where its RBAC marker lives, next to the only code that needs the permission.
 
-The consequence is worth knowing: creating a grant does not *itself* re-enqueue the objects
-it unblocks. That is a watch, and watches are [#25](https://github.com/ricardomolendijk/netbox-operator/issues/25).
+Having no controller does not mean having no effect on the queue, though. The object
+controllers watch grants: writing one re-enqueues the objects whose references cross into
+that namespace, found through an index over the namespaces each object's references reach
+into. So a grant takes effect when it is applied rather than on the next resync, without a
+grant controller existing to make that happen.
 
 ## Printer columns
 
@@ -363,7 +367,7 @@ exactly one of, per catalogue namespace.
 | `kubectl apply` rejected, `requires a non-empty selector` | none; admission refused it | `namespaces: Selector` with `selector: {}` | Write `namespaces: All` if that is what you meant |
 | `kubectl apply` rejected, `should match '^NetBox[A-Za-z0-9]+$'` | none; admission refused it | a `kinds` entry that is a NetBox model name (`dcim.region`) rather than a CRD Kind | Use the Kind: `NetBoxRegion` |
 | `kubectl apply` rejected on `names` | none; admission refused it | a prefix glob such as `web-*` | Name them, or use `*` alone |
-| The grant is written and the object is still denied | same, and unchanged `observedGeneration` on the referrer | there is no watch from a grant to its referrers yet ([#25](https://github.com/ricardomolendijk/netbox-operator/issues/25)) | Wait for the endpoint's `resyncPeriod`, or touch the referring CR |
+| The grant is written and the object is still denied a second later | same | the grant does not cover this reference: check `from`, `to.kinds` and `to.names` against the message | Widen the grant, or read the rows above |
 | A denied reference still reaches NetBox by `slug` | `Ready=True` on the referrer | working as designed — see [a grant is not NetBox authorisation](#a-grant-is-not-netbox-authorisation) | Use NetBox object permissions on that namespace's token |
 | Every cross-namespace reference in the cluster is `Reason=Invalid`, message `no grant reader is configured` | `RefsResolved=False, Reason=Invalid` | a bug in this operator's wiring, not in any manifest | File an issue. It fails closed, so nothing was permitted that should not have been |
 
