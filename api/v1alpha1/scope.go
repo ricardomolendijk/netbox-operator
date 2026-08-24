@@ -8,7 +8,7 @@ package v1alpha1
 // `scope_type` / `scope_id` pair plus four read-only denormalised caches -- `_region`,
 // `_site_group`, `_site`, `_location` (docs/netbox-schema.md -> dcim.CachedScopeMixin).
 // Writing `site` to such a model is not rejected, it is *ignored*, so the object reports
-// itself synced while carrying no scope at all. See docs/concepts/scopes.md.
+// itself synced while carrying no scope at all. See docs/concepts/generic-refs.md.
 //
 // At most one member may be set. None means globally scoped: both columns are written as
 // null, because an omitted pair would leave whatever NetBox holds in place and there would
@@ -45,17 +45,3 @@ type ScopeRef struct {
 	// +optional
 	LocationRef *LocationRef `json:"locationRef,omitempty"`
 }
-
-// ScopeMemberFields are the CR spec fields of the scope union, in the order the engine
-// considers them.
-//
-// Exported so that the registry's declaration of the union and this struct cannot drift
-// apart silently: a member added here and forgotten there would be a field the API server
-// accepts and the resolver never reads, which is the same silent no-op the whole type
-// exists to prevent. internal/registry asserts the two agree, and asserts each entry is a
-// JSON field of ScopeRef.
-//
-// The object type each maps to is deliberately *not* here. It is the target Kind's own
-// Descriptor.ObjectType, so `dcim.sitegroup` is spelled once in the codebase rather than
-// once per place that needs it.
-var ScopeMemberFields = []string{"regionRef", "siteGroupRef", "siteRef", "locationRef"}

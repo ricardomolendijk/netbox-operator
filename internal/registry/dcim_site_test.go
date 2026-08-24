@@ -86,7 +86,7 @@ func TestSiteFieldMapCoversEverySpecField(t *testing.T) {
 	// No Ref entries: dcim.Site's foreign keys are out of scope this milestone and are
 	// absent from the CRD, so the map must not declare them either.
 	for _, f := range d.Fields {
-		if f.Ref {
+		if f.Class.Ref() {
 			t.Errorf("field %q is marked as a reference, but no dcim.Site FK is in scope yet", f.Spec)
 		}
 	}
@@ -100,14 +100,14 @@ func TestSiteFieldMapCoversEverySpecField(t *testing.T) {
 func TestSiteNeedsNoFieldClasses(t *testing.T) {
 	d, _ := Get(netboxv1alpha1.GroupVersion.WithKind("NetBoxSite"))
 
-	if len(d.M2M) != 0 {
-		t.Errorf("M2M = %v, want none", d.M2M)
+	if got := d.M2MFields(); len(got) != 0 {
+		t.Errorf("M2MFields() = %v, want none", got)
 	}
-	if len(d.Arrays) != 0 {
-		t.Errorf("Arrays = %v, want none", d.Arrays)
+	if got := d.ArrayFields(); len(got) != 0 {
+		t.Errorf("ArrayFields() = %v, want none", got)
 	}
-	if len(d.ObjectTypeLists) != 0 {
-		t.Errorf("ObjectTypeLists = %v, want none", d.ObjectTypeLists)
+	if got := d.ObjectTypeListFields(); len(got) != 0 {
+		t.Errorf("ObjectTypeListFields() = %v, want none", got)
 	}
 	if len(d.GenericFKs) != 0 {
 		t.Errorf("GenericFKs = %v, want none", d.GenericFKs)

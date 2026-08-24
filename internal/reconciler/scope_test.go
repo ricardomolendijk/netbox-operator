@@ -2,7 +2,6 @@ package reconciler
 
 import (
 	"context"
-	"slices"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -13,6 +12,12 @@ import (
 	"github.com/ricardomolendijk/netbox-operator/internal/registry"
 	"github.com/ricardomolendijk/netbox-operator/internal/resolver"
 )
+
+// NetBox's scope pair as the engine sees it. The mechanism itself -- both columns or
+// neither, empty-clears, absent-does-not, a refused target -- is covered once, over the same
+// descriptor, in refs_test.go. What is left here is what is true of *scope* and of no other
+// union: the columns that must never appear in a request body, and the round trip through the
+// real resolver that proves `scope_type` is spelled by the target's own Descriptor.
 
 // forbiddenScopeKeys are the columns that must never appear in a request body for a scoped
 // kind, and the reason this file exists.
@@ -32,8 +37,10 @@ var forbiddenScopeKeys = append([]string{"site", "site_id"}, registry.ScopeCache
 // invisible from RefsResolved=True: the operator would report every reference resolved and
 // send NetBox an unscoped prefix.
 //
-// The real resolver, not a canned resolution, so the `app_label.model` string in the body is
-// the one the target kind's own Descriptor carries.
+// The real resolver, not a canned resolution, which is what this adds over
+// TestResolvedGenericFKWritesBothColumns: the `app_label.model` string in the body has to be
+// the one the *target* kind's own Descriptor carries, and a canned Result asserts only that
+// the engine copies whatever it was handed.
 func TestScopeReachesThePayloadAsAPair(t *testing.T) {
 	siteGVK := netboxv1alpha1.SiteRef{}.TargetGVK()
 
@@ -41,7 +48,7 @@ func TestScopeReachesThePayloadAsAPair(t *testing.T) {
 	obj.Spec.Scope = &netboxv1alpha1.ScopeRef{SiteRef: &netboxv1alpha1.SiteRef{Name: "hq"}}
 
 	nb := &fakeClient{created: liveTag(7)}
-	engine := engineWith(t, scopeUnionDescriptor(), nb, &resolver.Resolver{
+	engine := engineWith(t, scopedDescriptor(), nb, &resolver.Resolver{
 		Objects: fakeCluster{objects: []*unstructured.Unstructured{
 			readyTarget(siteGVK, "team-a", "hq", 5),
 		}},
@@ -69,63 +76,14 @@ func TestScopeReachesThePayloadAsAPair(t *testing.T) {
 	}
 }
 
-// TestEmptyScopeIsWrittenAsNull is the other half of the pair's semantics.
-//
-// An omitted pair means "leave whatever NetBox holds", which is right for every other field
-// and would make a scope impossible to *clear* through this API: set it once and it stays
-// forever. So an empty union is an instruction rather than an omission, and both columns go
-// out as null.
-func TestEmptyScopeIsWrittenAsNull(t *testing.T) {
-	obj := fakeObject()
-	obj.Spec.Scope = &netboxv1alpha1.ScopeRef{}
-
-	nb := &fakeClient{created: liveTag(7)}
-	engine := engineWith(t, scopeUnionDescriptor(), nb, &fakeRefs{})
-
-	if _, err := engine.Reconcile(context.Background(), obj); err != nil {
-		t.Fatalf("Reconcile() = %v", err)
-	}
-
-	payload := nb.lastPayload()
-
-	for _, column := range []string{registry.ScopeTypeField, registry.ScopeIDField} {
-		value, present := payload[column]
-		if !present || value != nil {
-			t.Errorf("payload[%s] = %v (present %v), want an explicit null", column, value, present)
-		}
-	}
-
-	assertNoForbiddenKeys(t, payload)
-}
-
-// TestAbsentScopeWritesNeitherColumn keeps the clear from happening by accident.
-//
-// A spec that never mentions the scope is not asking for one to be removed -- spec omission
-// means "do not manage this field", which is what lets the operator co-exist with a human
-// editing the same object in the NetBox UI (docs/decisions/0005-gitops-coexistence.md).
-func TestAbsentScopeWritesNeitherColumn(t *testing.T) {
-	nb := &fakeClient{created: liveTag(7)}
-	engine := engineWith(t, scopeUnionDescriptor(), nb, &fakeRefs{})
-
-	if _, err := engine.Reconcile(context.Background(), fakeObject()); err != nil {
-		t.Fatalf("Reconcile() = %v", err)
-	}
-
-	payload := nb.lastPayload()
-
-	for _, column := range []string{registry.ScopeTypeField, registry.ScopeIDField} {
-		if _, present := payload[column]; present {
-			t.Errorf("payload holds %s, want an unmentioned scope to be left to netbox", column)
-		}
-	}
-}
-
-// TestScopeMoveIsOnePatch covers moving a prefix from a Region to a Site.
+// TestScopeMoveIsOnePatch covers moving a prefix from a Region to a Site, which is the only
+// path on which NetBox hands the caches *back*.
 //
 // Both columns go out even though the user changed one field, because NetBox validates the
 // pair together: a `scope_id` sent without its `scope_type` is either rejected or, worse,
 // interpreted against the type NetBox still holds -- which points the object at whatever
-// Region happens to own that primary key.
+// Region happens to own that primary key. And the four caches that come back on the read must
+// not be echoed: a diff that includes one is a PATCH that can never satisfy itself.
 func TestScopeMoveIsOnePatch(t *testing.T) {
 	siteGVK := netboxv1alpha1.SiteRef{}.TargetGVK()
 
@@ -137,15 +95,12 @@ func TestScopeMoveIsOnePatch(t *testing.T) {
 	live[registry.ScopeTypeField] = "dcim.region"
 	live[registry.ScopeIDField] = float64(3)
 
-	// The caches NetBox maintains come back on every read of a scoped object. They must be
-	// read and never echoed: a diff that includes one is a PATCH that can never satisfy
-	// itself.
 	for _, column := range registry.ScopeCacheColumns() {
 		live[column] = map[string]any{"id": float64(3), "name": "emea"}
 	}
 
 	nb := &fakeClient{get: live, patched: live}
-	engine := engineWith(t, scopeUnionDescriptor(), nb, &resolver.Resolver{
+	engine := engineWith(t, scopedDescriptor(), nb, &resolver.Resolver{
 		Objects: fakeCluster{objects: []*unstructured.Unstructured{
 			readyTarget(siteGVK, "team-a", "hq", 5),
 		}},
@@ -174,18 +129,25 @@ func TestScopeMoveIsOnePatch(t *testing.T) {
 	assertNoForbiddenKeys(t, payload)
 }
 
-// TestUnresolvedScopeWritesNoScopeAtAll is the not-ready state: the NetBoxSite exists and
-// has no NetBox id yet.
+// TestUnresolvedScopeWritesNoScopeAtAll is the first-apply state: the NetBoxSite exists in
+// the cluster and has no NetBox id yet.
 //
 // Neither column is written -- half a reference is worse than none -- and the object is kept
-// off Ready so that a dropped scope cannot pass `kubectl wait --for=condition=Ready`.
+// off Ready so that a dropped scope cannot pass `kubectl wait --for=condition=Ready`. Distinct
+// from TestRefusedGenericFKIsTerminalAndWritesNothingToTheColumns, which is the target that
+// will never become legal; this one clears itself on a watch event.
 func TestUnresolvedScopeWritesNoScopeAtAll(t *testing.T) {
 	obj := fakeObject()
 	obj.Spec.Scope = &netboxv1alpha1.ScopeRef{SiteRef: &netboxv1alpha1.SiteRef{Name: "hq"}}
 
+	err := refError("scope", resolver.ErrRefNotReady)
 	nb := &fakeClient{created: liveTag(7)}
-	engine := engineWith(t, scopeUnionDescriptor(), nb,
-		&fakeRefs{resolution: blockedOnScope(resolver.ErrRefNotReady)})
+	engine := engineWith(t, scopedDescriptor(), nb, &fakeRefs{resolution: resolver.Resolution{
+		ByField: map[string]resolver.FieldRefs{},
+		Blocked: []resolver.Blocker{{
+			Field: "scope", Reason: resolver.Classify(err).Reason, Err: err,
+		}},
+	}})
 
 	if _, err := engine.Reconcile(context.Background(), obj); err != nil {
 		t.Fatalf("Reconcile() = %v", err)
@@ -199,6 +161,8 @@ func TestUnresolvedScopeWritesNoScopeAtAll(t *testing.T) {
 		}
 	}
 
+	assertNoForbiddenKeys(t, payload)
+
 	if got := conditionOf(obj, netboxv1alpha1.ConditionRefsResolved); got.Status != metav1.ConditionFalse ||
 		got.Reason != netboxv1alpha1.ReasonRefNotReady {
 		t.Errorf("RefsResolved = %s/%s, want False/%s", got.Status, got.Reason, netboxv1alpha1.ReasonRefNotReady)
@@ -207,16 +171,6 @@ func TestUnresolvedScopeWritesNoScopeAtAll(t *testing.T) {
 	if got := conditionOf(obj, netboxv1alpha1.ConditionReady); got.Status != metav1.ConditionFalse ||
 		got.Reason != netboxv1alpha1.ReasonWaitingForRef {
 		t.Errorf("Ready = %s/%s, want False/%s", got.Status, got.Reason, netboxv1alpha1.ReasonWaitingForRef)
-	}
-}
-
-// blockedOnScope is the resolution a scope waiting for its target produces.
-func blockedOnScope(cause error) resolver.Resolution {
-	err := refError("scope", cause)
-
-	return resolver.Resolution{
-		ByField: map[string]resolver.Result{},
-		Blocked: []resolver.Blocker{{Field: "scope", Reason: resolver.Classify(err).Reason, Err: err}},
 	}
 }
 
@@ -231,26 +185,15 @@ func assertNoForbiddenKeys(t *testing.T, payload netbox.Object) {
 	}
 }
 
-// scopeUnionDescriptor is the fake kind with the real scope union: the pair, its four legal
-// targets, and its four caches in ReadOnly.
-func scopeUnionDescriptor() registry.Descriptor {
-	d := fakeDescriptor()
-	d.ReadOnly = append(slices.Clone(d.ReadOnly), registry.ScopeCacheColumns()...)
-	d.GenericFKs = []registry.GenericFKSpec{registry.ScopeFK("scope")}
-	d.ContainmentRef = "scope"
-
-	return d
-}
-
 // scopeKinds is a real registry holding the scoped kind and the one union target whose CRD
-// this build carries, so the object type written to `scope_type` is read off that target's
-// own Descriptor rather than supplied by the test.
+// this build carries, so the object type written to `scope_type` is read off that target's own
+// Descriptor rather than supplied by the test.
 func scopeKinds(t *testing.T) *registry.Registry {
 	t.Helper()
 
 	reg := registry.New()
 
-	for _, d := range []registry.Descriptor{scopeUnionDescriptor(), siteTargetDescriptor()} {
+	for _, d := range []registry.Descriptor{scopedDescriptor(), siteTargetDescriptor()} {
 		if err := reg.Add(d); err != nil {
 			t.Fatalf("registering %s: %v", d.GVK, err)
 		}

@@ -162,13 +162,15 @@ func TestReportModeOverridesApplyAtTheClient(t *testing.T) {
 
 	t.Cleanup(func() { _ = k8sClient.Delete(context.Background(), endpoint) })
 
-	eventually(t, "a client for the reporting endpoint", func() bool {
-		_, _, ok := clients.Lookup(ns, "reporting")
+	// Ready=True rather than "the cache has an entry": put runs before the status write, so
+	// this is the later of the two signals, and the `ok` below cannot then be a stale
+	// entry's (#159).
+	eventually(t, "Ready=True", func() bool { return endpointIsReady(ns, "reporting") })
 
-		return ok
-	})
-
-	nbClient, _, _ := clients.Lookup(ns, "reporting")
+	nbClient, _, ok := clients.Lookup(ns, "reporting")
+	if !ok {
+		t.Fatal("no client cached for an endpoint reporting Ready=True")
+	}
 	if !nbClient.DryRun() {
 		t.Error("driftMode Report produced a client that can write to netbox")
 	}

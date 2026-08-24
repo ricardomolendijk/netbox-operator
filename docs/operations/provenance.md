@@ -321,12 +321,36 @@ filter.
 
 ## Two clusters, one NetBox
 
-Supported, and deliberately not coordinated. Two clusters with different `clusterID` values
+Supported, and **never coordinated**. Two clusters with different `clusterID` values
 managing the same NetBox object will both keep correcting it towards their own spec, and the
 operator does not stop them. What the stamp buys is that the fight is **visible**: whichever
 cluster wrote last owns `k8s_cluster`, so a value that keeps changing is the symptom, and
-`k8s_owner` names the manifest on the other side. Making it an error — a lock checked before
-every write — is deferred until somebody needs it (NBO-047).
+`k8s_owner` names the manifest on the other side. Writing over a foreign `k8s_cluster` also
+raises a `Conflict` condition naming the other writer, plus an Event — and then writes
+anyway. The condition is a warning, not a gate (NBO-047).
+
+**The operator will not serialise writes between clusters.** Decided, not deferred
+([#18](https://github.com/ricardomolendijk/netbox-operator/issues/18)): making a foreign
+`k8s_cluster` refuse the write would put a read in front of every write on the hot path, and
+then need a lease with a TTL for the cluster that dies mid-write, and then a documented
+break-glass for when the lease is wrong. That is a lot of moving parts, each with its own
+failure mode, for a problem nobody has reported. Visible-and-noisy is the whole of the
+position, and the answer if it hurts is to stop two clusters managing one object — not to
+turn a setting on.
+
+So, in practice, if two clusters share a NetBox:
+
+- **Give each one a distinct `clusterID`.** Without that the stamp cannot tell them apart
+  and the symptom above is invisible.
+- **Partition what they manage.** Two clusters can share a NetBox indefinitely with no
+  interaction at all, as long as their manifests describe disjoint sets of NetBox objects.
+  Overlap is the only thing that fights.
+- **Watch for overlap rather than assuming it away.** `?cf_k8s_cluster=prod-eu` lists what a
+  cluster claims; a `Conflict` condition or its Event is the per-object signal, and both are
+  worth an alert if you have deliberately arranged an overlap.
+- **Expect no winner.** Neither side backs off, and there is no field that makes one
+  authoritative. The write rate is bounded by the shorter of the two resync periods, so the
+  cost of leaving it running is API calls and a changelog full of flapping.
 
 Give each cluster the same `tag` and a different `clusterID` if they share a NetBox and you
 want one sweep vocabulary; give them different tags if you want their sweeps entirely

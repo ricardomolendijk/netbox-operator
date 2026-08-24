@@ -26,7 +26,7 @@ import (
 // internal/registry/deferred_test.go.
 func deferringDescriptor() registry.Descriptor {
 	d := fakeDescriptor()
-	d.Fields = append(d.Fields, registry.Field{Spec: "primaryIP4Ref", API: "primary_ip4", Ref: true})
+	d.Fields = append(d.Fields, registry.Field{Spec: "primaryIP4Ref", API: "primary_ip4", Class: registry.ClassRefOne})
 	d.Deferred = []registry.DeferredField{{APIField: "primary_ip4", Mode: registry.DeferAlways}}
 
 	return d
@@ -62,9 +62,9 @@ func deferringObject() *fakeKind {
 
 // resolvedRefs is a resolution that turned several references into ids.
 func resolvedRefs(ids map[string]int64) resolver.Resolution {
-	byField := make(map[string]resolver.Result, len(ids))
+	byField := make(map[string]resolver.FieldRefs, len(ids))
 	for field, id := range ids {
-		byField[field] = resolver.Result{ID: id, ObjectType: "ipam.ipaddress", Mode: resolver.ModeName}
+		byField[field] = resolver.FieldRefs{{ID: id, ObjectType: "ipam.ipaddress", Mode: resolver.ModeName}}
 	}
 
 	return resolver.Resolution{ByField: byField}
@@ -75,7 +75,7 @@ func blockedOn(field string, cause error, requeue time.Duration) resolver.Resolu
 	err := refError(field, cause)
 
 	return resolver.Resolution{
-		ByField: map[string]resolver.Result{},
+		ByField: map[string]resolver.FieldRefs{},
 		Blocked: []resolver.Blocker{{
 			Field: field, Reason: resolver.Classify(err).Reason, Requeue: requeue, Err: err,
 		}},

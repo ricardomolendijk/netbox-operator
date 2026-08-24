@@ -141,7 +141,12 @@ type objectController struct {
 // included: one wrapper rather than one per writer, so a future collaborator wired from
 // mgr.GetClient() directly is the visible odd one out.
 func newObjectController(mgr ctrl.Manager, endpoints reconciler.Endpoints, kind namedKind) *objectController {
-	writer := specGuard{mgr.GetClient()}
+	// Field-owned before it is guarded, so every write the operator makes -- the status
+	// update, the finalizer patch -- is attributed to one stable manager name. The engine
+	// reads metadata.managedFields to learn which spec fields a user set and identifies its
+	// own entries by elimination, which needs a name that does not change with the binary
+	// (reconciler.FieldManager, NBO-079).
+	writer := specGuard{client.WithFieldOwner(mgr.GetClient(), reconciler.FieldManager)}
 
 	return &objectController{
 		Client: writer,
@@ -240,7 +245,7 @@ func (c *objectController) watchRefs(mgr ctrl.Manager, b *builder.Builder, kind 
 	// Through specGuard like every other route to the API server from this controller, even
 	// though a map function only ever lists: one wrapper rather than one per caller is what
 	// keeps a future collaborator wired from mgr.GetClient() directly the visible odd one out.
-	reader := specGuard{mgr.GetClient()}
+	reader := specGuard{client.WithFieldOwner(mgr.GetClient(), reconciler.FieldManager)}
 
 	if err := WatchRefs(b, reader, mgr.GetScheme(), d); err != nil {
 		return fmt.Errorf("watching the reference targets of %s: %w", kind.name, err)

@@ -237,8 +237,9 @@ func TestFilterValue(t *testing.T) {
 // than an error (docs/concepts/drift.md).
 func TestFieldRulesFromDescriptor(t *testing.T) {
 	d := scopedDescriptor()
-	d.M2M = []string{"tags"}
-	d.Arrays = []string{"vid_ranges"}
+	d.Fields = append(d.Fields,
+		registry.Field{Spec: "tagRefs", API: "tags", Class: registry.ClassRefMany},
+		registry.Field{Spec: "vidRanges", API: "vid_ranges", Class: registry.ClassArray})
 
 	rules := fieldRules(d)
 
@@ -271,12 +272,8 @@ func TestEnvelopeFieldsAreDerived(t *testing.T) {
 // NetBox 4.2 (docs/decisions/0003-ownership-and-references.md rule 2).
 func scopedDescriptor() registry.Descriptor {
 	d := fakeDescriptor()
-	d.GenericFKs = []registry.GenericFKSpec{{
-		TypeField:    "scope_type",
-		IDField:      "scope_id",
-		AllowedTypes: []string{"dcim.site", "dcim.region"},
-		Spec:         "scope",
-	}}
+	d.ReadOnly = append(slices.Clone(d.ReadOnly), registry.ScopeCacheColumns()...)
+	d.GenericFKs = []registry.GenericFKSpec{registry.ScopeFK("scope")}
 	d.ContainmentRef = "scope"
 
 	return d

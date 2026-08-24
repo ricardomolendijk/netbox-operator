@@ -60,6 +60,11 @@ func specOf(obj Object) (specFields, error) {
 
 // desired renders the spec into the payload to send, and reports what it could not render.
 //
+// What arrives here has already been through specFields.restoreEmpty, so a field the user
+// explicitly emptied is present and empty rather than absent (NBO-079,
+// docs/concepts/field-ownership.md). Everything below then treats it like any other value,
+// which is why nothing here had to learn about field ownership.
+//
 // Read-only columns need no filtering here: a spec field may not map onto one, enforced by
 // registry.Descriptor.Validate at boot. So the only thing left out is a reference, and that
 // is returned rather than dropped.
@@ -85,18 +90,9 @@ func (s specFields) desired(d registry.Descriptor) (netbox.Object, registry.Spec
 		state.Declared = append(state.Declared, name)
 
 		field, mapped := d.FieldFor(name)
-		generic, union := d.GenericFKFor(name)
 
 		switch {
-		case mapped && field.Ref:
-			refs = append(refs, name)
-		case union && clearsUnion(value, generic):
-			// An empty union is an instruction, not an omission: it says "no scope", and
-			// both columns have to be sent as null to carry it out. Omitting the pair would
-			// leave whatever NetBox holds in place, so a scope could be set through this API
-			// and never cleared through it.
-			desired[generic.TypeField], desired[generic.IDField] = nil, nil
-		case union:
+		case mapped && field.Class.Ref(), !mapped && isGenericFK(d, name):
 			refs = append(refs, name)
 		case mapped:
 			desired[field.API] = value
@@ -158,37 +154,17 @@ func filterValue(value any) (string, bool) {
 	}
 }
 
-// clearsUnion reports whether a polymorphic reference the spec sets names none of its
-// members, which is the instruction to write both of its columns as null.
-//
-// A pair whose descriptor declares no members at all is deliberately not that. The engine
-// cannot read such a union, and clearing a column because it could not be understood would
-// wipe a scope the user asked for; it is reported unresolved instead, which is what the
-// engine did before unions could be resolved.
-func clearsUnion(value any, generic registry.GenericFKSpec) bool {
-	if len(generic.Members) == 0 {
-		return false
-	}
+func isGenericFK(d registry.Descriptor, spec string) bool {
+	_, ok := d.GenericFKFor(spec)
 
-	union, ok := value.(map[string]any)
-	if !ok {
-		return false
-	}
-
-	for _, member := range generic.Members {
-		if union[member.Field] != nil {
-			return false
-		}
-	}
-
-	return true
+	return ok
 }
 
 // fieldRules translates the descriptor's field classes into the comparison rules Drift
 // needs. It is the whole of the engine's knowledge about how a field is compared, and it
 // is data every time.
 func fieldRules(d registry.Descriptor) netbox.FieldRules {
-	m2m := set(d.M2M)
+	m2m := set(d.M2MFields())
 
 	// `tags` is not in any descriptor's M2M list because no spec field maps onto it: it is
 	// the engine's own column, written by the provenance stamp (NBO-075). It still needs the
@@ -204,8 +180,8 @@ func fieldRules(d registry.Descriptor) netbox.FieldRules {
 
 	rules := netbox.FieldRules{
 		M2M:             m2m,
-		ObjectTypeLists: set(d.ObjectTypeLists),
-		Arrays:          set(d.Arrays),
+		ObjectTypeLists: set(d.ObjectTypeListFields()),
+		Arrays:          set(d.ArrayFields()),
 		GenericFKs:      make([]netbox.GenericFK, 0, len(d.GenericFKs)),
 	}
 

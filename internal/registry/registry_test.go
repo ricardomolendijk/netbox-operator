@@ -7,6 +7,8 @@ import (
 
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+
+	netboxv1alpha1 "github.com/ricardomolendijk/netbox-operator/api/v1alpha1"
 )
 
 func testGVK(kind string) schema.GroupVersionKind {
@@ -28,12 +30,11 @@ func tagDescriptor() Descriptor {
 			{Spec: "color", API: "color"},
 			{Spec: "description", API: "description"},
 			{Spec: "weight", API: "weight"},
-			{Spec: "objectTypes", API: "object_types"},
+			{Spec: "objectTypes", API: "object_types", Class: ClassObjectTypeList},
 		},
-		NaturalKeys:     []NaturalKey{{Fields: []KeyField{{Filter: "slug", Spec: "slug"}}}},
-		UpdateStrategy:  UpdatePatch,
-		ReadOnly:        []string{"created", "last_updated", "url", "display"},
-		ObjectTypeLists: []string{"object_types"},
+		NaturalKeys:    []NaturalKey{{Fields: []KeyField{{Filter: "slug", Spec: "slug"}}}},
+		UpdateStrategy: UpdatePatch,
+		ReadOnly:       []string{"created", "last_updated", "url", "display"},
 	}
 }
 
@@ -51,9 +52,13 @@ func vrfDescriptor() Descriptor {
 			{Spec: "rd", API: "rd"},
 			{Spec: "enforceUnique", API: "enforce_unique"},
 			{Spec: "description", API: "description"},
-			{Spec: "tenantRef", API: "tenant", Ref: true},
-			{Spec: "importTargets", API: "import_targets", Ref: true},
-			{Spec: "exportTargets", API: "export_targets", Ref: true},
+			{Spec: "tenantRef", API: "tenant", Class: ClassRefOne},
+			// The two to-many references NBO-088 was filed for. `import_targets` and
+			// `export_targets` are ManyToManyFields onto ipam.RouteTarget
+			// (docs/netbox-schema.md -> ipam.VRF), so one class says both that each is a list
+			// of references to resolve and that its value compares as an id set.
+			{Spec: "importTargets", API: "import_targets", Class: ClassRefMany},
+			{Spec: "exportTargets", API: "export_targets", Class: ClassRefMany},
 		},
 		NaturalKeys: []NaturalKey{
 			{Fields: []KeyField{{Filter: "rd", Spec: "rd"}}},
@@ -61,7 +66,6 @@ func vrfDescriptor() Descriptor {
 		},
 		UpdateStrategy: UpdatePatch,
 		ReadOnly:       []string{"created", "last_updated", "url", "display"},
-		M2M:            []string{"import_targets", "export_targets"},
 	}
 }
 
@@ -77,7 +81,7 @@ func regionDescriptor() Descriptor {
 			{Spec: "name", API: "name"},
 			{Spec: "slug", API: "slug"},
 			{Spec: "description", API: "description"},
-			{Spec: "parentRef", API: "parent", Ref: true},
+			{Spec: "parentRef", API: "parent", Class: ClassRefOne},
 		},
 		NaturalKeys: []NaturalKey{
 			{Fields: []KeyField{
@@ -111,14 +115,14 @@ func deviceDescriptor() Descriptor {
 		Fields: []Field{
 			{Spec: "name", API: "name"},
 			{Spec: "status", API: "status"},
-			{Spec: "siteRef", API: "site", Ref: true},
-			{Spec: "tenantRef", API: "tenant", Ref: true},
-			{Spec: "roleRef", API: "role", Ref: true},
-			{Spec: "deviceTypeRef", API: "device_type", Ref: true},
-			{Spec: "primaryIP4Ref", API: "primary_ip4", Ref: true},
-			{Spec: "primaryIP6Ref", API: "primary_ip6", Ref: true},
-			{Spec: "oobIPRef", API: "oob_ip", Ref: true},
-			{Spec: "virtualChassisRef", API: "virtual_chassis", Ref: true},
+			{Spec: "siteRef", API: "site", Class: ClassRefOne},
+			{Spec: "tenantRef", API: "tenant", Class: ClassRefOne},
+			{Spec: "roleRef", API: "role", Class: ClassRefOne},
+			{Spec: "deviceTypeRef", API: "device_type", Class: ClassRefOne},
+			{Spec: "primaryIP4Ref", API: "primary_ip4", Class: ClassRefOne},
+			{Spec: "primaryIP6Ref", API: "primary_ip6", Class: ClassRefOne},
+			{Spec: "oobIPRef", API: "oob_ip", Class: ClassRefOne},
+			{Spec: "virtualChassisRef", API: "virtual_chassis", Class: ClassRefOne},
 		},
 		NaturalKeys: []NaturalKey{
 			{Fields: []KeyField{
@@ -169,8 +173,8 @@ func ipAddressDescriptor() Descriptor {
 			{Spec: "address", API: "address"},
 			{Spec: "status", API: "status"},
 			{Spec: "dnsName", API: "dns_name"},
-			{Spec: "vrfRef", API: "vrf", Ref: true},
-			{Spec: "natInsideRef", API: "nat_inside", Ref: true},
+			{Spec: "vrfRef", API: "vrf", Class: ClassRefOne},
+			{Spec: "natInsideRef", API: "nat_inside", Class: ClassRefOne},
 		},
 		NaturalKeys: []NaturalKey{
 			{Fields: append([]KeyField{address, vrf}, assigned...)},
@@ -190,6 +194,15 @@ func ipAddressDescriptor() Descriptor {
 				"ipam.fhrpgroup",
 			},
 			Spec: "assignedObject",
+			// The union members as v1alpha1.IPAssignment declares them, each pinned to
+			// the Kind by its own typed alias rather than by a GVK written out here --
+			// so a renamed member or a re-aimed alias fails the descriptor rather than
+			// silently resolving against the wrong Kind.
+			Members: []GenericFKMember{
+				{Spec: "interfaceRef", Target: netboxv1alpha1.InterfaceRef{}.TargetGVK()},
+				{Spec: "vmInterfaceRef", Target: netboxv1alpha1.VMInterfaceRef{}.TargetGVK()},
+				{Spec: "fhrpGroupRef", Target: netboxv1alpha1.FHRPGroupRef{}.TargetGVK()},
+			},
 		}},
 		ContainmentRef: "vrfRef",
 	}
@@ -208,8 +221,8 @@ func clusterDescriptor() Descriptor {
 		Fields: []Field{
 			{Spec: "name", API: "name"},
 			{Spec: "status", API: "status"},
-			{Spec: "typeRef", API: "type", Ref: true},
-			{Spec: "groupRef", API: "group", Ref: true},
+			{Spec: "typeRef", API: "type", Class: ClassRefOne},
+			{Spec: "groupRef", API: "group", Class: ClassRefOne},
 		},
 		NaturalKeys: []NaturalKey{
 			{Fields: []KeyField{
@@ -222,13 +235,8 @@ func clusterDescriptor() Descriptor {
 			}},
 		},
 		UpdateStrategy: UpdatePatch,
-		ReadOnly:       []string{"_site", "created", "last_updated", "url", "display"},
-		GenericFKs: []GenericFKSpec{{
-			TypeField:    "scope_type",
-			IDField:      "scope_id",
-			AllowedTypes: []string{"dcim.region", "dcim.sitegroup", "dcim.site", "dcim.location"},
-			Spec:         "scope",
-		}},
+		ReadOnly:       append(ScopeCacheColumns(), "created", "last_updated", "url", "display"),
+		GenericFKs:     []GenericFKSpec{ScopeFK("scope")},
 		ContainmentRef: "scope",
 	}
 }
@@ -247,7 +255,7 @@ func tenantGroupDescriptor() Descriptor {
 			{Spec: "name", API: "name"},
 			{Spec: "slug", API: "slug"},
 			{Spec: "description", API: "description"},
-			{Spec: "parentRef", API: "parent", Ref: true},
+			{Spec: "parentRef", API: "parent", Class: ClassRefOne},
 		},
 		NaturalKeys:    []NaturalKey{{Fields: []KeyField{{Filter: "slug", Spec: "slug"}}}},
 		UpdateStrategy: UpdatePatch,
@@ -366,14 +374,6 @@ func TestDescriptorValidate(t *testing.T) {
 			wantErr: ErrUnknownScope,
 		},
 		{
-			name: "field is both m2m and object-type list",
-			mutate: func(d *Descriptor) {
-				d.M2M = []string{"object_types"}
-				d.ObjectTypeLists = []string{"object_types"}
-			},
-			wantErr: ErrFieldClassConflict,
-		},
-		{
 			name:    "deferred field with no name",
 			mutate:  func(d *Descriptor) { d.Deferred = []DeferredField{{Mode: DeferAlways}} },
 			wantErr: ErrEmptyField,
@@ -460,7 +460,10 @@ func TestDescriptorValidateDeferredNaturalKey(t *testing.T) {
 				d.NaturalKeys, d.Fields, d.GenericFKs = cluster.NaturalKeys, cluster.Fields, cluster.GenericFKs
 				d.Deferred = nil
 				d.ContainmentRef = cluster.ContainmentRef
-				d.ReadOnly = append(d.ReadOnly, "_site")
+				// The pair's caches come along too: GenericFKSpec.Cached insists every one
+				// of them is read-only, and `_site` -- the column this case is about -- is
+				// one of the four.
+				d.ReadOnly = append(d.ReadOnly, ScopeCacheColumns()...)
 			},
 		},
 	}
@@ -587,6 +590,9 @@ func TestRegistryValidateReportsBadDescriptor(t *testing.T) {
 func TestMustRegisterPanicsOnDuplicate(t *testing.T) {
 	d := tagDescriptor()
 	d.GVK = testGVK("NetBoxMustRegisterFixture")
+	// Its own object type as well as its own Kind: the reverse index is one-to-one, so a
+	// fixture borrowing extras.tag would be refused for that instead of for its GVK.
+	d.ObjectType = "extras.mustregisterfixture"
 
 	MustRegister(d)
 

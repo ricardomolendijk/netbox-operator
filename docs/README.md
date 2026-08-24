@@ -16,10 +16,11 @@ How the engine behaves, and why.
 | [The Descriptor](concepts/descriptor.md) | What per-kind facts the engine needs, why they are data rather than code, and how natural keys establish identity before a `status.id` exists |
 | [Deletion](concepts/deletion.md) | What `deletionPolicy: Delete` and `Retain` each do, why the finalizer goes on before the first write and comes off after the last one, what a `PROTECT`-blocked delete looks like and how to get out of it |
 | [Drift detection](concepts/drift.md) | Why what NetBox returns is not what you wrote, and the eight comparison rules that stop a reconcile loop from PATCHing forever |
+| [Field ownership](concepts/field-ownership.md) | The three states of an optional field -- absent, empty, set -- how to write each, how `metadata.managedFields` tells them apart, and what happens when there is no ownership metadata to read |
+| [Generic references](concepts/generic-refs.md) | What a polymorphic foreign key is, why the `app_label.model` spelling is written down once, why the schema digest's `REQ` on a `GenericForeignKey` row must be ignored, how a `*_type` / `*_id` pair is kept atomic, and NetBox's scope pair — including why writing `site` returns `201` and sets nothing |
 | [Errors and retries](concepts/errors-and-retries.md) | Which NetBox failure becomes which typed error, what gets retried and where, and why more than one lookup match is an error rather than a guess |
 | [Lookups](concepts/lookups.md) | How a natural key becomes a query string, why `?name__ie=` exists, and why a null filter is pinned rather than omitted |
 | [References](concepts/references.md) | How one object points at another, the four resolution modes, what the API server rejects before a bad reference reaches the operator, and what it takes to cross a namespace |
-| [Scopes](concepts/scopes.md) | Why NetBox 4.2 replaced `site` with a polymorphic `(scope_type, scope_id)` pair, why writing `site` returns 201 and sets nothing, the four legal targets, and why NetBox scope has nothing to do with Kubernetes CRD scope |
 
 ## Reference
 
@@ -33,7 +34,7 @@ their pages.
 | [`NetBoxRegion`](reference/netboxregion.md) | The first kind whose identity depends on a reference: two natural keys, why a top-level region is a different identity rather than a missing filter, and why a child region waits instead of guessing |
 | [`NetBoxTag`](reference/netboxtag.md) | The first NetBox object kind: `slug` as a natural key, adoption and `Conflict`, `objectTypes` as content-type strings, and what happens when two namespaces claim one slug |
 | [`NetBoxSite`](reference/netboxsite.md) | A choice column and two decimals that need no per-kind handling, a globally-unique slug over namespaced CRDs, and which of `dcim.Site`'s foreign keys are deliberately absent |
-| [`ScopeRef`](reference/scoperef.md) | A shared field type rather than a CRD: `spec.scope` on every scoped kind — the four members, what each writes to `scope_type`, the three meanings of absent/empty/set, and what happens while `NetBoxSiteGroup` and `NetBoxLocation` do not exist |
+| [Generic references](reference/genericref.md) | The union shape a polymorphic foreign key takes in a spec: one member per legal target, `<= 1` versus `== 1`, why an empty union clears the reference while an absent one does not, and the two unions that ship: `IPAssignment` and `ScopeRef` |
 | [`NetBoxRefGrant`](reference/netboxrefgrant.md) | The kind that describes no NetBox object: which namespaces may reference into this one, the wildcard and selector forms that keep one grant per catalogue namespace, why `NetBoxEndpoint` is the one exception, and why a grant is not NetBox authorisation |
 
 ### The shape of a reference page
@@ -77,7 +78,7 @@ Dated records of decisions that are expensive to reverse. Index and status:
 |---|---|
 | [0001 — API group and kind naming](decisions/0001-api-group-and-kind-naming.md) | Why the group is `netbox.kubeforge.org` and every kind is prefixed `NetBox` |
 | [0002 — CRD scoping](decisions/0002-crd-scoping.md) | Why every kind is namespaced in `v1alpha1`, what that costs, and what would have to change to revisit it |
-| [0003 — Ownership and references](decisions/0003-ownership-and-references.md) | How a NetBox foreign key differs from a Kubernetes owner reference, and where the operator adds each |
+| [0003 — Ownership and references](decisions/0003-ownership-and-references.md) | How a NetBox foreign key differs from a Kubernetes owner reference, where the operator adds each, and why inline child sugar is in `v1alpha1` on terms that let `v1beta1` drop it |
 | [0004 — Claims-first allocation](decisions/0004-claims-first-allocation.md) | Why "allocate me an address" is a separate kind rather than a mode of `NetBoxIPAddress` |
 | [0005 — Coexisting with Flux and Argo CD](decisions/0005-gitops-coexistence.md) | Why Git is authoritative, why a NetBox UI edit is drift rather than a competing opinion, and why there is no write-back |
 
@@ -85,8 +86,8 @@ Dated records of decisions that are expensive to reverse. Index and status:
 
 | Page | Answers |
 |---|---|
-| [Coexisting with Flux and Argo CD](operations/gitops.md) | Why the operator never writes a `spec` and how that is enforced, the Argo CD `ignoreDifferences` and Flux `Kustomization` snippets that make it quiet, the three `driftMode` values, the cluster-rebuild walkthrough, and the NetBox permission model |
-| [Provenance](operations/provenance.md) | What `spec.managedBy` writes into every NetBox object the operator manages, how the tag and custom-field definitions get bootstrapped, why stamping is not mandatory, and what stops working when you turn it off |
+| [Coexisting with Flux and Argo CD](operations/gitops.md) | Why the operator never writes a `spec` and how that is enforced, the Argo CD `ignoreDifferences` and Flux `Kustomization` snippets that make it quiet, the three `driftMode` values, the cluster-rebuild and NetBox-restore walkthroughs, and the NetBox permission model |
+| [Provenance](operations/provenance.md) | What `spec.managedBy` writes into every NetBox object the operator manages, how the tag and custom-field definitions get bootstrapped, why stamping is not mandatory, what stops working when you turn it off, and why two clusters sharing one NetBox are never serialised |
 | [Observability](operations/observability.md) | Every metric with its labels, cardinality and what to alert on; which Events fire and when; the log levels and the stable key set, with `kubectl logs \| jq` recipes |
 | [Stuck references](operations/stuck-references.md) | Which condition says why an object is waiting for another one, what the reference metrics mean together, how to find an object's referrers by hand, and which references nothing will ever wake |
 | [NetBox schema reference](netbox-schema.md) | The authoritative field list every CRD is derived from: 159 models, 138 endpoints, machine-extracted from NetBox 4.6.8. Grep it; do not read it |

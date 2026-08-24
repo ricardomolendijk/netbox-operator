@@ -17,6 +17,15 @@ ever sees it.
 > **cycle detection over the whole graph** (NBO-016) are both built — see
 > [Crossing a namespace](#crossing-a-namespace) and [Cycles](#cycles). What is still missing on the cycle side is the
 > engine's half: a `RefCycle` Event, and a `refs_unresolved` metric to alert on.
+>
+> **To-many references** (NBO-088) and **resolving on an id rather than on the target's
+> readiness** (NBO-089) are both built — see
+> [To-one and to-many](#to-one-and-to-many) and
+> [A reference needs an id](#a-reference-needs-an-id-not-a-ready-target).
+
+A **polymorphic** reference — one NetBox column pair that may point at any of several models
+— is a union of the references described here, and has a page of its own:
+[Generic references](generic-refs.md).
 
 ## What a reference is
 
@@ -101,6 +110,63 @@ different NetBox, and the operator does not currently compare the two. Until it 
 (`ErrRefEndpointMismatch`, which arrives with the endpoint work), point references at
 namespaces that use the same NetBox.
 
+## To-one and to-many
+
+A reference field holds either **one** object or a **list** of them, and which it is comes
+from its `Field.Class` in the kind's [`Descriptor`](descriptor.md#field-classes) — `RefOne`
+or `RefMany`. Cardinality is a per-kind fact, not something guessed from the value: a
+`RefOne` field holding a JSON array, or a `RefMany` field holding a single object, means the
+descriptor and the CRD disagree, and it is refused rather than coerced.
+
+```yaml
+spec:
+  tenantRef:                 # RefOne  -> tenant: 4
+    name: acme
+  importTargets:             # RefMany -> import_targets: [5, 7]
+    - name: rt-65000-5
+    - name: rt-65000-7
+```
+
+Each element resolves on its own, in any of the four modes, and each is authorised on its own
+if it crosses a namespace.
+
+### A list resolves whole, or not at all
+
+If three of five elements resolve, **nothing is written for that field**. `RefsResolved` goes
+to `False` and names each element that did not resolve.
+
+This is not conservatism. NetBox's many-to-many write is a **full replacement**, so sending
+the three that resolved deletes the two that did not — and reports a successful write while
+doing it. Writing three of five tags is not a smaller version of the right answer; it is a
+different, wrong answer that looks like success.
+
+Each failed element is reported as its own blocker, with its own reason and its own retry
+interval, because a missing CR and a missing NetBox slug are woken up by different things. The
+condition then carries the first blocker's reason, a message naming every one of them, and the
+soonest of their intervals — exactly as it does for several unresolved fields.
+
+```
+{"type":"RefsResolved","status":"False","reason":"RefNotReady",
+ "message":"importTargets -> netboxroutetarget/team-a/rt-65000-5: not ready (the target has no status.id yet); importTargets -> netboxroutetarget/team-a/rt-65000-9: not found (no such object in the cluster)"}
+```
+
+### An empty list is a value
+
+`importTargets: []` is a statement — this VRF has no route targets — and it is written as an
+empty list. Omitting the field entirely is a different statement: spec omission means "do not
+manage", so the column is left as NetBox has it. The two are deliberately distinct, the same
+way an absent reference and a present-but-empty one are.
+
+### Order is not data
+
+The ids are written **sorted and deduplicated**. NetBox does not preserve many-to-many order
+and [drift detection](drift.md) compares the field as a set, so the order the spec listed the
+elements in carries no information. Sending them in spec order would advertise an ordering
+nothing downstream honours, and make two specs that mean the same thing produce two different
+create bodies.
+
+Two references to the same object are one member of a set, which is what NetBox stores either
+way.
 ## Ordering and convergence
 
 **Apply order does not matter.** A manifest applied backwards converges as fast as one
@@ -150,10 +216,12 @@ An event on a target is admitted when, and only when:
 | A spec edit on the *target* | **no** | A referrer resolves off the target's id, not off its description. |
 | Generic | no | It carries no before-and-after to compare. |
 
-Both halves of the pair are watched — the id *and* `Ready` — because
-[#142](https://github.com/ricardomolendijk/netbox-operator/issues/142) is open on which of
-them a reference should require. Whichever way that lands, the transition that matters is
-already the one that wakes the referrer.
+Both halves of the pair are watched — the id *and* `Ready` — and
+[#142](https://github.com/ricardomolendijk/netbox-operator/issues/142) is why both are still
+needed now that it has landed. A reference requires an **id**, so `status.id` appearing is the
+transition most referrers are waiting for. But a `Ready` change can move a target between
+[refusing and reporting](#a-reference-needs-an-id-not-a-ready-target) — a `Conflict` cleared,
+or a spec NetBox stops rejecting — and that changes what the same id resolves to.
 
 ### A grant is an event too
 
@@ -172,9 +240,11 @@ changing or going away is noticed on the retry interval in the table above, and 
 else. That is the standing cost of not using a CR reference.
 
 **A target that exists and never becomes usable produces no event**, so a referrer waiting
-on one sits at `RefNotReady` indefinitely. That is intended: the fix is on the target, and a
-poll would hide a stuck graph rather than reveal it. `RefsResolved` on the referrer names
-the target, and the target's own `Ready` condition says what is wrong with it.
+on one sits at `RefNotReady` — or at `RefTargetFailed` — indefinitely. That is intended: the
+fix is on the target, and a poll would hide a stuck graph rather than reveal it.
+`RefsResolved` on the referrer names the target, and the target's own `Ready` condition says
+what is wrong with it. Note that "not usable" is narrower than "not `Ready`": a target that is
+merely unfinished resolves and is reported, so it is not in this category at all.
 
 ### Seeing it
 
@@ -269,7 +339,7 @@ for any reference that stops resolving.
 
 ## What happens when it does not resolve
 
-Every failure is one of seven causes. Each maps to exactly one `RefsResolved` reason and one
+Every failure is one of eight causes. Each maps to exactly one `RefsResolved` reason and one
 retry interval; `Ready` reports `WaitingForRef` for all of them, because that is the
 question a `kubectl wait` is asking.
 
@@ -277,19 +347,25 @@ question a `kubectl wait` is asking.
 |---|---|---|---|
 | Nothing to point at | `RefNotFound` | On the missing CR's creation; **1 min** for a missing NetBox object | A CR's creation is an event the operator receives. NetBox announces nothing, so a timer is the only thing that will notice. |
 | Target exists, has no id yet | `RefNotReady` | On the target's own event | The target's own reconcile is what changes this, and that reconcile's result is an event. |
+| Target has an id for an object it no longer describes | `RefTargetFailed` | On the target's own event | Somebody has to fix the **target**, and the fix arrives as an event on it. See [readiness](#a-reference-needs-an-id-not-a-ready-target). |
 | Several NetBox objects match | `RefAmbiguous` | **10 min** | Only a human can say which one was meant. |
 | Cross-namespace, no grant | `RefDenied` | On a grant event in the target namespace | Writing the grant is the fix, and writing it is what retries the reference. |
 | The references depend on each other | `RefCycle` | Only on a spec change | No order of reconciles resolves it. See [Cycles](#cycles). |
 | The graph is too deep, or too wide, to walk | `RefDepthExceeded` | Only on a spec change | A 33-hop chain is a mistake, and the walk will not guess past its cap. |
 | Target Kind has no descriptor, or its CRD is not installed | `RefKindUnavailable` | **10 min** | The manifest is correct; the fix is an operator upgrade. |
+| A [polymorphic reference](generic-refs.md) names a target its column will not take | `RefTypeNotAllowed` | Only on a spec change | No object appearing anywhere makes an illegal target legal. |
 
 Two more reasons appear on `RefsResolved` and are not resolution failures at all:
-`AllResolved`, and `NotImplemented` for a reference this build cannot dispatch on — a
-[generic foreign key](descriptor.md), whose target is a union of Kinds
-([NBO-019](https://github.com/ricardomolendijk/netbox-operator/issues/31)), or a **to-many**
-reference such as `tags`, since neither `ObjectRef` nor `Field` carries a cardinality. Both
-are left out of the payload and reported, which keeps the object off `Ready` rather than
-writing one id where a list belongs.
+`AllResolved`, and `NotImplemented` for a reference this build cannot dispatch on. As of
+NBO-019 that set is **empty**, and the reason survives as the guard rather than as a state: a
+declared reference that comes back neither resolved nor blocked is left out of the payload and
+reported, which keeps the object off `Ready` rather than writing a value the operator guessed
+at.
+
+Neither of the two references that used to be in it is any more. A **to-many** reference —
+`tags`, `ipam.VRF.import_targets`, `dcim.Site.asns`, `dcim.Interface.wireless_lans` — resolves
+element by element (see [to-one and to-many](#to-one-and-to-many)), and a
+[generic foreign key](generic-refs.md) resolves through its union's dispatch table.
 
 When several references are unresolved, the condition carries the **first** blocker's
 reason — a reason is a single value tooling keys on — and a message naming every one of
@@ -298,14 +374,86 @@ a minute is not held behind one that needs a human.
 
 `RefNotReady` is a state, not a failure. Nothing about it is logged as an error, no Event
 is emitted, and no backoff is applied: a graph applied in any order converges only if "the
-target does not exist yet" is normal. A target that is *failing* resolves to `RefNotReady`
-too — the referrer is genuinely just waiting — but the message quotes the target's own
-`Ready` reason, so the reader is sent to the object that is actually broken:
+target does not exist yet" is normal. It means one thing and one thing only — the target has
+**no `status.id`** — and the message quotes the target's own `Ready` reason where there is one
+to quote, so the reader is sent to the object that is actually holding things up:
 
 ```
 regionRef -> netboxregion/catalogue/emea: not ready
+  (the target has no status.id yet)
+```
+
+`RefTargetFailed` is the neighbouring case, and a different promise: the target *has* an id,
+and its own `Ready` reason says that id is for an object it no longer describes. Nothing
+clears it on a timer — somebody has to edit the target — so it gets none.
+
+```
+regionRef -> netboxregion/catalogue/emea: target failed
   (target Ready=False, Reason=Invalid: "slug must be unique")
 ```
+
+## A reference needs an id, not a `Ready` target
+
+**Decided** in [NBO-089](https://github.com/ricardomolendijk/netbox-operator/issues/142). The
+discriminator is the target's `Ready` **reason**, not its `Ready` **status**.
+
+### Why not readiness
+
+`Ready=False` is not one state. `driftMode: Report`
+([ADR-0005](../decisions/0005-gitops-coexistence.md)) makes it the **steady** state of every
+object at an endpoint, by design: drift is detected, reported, and never corrected, so the
+object never matches the spec and never reports that it does. `mode: DryRun` has the identical
+shape.
+
+Requiring readiness therefore meant that every object at a `Report` endpoint blocked every
+object referring to it, indefinitely — and `Report` is the mode meant to be left on for a week
+while an existing NetBox is adopted, which is exactly when a catalogue namespace holds the
+objects everything else points at. "Correct, and unusable for the case it exists for" was the
+honest description.
+
+`status.id` is only written once the object provably exists in NetBox. That is the whole claim
+a referrer needs in order to write its own payload: not *this object matches its spec*, but
+*this NetBox object exists and here is its id*.
+
+### What still refuses
+
+An id can be **stale** rather than merely uncorrected, and three target reasons are where that
+happens — the object the CR manages is not the object the CR now describes:
+
+| Target `Ready` reason | Referrer | Why |
+|---|---|---|
+| `Conflict` | **blocked** (`RefTargetFailed`) | NetBox holds an object matching the target's natural key that it may not claim, so any id it still carries came from a key it no longer has. |
+| `AdoptOnly` | **blocked** (`RefTargetFailed`) | `onConflict: AdoptOnly` and nothing matched — the same shape. |
+| `Invalid` | **blocked** (`RefTargetFailed`) | NetBox rejected the payload, so the object's fields are not what the target says, and referring to it propagates that. |
+| `ReportPending`, `DryRunPending` | resolves, reported | The id is right and the write was deliberately suppressed. |
+| `WaitingForRef`, `DeferredFieldPending` | resolves, reported | The id is right and a column is missing. Blocking here would cascade one unresolved leaf all the way up a chain. |
+| `APIError`, `WaitingForEndpoint`, `WaitingForKey` | resolves, reported | NetBox being unreachable says nothing about which object the id names. |
+| no `Ready` condition at all | resolves | Mid-write, or written by a build that reported none. The id is proven either way. |
+
+The **default is to proceed**, and the direction is deliberate. A block-list that misses a
+genuinely broken state lets one stale id through, reported on the referrer's own condition. An
+allow-list that misses a benign one reintroduces the cluster-wide stall this rule exists to
+end, and stays invisible until somebody runs `Report` in anger.
+
+A target with **no id** is `RefNotReady` regardless of its reason — including a `Conflict`,
+which is its ordinary shape: the engine refused to claim anything, so there is nothing to
+refuse a referrer over. That is the case that genuinely has to wait, and it is what
+`ErrRefNotReady` now means and only means.
+
+### Proceeding is not silence
+
+A reference that resolved against a target that is not `Ready` says so on the referrer's own
+`RefsResolved` — the condition somebody debugging is already reading. `RefsResolved` stays
+`True` and the referrer reaches `Ready`, because its own work is done:
+
+```
+{"type":"RefsResolved","status":"True","reason":"AllResolved",
+ "message":"resolved parentRef; parentRef -> catalogue/emea: resolved, target not ready
+            (target Ready=False, Reason=ReportPending: \"the endpoint's driftMode is Report, so nothing was sent\")"}
+```
+
+Without the note, a `Ready=True` object would be pointing at something unfinished with nothing
+anywhere saying so.
 
 ### An unresolved reference is created without, and reported
 
@@ -328,8 +476,10 @@ Creating there would duplicate the region, and falling through to the top-level 
 would adopt an unrelated one ([lookups](lookups.md)).
 
 A reference that resolved yesterday and does not today does **not** clear the NetBox field.
-Spec omission means "do not manage": the object stops writing that column, reports
-`RefsResolved=False`, and leaves the live value alone.
+The object stops writing that column, reports `RefsResolved=False`, and leaves the live value
+alone. Unresolved is not the same as cleared: clearing a field is something you ask for by
+writing an empty value, and it is tracked separately from the value itself
+([field ownership](field-ownership.md)).
 
 An **absent** reference and a **present but empty** one are two different states, not one.
 An absent field is not resolved, not blocked and not reported — nobody asked for it. A
@@ -350,8 +500,13 @@ $ kubectl get netboxsite ams -o jsonpath='{.status.conditions[?(@.type=="RefsRes
 Read it right to left: the reason names the class of problem, the message names the field
 you wrote and the object it pointed at. From there:
 
-- `RefNotReady` → look at the target's own `Ready` condition. If the message already quotes
-  one, the target is the broken object, not this one.
+- `RefNotReady` → the target has no `status.id` yet. Look at the target's own conditions; if
+  the message quotes one, the target is the object to look at, not this one.
+- `RefTargetFailed` → the target has an id for an object it no longer describes. The message
+  quotes the target's own reason. Fix the **target**; nothing here clears on a timer. Note what
+  this is *not*: a target that is merely unfinished — one at a `Report` endpoint, or waiting on
+  its own reference — resolves and is [reported rather than
+  blocked](#a-reference-needs-an-id-not-a-ready-target).
 - `RefNotFound` on a `name` → the CR does not exist. Check the namespace: it defaults to the
   referrer's, not to the one the catalogue lives in.
 - `RefNotFound` on a `slug`, `lookup` or `id` → NetBox does not hold it. Nothing will
@@ -596,16 +751,23 @@ test — if the two disagree, that test fails.
 `scope` on a scoped kind is one spec field that writes two NetBox columns and may point at
 any of four Kinds. It is still a reference — same resolver, same modes, same grant check,
 same watches — but it is declared on the `Descriptor`'s `GenericFKs` rather than in `Fields`,
-because a `Field` maps one spec name to one API name. See [scopes.md](scopes.md).
+because a `Field` maps one spec name to one API name. See [generic-refs.md](generic-refs.md).
 
 ## How the descriptor sees a reference
 
 Per-kind facts are data, so a reference is a `Field` in the kind's
-[`Descriptor`](descriptor.md) with `Ref: true` and a `Target`:
+[`Descriptor`](descriptor.md) with a reference `Class` and a `Target`:
 
 ```go
-{Spec: "parentRef", API: "parent", Ref: true, Target: v1alpha1.RegionRef{}.TargetGVK()},
+{Spec: "parentRef",     API: "parent",         Class: registry.ClassRefOne,  Target: v1alpha1.RegionRef{}.TargetGVK()},
+{Spec: "importTargets", API: "import_targets", Class: registry.ClassRefMany, Target: v1alpha1.RouteTargetRef{}.TargetGVK()},
 ```
+
+The class carries the cardinality, and it carries it *once*: the same declaration is what
+[drift detection](drift.md) reads to compare the field as an order-independent id set. Before
+[NBO-088](https://github.com/ricardomolendijk/netbox-operator/issues/141) those were two
+declarations — a `Ref: true` bool and an entry in a separate `M2M` list — which could disagree
+with each other, and did not add up to a cardinality the resolver could dispatch on.
 
 `Target` is written as the alias's own answer rather than as a fresh GVK literal, so the
 alias stays the single source of truth for what it points at.
@@ -615,12 +777,17 @@ emitted by the generator, printed in a diff or linted — and none is needed, be
 engine already reads a spec through its JSON representation rather than through per-kind
 accessors. The target Kind is the only per-kind fact a resolver needs.
 
-A `Target` on a field that is not a `Ref` is rejected at manager start
-(`ErrTargetNotRef`): it is almost always a forgotten `Ref: true`, and left alone it
-produces a field the resolver ignores and the engine writes to NetBox verbatim.
+A `Target` on a field whose class is not a reference is rejected at manager start
+(`ErrTargetNotRef`): it is almost always a class left at `Value`, and left alone it produces a
+field the resolver ignores and the engine writes to NetBox verbatim.
 
-The converse — a `Ref` with no `Target` — is still not rejected at start, because a typed
-alias exists for six Kinds and a descriptor may legitimately declare a reference to a Kind
+A to-many reference in a natural key (`ErrToManyNaturalKey`) or as the `ContainmentRef`
+(`ErrContainmentToMany`) is rejected too. Both are places where exactly one object is
+required, and both fail *silently* if allowed through — a candidate reading a list is never
+applicable, so the object waits forever for an identity it cannot build.
+
+The converse — a reference with no `Target` — is still not rejected at start, because a typed
+alias exists for nine Kinds and a descriptor may legitimately declare a reference to a Kind
 that has none yet. The resolver reports such a field as `RefKindUnavailable`, with a message
 that says the descriptor names no target rather than blaming the manifest, and the object
 does not reach `Ready`. Turning the check into a boot failure waits for the aliases the

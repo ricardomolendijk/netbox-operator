@@ -28,16 +28,27 @@ field you wrote and the object it pointed at. The
 [table of reasons](../concepts/references.md#what-happens-when-it-does-not-resolve) says
 what each one means and what retries it.
 
-Two of them are worth restating here, because they are the two that look like the operator
+Three of them are worth restating here, because they are the ones that look like the operator
 being stuck when it is not:
 
 - **`RefNotReady`** — the target exists and has no NetBox id yet. Nothing is wrong with the
   object you are looking at. Go and read the target's own `Ready` condition; if the message
   above already quotes one, the target is the broken object.
+- **`RefTargetFailed`** — the target *has* an id, and its own `Ready` reason says that id is
+  for an object it no longer describes: a `Conflict`, an `AdoptOnly` that matched nothing, or a
+  spec NetBox rejected. Fix the target. A target that is merely unfinished — one at a
+  `driftMode: Report` endpoint, or one waiting on its own reference — is **not** this: it
+  resolves, and the referrer says so on this same condition
+  ("resolved, target not ready") while reaching `Ready` itself.
 - **`RefDenied`** — the reference crosses a namespace with no
   [`NetBoxRefGrant`](../reference/netboxrefgrant.md) permitting it. The message names the
   grant to create and the namespace to create it in, and writing it takes effect within a
   second — there is no resync to wait out.
+- **`RefTypeNotAllowed`** — a
+  [polymorphic reference](../reference/genericref.md) names a target its NetBox column will
+  not take. This one really is stuck, and deliberately: there is no retry, because no object
+  appearing anywhere makes an illegal target legal. The message names what you gave and what
+  the column accepts; fix the manifest and it clears on the next event.
 
 When every reference resolved, the same condition says so and names them
 (`reason=AllResolved`, `message="resolved parentRef, tenantRef"`), so the message is also
@@ -99,9 +110,9 @@ somebody to create the object in NetBox, and it will notice within a minute of t
 it.
 
 The other case with no event behind it is a target that exists and never becomes usable: the
-referrer sits at `RefNotReady` for as long as that lasts. That is deliberate — the fix is on
-the target, and polling would hide a stuck graph rather than reveal it. `RefsResolved` names
-the target; go there.
+referrer sits at `RefNotReady`, or at `RefTargetFailed`, for as long as that lasts. That is
+deliberate — the fix is on the target, and polling would hide a stuck graph rather than reveal
+it. `RefsResolved` names the target; go there.
 
 ## Related
 

@@ -119,6 +119,21 @@ type (
 
 	// TenantRef points at a NetBoxTenant (tenancy.Tenant, tenancy/tenants).
 	TenantRef ObjectRef
+
+	// InterfaceRef points at a NetBoxInterface (dcim.Interface, dcim/interfaces).
+	//
+	// A member of IPAssignment (genericref.go). Declared before the Kind exists, which is
+	// deliberate: the alias is where the target Kind and therefore the `dcim.interface`
+	// object type is written down, and a union member the API accepts and silently drops
+	// would be worse than one that resolves to RefKindUnavailable and says so.
+	InterfaceRef ObjectRef
+
+	// VMInterfaceRef points at a NetBoxVMInterface (virtualization.VMInterface,
+	// virtualization/interfaces -- the endpoint is looked up, never pluralised).
+	VMInterfaceRef ObjectRef
+
+	// FHRPGroupRef points at a NetBoxFHRPGroup (ipam.FHRPGroup, ipam/fhrp-groups).
+	FHRPGroupRef ObjectRef
 )
 
 // TargetGVK reports the Kind this reference resolves against.
@@ -165,6 +180,30 @@ func (r TenantRef) TargetGVK() schema.GroupVersionKind {
 // AsObjectRef returns the underlying reference.
 func (r TenantRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
 
+// TargetGVK reports the Kind this reference resolves against.
+func (r InterfaceRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxInterface")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r InterfaceRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r VMInterfaceRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxVMInterface")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r VMInterfaceRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r FHRPGroupRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxFHRPGroup")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r FHRPGroupRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
 // Compile-time proof that every alias satisfies RefTarget. An alias that forgets its
 // methods fails the build here rather than at the first reconcile that needs it.
 var (
@@ -174,4 +213,7 @@ var (
 	_ RefTarget = SiteGroupRef{}
 	_ RefTarget = LocationRef{}
 	_ RefTarget = TenantRef{}
+	_ RefTarget = InterfaceRef{}
+	_ RefTarget = VMInterfaceRef{}
+	_ RefTarget = FHRPGroupRef{}
 )

@@ -45,10 +45,10 @@ func ScopeFK(spec string) GenericFKSpec {
 		// something while they are stated independently.
 		AllowedTypes: []string{"dcim.region", "dcim.sitegroup", "dcim.site", "dcim.location"},
 		Members: []GenericFKMember{
-			{Field: "regionRef", Target: netboxv1alpha1.RegionRef{}.TargetGVK()},
-			{Field: "siteGroupRef", Target: netboxv1alpha1.SiteGroupRef{}.TargetGVK()},
-			{Field: "siteRef", Target: netboxv1alpha1.SiteRef{}.TargetGVK()},
-			{Field: "locationRef", Target: netboxv1alpha1.LocationRef{}.TargetGVK()},
+			{Spec: "regionRef", Target: netboxv1alpha1.RegionRef{}.TargetGVK()},
+			{Spec: "siteGroupRef", Target: netboxv1alpha1.SiteGroupRef{}.TargetGVK()},
+			{Spec: "siteRef", Target: netboxv1alpha1.SiteRef{}.TargetGVK()},
+			{Spec: "locationRef", Target: netboxv1alpha1.LocationRef{}.TargetGVK()},
 		},
 		Cached: ScopeCacheColumns(),
 	}

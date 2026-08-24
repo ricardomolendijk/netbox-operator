@@ -52,6 +52,37 @@ engine: the missing behaviour belongs in the `Descriptor` as data, not in the en
 as a branch. **There is no `switch` on kind anywhere in the reconcile path** — that
 switch is the specific smell this rule exists to prevent.
 
+### Optional spec fields have three states, not two
+
+An optional field can be **absent** (leave NetBox's value alone), **empty** (clear
+NetBox's value) or **set**. The engine tells absent from empty by reading
+`metadata.managedFields`, not by looking at the Go value, so writing a kind needs
+nothing but two conventions:
+
+- **Keep `omitempty`.** Taking it off makes a typed Go client marshal every unset
+  string as `""` and claim it, so adopting a pre-existing NetBox object would wipe
+  every value the user had not restated. That is the inverse of the bug, and worse.
+- **Document the empty state on any field that has one.** One sentence in the field's
+  doc comment, because that comment is what `kubectl explain` prints:
+
+  ```go
+  // Description is free text shown next to the tag.
+  //
+  // Omit it to leave NetBox's own value alone; set it to `""` to clear the value in
+  // NetBox. The two are different intents and the operator can tell them apart
+  // (docs/concepts/field-ownership.md).
+  ```
+
+  Leave the sentence off a field that has no third state: one that is required, one
+  with a `+kubebuilder:default` so it is never absent, or one whose validation
+  rejects the empty value. `TestClearableFieldsDocumentBothStatesInTheSchema` checks
+  both directions against the generated CRDs — a field that documents an empty state
+  its own schema forbids fails, and so does an object kind that documents none at all.
+
+**"Spec omission means don't manage" is about your manifest, not about Go.** A field
+you never wrote is unmanaged; a field you wrote as empty is managed and cleared. See
+[`docs/concepts/field-ownership.md`](docs/concepts/field-ownership.md).
+
 ### Core logic lives in one place
 
 - `internal/reconciler` — the only place a create/adopt/update/delete decision is made.

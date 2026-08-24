@@ -31,7 +31,21 @@ var (
 	// populator's ordering problem is solved by treating "not yet" as normal and letting an
 	// event wake the referrer up, so nothing here backs off and nothing here is logged as an
 	// error.
+	//
+	// Deliberately *not* "a target that is not Ready". A missing id is the case that genuinely
+	// has to wait; a target that holds an id and is merely unfinished resolves, because an id
+	// is only written once the object provably exists in NetBox and that is the whole claim a
+	// referrer needs (NBO-089).
 	ErrRefNotReady = errors.New("not ready")
+
+	// ErrRefTargetFailed is a target that holds an id the referrer must not use: its own Ready
+	// reason says the object it manages is not the object it now describes.
+	//
+	// Separate from ErrRefNotReady because the two are different promises to a reader. A wait
+	// ends by itself; this one ends when somebody edits the target, so it carries no timer and
+	// its reason points at the target rather than at the manifest in front of them. See
+	// targetFailures in resolver.go for which reasons are in it and why.
+	ErrRefTargetFailed = errors.New("target failed")
 
 	// ErrRefAmbiguous is a slug or lookup matching more than one NetBox object. Real rather
 	// than theoretical: `slug` is only globally unique on some models -- ipam.VLANGroup is
@@ -87,6 +101,17 @@ var (
 	// distinguishable at the API level too (#121), and "clear this foreign key" will be an
 	// explicit instruction rather than an empty reference read as one.
 	ErrRefMalformed = errors.New("no mode set")
+
+	// ErrRefTypeNotAllowed is a polymorphic reference naming a target its column will not
+	// take: a union member the Descriptor does not declare, or one whose object type is
+	// outside the pair's AllowedTypes.
+	//
+	// Terminal, and deliberately not ErrRefNotFound. Nothing that happens in NetBox or in
+	// the cluster makes an illegal target legal, so retrying is burning the workqueue to
+	// re-derive the same refusal -- only an edit to the manifest, or to the Descriptor,
+	// clears it. The message therefore has to carry both halves: what was given, and what
+	// the column accepts.
+	ErrRefTypeNotAllowed = errors.New("target type not allowed")
 )
 
 // Requeue delays for the states that do not clear themselves.
@@ -209,6 +234,10 @@ func Classify(err error) Outcome {
 	switch {
 	case errors.Is(err, ErrRefNotReady):
 		return Outcome{Reason: netboxv1alpha1.ReasonRefNotReady}
+	case errors.Is(err, ErrRefTargetFailed):
+		// No timer, for the same reason a cycle gets none: only an edit to one of the objects
+		// involved changes the answer, and an edit arrives as a watch event.
+		return Outcome{Reason: netboxv1alpha1.ReasonRefTargetFailed}
 	case errors.Is(err, ErrRefNotFound):
 		return Outcome{Reason: netboxv1alpha1.ReasonRefNotFound, Requeue: notFoundRetry(refErr.Mode)}
 	case errors.Is(err, ErrRefAmbiguous):
@@ -224,6 +253,10 @@ func Classify(err error) Outcome {
 		return Outcome{Reason: netboxv1alpha1.ReasonRefDepthExceeded}
 	case errors.Is(err, ErrRefKindUnavailable):
 		return Outcome{Reason: netboxv1alpha1.ReasonRefKindUnavailable, Requeue: humanRetry}
+	case errors.Is(err, ErrRefTypeNotAllowed):
+		// No timer, for the same reason a cycle gets none: the verdict is a property of the
+		// manifest and the Descriptor, and an edit to either arrives as a watch event.
+		return Outcome{Reason: netboxv1alpha1.ReasonRefTypeNotAllowed}
 	default:
 		return Outcome{Reason: netboxv1alpha1.ReasonInvalid}
 	}
@@ -269,6 +302,11 @@ func (req Request) blockedTarget(cause error, key types.NamespacedName, detail s
 // notReady is the wait: the target is there and its NetBox id is not.
 func (req Request) notReady(key types.NamespacedName, detail string) *Error {
 	return req.blockedTarget(ErrRefNotReady, key, detail)
+}
+
+// targetFailed is the refusal: the target has an id and it is not the right one.
+func (req Request) targetFailed(key types.NamespacedName, detail string) *Error {
+	return req.blockedTarget(ErrRefTargetFailed, key, detail)
 }
 
 // unavailableDetail says which half of "unavailable" this is: a descriptor that names no

@@ -1,6 +1,8 @@
 # 0003 — Ownership and references
 
 **Status:** Accepted · 2026-08-21
+**Amended:** 2026-08-24 — rule 5 added, settling whether inline child sugar belongs in
+`v1alpha1` at all ([#17](https://github.com/ricardomolendijk/netbox-operator/issues/17)).
 
 ## The two different relationships
 
@@ -97,12 +99,82 @@ parent instead. Any ref whose target's deletion cascades server-side belongs in 
 list for the same reason; the general rule is *server-side cascade implies an owner
 reference*, and the list is the enumeration of where that is true.
 
+**5. Inline child sugar is in `v1alpha1`, and every inline field is optional.**
+
+`NetBoxVirtualMachine` and `NetBoxDevice` carry inline lists that the controller
+materialises into real child CRs — a VM's `interfaces`, and each interface's
+`addresses`:
+
+```yaml
+kind: NetBoxVirtualMachine
+spec:
+  name: dns
+  interfaces:                       # sugar: materialises NetBoxVMInterface + NetBoxIPAddress
+    - name: eth0
+      addresses:
+        - address: 10.20.0.10/24
+          primary: true
+```
+
+Nothing is hidden by this. The children are ordinary CRs — they appear in
+`kubectl get netboxvminterface` and `kubectl get netboxipaddress`, they carry the
+controller owner reference from rule 3, and `kubectl delete` on the parent cascades
+through them natively. An inline address that says `fromPrefixRef` rather than a literal
+materialises a **claim** child, so there is still exactly one allocation code path
+([ADR-0004](0004-claims-first-allocation.md)).
+
+Two constraints are what make this a decision that can be walked back rather than a
+permanent part of the API:
+
+- **Every inline field is optional, and every core kind is fully usable standalone.**
+  Anything expressible inline is equally expressible as separate CRs wired together with
+  `parentRef`. No shape *requires* the sugar.
+- **Only materialised children are ever pruned, and a pre-existing CR is never
+  hijacked.** A materialised child carries the operator-generated marker of
+  [ADR-0005 §2](0005-gitops-coexistence.md#2-objects-the-operator-creates-are-labelled-as-not-gits);
+  pruning is limited to children carrying it. A hand-written CR that collides with an
+  inline entry is left alone and the **parent** reports `Conflict`.
+
+Together those mean the sugar can be deprecated in `v1beta1` without breaking anyone:
+removing an optional field that nobody set is a no-op, and children already materialised
+survive their parent losing its sugar, because the marker — not the parent's spec — is
+what identifies them.
+
+Not built yet; the materialisation ticket is NBO-032
+([#45](https://github.com/ricardomolendijk/netbox-operator/issues/45)), tracked in
+[object lifecycle](../concepts/object-lifecycle.md).
+
 ## Why not make the parent ref the *controller* reference
 
 An object can have only one controller reference. Giving it to `parentRef` would take
 it away from inline-child materialisation, which needs it to know which children it
 owns and may prune. Materialisation is the stronger claim — it created the object —
 so it wins, and containment settles for a non-controller reference that still drives GC.
+
+## Why inline sugar is in the API at all, given what it costs
+
+It is the ergonomics that were asked for: creating a VM CR also creates its interface and
+IP CRs, with owner references, so `kubectl delete` on the VM takes the whole set with it.
+For the common case that is strictly more convenient than hand-wiring three CRs, and
+because the children are real objects it costs no visibility.
+
+The costs are real and are accepted rather than disputed:
+
+- **Spec bloat on the core kinds.** Carried to its conclusion, `NetBoxDevice` grows
+  `interfaces`, `consolePorts`, `powerPorts`, `frontPorts`, `rearPorts`, `deviceBays`,
+  `moduleBays` and `inventoryItems` — eight inline lists, each a partial mirror of another
+  kind's spec, each having to stay in sync with it.
+- **Two ways to express the same thing**, which is two code paths, two sets of edge cases
+  (a hand-written child colliding with an inline one being the obvious one), and a docs
+  burden.
+- **Composition is arguably not the provider API's job** at all; it is what Helm,
+  Kustomize or a higher-level abstraction are for.
+
+The alternatives were keeping the core kinds strictly 1:1 with NetBox objects and putting
+composition either in a separate `CompositeVirtualMachine` kind or entirely in the
+templating layer. They were not taken, because the mitigations in rule 5 make the sugar
+removable at a version boundary — so shipping it in `v1alpha1` and finding it wrong is
+recoverable, which is the property that decided it.
 
 ## Deletion policy
 

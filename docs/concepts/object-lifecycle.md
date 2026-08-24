@@ -185,7 +185,9 @@ erroring. So "upstream barely changes" is true on average and dangerous in the t
 
 1. **Generate only the `Descriptor` data.** Endpoint path and object type from the endpoint
    map; `NaturalKeys` from `meta.constraints`; `ReadOnly` from the `_`-prefixed columns and
-   every `CounterCacheField`; `M2M` and `GenericFKs` from the field kinds. All of it is
+   every `CounterCacheField`; each field's `Class` (which is what `M2MFields()`,
+   `ObjectTypeListFields()` and `ArrayFields()` derive from) and `GenericFKs` from the field
+   kinds. All of it is
    already in `docs/netbox-schema.md`, produced by the extractor that exists
    (`hack/extract-netbox-schema.py`). This is the mechanical, high-volume,
    silently-wrong part.

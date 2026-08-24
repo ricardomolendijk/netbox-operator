@@ -58,7 +58,7 @@ func IndexValue(gvk schema.GroupVersionKind, namespace, name string) string {
 // silently absent turns every watch built on it into a reconcile that never happens.
 func AddIndexes(ctx context.Context, fi client.FieldIndexer, s *runtime.Scheme, ds []registry.Descriptor) error {
 	for _, d := range ds {
-		if len(refFields(d)) == 0 {
+		if len(refFields(d)) == 0 && len(d.GenericFKs) == 0 {
 			continue
 		}
 
@@ -82,26 +82,19 @@ func AddIndexes(ctx context.Context, fi client.FieldIndexer, s *runtime.Scheme, 
 // refFields are the reference fields of d that a Kubernetes event can ever arrive for: a
 // declared reference with a target Kind to watch.
 //
-// A Ref with no Target is left out because there is nothing to index it under. The resolver
-// reports such a field as RefKindUnavailable, which is a descriptor gap rather than a
+// A reference with no Target is left out because there is nothing to index it under. The
+// resolver reports such a field as RefKindUnavailable, which is a descriptor gap rather than a
 // manifest error, and it is not made better by an index key of `//ns/name`.
 //
-// A polymorphic reference contributes one entry per union member. They share the union's
-// spec name, which is right: only the Target is read from here -- by RefTargets, to know
-// what to watch -- and a NetBoxSite becoming Ready has to wake every object that could be
-// scoped to it, whichever member of the union names it.
+// Cardinality is not a distinction here. A to-many reference is watched exactly like a to-one
+// (NBO-088): each element gets its own index key, and the watch on the target Kind is the same
+// watch either way.
 func refFields(d registry.Descriptor) []registry.Field {
 	fields := make([]registry.Field, 0, len(d.Fields))
 
 	for _, field := range d.Fields {
-		if field.Ref && !field.Target.Empty() {
+		if field.Class.Ref() && !field.Target.Empty() {
 			fields = append(fields, field)
-		}
-	}
-
-	for _, generic := range d.GenericFKs {
-		for _, member := range generic.Members {
-			fields = append(fields, registry.Field{Spec: generic.Spec, Ref: true, Target: member.Target})
 		}
 	}
 
@@ -113,12 +106,29 @@ func refFields(d registry.Descriptor) []registry.Field {
 // Distinct, because a kind with three references into one catalogue Kind needs one watch on
 // it and not three: the map function behind the watch finds referrers through the index,
 // which does not care which field produced the key.
+//
+// The polymorphic pairs are in here too, and that is the point of them being here rather
+// than in a second mechanism: every legal target of a generic FK gets the same watch a typed
+// reference gets, so an IP address waiting on an interface converges on the interface
+// becoming Ready instead of on the endpoint's resync (#25).
 func RefTargets(d registry.Descriptor) []schema.GroupVersionKind {
+	return refTargets(registryLookup{}, d)
+}
+
+// refTargets is RefTargets against a given reverse index, so a test can supply one rather
+// than registering a kind into the package-level registry.
+func refTargets(lookup objectTypes, d registry.Descriptor) []schema.GroupVersionKind {
 	targets := make([]schema.GroupVersionKind, 0, len(d.Fields))
 
 	for _, field := range refFields(d) {
 		if !slices.Contains(targets, field.Target) {
 			targets = append(targets, field.Target)
+		}
+	}
+
+	for _, target := range genericTargets(lookup, d) {
+		if !slices.Contains(targets, target) {
+			targets = append(targets, target)
 		}
 	}
 
@@ -184,17 +194,35 @@ func nameRefTargets(obj client.Object, d registry.Descriptor) []RefNode {
 		return nil
 	}
 
+	// The union members come in as ordinary references. A polymorphic reference is indexed
+	// under the object it selected, exactly as a typed one is, so the watch registered for
+	// that Kind finds this object without knowing the reference was polymorphic at all.
+	generics, err := genericFKsOf(obj, d)
+	if err != nil {
+		return nil
+	}
+
+	refs = append(refs, genericMemberRefs(generics)...)
+
 	from := RefNode{GVK: d.GVK, Key: types.NamespacedName{
 		Namespace: obj.GetNamespace(), Name: obj.GetName(),
 	}}
 	targets := make([]RefNode, 0, len(refs))
 
-	for _, ref := range refs {
-		if modeOf(ref.ref) != ModeName || ref.field.Target.Empty() {
+	for _, declared := range refs {
+		if declared.field.Target.Empty() {
 			continue
 		}
 
-		targets = append(targets, targetNode(from, ref))
+		// One key per element, so a to-many reference is woken by any of the objects it points
+		// at rather than by the first one (NBO-088).
+		for _, element := range declared.elements() {
+			if modeOf(element.ref) != ModeName {
+				continue
+			}
+
+			targets = append(targets, targetNode(from, element))
+		}
 	}
 
 	return targets

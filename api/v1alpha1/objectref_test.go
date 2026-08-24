@@ -22,6 +22,9 @@ func TestRefAliasTargets(t *testing.T) {
 		{"siteGroup", SiteGroupRef{}, "NetBoxSiteGroup"},
 		{"location", LocationRef{}, "NetBoxLocation"},
 		{"tenant", TenantRef{}, "NetBoxTenant"},
+		{"interface", InterfaceRef{}, "NetBoxInterface"},
+		{"vmInterface", VMInterfaceRef{}, "NetBoxVMInterface"},
+		{"fhrpGroup", FHRPGroupRef{}, "NetBoxFHRPGroup"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := tc.ref.TargetGVK()

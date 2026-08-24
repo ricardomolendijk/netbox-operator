@@ -88,7 +88,7 @@ func newDeferral(d registry.Descriptor, state registry.SpecState, desired netbox
 // check exists to catch first.
 func writerOf(d registry.Descriptor, api string) (registry.Field, bool) {
 	for _, field := range d.Fields {
-		if field.Ref && field.API == api {
+		if field.Class.Ref() && field.API == api {
 			return field, true
 		}
 	}

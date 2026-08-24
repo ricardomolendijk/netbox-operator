@@ -65,15 +65,34 @@ var (
 	// on a kind that updates in place.
 	ErrRecreateOnWithoutRecreate = errors.New("recreateOn requires UpdateRecreate")
 
-	// ErrFieldClassConflict is returned for a field declared in two field classes.
-	ErrFieldClassConflict = errors.New("field is declared in two field classes")
-
 	// ErrEmptyField is returned for an empty entry in a field list.
 	ErrEmptyField = errors.New("empty field name")
 
 	// ErrInvalidGenericFK is returned for a generic-FK spec missing a column or its
 	// legal targets.
 	ErrInvalidGenericFK = errors.New("incomplete generic-FK spec")
+
+	// ErrInvalidGenericFKMember is returned for a union member with no CR spec field name,
+	// no target Kind, or a name a sibling member already claims.
+	ErrInvalidGenericFKMember = errors.New("malformed generic-FK union member")
+
+	// ErrMemberTypeNotAllowed is returned when a union member's target Kind is registered
+	// and its object type is not in the pair's AllowedTypes.
+	//
+	// The pair's two declarations -- the union members, which say what the CR accepts, and
+	// AllowedTypes, which says what NetBox accepts -- have to agree, and this is the check
+	// that makes a disagreement a boot failure rather than a condition on somebody's
+	// object. It can only run over registered Kinds: a member naming a Kind this build does
+	// not carry yet is checked the first time a manifest uses it (NBO-019).
+	//
+	// It is what stops `scope_type` from being written with a spelling NetBox rejects, or --
+	// worse -- one it accepts for a different model.
+	ErrMemberTypeNotAllowed = errors.New("union member's object type is not in allowedTypes")
+
+	// ErrDuplicateObjectType is returned when two descriptors claim one `app_label.model`
+	// string. It would make the reverse lookup ambiguous, and an ambiguous answer there is
+	// a generic FK resolved against the wrong Kind.
+	ErrDuplicateObjectType = errors.New("duplicate object type")
 
 	// ErrCachedNotReadOnly is returned for a denormalised column a generic FK declares
 	// that is not also in ReadOnly.
@@ -83,14 +102,6 @@ var (
 	// it, so a descriptor that treats it as writable produces a field the operator sends
 	// forever and NetBox drops every time.
 	ErrCachedNotReadOnly = errors.New("cached generic-FK column is not read-only")
-
-	// ErrGenericFKTypeMismatch is returned when a union member's target kind reports an
-	// object type the pair does not permit.
-	//
-	// Checked across the registry rather than on the descriptor, because the answer lives
-	// on the *target's* descriptor. It is what stops `scope_type` from being written with a
-	// spelling NetBox rejects, or -- worse -- one it accepts for a different model.
-	ErrGenericFKTypeMismatch = errors.New("union member's object type is not permitted by the pair")
 )
 
 // objectTypePattern is the Django ContentType spelling: `model` is lowercased and
@@ -147,6 +158,25 @@ type DeferredField struct {
 	Mode DeferMode
 }
 
+// GenericFKMember is one member of the union behind a polymorphic pair: the CR spec field
+// that selects it, and the Kind it resolves against.
+//
+// The Kind and not the `app_label.model` string. That string is written down exactly once,
+// on the target's own Descriptor.ObjectType, and read from there -- so a member cannot point
+// at a type spelling no Kind actually has, which is a mistake NetBox answers with a silent
+// no-op rather than an error.
+type GenericFKMember struct {
+	// Spec is the union member's JSON field name, e.g. `interfaceRef`. It is what the
+	// resolver dispatches on: a table lookup keyed on the name the user wrote, never a
+	// switch on Kind.
+	Spec string
+
+	// Target is the Kind this member resolves against. Written as the matching typed
+	// alias's own answer, `v1alpha1.InterfaceRef{}.TargetGVK()`, so the alias stays the
+	// single source of truth for what it points at.
+	Target schema.GroupVersionKind
+}
+
 // GenericFKSpec describes one polymorphic foreign key: a `*_type` / `*_id` column pair
 // whose type half is written as an `app_label.model` string over the REST API
 // (docs/netbox-schema.md, generic-FK note).
@@ -167,16 +197,13 @@ type GenericFKSpec struct {
 	// a Field maps one spec name to one API name, and this reference has two.
 	Spec string
 
-	// Members are the union's own fields, each naming the Kind it resolves against. It is
-	// what turns the union from a shape the API server validates into one the resolver can
-	// dispatch on, and it is data so that a new member is a descriptor edit rather than a
-	// branch in internal/resolver.
+	// Members are the union's members: which CR spec field selects which Kind. It is the
+	// resolver's dispatch table, and the reason adding a legal target is a data change.
 	//
-	// Optional, like Field.Target and for the same reason: a pair whose legal targets have
-	// no CRD yet -- ipam.IPAddress.assigned_object points at interfaces and FHRP groups --
-	// would otherwise have to name GVKs nobody has built. A pair with no members resolves
-	// to nothing and is reported unresolved, which is what the engine did before this
-	// existed.
+	// Separate from AllowedTypes rather than derived from it, because the two say different
+	// things and both are load-bearing: AllowedTypes is what NetBox will accept in the
+	// `*_type` column, and Members is what this CRD offers a user. Validate cross-checks
+	// them, so a member the API accepts and NetBox would reject cannot ship.
 	Members []GenericFKMember
 
 	// Cached are the read-only denormalised columns NetBox maintains from this pair:
@@ -184,26 +211,35 @@ type GenericFKSpec struct {
 	// (docs/netbox-schema.md -> dcim.CachedScopeMixin). Each must also appear in
 	// Descriptor.ReadOnly, which Validate enforces.
 	//
-	// Declared per pair rather than as a constant because not every scoped model has them:
-	// ipam.VLANGroup declares `scope_type` / `scope_id` on the model itself and carries no
-	// caches at all.
+	// Declared per pair rather than as a constant because not every pair has them:
+	// ipam.IPAddress's `assigned_object` maintains no caches at all, and ipam.VLANGroup
+	// declares `scope_type` / `scope_id` on the model itself and carries none either.
 	Cached []string
 }
 
-// GenericFKMember is one arm of a polymorphic reference: the CR spec field, and the Kind it
-// points at.
-type GenericFKMember struct {
-	// Field is the union's own field name, which is its JSON name -- `siteRef`, not
-	// `scope.siteRef` and not `site`.
-	Field string
+// MemberFor returns the union member a CR spec field selects.
+//
+// A linear scan over a handful of entries, for the same reason FieldFor is one: the
+// alternative is a map that has to be kept in step with the slice the M7 generator emits.
+func (g GenericFKSpec) MemberFor(spec string) (GenericFKMember, bool) {
+	for _, member := range g.Members {
+		if member.Spec == spec {
+			return member, true
+		}
+	}
 
-	// Target is the Kind this member resolves against. The object type written to the
-	// pair's type column is that Kind's own Descriptor.ObjectType, never a string repeated
-	// here, so `dcim.sitegroup` is spelled once in the codebase.
-	//
-	// Write it as the matching typed alias's own answer,
-	// `v1alpha1.SiteRef{}.TargetGVK()`.
-	Target schema.GroupVersionKind
+	return GenericFKMember{}, false
+}
+
+// MemberSpecs are the union's member field names, in declaration order. It is what the
+// "what is allowed" half of a rejection message names.
+func (g GenericFKSpec) MemberSpecs() []string {
+	specs := make([]string, 0, len(g.Members))
+	for _, member := range g.Members {
+		specs = append(specs, member.Spec)
+	}
+
+	return specs
 }
 
 // Descriptor is everything the engine needs to reconcile one kind, as data.
@@ -256,23 +292,6 @@ type Descriptor struct {
 	// (docs/netbox-schema.md preamble). Writing one silently no-ops, which is a PATCH
 	// loop rather than an error.
 	ReadOnly []string
-
-	// M2M are many-to-many fields written as a list of NetBox object IDs.
-	M2M []string
-
-	// Arrays are Postgres ArrayFields, whose order is data rather than incidental:
-	// ipam.VLANGroup.vid_ranges and ipam.Service.ports (docs/netbox-schema.md). They are
-	// a separate class from M2M because comparing them order-independently would miss a
-	// reordering the user asked for, and comparing an M2M order-sensitively would PATCH
-	// forever — NetBox does not preserve M2M order.
-	Arrays []string
-
-	// ObjectTypeLists are many-to-many fields onto contenttypes.ContentType, whose
-	// values are `app_label.model` strings rather than references to NetBox objects:
-	// extras.Tag.object_types is the first (docs/netbox-schema.md -> extras.Tag). They are
-	// a separate class from M2M because a resolver told to resolve them would look for
-	// CRs that cannot exist.
-	ObjectTypeLists []string
 
 	// GenericFKs are the polymorphic foreign keys on this kind.
 	GenericFKs []GenericFKSpec
@@ -439,15 +458,18 @@ func (d Descriptor) matchedByNaturalKey(apiField string) bool {
 	return false
 }
 
+// validateFieldSets checks the two lists of API names that are still declared rather than
+// derived.
+//
+// The comparison classes are no longer among them. M2M, object-type lists and arrays come
+// off Field.Class now (Descriptor.M2MFields and friends), so a field cannot be in two of
+// them and there is nothing left to cross-check: one declaration, one answer (NBO-088).
 func (d Descriptor) validateFieldSets() error {
 	lists := []struct {
 		name   string
 		fields []string
 	}{
 		{"readOnly", d.ReadOnly},
-		{"m2m", d.M2M},
-		{"objectTypeLists", d.ObjectTypeLists},
-		{"arrays", d.Arrays},
 		{"recreateOn", d.RecreateOn},
 	}
 
@@ -456,18 +478,6 @@ func (d Descriptor) validateFieldSets() error {
 	for _, list := range lists {
 		if slices.Contains(list.fields, "") {
 			errs = append(errs, fmt.Errorf("%w: %s", ErrEmptyField, list.name))
-		}
-	}
-
-	for _, field := range d.ObjectTypeLists {
-		if slices.Contains(d.M2M, field) {
-			errs = append(errs, fmt.Errorf("%w: %s is both m2m and objectTypeList", ErrFieldClassConflict, field))
-		}
-	}
-
-	for _, field := range d.Arrays {
-		if slices.Contains(d.M2M, field) || slices.Contains(d.ObjectTypeLists, field) {
-			errs = append(errs, fmt.Errorf("%w: %s is an array and a list of references", ErrFieldClassConflict, field))
 		}
 	}
 
@@ -490,35 +500,39 @@ func (d Descriptor) validateGenericFKs() error {
 			}
 		}
 
-		errs = append(errs, d.validateGenericFKMembers(generic), d.validateGenericFKCaches(generic))
+		errs = append(errs, validateGenericFKMembers(generic), d.validateGenericFKCaches(generic))
 	}
 
 	return errors.Join(errs...)
 }
 
-// validateGenericFKMembers checks the union's arms. A member with no target Kind cannot be
-// dispatched on, and a duplicate member field would make which Kind a spec value resolves
-// against depend on slice order.
-func (d Descriptor) validateGenericFKMembers(generic GenericFKSpec) error {
+// validateGenericFKMembers checks the union's dispatch table. A member with no name is
+// unreachable, a member with no target Kind cannot be resolved, and two members sharing a
+// name make dispatch pick whichever comes first.
+func validateGenericFKMembers(generic GenericFKSpec) error {
+	if len(generic.Members) == 0 {
+		return fmt.Errorf("%w: %s has no union members", ErrInvalidGenericFK, generic.TypeField)
+	}
+
 	errs := make([]error, 0, len(generic.Members))
 	seen := make(map[string]struct{}, len(generic.Members))
 
 	for _, member := range generic.Members {
-		// Keyed on Kind rather than on GVK.Empty(): a target carrying a group and a
-		// version and no Kind is not empty and is not resolvable either, and it is the
-		// shape a half-written member actually has.
-		if member.Field == "" || member.Target.Kind == "" {
-			errs = append(errs, fmt.Errorf("%w: member %+v of %s", ErrInvalidGenericFK, member, generic.Spec))
+		// Keyed on Kind rather than on GVK.Empty(): a target carrying a group and a version
+		// and no Kind is not empty and is not resolvable either, and it is the shape a
+		// half-written member actually has.
+		if member.Spec == "" || member.Target.Kind == "" {
+			errs = append(errs, fmt.Errorf("%w: %+v on %s", ErrInvalidGenericFKMember, member, generic.TypeField))
 
 			continue
 		}
 
-		if _, dup := seen[member.Field]; dup {
-			errs = append(errs, fmt.Errorf("%w: %s.%s is declared twice",
-				ErrInvalidGenericFK, generic.Spec, member.Field))
+		if _, dup := seen[member.Spec]; dup {
+			errs = append(errs, fmt.Errorf("%w: %s is declared twice on %s",
+				ErrInvalidGenericFKMember, member.Spec, generic.TypeField))
 		}
 
-		seen[member.Field] = struct{}{}
+		seen[member.Spec] = struct{}{}
 	}
 
 	return errors.Join(errs...)
@@ -561,14 +575,28 @@ func (d Descriptor) validateUpdates() error {
 type Registry struct {
 	// mu guards the state below. Get is called from every reconcile goroutine while Add
 	// is called from init(), and an invariant held only by documentation is not one.
-	mu         sync.RWMutex
-	byGVK      map[schema.GroupVersionKind]Descriptor
-	duplicates []schema.GroupVersionKind
+	mu    sync.RWMutex
+	byGVK map[schema.GroupVersionKind]Descriptor
+
+	// byObjectType is the reverse of Descriptor.ObjectType: the `app_label.model` string a
+	// generic FK writes, back to the Kind that answers for it.
+	//
+	// It exists because a polymorphic reference is declared in NetBox's vocabulary and
+	// watched in Kubernetes's. GenericFKSpec.AllowedTypes holds object-type strings, and
+	// without this there is no Kind behind one -- so a generic FK could not become a watch
+	// target and converged only on the referrer's resync (NBO-013, #25).
+	byObjectType map[string]schema.GroupVersionKind
+
+	duplicates     []schema.GroupVersionKind
+	duplicateTypes []string
 }
 
 // New returns an empty registry. Tests use it to stay off the package-level one.
 func New() *Registry {
-	return &Registry{byGVK: make(map[schema.GroupVersionKind]Descriptor)}
+	return &Registry{
+		byGVK:        make(map[schema.GroupVersionKind]Descriptor),
+		byObjectType: make(map[string]schema.GroupVersionKind),
+	}
 }
 
 // Add registers d. A GVK that is already registered is rejected and recorded, so the
@@ -584,9 +612,32 @@ func (r *Registry) Add(d Descriptor) error {
 		return fmt.Errorf("%w: %s", ErrDuplicateGVK, d.GVK)
 	}
 
+	if other, taken := r.byObjectType[d.ObjectType]; taken && d.ObjectType != "" {
+		r.duplicateTypes = append(r.duplicateTypes, d.ObjectType)
+
+		return fmt.Errorf("%w: %q is claimed by %s and %s", ErrDuplicateObjectType, d.ObjectType, other, d.GVK)
+	}
+
 	r.byGVK[d.GVK] = d
+	r.byObjectType[d.ObjectType] = d.GVK
 
 	return nil
+}
+
+// ByObjectType returns the descriptor that answers for an `app_label.model` string, which
+// is how a generic FK's declared target becomes a Kind to watch and a key to index.
+func (r *Registry) ByObjectType(objectType string) (Descriptor, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	gvk, ok := r.byObjectType[objectType]
+	if !ok {
+		return Descriptor{}, false
+	}
+
+	d, ok := r.byGVK[gvk]
+
+	return d, ok
 }
 
 // Get returns the descriptor for gvk.
@@ -616,10 +667,14 @@ func (r *Registry) Validate() error {
 	defer r.mu.RUnlock()
 
 	descriptors := r.list()
-	errs := make([]error, 0, len(descriptors)+len(r.duplicates))
+	errs := make([]error, 0, len(descriptors)+len(r.duplicates)+len(r.duplicateTypes))
 
 	for _, gvk := range r.duplicates {
 		errs = append(errs, fmt.Errorf("%w: %s", ErrDuplicateGVK, gvk))
+	}
+
+	for _, objectType := range r.duplicateTypes {
+		errs = append(errs, fmt.Errorf("%w: %q", ErrDuplicateObjectType, objectType))
 	}
 
 	for _, d := range descriptors {
@@ -629,19 +684,16 @@ func (r *Registry) Validate() error {
 	return errors.Join(errs...)
 }
 
-// validateUnionTypes checks each union member's target kind against the object types its
-// pair permits.
+// validateUnionTypes checks every union member whose Kind this build carries against the
+// pair's AllowedTypes.
 //
-// Cross-descriptor, so it lives here rather than on Descriptor: the object type written to
-// `scope_type` comes off the *target's* descriptor, and AllowedTypes is the referring kind's
-// statement of what NetBox will accept there. A member whose target reports a type the pair
-// does not list is a descriptor bug that would otherwise surface as a 400 on the first write.
-//
-// A target with no descriptor is skipped rather than rejected. Declaring a member before its
-// Kind exists is the normal state through M2-M9 -- NetBoxSiteGroup and NetBoxLocation are
-// still to come -- and the resolver already reports such a member as RefKindUnavailable.
+// A registry-level check rather than a Descriptor one, because it needs the *target's*
+// descriptor to learn its object type -- which is exactly the property that keeps the
+// `app_label.model` spelling in one place. A member naming an unregistered Kind is passed
+// over here and reported at resolve time as RefKindUnavailable: the manifest is correct and
+// the fix is an operator upgrade, so it must not fail the boot of every other kind.
 func (r *Registry) validateUnionTypes(d Descriptor) error {
-	var errs []error
+	errs := make([]error, 0, len(d.GenericFKs))
 
 	for _, generic := range d.GenericFKs {
 		for _, member := range generic.Members {
@@ -650,8 +702,11 @@ func (r *Registry) validateUnionTypes(d Descriptor) error {
 				continue
 			}
 
-			errs = append(errs, fmt.Errorf("descriptor %s: %w: %s.%s -> %s is %q, permitted are %v",
-				d.GVK, ErrGenericFKTypeMismatch, generic.Spec, member.Field,
+			// The referring descriptor is named too: the member field alone does not say
+			// which kind declared it, and a boot failure has to point at the descriptor a
+			// human has to edit.
+			errs = append(errs, fmt.Errorf("descriptor %s: %w: %s.%s -> %s is %q, allowed are %v",
+				d.GVK, ErrMemberTypeNotAllowed, generic.Spec, member.Spec,
 				member.Target.Kind, target.ObjectType, generic.AllowedTypes))
 		}
 	}
@@ -689,6 +744,11 @@ func MustRegister(d Descriptor) {
 // Get returns the descriptor registered for gvk.
 func Get(gvk schema.GroupVersionKind) (Descriptor, bool) {
 	return defaultRegistry.Get(gvk)
+}
+
+// ByObjectType returns the descriptor registered for an `app_label.model` string.
+func ByObjectType(objectType string) (Descriptor, bool) {
+	return defaultRegistry.ByObjectType(objectType)
 }
 
 // List returns every registered descriptor, ordered by GVK.

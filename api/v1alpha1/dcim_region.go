@@ -38,12 +38,18 @@ type NetBoxRegionSpec struct {
 	// same key with a field omitted -- see docs/concepts/lookups.md on why a null filter
 	// is pinned.
 	//
-	// Declared, not resolved. Resolution is NBO-012; until then the engine reports the
-	// reference unresolved and leaves `parent` out of the payload.
+	// Resolved to a NetBox id before the payload is built. Until it resolves, the object
+	// reports RefsResolved=False naming this field, and `parent` is left out of the payload
+	// rather than sent as null. A change to the target re-enqueues this object directly, so
+	// applying parent and child in either order converges without waiting for a resync.
 	// +optional
 	ParentRef *RegionRef `json:"parentRef,omitempty"`
 
 	// Description is free text shown next to the region.
+	//
+	// Omit it to leave NetBox's own value alone; set it to `""` to clear the value in
+	// NetBox. The two are different intents and the operator can tell them apart
+	// (docs/concepts/field-ownership.md).
 	// +kubebuilder:validation:MaxLength=200
 	// +optional
 	Description string `json:"description,omitempty"`
