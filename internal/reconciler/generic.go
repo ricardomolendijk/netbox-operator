@@ -562,6 +562,11 @@ func (p *pass) create(ctx context.Context) (ctrl.Result, error) {
 func (p *pass) update(ctx context.Context, live netbox.Object) (ctrl.Result, error) {
 	p.live = live
 
+	// Before the stamp, which is about to overwrite the very fields the report reads: the
+	// claim on the live object is the other writer's, and the payload's is ours (NBO-047).
+	// Reporting and not refusing -- see conflict.go.
+	p.reportConflict(ctx, live)
+
 	// Before the comparison, and with the live object in hand: an adopted object gains the
 	// stamp here, and one that already carries it produces no change at all.
 	p.stamp(ctx, live)

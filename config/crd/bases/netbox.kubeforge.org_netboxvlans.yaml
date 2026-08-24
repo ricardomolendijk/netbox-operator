@@ -770,6 +770,56 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              conflict:
+                description: |-
+                  Conflict is the other writer this object's NetBox counterpart says it belongs to, when
+                  its stamp names one (NBO-047). The write went ahead regardless -- see
+                  ConditionConflict and docs/operations/multi-writer.md.
+                properties:
+                  clusterID:
+                    description: |-
+                      ClusterID is the other writer's cluster stamp, verbatim. Empty when the live object
+                      carries none, which is what an endpoint whose clusterField is switched off writes.
+                    type: string
+                  firstObserved:
+                    description: |-
+                      FirstObserved is when this claimant was first seen on this object. Preserved across
+                      reconciles for as long as the claimant does not change.
+                    format: date-time
+                    type: string
+                  observations:
+                    description: |-
+                      Observations is how many consecutive reconciles have found this same claimant. One is a
+                      flap -- a migration, a hand edit, a cluster mid-rebuild; a number that keeps climbing is
+                      two writers taking turns, and only the second is worth waking somebody for.
+
+                      Consecutive reconciles rather than a duration, because a reconcile is when the operator
+                      can observe anything at all: multiply by the endpoint's resyncPeriod for the wall-clock
+                      answer, or read firstObserved. It resets to one when the claimant changes, since a
+                      different writer is a different fight.
+                    format: int32
+                    type: integer
+                  owner:
+                    description: |-
+                      Owner is the other writer's CR, as `<lowercased kind>/<namespace>/<name>` -- the
+                      manifest to go and edit, in the same spelling `status.provenance` and the
+                      netbox.kubeforge.org/generated-by annotation use. Empty when the live object carries no
+                      owner stamp.
+
+                      It names a CR in *another* cluster when Reason is ForeignCluster, so it is a lead rather
+                      than a resolvable reference: nothing in this cluster can look it up, and that is the
+                      point -- otherwise the only record of the other writer would be in a cluster you may not
+                      have.
+                    type: string
+                  reason:
+                    description: |-
+                      Reason is ForeignCluster or ForeignOwner -- the same value as the Conflict condition's
+                      reason, repeated here so a single `-o jsonpath` over `status.conflict` is a complete
+                      answer.
+                    type: string
+                required:
+                - reason
+                type: object
               deferredPending:
                 description: |-
                   DeferredPending are the CR spec fields the engine has declared deferred and has not
