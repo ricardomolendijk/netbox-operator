@@ -30,6 +30,12 @@ func TestRefAliasTargets(t *testing.T) {
 		{"interface", InterfaceRef{}, "NetBoxInterface"},
 		{"vmInterface", VMInterfaceRef{}, "NetBoxVMInterface"},
 		{"fhrpGroup", FHRPGroupRef{}, "NetBoxFHRPGroup"},
+		{"device", DeviceRef{}, "NetBoxDevice"},
+		{"deviceType", DeviceTypeRef{}, "NetBoxDeviceType"},
+		{"deviceRole", DeviceRoleRef{}, "NetBoxDeviceRole"},
+		{"platform", PlatformRef{}, "NetBoxPlatform"},
+		{"cluster", ClusterRef{}, "NetBoxCluster"},
+		{"ipAddress", IPAddressRef{}, "NetBoxIPAddress"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := tc.ref.TargetGVK()
