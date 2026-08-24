@@ -344,6 +344,39 @@ findable by its `cf_k8s_allocation_identity`.
 increase(netbox_operator_allocations_retained_total[1d])
 ```
 
+### `netbox_operator_conflicts_total`
+
+| | |
+|---|---|
+| Type | counter |
+| Labels | `kind`, `reason` |
+| Cardinality | ~240 series worst case, and **no series at all** on a cluster with one writer |
+
+Reconciles that found another writer's provenance stamp on the NetBox object they were about to
+write to — another cluster's (`reason="ForeignCluster"`) or another CR's in this one
+(`reason="ForeignOwner"`) — and wrote to it anyway. The operator does not serialise writes
+between writers and will not
+([#18](https://github.com/ricardomolendijk/netbox-operator/issues/18)); this counter, the
+`Conflict` condition and `status.conflict` are the whole of what it does instead
+([multi-writer](multi-writer.md)).
+
+**Alert on a window, never on an instant**, and give it a `for:` of at least one resync period.
+A conflict during a rolling migration or a cluster rebuild is expected and transient, and an
+alert that fires on those is an alert that gets muted.
+
+```promql
+# Somebody must look: two writers are still taking turns over the same object.
+sum by (kind, reason) (increase(netbox_operator_conflicts_total[1h])) > 0
+```
+
+A counter rather than a gauge of "objects currently in conflict", deliberately: such a gauge
+has to be decremented when a conflict clears, only that object's own reconcile knows it
+cleared, and keeping it accurate therefore needs a series per object — a label carrying a
+namespace and a name, which is exactly what the cardinality rule below forbids. It is not
+labelled by the other writer's cluster id either: that value is read out of a NetBox custom
+field, so its cardinality is a third party's to decide. **Who** the other writer is lives on the
+object, in `status.conflict.owner` and `status.conflict.clusterID`.
+
 ### `netbox_operator_spec_ownership_untracked_total`
 
 | | |
@@ -486,6 +519,7 @@ are:
 | `method` | HTTP verbs the client uses | 4 |
 | `code` | A closed set, unexpected statuses collapsed to their class | 16 |
 | `field` | NetBox API column names, from a Descriptor's field map | tens per model |
+| `reason` | The `Conflict` condition's reasons, constants in `api/v1alpha1` | 2 |
 | `targetKind`, `referrerKind` | Kind names from a Descriptor, paired only where a field map declares a reference | a few hundred pairs |
 | `reason` | The sweep finding reasons in `api/v1alpha1` | 3 |
 | `operation` | The admission verbs the webhook registers | 2 |
@@ -558,6 +592,8 @@ Emitted by the engine when it writes, or when it refuses to.
 | `Conflict` | Warning | NetBox holds an object this CR cannot safely claim: more than one natural-key match, an unadoptable match, or a protected relation. |
 | `Invalid` | Warning | NetBox rejected the payload, or the spec cannot be rendered into one. |
 | `DriftDetected` | Normal | Drift was found on a `driftMode: Report` endpoint and deliberately left alone. The message is the same `field: old → new` diff, prefixed `report only: would have written …`. |
+| `Conflict` | Warning | *(also)* The live NetBox object carries another cluster's or another CR's provenance stamp. Names the claimant and the manifest to edit. Fires once per claimant; the write goes ahead regardless ([multi-writer](multi-writer.md)). |
+| `ConflictSustained` | Warning | The same claimant has been on the object for five consecutive reconciles — a two-writer fight rather than a flap. Fires exactly once, at the threshold. |
 
 On a `DryRun` endpoint the write's own reason is kept with a `dry run: would have written …`
 message, because the endpoint is rehearsing that write. `driftMode: Report` replaces it with

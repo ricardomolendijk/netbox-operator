@@ -208,7 +208,7 @@ there is nothing to report.
 | Feature | Without a stamp |
 |---|---|
 | `NetBoxSweep` (NBO-046) | Nothing to sweep. Every object looks like somebody else's, which is safe and useless |
-| Multi-writer conflicts (NBO-047) | Invisible. Two clusters reconciling one object just fight, and neither says so |
+| Multi-writer conflicts (NBO-047) | Invisible. Two clusters reconciling one object just fight, and neither says so ([multi-writer](multi-writer.md)) |
 | Allocation reclaim (ADR-0005 §3) | A claim **refuses to allocate at all**: `Reason=IdempotencyKeyUnavailable`, zero POSTs. Not a degraded mode — see above |
 | Adoption audit (NBO-006) | An adopted object records nothing about who took it over except in the CR's own `status` |
 
@@ -337,8 +337,11 @@ managing the same NetBox object will both keep correcting it towards their own s
 operator does not stop them. What the stamp buys is that the fight is **visible**: whichever
 cluster wrote last owns `k8s_cluster`, so a value that keeps changing is the symptom, and
 `k8s_owner` names the manifest on the other side. Writing over a foreign `k8s_cluster` also
-raises a `Conflict` condition naming the other writer, plus an Event — and then writes
-anyway. The condition is a warning, not a gate (NBO-047).
+raises a `Conflict` condition naming the other writer, records the claimant and how long it
+has been there in `status.conflict`, emits an Event, counts it in
+`netbox_operator_conflicts_total` — and then writes anyway. All four are a report, not a gate
+(NBO-047). [Two writers, one NetBox object](multi-writer.md) is the operator's side of it in
+full: the classification, what is deliberately *not* reported, and the runbook.
 
 **The operator will not serialise writes between clusters.** Decided, not deferred
 ([#18](https://github.com/ricardomolendijk/netbox-operator/issues/18)): making a foreign
@@ -357,8 +360,10 @@ So, in practice, if two clusters share a NetBox:
   interaction at all, as long as their manifests describe disjoint sets of NetBox objects.
   Overlap is the only thing that fights.
 - **Watch for overlap rather than assuming it away.** `?cf_k8s_cluster=prod-eu` lists what a
-  cluster claims; a `Conflict` condition or its Event is the per-object signal, and both are
-  worth an alert if you have deliberately arranged an overlap.
+  cluster claims; the `Conflict` condition and `status.conflict` are the per-object signal, and
+  `increase(netbox_operator_conflicts_total[1h]) > 0` is the cluster-wide one. Alert on a
+  window rather than an instant — a conflict during a migration is expected and transient
+  ([multi-writer](multi-writer.md#metrics-and-alerting)).
 - **Expect no winner.** Neither side backs off, and there is no field that makes one
   authoritative. The write rate is bounded by the shorter of the two resync periods, so the
   cost of leaving it running is API calls and a changelog full of flapping.
@@ -377,5 +382,7 @@ independent.
   `driftMode` does to a write
 - [The Descriptor](../concepts/descriptor.md) — where `Taggable` and `CustomFieldable` live,
   and why they are data rather than a list in the engine
+- [Two writers, one NetBox object](multi-writer.md) — the three supported multi-cluster
+  shapes, what the operator reports when two writers overlap, and what to do about it
 - [Drift detection](../concepts/drift.md) — why `tags` is compared as an unordered id set and
   `custom_fields` only on the keys the operator sets
