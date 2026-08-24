@@ -406,19 +406,6 @@ reader tell "reconciled and healthy" from "not yet looked at since the last edit
 it, `kubectl wait --for=condition=Ready` returns immediately on a stale `True` from
 before the spec change, and any automation built on that quietly does the wrong thing.
 
-**A standing failure is reported once.** Both the endpoint controller's `fail` and the
-engine's `stop` emit their `Warning` Event and their error-level log line only on the
-transition into a state — keyed on the condition's `status` and `reason`, never its
-message, since a timeout whose wording differs by a millisecond is not a state change —
-and log the repeats at debug instead. The condition is written on every pass regardless,
-because the condition *is* the standing state, and that is exactly why the Event does not
-need to repeat: a spec NetBox keeps rejecting would otherwise produce an Event and an
-error line every resync forever, and a flood of duplicate Events evicts the ones somebody
-needed. Metrics are the deliberate exception — `netbox_operator_reconcile_total` and
-`netbox_operator_endpoint_reconcile_total` count every pass, because they are counters of
-reconciles rather than of changes, and a `rate()` over them is how the retry rate of a
-stuck object is visible at all.
-
 **The three condition types** (`api/v1alpha1/netboxendpoint_types.go:8`–`:17`):
 
 | Type | Meaning | Set to `False` by |
@@ -456,6 +443,57 @@ payload marked suppressed and invents nothing
 (`internal/netbox/client.go:225`–`:236`). An empty `status.id` is the honest
 representation of "not created", and it is the state the create path is designed to
 recover from.
+
+### An Event or an error log on a repeating state is keyed on the transition
+
+**The rule, in one sentence: an Event or an error-level log line on a state a pass can find
+itself in twice is emitted only on the transition into that state, and the condition
+carries the standing state.** It is not a rule about failures. It follows from
+level-triggering: nothing distinguishes the first pass from the thousandth, so an
+announcement that is not keyed on a change is an announcement per object per resync
+period, forever.
+
+The condition is written on every pass regardless, because the condition *is* the standing
+state — and that is exactly why the announcement need not repeat. Anyone who wants the
+current state reads the condition; the Event and the error line say only that the state is
+new. Repeats drop to debug, so the detail is still there for whoever turns the verbosity
+up.
+
+Events are the expensive half. An Event is an API object: it costs etcd, it counts against
+the namespace's retention, and a duplicate every resync evicts the Events somebody was
+actually watching for. An error-level line is the same flood into a different sink, and it
+buries whatever is genuinely new.
+
+Metrics are the deliberate exception — `netbox_operator_reconcile_total`,
+`netbox_operator_endpoint_reconcile_total` and `netbox_operator_drift_detected_total` count
+every pass, because they are counters of reconciles rather than of changes, and a `rate()`
+over them is how the retry rate of a stuck object, or the size of standing drift, is
+visible at all. The asymmetry between an Event that fires once and a counter that keeps
+moving is correct; both sides carry a comment saying so, because it reads like an
+inconsistency to fix.
+
+Three places apply the rule, and what counts as a change differs in the third:
+
+| Site | Announced on a change in |
+|---|---|
+| `NetBoxEndpointReconciler.fail` / the Ready transition (NBO-010) | `Ready`'s `status` and `reason` |
+| `pass.stop`, every non-success exit of the engine (NBO-081) | `Ready`'s `status` and `reason` |
+| `pass.applyWrite`, the suppressed-write branch (NBO-087) | `Synced`'s `reason`, plus `DriftDetected`'s `message` |
+
+The condition's `message` is excluded from the first two on purpose — a timeout whose
+wording differs by a millisecond, or a NetBox body listing the same field errors in another
+order, is not a state change, and keying on it would re-fire on every retry. It is included
+in the third on purpose: there the message is the list of fields NetBox and the spec
+disagree on, so a second field edited in NetBox underneath the operator is new information
+about the same standing state. The test is whether the message *is* the state or merely a
+rendering of it.
+
+The third site is worth spelling out because it is not a failure at all. A `mode: DryRun`
+endpoint, or one whose `driftMode` is `Report`, writes nothing and therefore finds the same
+drift on every resync; the `Normal` Event saying what it would have written is a duplicate
+per object per interval for as long as the mode is left on. `Report` is designed to be left
+on for a week over an entire NetBox — maximum standing drift over maximum objects — so it
+is precisely where a per-resync Event does the most damage while looking least like a bug.
 
 ## What this page does not cover
 

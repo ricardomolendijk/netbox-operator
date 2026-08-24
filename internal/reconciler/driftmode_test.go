@@ -3,10 +3,12 @@ package reconciler
 import (
 	"context"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	ctrl "sigs.k8s.io/controller-runtime"
 
 	netboxv1alpha1 "github.com/ricardomolendijk/netbox-operator/api/v1alpha1"
 	"github.com/ricardomolendijk/netbox-operator/internal/metrics"
@@ -29,6 +31,14 @@ func TestDriftModes(t *testing.T) {
 		driftMode netboxv1alpha1.DriftMode
 		object    func() *fakeKind
 		client    func(t *testing.T) *fakeClient
+
+		// passes is how many times to reconcile the same object, zero meaning once. More
+		// than one is what makes a case say something about the resync rather than about
+		// the first pass: an endpoint that does not write finds the same drift forever, so
+		// the second pass is where a per-resync Event shows up (NBO-087). wantMethods and
+		// reconcile_total scale with it; the conditions are asserted after the last pass,
+		// since a repeat must leave them saying exactly what one pass did.
+		passes int
 
 		wantMethods   []string
 		wantSynced    string
@@ -87,6 +97,9 @@ func TestDriftModes(t *testing.T) {
 			client: func(t *testing.T) *fakeClient {
 				return &fakeClient{get: driftedTag(), dryRun: dryRunClient(t)}
 			},
+			// Twice, and one Event: Report is meant to be left running over a whole NetBox
+			// for a week, which is standing drift on every object at once.
+			passes:      2,
 			wantMethods: []string{"GET", "PATCH"},
 			wantSynced:  netboxv1alpha1.ReasonDriftReported,
 			// Not Ready, and deliberately so: NetBox does not match the spec and saying it
@@ -108,6 +121,7 @@ func TestDriftModes(t *testing.T) {
 			client: func(t *testing.T) *fakeClient {
 				return &fakeClient{get: driftedTag(), dryRun: dryRunClient(t)}
 			},
+			passes:       2,
 			wantMethods:  []string{"GET", "PATCH"},
 			wantSynced:   netboxv1alpha1.ReasonDriftDetectedDryRun,
 			wantReady:    metav1.ConditionFalse,
@@ -128,6 +142,7 @@ func TestDriftModes(t *testing.T) {
 			client: func(t *testing.T) *fakeClient {
 				return &fakeClient{dryRun: dryRunClient(t)}
 			},
+			passes:       2,
 			wantMethods:  []string{"GETONE", "POST"},
 			wantSynced:   netboxv1alpha1.ReasonDriftReported,
 			wantReady:    metav1.ConditionFalse,
@@ -214,13 +229,20 @@ func TestDriftModes(t *testing.T) {
 			corrected := watch(t, metrics.DriftCorrected, []string{fakeGVK.Kind, "color"})
 			reconciles := watch(t, metrics.ReconcileTotal, []string{fakeGVK.Kind, test.wantResult})
 
-			result, err := engine.Reconcile(context.Background(), obj)
-			if err != nil {
-				t.Fatalf("Reconcile() = %v", err)
+			passes := max(test.passes, 1)
+
+			var result ctrl.Result
+
+			for pass := range passes {
+				var err error
+				if result, err = engine.Reconcile(context.Background(), obj); err != nil {
+					t.Fatalf("Reconcile() pass %d = %v", pass+1, err)
+				}
 			}
 
-			if got := client.methods(); !slices.Equal(got, test.wantMethods) {
-				t.Errorf("netbox requests = %v, want %v", got, test.wantMethods)
+			wantMethods := slices.Repeat(test.wantMethods, passes)
+			if got := client.methods(); !slices.Equal(got, wantMethods) {
+				t.Errorf("netbox requests = %v, want %v", got, wantMethods)
 			}
 
 			if ready := conditionOf(obj, netboxv1alpha1.ConditionReady); ready.Status != test.wantReady ||
@@ -240,8 +262,12 @@ func TestDriftModes(t *testing.T) {
 					drift.Status, drift.Reason, test.wantDrift, test.wantDriftWhy)
 			}
 
+			// Over every pass, not per pass: an Event on a state that repeats has to be
+			// keyed on the transition into it, or `driftMode: Report` files one per object
+			// per resync forever and evicts what somebody was watching for (NBO-087).
 			if test.wantEvents != nil && !slices.Equal(events.events, test.wantEvents) {
-				t.Errorf("events = %v, want %v", events.events, test.wantEvents)
+				t.Errorf("events over %d passes = %v, want %v",
+					passes, events.events, test.wantEvents)
 			}
 
 			assertRequeue(t, result.RequeueAfter, test.wantRequeue)
@@ -249,8 +275,9 @@ func TestDriftModes(t *testing.T) {
 			// drift_detected_total moving while drift_corrected_total does not is the whole
 			// signal Report mode produces on a dashboard: without the gap, "reporting as
 			// configured" and "healthy" are the same shape.
-			if got := reconciles.delta(fakeGVK.Kind, test.wantResult); got != 1 {
-				t.Errorf("reconcile_total{result=%q} moved by %v, want 1", test.wantResult, got)
+			if got := reconciles.delta(fakeGVK.Kind, test.wantResult); got != float64(passes) {
+				t.Errorf("reconcile_total{result=%q} moved by %v, want %d",
+					test.wantResult, got, passes)
 			}
 
 			if moved := corrected.delta(fakeGVK.Kind, "color") > 0; moved != test.wantCorrected {
@@ -258,6 +285,88 @@ func TestDriftModes(t *testing.T) {
 					moved, test.wantCorrected)
 			}
 		})
+	}
+}
+
+// TestReportedDriftEventsOnChangeOnly is the three-pass probe behind NBO-087: an endpoint
+// that does not write finds the same drift on every resync, and an Event per resync is a
+// duplicate per object per interval for as long as `driftMode: Report` is left on -- which
+// is the mode meant to be left on over a whole NetBox for a week, so it is where the flood
+// evicts the most.
+//
+// Three passes rather than two, because "say it once" is only half the requirement: drift
+// that *changes* is new information and has to be said again. Nothing else moves between
+// the passes -- same object, same spec, same endpoint -- so the third Event can only come
+// from the drift itself having changed.
+func TestReportedDriftEventsOnChangeOnly(t *testing.T) {
+	client := &fakeClient{get: driftedTag(), dryRun: dryRunClient(t)}
+	events := &fakeRecorder{}
+	status := &fakeStatus{}
+	engine := &Engine{
+		Descriptors: fakeDescriptors{descriptor: fakeDescriptor(), registered: true},
+		Endpoints: fakeEndpoints{ready: true, endpoint: Endpoint{
+			Client:    client,
+			Resync:    testResync,
+			DriftMode: netboxv1alpha1.DriftReport,
+		}},
+		Status:     status,
+		Finalizers: &fakeFinalizers{},
+		Events:     events,
+		Scheme:     fakeScheme(t),
+	}
+
+	obj := adoptedObject()
+	detected := watch(t, metrics.DriftDetected, []string{fakeGVK.Kind, "color"})
+
+	reconcile := func(pass string, wantEvents int) {
+		t.Helper()
+
+		if _, err := engine.Reconcile(context.Background(), obj); err != nil {
+			t.Fatalf("Reconcile() %s = %v", pass, err)
+		}
+
+		if got := len(events.events); got != wantEvents {
+			t.Errorf("%s: %d events (%v), want %d", pass, got, events.events, wantEvents)
+		}
+
+		// Every pass, and that is the point of the pair: the condition is the standing
+		// state, which is exactly why the Event need not repeat.
+		if drift := conditionOf(obj, netboxv1alpha1.ConditionDriftDetected); drift.Status !=
+			metav1.ConditionTrue || drift.Reason != netboxv1alpha1.ReasonDriftDetected {
+			t.Errorf("%s: DriftDetected = %s/%s, want True/%s",
+				pass, drift.Status, drift.Reason, netboxv1alpha1.ReasonDriftDetected)
+		}
+	}
+
+	reconcile("first pass", 1)
+	reconcile("second pass on the same drift", 1)
+
+	// A human edits the same field again in NetBox. The Synced reason has not moved -- the
+	// endpoint is still declining to write for the same reason -- so only the drift itself
+	// distinguishes this pass, which is why the guard cannot key on the reason alone.
+	live := driftedTag()
+	live["color"] = "0000ff"
+	client.get = live
+
+	reconcile("third pass on changed drift", 2)
+
+	if drift := conditionOf(obj, netboxv1alpha1.ConditionDriftDetected); !strings.Contains(
+		drift.Message, "0000ff") {
+		t.Errorf("DriftDetected message = %q, want it to name the drift this pass found",
+			drift.Message)
+	}
+
+	// Counted on every pass, Event or no Event: drift_detected_total is a count of
+	// reconciles that found drift, not of Events, and a rate() over it is how standing
+	// drift is visible at all. Do not "fix" it to match the Event.
+	if got := detected.delta(fakeGVK.Kind, "color"); got != 3 {
+		t.Errorf("drift_detected_total{field=color} moved by %v over three passes, want 3", got)
+	}
+
+	// Two writes, not three: the middle pass changed nothing, and finish() writes nothing
+	// when nothing moved.
+	if status.writes != 2 {
+		t.Errorf("status writes = %d, want 2: the repeat pass changes nothing", status.writes)
 	}
 }
 

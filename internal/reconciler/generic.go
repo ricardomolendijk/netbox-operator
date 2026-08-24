@@ -490,15 +490,31 @@ func (p *pass) applyWrite(ctx context.Context, written netbox.Object, event, act
 
 	if netbox.Suppressed(written) {
 		out := p.suppression(event)
+		drift := p.uncorrected(detail)
 
 		// Debug, not info: a non-writing endpoint finds the same drift on every resync
 		// and writes nothing, so at info this is one identical line per object per resync
 		// forever. What changed is nothing; drift_detected_total and the DriftDetected
 		// condition are the signals that scale.
 		log.V(1).Info(out.what + ": netbox was not written")
-		p.engine.event(p.obj, out.event, "%s: would have written %s (%s)", out.what, p.desc.Endpoint, detail)
+
+		// On the transition only, for the reason the log line above was demoted -- an
+		// Event is the more expensive of the two, since it is an API object that costs
+		// etcd and evicts the Events somebody was watching for. driftMode: Report is meant
+		// to be left running for a week over a whole NetBox, which is standing drift on
+		// every object at once, so this is the path where a per-resync Event does the most
+		// damage (NBO-087).
+		if p.newDrift(out.synced, drift) {
+			p.engine.event(p.obj, out.event, "%s: would have written %s (%s)",
+				out.what, p.desc.Endpoint, detail)
+		}
+
+		// Both unguarded, and deliberately: the conditions are the standing state, which
+		// is precisely why the Event need not repeat, and p.result feeds reconcile_total,
+		// a count of reconciles rather than of changes. Do not "fix" either to match the
+		// Event.
 		p.condition(netboxv1alpha1.ConditionSynced, false, out.synced, out.why)
-		p.driftCondition(true, netboxv1alpha1.ReasonDriftDetected, p.uncorrected(detail))
+		p.driftCondition(true, netboxv1alpha1.ReasonDriftDetected, drift)
 		p.result = out.result
 
 		return p.pending(ctx, out.ready,

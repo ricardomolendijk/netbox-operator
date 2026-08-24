@@ -331,8 +331,17 @@ message, because the endpoint is rehearsing that write. `driftMode: Report` repl
 `DriftDetected` instead: "updated" and "would have updated" must not read alike in
 `kubectl describe`. Normal rather than Warning in both cases — nothing has malfunctioned, and
 a Warning per object per resync would make the mode unusable in the adoption week it exists
-for. Kubernetes aggregates repeats of an identical Event into a count
-(`DriftDetected (x27)`) rather than a new line each resync.
+for.
+
+Both fire **only when the reported drift is new**: the first pass that finds it, and any
+later pass on which it changes. A non-writing endpoint finds the same drift on every resync
+and writes nothing, so an unguarded Event would be one duplicate per object per interval
+for as long as the mode is left on — and `driftMode: Report` is meant to be left on for a
+week over an entire NetBox. Relying on Kubernetes to aggregate identical Events into a count
+(`DriftDetected (x27)`) is not enough: aggregation still writes to etcd, still consumes the
+namespace's Event retention, and the standing state belongs in a condition either way. The
+`DriftDetected` condition and `drift_detected_total` are the signals that carry every pass
+(see [the transition rule](../concepts/reconciliation.md#an-event-or-an-error-log-on-a-repeating-state-is-keyed-on-the-transition)).
 
 There is deliberately **no** Event for a transient failure. A 500 or a timeout resolves on
 its own, and an Event for each one is noise at cluster scale — those show up in
