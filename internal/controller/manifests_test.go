@@ -25,6 +25,7 @@ var shippedManifests = []string{
 	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxprefixclaim.yaml"),
 	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxiprangeclaim.yaml"),
 	filepath.Join("..", "..", "docs", "examples", "tag.yaml"),
+	filepath.Join("..", "..", "docs", "examples", "contacts.yaml"),
 }
 
 // TestShippedManifestsAreAccepted applies every sample and example against the real CRDs.
@@ -97,10 +98,19 @@ const triStateNote = "Omit it to leave NetBox's own value alone"
 // changes nothing in NetBox, and its two `mark*` booleans are tri-state through a pointer
 // rather than through an empty string -- there is no empty value for a boolean to document.
 // The fields a NetBox range actually has live on NetBoxIPRange, which does carry the note.
+//
+// A contact assignment is a join object: `objectRef`, `contactRef` and `roleRef` are the whole
+// of its identity and all three are required, so the only optional field it has is `priority`
+// -- and that one is an enum. `""` is a member of the enum, because NetBox's column is
+// blank-able, so the field genuinely is clearable; what it cannot carry is the note, since
+// forbidsEmptyValue treats any `enum` as validation that rejects the empty value. The
+// statement lives on the ContactPriority type instead
+// (api/v1alpha1/tenancy_contactassignment.go, docs/reference/netboxcontactassignment.md).
 var noClearableFields = map[string]bool{
-	"netbox.kubeforge.org_netboxipaddressclaims.yaml": true,
-	"netbox.kubeforge.org_netboxprefixclaims.yaml":    true,
-	"netbox.kubeforge.org_netboxiprangeclaims.yaml":   true,
+	"netbox.kubeforge.org_netboxipaddressclaims.yaml":    true,
+	"netbox.kubeforge.org_netboxprefixclaims.yaml":       true,
+	"netbox.kubeforge.org_netboxiprangeclaims.yaml":      true,
+	"netbox.kubeforge.org_netboxcontactassignments.yaml": true,
 }
 
 // TestClearableFieldsDocumentBothStatesInTheSchema is NBO-079's third acceptance criterion:
