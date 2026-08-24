@@ -17,6 +17,11 @@ ever sees it.
 > **cycle detection over the whole graph** (NBO-016) are both built — see
 > [Crossing a namespace](#crossing-a-namespace) and [Cycles](#cycles). What is still missing on the cycle side is the
 > engine's half: a `RefCycle` Event, and a `refs_unresolved` metric to alert on.
+>
+> **To-many references** (NBO-088) and **resolving on an id rather than on the target's
+> readiness** (NBO-089) are both built — see
+> [To-one and to-many](#to-one-and-to-many) and
+> [A reference needs an id](#a-reference-needs-an-id-not-a-ready-target).
 
 ## What a reference is
 
@@ -207,10 +212,12 @@ An event on a target is admitted when, and only when:
 | A spec edit on the *target* | **no** | A referrer resolves off the target's id, not off its description. |
 | Generic | no | It carries no before-and-after to compare. |
 
-Both halves of the pair are watched — the id *and* `Ready` — because
-[#142](https://github.com/ricardomolendijk/netbox-operator/issues/142) is open on which of
-them a reference should require. Whichever way that lands, the transition that matters is
-already the one that wakes the referrer.
+Both halves of the pair are watched — the id *and* `Ready` — and
+[#142](https://github.com/ricardomolendijk/netbox-operator/issues/142) is why both are still
+needed now that it has landed. A reference requires an **id**, so `status.id` appearing is the
+transition most referrers are waiting for. But a `Ready` change can move a target between
+[refusing and reporting](#a-reference-needs-an-id-not-a-ready-target) — a `Conflict` cleared,
+or a spec NetBox stops rejecting — and that changes what the same id resolves to.
 
 ### A grant is an event too
 
@@ -229,9 +236,11 @@ changing or going away is noticed on the retry interval in the table above, and 
 else. That is the standing cost of not using a CR reference.
 
 **A target that exists and never becomes usable produces no event**, so a referrer waiting
-on one sits at `RefNotReady` indefinitely. That is intended: the fix is on the target, and a
-poll would hide a stuck graph rather than reveal it. `RefsResolved` on the referrer names
-the target, and the target's own `Ready` condition says what is wrong with it.
+on one sits at `RefNotReady` — or at `RefTargetFailed` — indefinitely. That is intended: the
+fix is on the target, and a poll would hide a stuck graph rather than reveal it.
+`RefsResolved` on the referrer names the target, and the target's own `Ready` condition says
+what is wrong with it. Note that "not usable" is narrower than "not `Ready`": a target that is
+merely unfinished resolves and is reported, so it is not in this category at all.
 
 ### Seeing it
 
@@ -326,7 +335,7 @@ for any reference that stops resolving.
 
 ## What happens when it does not resolve
 
-Every failure is one of seven causes. Each maps to exactly one `RefsResolved` reason and one
+Every failure is one of eight causes. Each maps to exactly one `RefsResolved` reason and one
 retry interval; `Ready` reports `WaitingForRef` for all of them, because that is the
 question a `kubectl wait` is asking.
 
@@ -334,6 +343,7 @@ question a `kubectl wait` is asking.
 |---|---|---|---|
 | Nothing to point at | `RefNotFound` | On the missing CR's creation; **1 min** for a missing NetBox object | A CR's creation is an event the operator receives. NetBox announces nothing, so a timer is the only thing that will notice. |
 | Target exists, has no id yet | `RefNotReady` | On the target's own event | The target's own reconcile is what changes this, and that reconcile's result is an event. |
+| Target has an id for an object it no longer describes | `RefTargetFailed` | On the target's own event | Somebody has to fix the **target**, and the fix arrives as an event on it. See [readiness](#a-reference-needs-an-id-not-a-ready-target). |
 | Several NetBox objects match | `RefAmbiguous` | **10 min** | Only a human can say which one was meant. |
 | Cross-namespace, no grant | `RefDenied` | On a grant event in the target namespace | Writing the grant is the fix, and writing it is what retries the reference. |
 | The references depend on each other | `RefCycle` | Only on a spec change | No order of reconciles resolves it. See [Cycles](#cycles). |
@@ -358,14 +368,86 @@ a minute is not held behind one that needs a human.
 
 `RefNotReady` is a state, not a failure. Nothing about it is logged as an error, no Event
 is emitted, and no backoff is applied: a graph applied in any order converges only if "the
-target does not exist yet" is normal. A target that is *failing* resolves to `RefNotReady`
-too — the referrer is genuinely just waiting — but the message quotes the target's own
-`Ready` reason, so the reader is sent to the object that is actually broken:
+target does not exist yet" is normal. It means one thing and one thing only — the target has
+**no `status.id`** — and the message quotes the target's own `Ready` reason where there is one
+to quote, so the reader is sent to the object that is actually holding things up:
 
 ```
 regionRef -> netboxregion/catalogue/emea: not ready
+  (the target has no status.id yet)
+```
+
+`RefTargetFailed` is the neighbouring case, and a different promise: the target *has* an id,
+and its own `Ready` reason says that id is for an object it no longer describes. Nothing
+clears it on a timer — somebody has to edit the target — so it gets none.
+
+```
+regionRef -> netboxregion/catalogue/emea: target failed
   (target Ready=False, Reason=Invalid: "slug must be unique")
 ```
+
+## A reference needs an id, not a `Ready` target
+
+**Decided** in [NBO-089](https://github.com/ricardomolendijk/netbox-operator/issues/142). The
+discriminator is the target's `Ready` **reason**, not its `Ready` **status**.
+
+### Why not readiness
+
+`Ready=False` is not one state. `driftMode: Report`
+([ADR-0005](../decisions/0005-gitops-coexistence.md)) makes it the **steady** state of every
+object at an endpoint, by design: drift is detected, reported, and never corrected, so the
+object never matches the spec and never reports that it does. `mode: DryRun` has the identical
+shape.
+
+Requiring readiness therefore meant that every object at a `Report` endpoint blocked every
+object referring to it, indefinitely — and `Report` is the mode meant to be left on for a week
+while an existing NetBox is adopted, which is exactly when a catalogue namespace holds the
+objects everything else points at. "Correct, and unusable for the case it exists for" was the
+honest description.
+
+`status.id` is only written once the object provably exists in NetBox. That is the whole claim
+a referrer needs in order to write its own payload: not *this object matches its spec*, but
+*this NetBox object exists and here is its id*.
+
+### What still refuses
+
+An id can be **stale** rather than merely uncorrected, and three target reasons are where that
+happens — the object the CR manages is not the object the CR now describes:
+
+| Target `Ready` reason | Referrer | Why |
+|---|---|---|
+| `Conflict` | **blocked** (`RefTargetFailed`) | NetBox holds an object matching the target's natural key that it may not claim, so any id it still carries came from a key it no longer has. |
+| `AdoptOnly` | **blocked** (`RefTargetFailed`) | `onConflict: AdoptOnly` and nothing matched — the same shape. |
+| `Invalid` | **blocked** (`RefTargetFailed`) | NetBox rejected the payload, so the object's fields are not what the target says, and referring to it propagates that. |
+| `ReportPending`, `DryRunPending` | resolves, reported | The id is right and the write was deliberately suppressed. |
+| `WaitingForRef`, `DeferredFieldPending` | resolves, reported | The id is right and a column is missing. Blocking here would cascade one unresolved leaf all the way up a chain. |
+| `APIError`, `WaitingForEndpoint`, `WaitingForKey` | resolves, reported | NetBox being unreachable says nothing about which object the id names. |
+| no `Ready` condition at all | resolves | Mid-write, or written by a build that reported none. The id is proven either way. |
+
+The **default is to proceed**, and the direction is deliberate. A block-list that misses a
+genuinely broken state lets one stale id through, reported on the referrer's own condition. An
+allow-list that misses a benign one reintroduces the cluster-wide stall this rule exists to
+end, and stays invisible until somebody runs `Report` in anger.
+
+A target with **no id** is `RefNotReady` regardless of its reason — including a `Conflict`,
+which is its ordinary shape: the engine refused to claim anything, so there is nothing to
+refuse a referrer over. That is the case that genuinely has to wait, and it is what
+`ErrRefNotReady` now means and only means.
+
+### Proceeding is not silence
+
+A reference that resolved against a target that is not `Ready` says so on the referrer's own
+`RefsResolved` — the condition somebody debugging is already reading. `RefsResolved` stays
+`True` and the referrer reaches `Ready`, because its own work is done:
+
+```
+{"type":"RefsResolved","status":"True","reason":"AllResolved",
+ "message":"resolved parentRef; parentRef -> catalogue/emea: resolved, target not ready
+            (target Ready=False, Reason=ReportPending: \"the endpoint's driftMode is Report, so nothing was sent\")"}
+```
+
+Without the note, a `Ready=True` object would be pointing at something unfinished with nothing
+anywhere saying so.
 
 ### An unresolved reference is created without, and reported
 
@@ -410,8 +492,13 @@ $ kubectl get netboxsite ams -o jsonpath='{.status.conditions[?(@.type=="RefsRes
 Read it right to left: the reason names the class of problem, the message names the field
 you wrote and the object it pointed at. From there:
 
-- `RefNotReady` → look at the target's own `Ready` condition. If the message already quotes
-  one, the target is the broken object, not this one.
+- `RefNotReady` → the target has no `status.id` yet. Look at the target's own conditions; if
+  the message quotes one, the target is the object to look at, not this one.
+- `RefTargetFailed` → the target has an id for an object it no longer describes. The message
+  quotes the target's own reason. Fix the **target**; nothing here clears on a timer. Note what
+  this is *not*: a target that is merely unfinished — one at a `Report` endpoint, or waiting on
+  its own reference — resolves and is [reported rather than
+  blocked](#a-reference-needs-an-id-not-a-ready-target).
 - `RefNotFound` on a `name` → the CR does not exist. Check the namespace: it defaults to the
   referrer's, not to the one the catalogue lives in.
 - `RefNotFound` on a `slug`, `lookup` or `id` → NetBox does not hold it. Nothing will

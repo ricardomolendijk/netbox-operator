@@ -6,6 +6,11 @@
 // field it came from, and `ErrRefNotReady` is a *state* rather than a failure: a graph
 // applied in any order converges only if "the target has not been created yet" is normal.
 //
+// A reference needs its target to hold an **id**, not to be `Ready`. Those are different
+// promises, and readiness is the wrong one: `driftMode: Report` makes `Ready=False` a steady
+// state by design, so requiring it blocked every object in an adoption namespace indefinitely
+// (NBO-089). See targetFailures for the small set of target states that do refuse.
+//
 // Resolve never writes, to NetBox or to Kubernetes. It is a read over the informer cache
 // plus, for the NetBox-side modes, one GET. That is what keeps it unit-testable with a fake
 // client and reusable by `nbctl plan` (NBO-038) and the admission webhook (NBO-044).
@@ -149,6 +154,16 @@ type Result struct {
 	// Target is the CR the id came from. Set for ModeName only -- the other three modes
 	// resolve against NetBox, where Kubernetes names do not exist.
 	Target types.NamespacedName
+
+	// TargetNotReady quotes the target's own Ready condition when the reference resolved
+	// against a target that is not Ready, and is empty otherwise.
+	//
+	// A resolved reference that still has something to say. Requiring readiness rather than
+	// an id made `driftMode: Report` unusable -- Report is Ready=False as a *steady state* by
+	// design, so every object in an adoption namespace blocked everything pointing at it, for
+	// the whole adoption (NBO-089). The referrer proceeds, and this is how it says so, on the
+	// condition somebody debugging is already reading.
+	TargetNotReady string
 }
 
 // Blocker is one reference that did not resolve, and what that means for the object.
@@ -515,13 +530,70 @@ func (r *Resolver) byName(ctx context.Context, req Request, target registry.Desc
 		return Result{}, req.notReady(key, "the target has no status.id yet")
 	}
 
-	if detail, waiting := notReadyDetail(live); waiting {
-		// Quoting the target's own reason is the whole point. Without it a human debugs the
-		// referrer for an hour before noticing the target is the broken one.
-		return Result{}, req.notReady(key, detail)
+	state, notReady := readinessOf(live)
+	if notReady && slices.Contains(targetFailures, state.reason) {
+		return Result{}, req.targetFailed(key, state.detail)
 	}
 
-	return Result{ID: id, ObjectType: target.ObjectType, Mode: ModeName, Target: key}, nil
+	result := Result{ID: id, ObjectType: target.ObjectType, Mode: ModeName, Target: key}
+	if notReady {
+		// Reported on the referrer rather than blocking it. Quoting the target's own words is
+		// the whole point either way: without them a human debugs the referrer for an hour
+		// before noticing the target is the unfinished one.
+		result.TargetNotReady = state.detail
+	}
+
+	return result, nil
+}
+
+// targetFailures are the target Ready reasons that stop a referrer from using the id the
+// target holds.
+//
+// The discriminator is the **reason**, not the status, and this list is the whole of the
+// decision NBO-089 asked for.
+//
+// `Ready=False` is not one state. NBO-065's `driftMode: Report` makes it the *steady* state of
+// every object at an endpoint by design -- drift is detected, reported and never corrected --
+// so requiring readiness meant every object in a Report namespace blocked everything pointing
+// at it, indefinitely. Report is the mode meant to run for a week over an existing NetBox
+// during an adoption, which is exactly when a catalogue namespace holds the objects everything
+// points at, so "correct but unusable" was the honest description. `mode: DryRun` has the
+// identical shape.
+//
+// An id, meanwhile, is only written once the object provably exists in NetBox, and that is the
+// entire claim a referrer needs in order to write its own payload.
+//
+// What survives of the counter-argument is that an id can be *stale* rather than merely
+// uncorrected, and these three are where that happens -- the object the CR manages is not the
+// object the CR now describes:
+//
+//   - Conflict: NetBox holds an object matching this CR's natural key that it may not claim,
+//     so an id it still carries came from a key it no longer has.
+//   - AdoptOnly: onConflict is AdoptOnly and nothing matched, which is the same shape.
+//   - Invalid: NetBox rejected the payload, so the object's fields are not what the CR says,
+//     and a referrer pointing at it propagates a state nobody asked for.
+//
+// Everything else -- ReportPending, DryRunPending, WaitingForRef, DeferredFieldPending,
+// APIError, WaitingForEndpoint, WaitingForKey -- is a target whose id is right and whose work
+// is unfinished, and the referrer proceeds while saying so.
+//
+// The default is therefore *proceed*, and that direction is deliberate. A block-list that
+// missed a genuinely broken state lets one stale id through, reported on the referrer's own
+// condition. An allow-list that missed a benign one reintroduces the cluster-wide stall this
+// list exists to end, and would stay invisible until somebody ran Report in anger.
+var targetFailures = []string{
+	netboxv1alpha1.ReasonConflict,
+	netboxv1alpha1.ReasonAdoptOnly,
+	netboxv1alpha1.ReasonInvalid,
+}
+
+// targetState is what a target CR's own Ready condition says about the id it holds.
+type targetState struct {
+	// reason is the target's Ready reason, and empty when it reports no Ready condition.
+	reason string
+
+	// detail is the condition quoted, for the referrer to carry verbatim.
+	detail string
 }
 
 // byQuery resolves a slug or a lookup against NetBox.
@@ -762,19 +834,19 @@ func (req Request) readFailure(key types.NamespacedName, err error) error {
 	}
 }
 
-// notReadyDetail reports whether the target's own Ready condition says to wait, and quotes
-// it if so.
+// readinessOf reads the target's own Ready condition, and reports whether it is anything
+// other than True.
 //
-// A target that is failing resolves to ErrRefNotReady like one that is merely young. There
-// is no separate reason for it: the referrer is genuinely just waiting, and a reason per
-// target-failure mode multiplies the vocabulary without adding information -- the message
-// carries the difference.
-func notReadyDetail(live *unstructured.Unstructured) (string, bool) {
+// It reports rather than decides. What a not-Ready target means for the referrer is
+// targetFailures' judgement, keyed on the reason this returns -- so the reading of the
+// condition and the policy over it are separable, and the policy is a list somebody can argue
+// with rather than a branch buried in a read.
+func readinessOf(live *unstructured.Unstructured) (targetState, bool) {
 	raw, found, err := unstructured.NestedSlice(live.Object, "status", "conditions")
 	if err != nil || !found {
 		// An id but no conditions at all: the object was written to NetBox by a build that
 		// reported no conditions, or the status is mid-write. The id is proven either way.
-		return "", false
+		return targetState{}, false
 	}
 
 	for _, entry := range raw {
@@ -784,12 +856,14 @@ func notReadyDetail(live *unstructured.Unstructured) (string, bool) {
 		}
 
 		if condition["status"] == string(metav1.ConditionTrue) {
-			return "", false
+			return targetState{}, false
 		}
 
-		return fmt.Sprintf("target Ready=%v, Reason=%v: %q",
-			condition["status"], condition["reason"], condition["message"]), true
+		reason, _ := condition["reason"].(string)
+
+		return targetState{reason: reason, detail: fmt.Sprintf("target Ready=%v, Reason=%v: %q",
+			condition["status"], condition["reason"], condition["message"])}, true
 	}
 
-	return "", false
+	return targetState{}, false
 }

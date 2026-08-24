@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 
 	netboxv1alpha1 "github.com/ricardomolendijk/netbox-operator/api/v1alpha1"
 	"github.com/ricardomolendijk/netbox-operator/internal/netbox"
@@ -151,5 +152,61 @@ func TestPartiallyResolvedToManyRefWritesNothing(t *testing.T) {
 	resolved := conditionOf(obj, netboxv1alpha1.ConditionRefsResolved)
 	if !strings.Contains(resolved.Message, "asnRefs") {
 		t.Errorf("RefsResolved message = %q, want it to name the field that did not resolve", resolved.Message)
+	}
+}
+
+// resolvedAgainstUnreadyTarget is a resolution that produced an id from a target that is not
+// Ready itself, which is what NBO-089 made possible: a reference needs its target to hold an
+// id, not to be Ready.
+func resolvedAgainstUnreadyTarget(field string, id int64, detail string) resolver.Resolution {
+	return resolver.Resolution{ByField: map[string]resolver.FieldRefs{
+		field: {{
+			ID: id, ObjectType: "dcim.region", Mode: resolver.ModeName,
+			Target:         types.NamespacedName{Namespace: "catalogue", Name: "emea"},
+			TargetNotReady: detail,
+		}},
+	}}
+}
+
+// TestUnreadyTargetIsReportedRatherThanWaitedFor is the engine half of NBO-089.
+//
+// The referrer reaches Ready and writes the id, because an id is the whole claim it needed --
+// and its RefsResolved message says the object behind that id is unfinished, quoting the
+// target's own condition. Both halves matter: without the first, `driftMode: Report` blocks
+// every referrer in the namespace indefinitely; without the second, a Ready object silently
+// points at something that is not.
+func TestUnreadyTargetIsReportedRatherThanWaitedFor(t *testing.T) {
+	obj := fakeObject()
+	obj.Spec.ParentRef = &fakeRef{Name: "emea"}
+
+	detail := `target Ready=False, Reason=ReportPending: "the endpoint's driftMode is Report"`
+	nb := &fakeClient{created: liveTag(7)}
+	engine := engineWith(t, fakeDescriptor(), nb,
+		&fakeRefs{resolution: resolvedAgainstUnreadyTarget("parentRef", 42, detail)})
+
+	if _, err := engine.Reconcile(context.Background(), obj); err != nil {
+		t.Fatalf("Reconcile() = %v", err)
+	}
+
+	if got := nb.lastPayload()["parent"]; got != int64(42) {
+		t.Errorf("payload[parent] = %v, want 42: the id resolved, so it is written", got)
+	}
+
+	ready := conditionOf(obj, netboxv1alpha1.ConditionReady)
+	if ready.Status != metav1.ConditionTrue || ready.Reason != netboxv1alpha1.ReasonSynced {
+		t.Errorf("Ready = %s/%s, want True/%s -- an unready target is not the referrer's wait",
+			ready.Status, ready.Reason, netboxv1alpha1.ReasonSynced)
+	}
+
+	resolved := conditionOf(obj, netboxv1alpha1.ConditionRefsResolved)
+	if resolved.Status != metav1.ConditionTrue || resolved.Reason != netboxv1alpha1.ReasonAllResolved {
+		t.Errorf("RefsResolved = %s/%s, want True/%s",
+			resolved.Status, resolved.Reason, netboxv1alpha1.ReasonAllResolved)
+	}
+
+	for _, want := range []string{"parentRef", "resolved, target not ready", "ReportPending"} {
+		if !strings.Contains(resolved.Message, want) {
+			t.Errorf("RefsResolved message = %q, want it to contain %q", resolved.Message, want)
+		}
 	}
 }

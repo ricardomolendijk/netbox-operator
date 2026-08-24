@@ -120,10 +120,12 @@ func TestResolve(t *testing.T) {
 			wantMessage: "the target has no status.id yet",
 		},
 		{
-			// A target that is failing is still just a wait for the referrer -- but the
-			// message has to quote the target's own reason, or a human debugs the referrer
-			// for an hour before noticing the target is the broken one.
-			name:     "name mode quotes a failing target's own reason",
+			// A target whose spec NetBox rejected holds an id for an object it no longer
+			// describes, so the referrer refuses it -- and quotes the target's own reason, or
+			// a human debugs the referrer for an hour before noticing the target is the broken
+			// one. Which target states refuse and which merely report is NBO-089's decision;
+			// see targetFailures.
+			name:     "name mode refuses a target whose spec was rejected",
 			field:    regionField(),
 			ref:      netboxv1alpha1.ObjectRef{Name: "emea"},
 			referrer: types.NamespacedName{Namespace: "team-a", Name: "ams"},
@@ -132,7 +134,7 @@ func TestResolve(t *testing.T) {
 				ready: metav1.ConditionFalse, reason: netboxv1alpha1.ReasonInvalid,
 				message: "slug must be unique",
 			}},
-			wantCause:   ErrRefNotReady,
+			wantCause:   ErrRefTargetFailed,
 			wantMessage: `target Ready=False, Reason=Invalid: "slug must be unique"`,
 		},
 		{

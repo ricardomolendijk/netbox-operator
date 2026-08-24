@@ -90,6 +90,7 @@ func (p *pass) resolveRefs(ctx context.Context, declared []string) error {
 	// Descriptor order rather than map order: the resolved list ends up in a condition
 	// message, and a message that reorders itself between passes is unreviewable.
 	resolved := make([]string, 0, len(resolution.ByField))
+	notes := make([]string, 0, len(resolution.ByField))
 
 	for _, field := range p.desc.Fields {
 		refs, ok := resolution.ByField[field.Spec]
@@ -99,19 +100,57 @@ func (p *pass) resolveRefs(ctx context.Context, declared []string) error {
 
 		p.applyRef(field, refs)
 		resolved = append(resolved, field.Spec)
+		notes = append(notes, unreadyTargets(field, refs)...)
 	}
 
 	if len(resolved) == len(declared) {
-		logf.FromContext(ctx).V(1).Info("resolved every reference", "action", "build", "refs", resolved)
+		logf.FromContext(ctx).V(1).Info("resolved every reference",
+			"action", "build", "refs", resolved, "unreadyTargets", notes)
 		p.condition(netboxv1alpha1.ConditionRefsResolved, true, netboxv1alpha1.ReasonAllResolved,
-			fmt.Sprintf("resolved %s", strings.Join(resolved, ", ")))
+			join(fmt.Sprintf("resolved %s", strings.Join(resolved, ", ")), notes))
 
 		return nil
 	}
 
-	p.reportUnresolved(ctx, resolution, declared, resolved)
+	p.reportUnresolved(ctx, resolution, declared, resolved, notes)
 
 	return nil
+}
+
+// unreadyTargets names the targets a resolved reference points at that are not Ready
+// themselves.
+//
+// Reported, not blocked, and that is NBO-089's decision: a reference needs its target to hold
+// an id, not to be Ready. `driftMode: Report` makes Ready=False the steady state of every
+// object at an endpoint by design, so blocking on it stalled every object pointing into an
+// adoption namespace for the length of the adoption. The resolver refuses only the target
+// states where the id is actually the wrong one (see resolver.targetFailures).
+//
+// It still has to be *said*, though. A referrer reporting Ready=True over an id whose object
+// is unfinished is exactly what somebody debugging needs told, and RefsResolved is the
+// condition they are already reading.
+func unreadyTargets(field registry.Field, refs resolver.FieldRefs) []string {
+	notes := make([]string, 0, len(refs))
+
+	for _, ref := range refs {
+		if ref.TargetNotReady == "" {
+			continue
+		}
+
+		notes = append(notes, fmt.Sprintf("%s -> %s: resolved, target not ready (%s)",
+			field.Spec, ref.Target, ref.TargetNotReady))
+	}
+
+	return notes
+}
+
+// join appends the notes to a message, and is the one place the separator is written.
+func join(message string, notes []string) string {
+	if len(notes) == 0 {
+		return message
+	}
+
+	return strings.Join(append([]string{message}, notes...), "; ")
 }
 
 // resolution runs the resolver, and reports nothing resolved when the engine has none.
@@ -185,7 +224,7 @@ func refValues(field registry.Field, refs resolver.FieldRefs) (payload, filterab
 // never saw is a generic foreign key, whose target is a union of Kinds rather than one and
 // whose dispatch is NBO-019.
 func (p *pass) reportUnresolved(
-	ctx context.Context, resolution resolver.Resolution, declared, resolved []string,
+	ctx context.Context, resolution resolver.Resolution, declared, resolved, notes []string,
 ) {
 	blocked := make([]string, 0, len(resolution.Blocked))
 	for _, blocker := range resolution.Blocked {
@@ -200,7 +239,7 @@ func (p *pass) reportUnresolved(
 		}
 	}
 
-	reason, message := resolution.Reason(), messageFor(resolution, dropped)
+	reason, message := resolution.Reason(), join(messageFor(resolution, dropped), notes)
 	if len(resolution.Blocked) == 0 {
 		reason = netboxv1alpha1.ReasonNotImplemented
 	}

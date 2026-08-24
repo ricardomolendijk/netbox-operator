@@ -163,6 +163,16 @@ const (
 	// does not read as a referrer that is broken.
 	ReasonRefNotReady = "RefNotReady"
 
+	// ReasonRefTargetFailed is on RefsResolved: the target CR holds a NetBox id and its own
+	// Ready reason says that id is for an object the target no longer describes -- a
+	// Conflict, an AdoptOnly that matched nothing, or a spec NetBox rejected.
+	//
+	// Distinct from ReasonRefNotReady, which is a wait an event ends. This one needs somebody
+	// to fix the *target*, so it carries no retry interval, and it exists because the
+	// alternative -- treating every Ready=False target as a wait -- made `driftMode: Report`
+	// block every object in its namespace indefinitely (NBO-089).
+	ReasonRefTargetFailed = "RefTargetFailed"
+
 	// ReasonRefAmbiguous is on RefsResolved: a slug or lookup matched several NetBox
 	// objects. The message names every id, because the next step is a human choosing
 	// between them.
