@@ -198,6 +198,7 @@ func classifyInvalid(err error, resync time.Duration) (outcome, bool) {
 	var ambiguous *netbox.AmbiguousError
 	var truncated *netbox.TruncatedError
 	var refused *refusedAdoption
+	var unclaimable *unclaimableDuplicate
 
 	conflict := outcome{
 		reason: netboxv1alpha1.ReasonConflict, requeue: resync,
@@ -209,7 +210,10 @@ func classifyInvalid(err error, resync time.Duration) (outcome, bool) {
 	}
 
 	switch {
-	case errors.As(err, &ambiguous), errors.As(err, &refused):
+	// A duplicate-bearing kind's own refusals (NBO-025) are the same category as an
+	// ambiguity: netbox holds objects this CR cannot safely claim, the matches are named, and
+	// only a change in netbox or in the spec clears it.
+	case errors.As(err, &ambiguous), errors.As(err, &refused), errors.As(err, &unclaimable):
 		return conflict, true
 	// A lookup that paginated past the page cap. Its own reason rather than Invalid or
 	// APIError: the engine wrote nothing because it could not tell whether the object exists
@@ -233,7 +237,8 @@ func classifyInvalid(err error, resync time.Duration) (outcome, bool) {
 	case errors.As(err, &validation):
 		return invalid, true
 	case errors.Is(err, errUnmappedField), errors.Is(err, errNoCustomFields),
-		errors.Is(err, errUnfilterable), errors.Is(err, errNoObjectID):
+		errors.Is(err, errUnfilterable), errors.Is(err, errNoObjectID),
+		errors.Is(err, errDuplicateNeedsProvenance):
 		return invalid, true
 	default:
 		return outcome{}, false

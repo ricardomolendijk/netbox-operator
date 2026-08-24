@@ -272,6 +272,12 @@ const (
 	//     immediately rather than never.
 	//   - The parent was written as a `slug`, a `lookup` or a raw `id`, so it names a NetBox
 	//     row and there is no CR for an owner reference to point at.
+	//   - The parent is a member of a polymorphic union that NetBox does not cascade from,
+	//     while a sibling member does: the cascade of a generic FK is declared per target
+	//     model, so a Kind can be deleted with one of its legal scopes and not with another
+	//     (#214). The owner reference is decided from the member the object actually
+	//     resolved through, so the same manifest with a different member of the same union
+	//     cascades.
 	ReasonCascadeUnavailable = "CascadeUnavailable"
 
 	// ReasonParentOwnershipDisabled is on ParentOwned: the object carries
@@ -432,7 +438,13 @@ type NetBoxObjectSpec struct {
 	// Read fresh on every pass rather than latched when deletion starts, so switching it
 	// to Retain on an object whose delete NetBox keeps refusing is a way out of that
 	// state (docs/concepts/deletion.md).
-	// +kubebuilder:default=Delete
+	//
+	// Left unset it is Delete for most kinds and Retain for the IPAM ones, where deleting
+	// the NetBox object destroys state rather than configuration -- an address freed for
+	// reallocation, a range whose ownership record is gone (decision #176). The default is
+	// therefore *not* a CRD marker: this field is declared once for every kind, so a marker
+	// here could only give them all the same answer. Each kind declares its own on its
+	// Descriptor and docs/concepts/deletion.md lists them.
 	// +optional
 	DeletionPolicy DeletionPolicy `json:"deletionPolicy,omitempty"`
 

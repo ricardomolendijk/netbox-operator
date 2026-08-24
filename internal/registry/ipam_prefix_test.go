@@ -126,13 +126,17 @@ func TestPrefixScopeIsTheSharedUnion(t *testing.T) {
 		t.Errorf("the scope pair is not prefixScopeFK():\n got %+v\nwant %+v", d.GenericFKs[0], want)
 	}
 
-	// The one field prefixScopeFK adds to the shared union, asserted on its own so that the
-	// DeepEqual above cannot pass with both sides false. Without it this kind has no
-	// containment parent at all: validateContainment refuses a ref that does not cascade
+	// The cascade prefixScopeFK adds to the shared union, asserted per member so that the
+	// DeepEqual above cannot pass with both sides unstated -- and per member because that is
+	// the shape of the fact (#214). Without it this kind has no containment parent at all:
+	// validateContainment refuses a ref where no member cascades
 	// (docs/decisions/0003-ownership-and-references.md rule 4).
-	if !d.GenericFKs[0].CascadeOnDelete {
-		t.Error("the scope pair does not declare CascadeOnDelete; every scope target declares " +
-			"a `prefixes` GenericRelation, so deleting one deletes the prefixes scoped to it")
+	for _, member := range d.GenericFKs[0].Members {
+		if member.CascadeOnDelete == nil || !*member.CascadeOnDelete {
+			t.Errorf("the scope member %s does not declare CascadeOnDelete; every scope target "+
+				"declares a `prefixes` GenericRelation, and dcim.CachedScopeMixin's `_site` and "+
+				"`_location` are CASCADE besides", member.Spec)
+		}
 	}
 }
 

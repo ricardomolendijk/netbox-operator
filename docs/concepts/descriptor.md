@@ -316,7 +316,12 @@ and the prefix goes" — and the gap shows up only as an object that refuses to 
 **Which** one it is, is not a per-kind judgement: it is whichever foreign key the *server*
 cascades. Each `Field` carries `CascadeOnDelete`, read straight off `on_delete` in
 `docs/netbox-schema.md`, and `Validate` rejects a `ContainmentRef` whose field has it false
-(`ErrContainmentNotCascade`). So `parentRef` for the nested-group kinds, `scopeRef` for
+(`ErrContainmentNotCascade`). On a polymorphic pair the flag is on each
+`GenericFKMember` instead, because a generic FK's cascade is stated per target model and one
+member of a union can cascade while its sibling does not: the boot check is that *some* member
+cascades, and the owner reference is decided per pass from the member the object resolved
+through ([#214](https://github.com/ricardomolendijk/netbox-operator/issues/214),
+`Descriptor.CascadesFrom`). So `parentRef` for the nested-group kinds, `scopeRef` for
 `NetBoxPrefix`, `assignedObject` for `NetBoxIPAddress` — and **none** for `NetBoxDevice`, whose
 `siteRef` reads like a container and is `on_delete=PROTECT`. Catalogue references contribute
 none either, so an empty `ContainmentRef` is the normal value for a catalogue kind.
@@ -470,11 +475,12 @@ by matching a message.
 | `ErrTargetNotRef` | a `Target` on a field whose class is not `RefOne` or `RefMany` |
 | `ErrToManyNaturalKey` | a natural-key candidate that matches on, or pins to null, a `RefMany` field |
 | `ErrContainmentToMany` | a `ContainmentRef` naming a `RefMany` field |
-| `ErrContainmentNotCascade` | a `ContainmentRef` naming a field with `CascadeOnDelete: false` — an owner reference on a `PROTECT`-ed foreign key promises a cascade NetBox refuses to perform |
+| `ErrContainmentNotCascade` | a `ContainmentRef` naming a field with `CascadeOnDelete: false`, or a polymorphic pair **no** member of which cascades — an owner reference on a `PROTECT`-ed foreign key promises a cascade NetBox refuses to perform |
 | `ErrCascadeNotRef` | `CascadeOnDelete` on a field whose class is not `RefOne` or `RefMany`; `on_delete` is a property of a foreign key |
 | `ErrEmptyField` | an empty string in `ReadOnly` or `RecreateOn`, a `Deferred` entry with no `APIField`, or an empty column in `GenericFKSpec.Cached` |
 | `ErrInvalidGenericFK` | a `GenericFKSpec` missing its `TypeField`, its `IDField`, its `AllowedTypes` or its `Members` |
 | `ErrInvalidGenericFKMember` | a `Members` entry with no `Spec` or no target `Kind`, or the same member `Spec` declared twice |
+| `ErrMemberCascadePartial` | a union stating `CascadeOnDelete` for some members and leaving the rest unstated. The flags are supplied per referring kind and cannot be defaulted, so a member left out is a typo — and it reads as "does not cascade", which is the direction that leaves a CR behind to resurrect a row NetBox deleted |
 | `ErrCachedNotReadOnly` | a `GenericFKSpec.Cached` column that is not also in `ReadOnly` |
 | `ErrMemberTypeNotAllowed` | a union member whose **registered** target Kind reports an `ObjectType` the pair's `AllowedTypes` does not list. Reported by `Registry.Validate`, since the answer lives on another descriptor; a target with no descriptor yet is skipped |
 | `ErrDuplicateObjectType` | two descriptors claiming one `app_label.model` string, which would make the `ObjectType` → GVK reverse index ambiguous |

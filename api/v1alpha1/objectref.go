@@ -263,6 +263,12 @@ type (
 	// ClusterTypeRef points at a NetBoxClusterType (virtualization.ClusterType,
 	// virtualization/cluster-types).
 	ClusterTypeRef ObjectRef
+	// IPAddressRef points at a NetBoxIPAddress (ipam.IPAddress, ipam/ip-addresses).
+	//
+	// The only self-referential alias on a non-tree model: `nat_inside` points at another
+	// address of the same kind (docs/netbox-schema.md -> ipam.IPAddress, `nat_inside
+	// ForeignKey -> ipam.IPAddress on_delete=SET_NULL`).
+	IPAddressRef ObjectRef
 )
 
 // TargetGVK reports the Kind this reference resolves against.
@@ -399,6 +405,14 @@ func (r ClusterTypeRef) TargetGVK() schema.GroupVersionKind {
 // AsObjectRef returns the underlying reference.
 func (r ClusterTypeRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
 
+// TargetGVK reports the Kind this reference resolves against.
+func (r IPAddressRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxIPAddress")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r IPAddressRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
 // Compile-time proof that every alias satisfies RefTarget. An alias that forgets its
 // methods fails the build here rather than at the first reconcile that needs it.
 var (
@@ -420,4 +434,6 @@ var (
 	_ RefTarget = ClusterRef{}
 	_ RefTarget = ClusterGroupRef{}
 	_ RefTarget = ClusterTypeRef{}
+	_ RefTarget = VRFRef{}
+	_ RefTarget = IPAddressRef{}
 )

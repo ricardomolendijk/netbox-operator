@@ -212,12 +212,14 @@ func TestTenantsWithDifferentSlugsDoNotAdoptEachOther(t *testing.T) {
 // what is special here: one to-one reference each, and nothing else. A class that stops
 // carrying its weight shows up as a failure rather than as dead data.
 func TestTenancyKindsNeedNoFieldClassesBeyondTheirReference(t *testing.T) {
-	for kind, ref := range map[string]string{
-		"NetBoxTenantGroup": "parent",
-		"NetBoxTenant":      "group",
+	for _, tc := range []struct {
+		kind, ref, containment string
+	}{
+		{kind: "NetBoxTenantGroup", ref: "parent", containment: "parentRef"},
+		{kind: "NetBoxTenant", ref: "group", containment: ""},
 	} {
-		t.Run(kind, func(t *testing.T) {
-			d, _ := Get(netboxv1alpha1.GroupVersion.WithKind(kind))
+		t.Run(tc.kind, func(t *testing.T) {
+			d, _ := Get(netboxv1alpha1.GroupVersion.WithKind(tc.kind))
 
 			if got := d.M2MFields(); len(got) != 0 {
 				t.Errorf("M2MFields() = %v, want none", got)
@@ -232,12 +234,25 @@ func TestTenancyKindsNeedNoFieldClassesBeyondTheirReference(t *testing.T) {
 				t.Errorf("GenericFKs = %v, want none", d.GenericFKs)
 			}
 
-			// A tenant is an attribute of an object, not its container, and neither of
-			// these kinds is contained by anything either
-			// (docs/decisions/0003-ownership-and-references.md rule 4).
-			if d.ContainmentRef != "" {
-				t.Errorf("ContainmentRef = %q, want empty: a catalogue kind has no container",
-					d.ContainmentRef)
+			// The two kinds diverge here, and the reason they do is worth stating
+			// because this test used to assert the opposite for both of them, on the
+			// grounds that they are catalogue kinds. That reasoning was wrong: the
+			// containment parent is whichever foreign key the *server* cascades
+			// (docs/decisions/0003-ownership-and-references.md rule 4), so how
+			// catalogue-like a Kind feels decides nothing.
+			//
+			// `tenancy.Tenant.group` is on_delete=SET_NULL, so deleting a group leaves
+			// its tenants standing with the column nulled: there is no server-side
+			// deletion for an owner reference to mirror, and setting one would delete a
+			// CR whose row is still there. `tenancy.TenantGroup.parent` is
+			// on_delete=CASCADE, so a child group *is* contained by its parent however
+			// much the Kind reads like a catalogue, and #203 is what leaving it
+			// undeclared cost: its one natural-key candidate is `slug` alone and never
+			// reads `parent`, so a child whose parent cascaded away still had an
+			// applicable candidate and the engine re-created a row NetBox deleted on
+			// purpose.
+			if d.ContainmentRef != tc.containment {
+				t.Errorf("ContainmentRef = %q, want %q", d.ContainmentRef, tc.containment)
 			}
 
 			refs := make([]string, 0, 1)
@@ -247,8 +262,8 @@ func TestTenancyKindsNeedNoFieldClassesBeyondTheirReference(t *testing.T) {
 				}
 			}
 
-			if !reflect.DeepEqual(refs, []string{ref}) {
-				t.Errorf("to-one references = %v, want [%s]", refs, ref)
+			if !reflect.DeepEqual(refs, []string{tc.ref}) {
+				t.Errorf("to-one references = %v, want [%s]", refs, tc.ref)
 			}
 		})
 	}

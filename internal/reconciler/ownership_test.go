@@ -418,7 +418,10 @@ func TestEveryRegisteredKindCanExpressAnEmptyValue(t *testing.T) {
 			// a latent bug and starts failing the object -- which is the right outcome, and
 			// this is where it is caught instead.
 			for name := range empties {
-				if envelopeFields[name] {
+				// Descriptor.DuplicateSpec is exempt with the envelope's own fields, and for
+				// the same reason: it configures the operator rather than describing a
+				// column, so specFields.desired skips it too (NBO-025).
+				if envelopeFields[name] || name == d.DuplicateSpec {
 					continue
 				}
 

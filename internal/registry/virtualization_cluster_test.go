@@ -140,21 +140,31 @@ func TestClusterScopeIsTheSharedUnion(t *testing.T) {
 		t.Fatalf("GenericFKs = %+v, want exactly the scope pair", d.GenericFKs)
 	}
 
-	if want := ScopeFK("scope"); !reflect.DeepEqual(d.GenericFKs[0], want) {
+	if want := ScopeFK("scope", ScopeCascadesFromEvery()); !reflect.DeepEqual(d.GenericFKs[0], want) {
 		t.Errorf("the scope pair is not registry.ScopeFK(\"scope\"):\n got %+v\nwant %+v",
 			d.GenericFKs[0], want)
 	}
 
 	// Rule 4 names exactly one containment ref, and for a scoped kind it is the scope: NetBox
-	// itself deletes a site's clusters with it (`_site on_delete=CASCADE`).
-	// Empty, and deliberately. This test asserted "scope" when it was written, and
-	// Validate() then refused the descriptor at boot once NBO-193's ErrContainmentNotCascade
-	// landed -- correctly. `clusters` is a GenericRelation on dcim.Region and dcim.SiteGroup
-	// only, not on dcim.Site or dcim.Location, so deleting a region takes its clusters and
-	// deleting a site does not. One CascadeOnDelete flag cannot say both, and an owner
-	// reference correct for half the scopes promises a cascade the server never performs.
-	if d.ContainmentRef != "" {
-		t.Errorf("ContainmentRef = %q, want empty: the scope union's members disagree on cascade", d.ContainmentRef)
+	// itself deletes a site's clusters with it, through `_site on_delete=CASCADE`.
+	//
+	// This assertion was inverted when the kind landed (#210), on the reading that the missing
+	// `clusters GenericRelation` on dcim.Site meant a site-scoped cluster does not cascade.
+	// It meant the opposite: the GenericRelations on dcim.Region and dcim.SiteGroup exist
+	// because `_region` and `_site_group` are SET_NULL, and dcim.Site and dcim.Location need
+	// none because their cached column is CASCADE (#214).
+	if d.ContainmentRef != "scope" {
+		t.Errorf("ContainmentRef = %q, want \"scope\": every member of the scope union deletes "+
+			"this kind with it -- two by GenericRelation, two by a CASCADE cached column",
+			d.ContainmentRef)
+	}
+
+	for _, member := range d.GenericFKs[0].Members {
+		if member.CascadeOnDelete == nil || !*member.CascadeOnDelete {
+			t.Errorf("the scope member %s does not cascade; deleting that scope deletes the "+
+				"cluster in netbox, so without the owner reference the CR survives and the "+
+				"engine recreates the row", member.Spec)
+		}
 	}
 }
 
