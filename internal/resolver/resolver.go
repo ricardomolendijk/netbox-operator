@@ -238,14 +238,7 @@ func (r *Resolver) ResolveAll(ctx context.Context, nb LookupClient, obj client.O
 	resolution := Resolution{ByField: make(map[string]Result, len(refs))}
 	referrer := types.NamespacedName{Namespace: obj.GetNamespace(), Name: obj.GetName()}
 
-	// One resolver for this pass, over one snapshot: the cycle check and the resolution below
-	// read the same objects, and reading each of them once is what keeps detection from
-	// doubling the reads a reconcile makes (see passReader).
-	// Grants is carried, not dropped. It was omitted when this was written -- grants landed
-	// on a sibling branch -- and the result was that every cross-namespace reference failed
-	// with ErrNoGrantReader instead of being denied, because authorise() reads it off the
-	// pass resolver rather than the outer one. Both branches' tests passed alone.
-	pass := &Resolver{Objects: newPassReader(r.Objects), Kinds: r.Kinds, Grants: r.Grants}
+	pass := r.forPass()
 
 	// The cycle check first, and before any NetBox call. A cycle means no NetBox request this
 	// pass could make would be useful -- the object cannot be created without the reference,
@@ -273,6 +266,23 @@ func (r *Resolver) ResolveAll(ctx context.Context, nb LookupClient, obj client.O
 	}
 
 	return resolution, nil
+}
+
+// forPass is the resolver one resolution pass uses: this one, over one snapshot of the
+// cluster.
+//
+// The snapshot is why it exists at all -- the cycle check and the resolution behind it read
+// the same objects, and reading each of them once is what keeps detection from doubling the
+// reads a reconcile makes (see passReader).
+//
+// It is a named constructor rather than a struct literal inside ResolveAll because a literal
+// silently drops a field. `Grants` was omitted when this was written -- the grant check landed
+// on a sibling branch -- so every cross-namespace reference failed with ErrNoGrantReader
+// instead of being denied, since both authorise() and the cycle walk read the collaborator off
+// the pass resolver and not off the outer one. Both branches' tests passed alone. Every field
+// of Resolver has to be carried here, and a test asserts it (NBO-092).
+func (r *Resolver) forPass() *Resolver {
+	return &Resolver{Objects: newPassReader(r.Objects), Kinds: r.Kinds, Grants: r.Grants}
 }
 
 // cycleResolution reports a detected cycle as the object's only blocker.

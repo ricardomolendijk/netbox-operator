@@ -583,6 +583,143 @@ func TestCheckIgnoresTheReferrersOwnStatus(t *testing.T) {
 	}
 }
 
+// TestCheckStopsAtAnEdgeItMayNotFollow is NBO-092.
+//
+// The grant check is deliberately made *before* the target is read, so that a denied reference
+// cannot tell a missing object from a present one in a namespace it has no access to. The cycle
+// walk did not go through it: it read CRs directly, followed `name` edges across namespaces and
+// reported the ring, so a namespace with no grant could close a ring through a foreign object
+// and read that object's name back out of its own condition.
+//
+// The graph below is that construction. `team-a` may not reference `catalogue`, and the ring
+// only closes through it.
+func TestCheckStopsAtAnEdgeItMayNotFollow(t *testing.T) {
+	graph := []target{
+		regionCR("team-a", "a", parentRef("b")),
+		regionCR("team-a", "b", parentRefIn("catalogue", "x")),
+		regionCR("catalogue", "x", parentRefIn("team-a", "a")),
+	}
+
+	start := graph[0].object()
+
+	t.Run("no grant, so the walk stops and the ring is not reported", func(t *testing.T) {
+		reader := &fakeReader{objects: graph}
+		resolver := &Resolver{Objects: reader, Kinds: regionKinds(), Grants: &fakeGrants{}}
+
+		if err := resolver.Check(context.Background(), start, regionDescriptor()); err != nil {
+			t.Fatalf("Check() = %v, want no verdict: the ring exists only through an edge team-a may not follow", err)
+		}
+
+		// The oracle closed: the object in `catalogue` was never read, so nothing about it --
+		// that it is there, that it points back -- can reach team-a's condition.
+		if reader.reads != 1 {
+			t.Errorf("cluster reads = %d, want 1: only team-a/b is readable from team-a", reader.reads)
+		}
+	})
+
+	t.Run("nothing the referrer reports names the object it may not reference", func(t *testing.T) {
+		resolver := &Resolver{
+			Objects: &fakeReader{objects: graph}, Kinds: regionKinds(), Grants: &fakeGrants{},
+		}
+
+		resolution, err := resolver.ResolveAll(
+			context.Background(), &fakeNetBox{}, start, regionDescriptor())
+		if err != nil {
+			t.Fatalf("ResolveAll() = %v", err)
+		}
+
+		// `a` waits on `b`, which is the truth from where `a` stands, and `b` reports the denial
+		// on its own reference -- the grant is what is missing, and that is what is actionable.
+		if got := resolution.Reason(); got != netboxv1alpha1.ReasonRefNotReady {
+			t.Errorf("Reason() = %q, want %q", got, netboxv1alpha1.ReasonRefNotReady)
+		}
+
+		if strings.Contains(resolution.Message(), "catalogue") {
+			t.Errorf("Message() = %q, want it to name nothing in a namespace team-a has no grant into",
+				resolution.Message())
+		}
+	})
+
+	t.Run("the denied edge is reported as RefDenied on the object holding it", func(t *testing.T) {
+		resolver := &Resolver{
+			Objects: &fakeReader{objects: graph}, Kinds: regionKinds(), Grants: &fakeGrants{},
+		}
+
+		resolution, err := resolver.ResolveAll(
+			context.Background(), &fakeNetBox{}, graph[1].object(), regionDescriptor())
+		if err != nil {
+			t.Fatalf("ResolveAll() = %v", err)
+		}
+
+		if got := resolution.Reason(); got != netboxv1alpha1.ReasonRefDenied {
+			t.Fatalf("Reason() = %q, want %q: the missing grant is the actionable half", got, netboxv1alpha1.ReasonRefDenied)
+		}
+
+		if !strings.Contains(resolution.Message(), "not permitted to reference") {
+			t.Errorf("Message() = %q, want the denial and its remedy", resolution.Message())
+		}
+	})
+
+	t.Run("with the grant the whole ring is reported", func(t *testing.T) {
+		resolver := &Resolver{
+			Objects: &fakeReader{objects: graph}, Kinds: regionKinds(),
+			// Only `catalogue` needs one: the edge back into team-a lands in the walking
+			// object's own namespace, which is free.
+			Grants: &fakeGrants{grants: []netboxv1alpha1.NetBoxRefGrant{catalogueGrant("catalogue")}},
+		}
+
+		err := resolver.Check(context.Background(), start, regionDescriptor())
+
+		want := []string{
+			"netboxregion/team-a/a", "netboxregion/team-a/b",
+			"netboxregion/catalogue/x", "netboxregion/team-a/a",
+		}
+		assertCycle(t, err, ErrRefCycle, strings.Join(want, " -> "), want)
+	})
+
+	t.Run("no grant reader at all fails closed and loudly", func(t *testing.T) {
+		resolver := &Resolver{Objects: &fakeReader{objects: graph}, Kinds: regionKinds()}
+
+		err := resolver.Check(context.Background(), start, regionDescriptor())
+
+		// A wiring bug in the operator rather than a verdict about the manifest, exactly as
+		// resolution treats it: an error the engine backs off and logs, not a silent allow and
+		// not a denial somebody would go and write grants for.
+		if !errors.Is(err, ErrNoGrantReader) {
+			t.Fatalf("Check() = %v, want %v", err, ErrNoGrantReader)
+		}
+
+		var refErr *Error
+		if errors.As(err, &refErr) {
+			t.Errorf("Check() = %v, want a plain failure rather than a blocked reference", err)
+		}
+	})
+}
+
+// TestCheckAuthorisesNothingInsideOneNamespace keeps the common case free. Every object in the
+// cluster with a reference pays for this walk on every reconcile, and a grant LIST per edge
+// would put one on the hot path of almost all of them.
+func TestCheckAuthorisesNothingInsideOneNamespace(t *testing.T) {
+	graph := []target{
+		regionCR("team-a", "a", parentRef("b")),
+		regionCR("team-a", "b", parentRef("a")),
+	}
+
+	grants := &fakeGrants{}
+	resolver := &Resolver{Objects: &fakeReader{objects: graph}, Kinds: regionKinds(), Grants: grants}
+
+	err := resolver.Check(context.Background(), graph[0].object(), regionDescriptor())
+
+	// A cycle wholly inside the referrer's own namespace still reports its whole path.
+	want := []string{"netboxregion/team-a/a", "netboxregion/team-a/b", "netboxregion/team-a/a"}
+	assertCycle(t, err, ErrRefCycle, strings.Join(want, " -> "), want)
+
+	if grants.lists != 0 || grants.nsReads != 0 {
+		t.Errorf("grant lists = %d, namespace reads = %d, want none: a same-namespace walk authorises nothing",
+			grants.lists, grants.nsReads)
+	}
+}
+
 // BenchmarkCheck is the cost of the guard on the path where it finds nothing, which is every
 // reconcile of every healthy object: a chain as long as the walk will follow.
 func BenchmarkCheck(b *testing.B) {
@@ -622,7 +759,7 @@ func checkGraph(
 			t.Fatalf("the test graph starts at a %s, which has no descriptor", candidate.gvk.Kind)
 		}
 
-		resolver := &Resolver{Objects: reader, Kinds: kinds}
+		resolver := &Resolver{Objects: reader, Kinds: kinds, Grants: openGrants(graph)}
 
 		return resolver.Check(context.Background(), candidate.object(), d)
 	}
@@ -630,6 +767,26 @@ func checkGraph(
 	t.Fatalf("the test graph holds no object %s", start)
 
 	return nil
+}
+
+// openGrants is a cluster where every namespace in the graph is referenceable by every other,
+// which is what the fixtures assumed before the walk authorised the edges it follows: a graph
+// that crosses a namespace now needs the grant a real cluster would need (NBO-092). The rows
+// that stay inside one namespace never read it.
+func openGrants(graph []target) *fakeGrants {
+	open := &fakeGrants{}
+
+	seen := map[string]bool{}
+	for _, candidate := range graph {
+		if seen[candidate.namespace] {
+			continue
+		}
+
+		seen[candidate.namespace] = true
+		open.grants = append(open.grants, catalogueGrant(candidate.namespace))
+	}
+
+	return open
 }
 
 // assertCycle checks the verdict, the message and the path: the classification is what tooling
