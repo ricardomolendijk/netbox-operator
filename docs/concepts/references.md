@@ -470,8 +470,10 @@ Creating there would duplicate the region, and falling through to the top-level 
 would adopt an unrelated one ([lookups](lookups.md)).
 
 A reference that resolved yesterday and does not today does **not** clear the NetBox field.
-Spec omission means "do not manage": the object stops writing that column, reports
-`RefsResolved=False`, and leaves the live value alone.
+The object stops writing that column, reports `RefsResolved=False`, and leaves the live value
+alone. Unresolved is not the same as cleared: clearing a field is something you ask for by
+writing an empty value, and it is tracked separately from the value itself
+([field ownership](field-ownership.md)).
 
 An **absent** reference and a **present but empty** one are two different states, not one.
 An absent field is not resolved, not blocked and not reported — nobody asked for it. A

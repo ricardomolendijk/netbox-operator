@@ -265,6 +265,34 @@ exists only for a `(target, referrer)` pair that some kind's field map actually 
 is a diagnostic to read next to `netbox_operator_reconcile_total{result="waiting"}`: waiting
 objects and no enqueues is a watch that is matching nothing.
 
+### `netbox_operator_spec_ownership_untracked_total`
+
+| | |
+|---|---|
+| Type | Counter |
+| Labels | `kind` |
+| Cardinality | ~120 series worst case, and **zero on a healthy cluster** |
+
+Reconciles of an object whose `metadata.managedFields` says nothing about its spec, so the
+operator had to read the user's intent off the Go zero value instead
+([field ownership](../concepts/field-ownership.md)).
+
+On such an object an explicitly-empty string, list, map, `false` or `0` cannot be told apart
+from an absent one, so **clearing that field in Git changes nothing in NetBox and no condition
+disagrees.** The operator keeps working — every non-empty field is still managed — but one
+third of the API is quietly unavailable on those objects.
+
+It should never fire. The API server has recorded field ownership on every write since
+Kubernetes 1.18, so a non-zero rate means something between the API server and the engine is
+erasing it: a `cache.Options.DefaultTransform` stripping `managedFields` to save memory is the
+usual cause, and a restore that dropped them is the other.
+
+**Alert on:** any of it.
+
+```promql
+sum by (kind) (rate(netbox_operator_spec_ownership_untracked_total[15m])) > 0
+```
+
 ## Cardinality
 
 A label whose value set is unbounded turns a metric into an outage: every distinct value

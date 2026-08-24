@@ -46,6 +46,10 @@ type NetBoxTagSpec struct {
 	Color string `json:"color,omitempty"`
 
 	// Description is free text shown next to the tag.
+	//
+	// Omit it to leave NetBox's own value alone; set it to `""` to clear the value in
+	// NetBox. The two are different intents and the operator can tell them apart
+	// (docs/concepts/field-ownership.md).
 	// +kubebuilder:validation:MaxLength=200
 	// +optional
 	Description string `json:"description,omitempty"`
@@ -71,6 +75,10 @@ type NetBoxTagSpec struct {
 	// and nothing for the resolver to resolve. The descriptor therefore declares it an
 	// ObjectTypeList rather than an M2M. The item pattern is the REST spelling: lowercased
 	// and unpunctuated, so `dcim.device` and never `dcim.Device`.
+	//
+	// Omit it to leave NetBox's own value alone; set it to `[]` to clear the value in
+	// NetBox. The two are different intents and the operator can tell them apart
+	// (docs/concepts/field-ownership.md).
 	// +kubebuilder:validation:items:MaxLength=100
 	// +kubebuilder:validation:items:Pattern=`^[a-z_]+\.[a-z0-9_]+$`
 	// +optional
