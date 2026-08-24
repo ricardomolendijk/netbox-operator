@@ -35,6 +35,10 @@ rules:
   - netboxclustergroups
   - netboxclusters
   - netboxclustertypes
+  - netboxcontactassignments
+  - netboxcontactgroups
+  - netboxcontactroles
+  - netboxcontacts
   - netboxdeviceroles
   - netboxdevices
   - netboxdevicetypes
@@ -73,6 +77,10 @@ rules:
   - netboxclustergroups/finalizers
   - netboxclusters/finalizers
   - netboxclustertypes/finalizers
+  - netboxcontactassignments/finalizers
+  - netboxcontactgroups/finalizers
+  - netboxcontactroles/finalizers
+  - netboxcontacts/finalizers
   - netboxdeviceroles/finalizers
   - netboxdevices/finalizers
   - netboxdevicetypes/finalizers
@@ -107,6 +115,10 @@ rules:
   - netboxclustergroups/status
   - netboxclusters/status
   - netboxclustertypes/status
+  - netboxcontactassignments/status
+  - netboxcontactgroups/status
+  - netboxcontactroles/status
+  - netboxcontacts/status
   - netboxdeviceroles/status
   - netboxdevices/status
   - netboxdevicetypes/status

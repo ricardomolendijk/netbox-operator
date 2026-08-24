@@ -4,30 +4,24 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.19.0
-  name: netboxipranges.netbox.kubeforge.org
+  name: netboxcontactgroups.netbox.kubeforge.org
 spec:
   group: netbox.kubeforge.org
   names:
-    kind: NetBoxIPRange
-    listKind: NetBoxIPRangeList
-    plural: netboxipranges
+    kind: NetBoxContactGroup
+    listKind: NetBoxContactGroupList
+    plural: netboxcontactgroups
     shortNames:
-    - nbrange
-    singular: netboxiprange
+    - nbcontactgroup
+    singular: netboxcontactgroup
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .spec.startAddress
-      name: Start
+    - jsonPath: .spec.slug
+      name: Slug
       type: string
-    - jsonPath: .spec.endAddress
-      name: End
-      type: string
-    - jsonPath: .spec.vrfRef.name
-      name: VRF
-      type: string
-    - jsonPath: .spec.status
-      name: Status
+    - jsonPath: .spec.parentRef.name
+      name: Parent
       type: string
     - jsonPath: .status.id
       name: ID
@@ -35,9 +29,6 @@ spec:
     - jsonPath: .status.conditions[?(@.type=="Ready")].status
       name: Ready
       type: string
-    - jsonPath: .status.adopted
-      name: Adopted
-      type: boolean
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
@@ -45,14 +36,11 @@ spec:
     schema:
       openAPIV3Schema:
         description: |-
-          NetBoxIPRange is one ipam.IPRange in NetBox.
+          NetBoxContactGroup is one tenancy.ContactGroup in NetBox.
 
-          Namespaced like every kind in v1alpha1 (docs/decisions/0002-crd-scoping.md).
-
-          There is no SIZE printer column, for the reason there is no `size` field: NetBox derives it
-          and the operator never sends it, so a column reading the spec would be empty on every object.
-          What a human wants side by side is where the block starts, where it ends, and whether NetBox
-          agrees.
+          Namespaced like every kind in v1alpha1 (docs/decisions/0002-crd-scoping.md). A contact
+          group is a shared catalogue object, so a cross-namespace name collision under one parent
+          is one group and a Conflict rather than two -- `onConflict` already defaults to Fail.
         properties:
           apiVersion:
             description: |-
@@ -73,41 +61,33 @@ spec:
             type: object
           spec:
             description: |-
-              NetBoxIPRangeSpec describes one ipam.IPRange.
+              NetBoxContactGroupSpec describes one tenancy.ContactGroup.
 
-              A run of consecutive addresses, held as its two endpoints: `10.0.30.128/24` through
-              `10.0.30.191/24` is 64 addresses, and NetBox stores exactly that -- two `IPAddressField`
-              columns and a derived count. It is not a prefix: a range need not be aligned, need not be a
-              power of two long, and cannot contain child prefixes. What it is for is the block of a
-              network somebody else hands out -- a DHCP scope, a load-balancer pool, an address space
-              delegated to another team -- recorded so that this operator and that somebody do not both
-              hand out `10.0.30.150`.
+              The third NestedGroupModel to ship, and the one that shows the family has three different
+              identities rather than two. dcim.Region and dcim.SiteGroup declare `(parent, name)` plus a
+              `name WHERE parent IS NULL` variant; tenancy.TenantGroup declares no `meta.constraints` at
+              all and puts column-level UNIQUE on `name` and `slug`. tenancy.ContactGroup is neither: it
+              declares **one** constraint, `(parent, name)`, and no conditional variant at all
+              (docs/netbox-schema.md -> tenancy.ContactGroup, `meta.constraints`;
+              netbox/tenancy/models/contacts.py:53-58). Its `slug` carries no UNIQUE, because
+              NestedGroupModel's does not (netbox/netbox/models/__init__.py:183-186) -- so `slug` cannot
+              be this kind's identity the way it is tenancy.TenantGroup's.
 
-              **There is no `size` field, and that is not an omission.** `ipam.IPRange.size` is
-              `editable=False` and computed in `save()` as `end - start + 1` (netbox/ipam/models/ip.py,
-              NetBox 4.6.8), so it is not in the write serializer at all: a `size` in a payload is
-              silently dropped. It is `REQ` in the schema digest because the *column* is not nullable,
-              which is the trap docs/concepts/generic-refs.md#the-req-trap-in-the-schema-digest describes
-              for a different pair of columns. The two endpoints are the input; the count is NetBox's
-              answer, and this kind reports it in status rather than accepting it in spec.
-
-              There is no scope union either -- `ipam.IPRange` is `ContactsMixin, PrimaryModel` with no
-              `CachedScopeMixin` (docs/netbox-schema.md -> ipam.IPRange) -- and no `parentRef`: a range's
-              place in the hierarchy is arithmetic, exactly as a prefix's is.
-
-              Like NetBoxPrefix, this kind wants `deletionPolicy: Retain` and cannot default to it: the
-              field is declared once on the embedded NetBoxObjectSpec, and redeclaring it here makes
-              controller-gen emit a schema the API server rejects. Deleting a range destroys the record of
-              who a block of addresses belonged to, so every manifest should say `Retain` explicitly, as
-              docs/reference/netboxiprange.md's examples do.
+              What follows from the missing conditional constraint is the interesting half, and it is
+              stated on ParentRef below: two *top-level* contact groups with the same name are legal in
+              NetBox, so the second lookup candidate is a convention rather than a constraint and an
+              ambiguous match is a Conflict.
             properties:
               comments:
                 description: |-
-                  Comments is the range's long-form notes field. Also inherited from PrimaryModel, and a
-                  TextField rather than a CharField: it has no max_length, so there is no MaxLength marker
-                  to derive.
+                  Comments is the group's long-form notes field.
 
-                  Omit it to leave NetBox's own value alone; set it to `""` to clear the value in NetBox.
+                  Also inherited from NestedGroupModel, and a TextField rather than a CharField: it has
+                  no max_length, so there is no MaxLength marker to derive.
+
+                  Omit it to leave NetBox's own value alone; set it to `""` to clear the value in
+                  NetBox. The two are different intents and the operator can tell them apart
+                  (docs/concepts/field-ownership.md).
                 type: string
               customFields:
                 additionalProperties:
@@ -164,34 +144,16 @@ spec:
                 type: string
               description:
                 description: |-
-                  Description is free text shown next to the range. Declared on PrimaryModel rather than
-                  on ipam.IPRange (docs/netbox-schema.md -> ipam.IPRange, `description (PrimaryModel)
-                  CharField len=200`); an inherited column is as writable as a declared one.
+                  Description is free text shown next to the group.
 
-                  Omit it to leave NetBox's own value alone; set it to `""` to clear the value in NetBox.
-                  The two are different intents and the operator can tell them apart
+                  Inherited from NestedGroupModel (docs/netbox-schema.md -> tenancy.ContactGroup,
+                  `description (NestedGroupModel) CharField len=200`).
+
+                  Omit it to leave NetBox's own value alone; set it to `""` to clear the value in
+                  NetBox. The two are different intents and the operator can tell them apart
                   (docs/concepts/field-ownership.md).
                 maxLength: 200
                 type: string
-              endAddress:
-                description: |-
-                  EndAddress is the last address in the range, inclusive
-                  (docs/netbox-schema.md -> ipam.IPRange, `end_address IPAddressField REQ`).
-
-                  Inclusive, so a range from `.128` to `.191` is 64 addresses and not 63. Equal to
-                  `startAddress` is legal and is a one-address range.
-
-                  The ordering and family checks are NetBox's: `IPRange.clean()` refuses an end below the
-                  start, a family mismatch and a mask mismatch, and refuses a range overlapping another in
-                  the same VRF. None of those is re-implemented as CEL, because CEL cannot see the other
-                  ranges and a rule that caught two of the four would read as if it caught all of them.
-                maxLength: 43
-                minLength: 1
-                type: string
-                x-kubernetes-validations:
-                - message: endAddress must be an address with a mask, IPv4 or IPv6,
-                    for example 10.0.30.191/24 or fd00:10::1ff/64
-                  rule: isCIDR(self)
               endpointRef:
                 description: |-
                   EndpointRef names the NetBoxEndpoint to write through, in this object's own
@@ -215,27 +177,19 @@ spec:
                     NetBox is a different object, so delete this one and re-apply
                     it
                   rule: self == oldSelf
-              markPopulated:
+              name:
                 description: |-
-                  MarkPopulated stops NetBox creating ipam.IPAddress objects inside the range
-                  (docs/netbox-schema.md -> ipam.IPRange, `mark_populated BooleanField def=False`).
+                  Name is the group's label in the NetBox UI, and this kind's natural key.
 
-                  The flag for a block something else owns: a DHCP scope's leases are not NetBox's to
-                  enumerate, and marking the range populated says so rather than leaving a hole that looks
-                  free. A pointer because of the `def=False`: a plain bool cannot tell "not managed" from
-                  "managed as false", so adopting a range somebody had marked populated would silently
-                  clear it on the first reconcile.
-                type: boolean
-              markUtilized:
-                description: |-
-                  MarkUtilized forces NetBox to report the range as 100% utilised regardless of what is
-                  inside it (docs/netbox-schema.md -> ipam.IPRange, `mark_utilized BooleanField
-                  def=False`). A pointer for the same reason as MarkPopulated.
-
-                  It is also the one flag that stops a NetBoxIPAddressClaim allocating out of this range:
-                  the flag means the free space here is not really free, and NetBox's `available-ips` view
-                  hands out an address anyway, so honouring it is this operator's job.
-                type: boolean
+                  Unique *per parent* rather than globally (docs/netbox-schema.md ->
+                  tenancy.ContactGroup, `meta.constraints`: `unique_parent_name` on `(parent, name)`).
+                  It is the identity here and `slug` is not, which is the opposite of every
+                  OrganizationalModel in the catalogue: NestedGroupModel's `slug` has no UNIQUE on it
+                  and this model adds none, so two contact groups may share a slug and `slug` could
+                  only ever adopt the wrong one.
+                maxLength: 100
+                minLength: 1
+                type: string
               onConflict:
                 default: Fail
                 description: OnConflict is what to do when NetBox already holds a
@@ -245,11 +199,28 @@ spec:
                 - Adopt
                 - AdoptOnly
                 type: string
-              roleRef:
+              parentRef:
                 description: |-
-                  RoleRef marks what the range is for -- DHCP, load balancers, guests
-                  (docs/netbox-schema.md -> ipam.IPRange, `role ForeignKey -> ipam.Role
-                  on_delete=SET_NULL`).
+                  ParentRef nests this group under another NetBoxContactGroup
+                  (docs/netbox-schema.md -> tenancy.ContactGroup, `parent (NestedGroupModel)
+                  TreeForeignKey -> tenancy.ContactGroup on_delete=CASCADE`).
+
+                  Part of this kind's identity, not an attribute of it: leaving it unset makes a
+                  *top-level* group, which is a different lookup rather than the same one with a filter
+                  dropped, so the second candidate pins `?parent_id=null` instead of omitting it
+                  (docs/concepts/lookups.md). Declaring it and having it not resolve yet makes neither
+                  candidate applicable, and the engine waits rather than adopting an unrelated top-level
+                  group of the same name and reparenting it.
+
+                  Unlike dcim.Region and dcim.SiteGroup, **no conditional constraint backs that second
+                  candidate**: NetBox has `(parent, name)` and nothing else, and Postgres treats NULLs
+                  as distinct, so the constraint does not fire between two top-level groups. Two of them
+                  may legitimately share a name, and more than one match is therefore a real server
+                  state reported as a Conflict rather than resolved by taking the first.
+
+                  CASCADE, so deleting a group in NetBox deletes its descendants server-side -- which is
+                  why this is the containment reference and a nested group carries an owner reference to
+                  its parent (docs/decisions/0003-ownership-and-references.md rule 4).
                 properties:
                   id:
                     description: |-
@@ -323,200 +294,22 @@ spec:
                 - message: lookup values are limited to 200 characters
                   rule: '!has(self.lookup) || self.lookup.all(k, size(self.lookup[k])
                     <= 200)'
-              startAddress:
+              slug:
                 description: |-
-                  StartAddress is the first address in the range, with a mask
-                  (docs/netbox-schema.md -> ipam.IPRange, `start_address IPAddressField REQ`).
+                  Slug is the group's URL-safe identifier.
 
-                  The mask is required by NetBox and must match `endAddress`'s: `IPRange.clean()` rejects
-                  a pair whose prefix lengths differ, and the UI writes the containing prefix's length.
-                  It is not a network -- `10.0.30.128/24` is an address inside `10.0.30.0/24`, and its
-                  host bits are the whole point -- which is why there is no masked-form validation here of
-                  the kind NetBoxPrefix.prefix carries.
-                maxLength: 43
+                  Required by NetBox (`slug SlugField REQ len=100`) and deliberately **not** a natural
+                  key: it carries no UNIQUE, on this model or on NestedGroupModel. A rename that
+                  collides with another group's slug under the same parent is NetBox's own 409, reported
+                  as Ready=False/Invalid, rather than something the operator looks objects up by.
+                maxLength: 100
                 minLength: 1
+                pattern: ^[-a-zA-Z0-9_]+$
                 type: string
-                x-kubernetes-validations:
-                - message: startAddress must be an address with a mask, IPv4 or IPv6,
-                    for example 10.0.30.128/24 or fd00:10::100/64
-                  rule: isCIDR(self)
-              status:
-                default: active
-                description: |-
-                  Status is the range's lifecycle state.
-
-                  Defaulted to NetBox's own default so the operator manages the field from the first
-                  reconcile: a defaulted field that never reaches a payload is a field the operator can
-                  never correct.
-                enum:
-                - active
-                - reserved
-                - deprecated
-                type: string
-              tenantRef:
-                description: |-
-                  TenantRef assigns the range to a tenant (docs/netbox-schema.md -> ipam.IPRange,
-                  `tenant ForeignKey -> tenancy.Tenant on_delete=PROTECT`).
-                properties:
-                  id:
-                    description: |-
-                      ID is a literal NetBox primary key: the escape hatch, and the only place in the API
-                      where a raw id is accepted.
-
-                      A pointer so that `id: 0` is distinguishable from unset. NetBox primary keys start
-                      at 1, so zero is never a real object and has to be rejected rather than silently
-                      treated as "no id".
-                    format: int64
-                    minimum: 1
-                    type: integer
-                  lookup:
-                    additionalProperties:
-                      type: string
-                    description: |-
-                      Lookup is a raw NetBox API filter, for an object no slug identifies -- a VLAN is
-                      `{vid: "20", site: "home"}` because its identity is a pair.
-
-                      `q` is rejected by the CEL rules along with the pagination and formatting
-                      parameters. It is NetBox's fuzzy search, and a fuzzy filter behind a reference that
-                      must identify exactly one object would make ambiguity the normal case rather than
-                      an error.
-                    maxProperties: 8
-                    type: object
-                  name:
-                    description: |-
-                      Name of a CR of the target Kind, resolved through that CR's `.status.id`.
-
-                      This is the mode to prefer: it is the only one that expresses a dependency the
-                      operator can wait on, which is what lets a graph applied in any order converge.
-                    maxLength: 253
-                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
-                    type: string
-                  namespace:
-                    description: |-
-                      Namespace of that CR. Defaults to the referring object's namespace.
-
-                      Load-bearing on the common path rather than an edge case: every Kind is namespaced
-                      in v1alpha1 (docs/decisions/0002-crd-scoping.md), so a team namespace pointing at a
-                      shared catalogue namespace is the normal shape. Crossing a namespace requires a
-                      NetBoxRefGrant in the target namespace (NBO-014).
-                    maxLength: 63
-                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
-                    type: string
-                  slug:
-                    description: |-
-                      Slug looks the object up in NetBox directly, for objects the operator does not
-                      manage. No CR needs to exist.
-
-                      Bounded at 100 characters because that is what NetBox's own column allows:
-                      `slug SlugField len=100` on every OrganizationalModel, NestedGroupModel and
-                      PrimaryModel (docs/netbox-schema.md -> dcim.Site, dcim.Region, extras.Tag).
-                    maxLength: 100
-                    pattern: ^[-a-zA-Z0-9_]+$
-                    type: string
-                type: object
-                x-kubernetes-validations:
-                - message: exactly one of name, slug, lookup or id must be set
-                  rule: '[has(self.name) && size(self.name) > 0, has(self.slug) &&
-                    size(self.slug) > 0, has(self.lookup) && size(self.lookup) > 0,
-                    has(self.id)].filter(x, x).size() == 1'
-                - message: namespace may only be set together with name
-                  rule: '!has(self.namespace) || (has(self.name) && size(self.name)
-                    > 0)'
-                - message: lookup keys must be lowercase NetBox filter names
-                  rule: '!has(self.lookup) || self.lookup.all(k, k.matches(''^[a-z][a-z0-9_]*$''))'
-                - message: lookup may not set pagination, formatting or fuzzy-search
-                    parameters
-                  rule: '!has(self.lookup) || self.lookup.all(k, !(k in [''limit'',''offset'',''format'',''brief'',''ordering'',''q'']))'
-                - message: lookup values are limited to 200 characters
-                  rule: '!has(self.lookup) || self.lookup.all(k, size(self.lookup[k])
-                    <= 200)'
-              vrfRef:
-                description: |-
-                  VRFRef puts the range in a VRF (docs/netbox-schema.md -> ipam.IPRange,
-                  `vrf ForeignKey -> ipam.VRF on_delete=PROTECT`).
-
-                  Part of this kind's identity, and more sharply than for a prefix: NetBox's overlap
-                  check is `filter(vrf=self.vrf)`, so the same block of addresses may legitimately be a
-                  range once globally and once in every VRF. The lookup either matches `vrf_id` against a
-                  value or pins it to null, never omits it
-                  (docs/concepts/lookups.md#why-a-null-filter-is-pinned-and-never-omitted).
-                properties:
-                  id:
-                    description: |-
-                      ID is a literal NetBox primary key: the escape hatch, and the only place in the API
-                      where a raw id is accepted.
-
-                      A pointer so that `id: 0` is distinguishable from unset. NetBox primary keys start
-                      at 1, so zero is never a real object and has to be rejected rather than silently
-                      treated as "no id".
-                    format: int64
-                    minimum: 1
-                    type: integer
-                  lookup:
-                    additionalProperties:
-                      type: string
-                    description: |-
-                      Lookup is a raw NetBox API filter, for an object no slug identifies -- a VLAN is
-                      `{vid: "20", site: "home"}` because its identity is a pair.
-
-                      `q` is rejected by the CEL rules along with the pagination and formatting
-                      parameters. It is NetBox's fuzzy search, and a fuzzy filter behind a reference that
-                      must identify exactly one object would make ambiguity the normal case rather than
-                      an error.
-                    maxProperties: 8
-                    type: object
-                  name:
-                    description: |-
-                      Name of a CR of the target Kind, resolved through that CR's `.status.id`.
-
-                      This is the mode to prefer: it is the only one that expresses a dependency the
-                      operator can wait on, which is what lets a graph applied in any order converge.
-                    maxLength: 253
-                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
-                    type: string
-                  namespace:
-                    description: |-
-                      Namespace of that CR. Defaults to the referring object's namespace.
-
-                      Load-bearing on the common path rather than an edge case: every Kind is namespaced
-                      in v1alpha1 (docs/decisions/0002-crd-scoping.md), so a team namespace pointing at a
-                      shared catalogue namespace is the normal shape. Crossing a namespace requires a
-                      NetBoxRefGrant in the target namespace (NBO-014).
-                    maxLength: 63
-                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
-                    type: string
-                  slug:
-                    description: |-
-                      Slug looks the object up in NetBox directly, for objects the operator does not
-                      manage. No CR needs to exist.
-
-                      Bounded at 100 characters because that is what NetBox's own column allows:
-                      `slug SlugField len=100` on every OrganizationalModel, NestedGroupModel and
-                      PrimaryModel (docs/netbox-schema.md -> dcim.Site, dcim.Region, extras.Tag).
-                    maxLength: 100
-                    pattern: ^[-a-zA-Z0-9_]+$
-                    type: string
-                type: object
-                x-kubernetes-validations:
-                - message: exactly one of name, slug, lookup or id must be set
-                  rule: '[has(self.name) && size(self.name) > 0, has(self.slug) &&
-                    size(self.slug) > 0, has(self.lookup) && size(self.lookup) > 0,
-                    has(self.id)].filter(x, x).size() == 1'
-                - message: namespace may only be set together with name
-                  rule: '!has(self.namespace) || (has(self.name) && size(self.name)
-                    > 0)'
-                - message: lookup keys must be lowercase NetBox filter names
-                  rule: '!has(self.lookup) || self.lookup.all(k, k.matches(''^[a-z][a-z0-9_]*$''))'
-                - message: lookup may not set pagination, formatting or fuzzy-search
-                    parameters
-                  rule: '!has(self.lookup) || self.lookup.all(k, !(k in [''limit'',''offset'',''format'',''brief'',''ordering'',''q'']))'
-                - message: lookup values are limited to 200 characters
-                  rule: '!has(self.lookup) || self.lookup.all(k, size(self.lookup[k])
-                    <= 200)'
             required:
-            - endAddress
             - endpointRef
-            - startAddress
+            - name
+            - slug
             type: object
           status:
             description: |-
