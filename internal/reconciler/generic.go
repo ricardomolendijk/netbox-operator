@@ -140,6 +140,11 @@ type Engine struct {
 	// Endpoints resolves a spec.endpointRef to a client.
 	Endpoints Endpoints
 
+	// Refs turns the references in a spec into NetBox ids. Nil resolves nothing: every
+	// declared reference is then reported unresolved and left out of the payload, which is
+	// what the engine did before internal/resolver existed.
+	Refs RefResolver
+
 	// Status persists status updates.
 	Status StatusWriter
 
@@ -262,12 +267,16 @@ type pass struct {
 	// state is which spec fields are set, and which hold a value a filter can use.
 	state registry.SpecState
 
+	// refs is what the references that did not resolve mean for this object. Zero when
+	// every reference resolved, which is what ready() checks before reporting Ready=True.
+	refs refWait
+
 	// result is this pass's outcome, one of the metrics.Result* values. Written by
 	// whichever step decided, read once by the deferred observation in Reconcile.
 	result string
 }
 
-// build renders the spec into a payload and reports the references it had to leave out.
+// build renders the spec into a payload and turns its references into ids.
 func (p *pass) build(ctx context.Context) error {
 	spec, err := specOf(p.obj)
 	if err != nil {
@@ -280,23 +289,7 @@ func (p *pass) build(ctx context.Context) error {
 	}
 	p.spec, p.desired, p.state = spec, desired, state
 
-	if len(refs) == 0 {
-		p.condition(netboxv1alpha1.ConditionRefsResolved, true,
-			netboxv1alpha1.ReasonAllResolved, "no unresolved references")
-
-		return nil
-	}
-
-	// References are accepted and ignored until internal/resolver lands (NBO-012).
-	// Reporting it is the difference between an honest M1 boundary and a silent omission:
-	// everything else about the object is still reconciled.
-	logf.FromContext(ctx).V(1).Info("references are not resolved in this build",
-		"action", "build", "refs", refs)
-	p.condition(netboxv1alpha1.ConditionRefsResolved, false,
-		netboxv1alpha1.ReasonNotImplemented,
-		fmt.Sprintf("references are not resolved yet and were left out of the payload: %v", refs))
-
-	return nil
+	return p.resolveRefs(ctx, refs)
 }
 
 // match is the live object the engine will act on, and how it was found.

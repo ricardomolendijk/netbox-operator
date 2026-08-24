@@ -284,6 +284,7 @@ func TestStatusWriterIsTheOnlyObjectWriter(t *testing.T) {
 	allowed := map[string]bool{
 		"Descriptors": true,
 		"Endpoints":   true,
+		"Refs":        true,
 		"Status":      true,
 		"Finalizers":  true,
 		"Events":      true,
@@ -303,6 +304,14 @@ func TestStatusWriterIsTheOnlyObjectWriter(t *testing.T) {
 	writer := reflect.TypeFor[StatusWriter]()
 	if writer.NumMethod() != 1 || writer.Method(0).Name != "UpdateStatus" {
 		t.Errorf("StatusWriter has %d methods, want only UpdateStatus", writer.NumMethod())
+	}
+
+	// The resolver is the one collaborator handed whole CRs, so it is the one that has to be
+	// narrow: reading a reference target must not come with a route to writing one. One
+	// method, and it returns a Resolution rather than accepting a writer.
+	refs := reflect.TypeFor[RefResolver]()
+	if refs.NumMethod() != 1 || refs.Method(0).Name != "ResolveAll" {
+		t.Errorf("RefResolver has %d methods, want only ResolveAll", refs.NumMethod())
 	}
 }
 
