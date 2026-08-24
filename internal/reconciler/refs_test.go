@@ -467,3 +467,162 @@ func TestNoResolverReportsRatherThanDrops(t *testing.T) {
 		t.Errorf("Ready reason = %q, want %q", got, netboxv1alpha1.ReasonWaitingForRef)
 	}
 }
+
+// TestResolvedGenericFKWritesBothColumns is the atomicity contract, asserted where it
+// matters: on the payload NetBox receives.
+//
+// The type half and the id half are one reference. An id written against a stale type is not
+// a partial update -- it points the object at a row of a different model that happens to
+// share a primary key, which NetBox accepts without complaint. So the assertion is on both
+// keys of the payload and never on the condition alone.
+func TestResolvedGenericFKWritesBothColumns(t *testing.T) {
+	obj := fakeObject()
+	obj.Spec.Scope = &fakeScope{SiteRef: &fakeRef{Name: "ams"}}
+
+	nb := &fakeClient{created: liveTag(7)}
+	engine := engineWith(t, scopedDescriptor(), nb, &fakeRefs{resolution: resolver.Resolution{
+		ByField: map[string]resolver.FieldRefs{
+			"scope": {{ID: 31, ObjectType: "dcim.site", Mode: resolver.ModeName}},
+		},
+	}})
+
+	if _, err := engine.Reconcile(context.Background(), obj); err != nil {
+		t.Fatalf("Reconcile() = %v", err)
+	}
+
+	payload := nb.lastPayload()
+	if payload["scope_type"] != "dcim.site" || payload["scope_id"] != int64(31) {
+		t.Errorf("payload (scope_type, scope_id) = (%v, %v), want (dcim.site, 31)",
+			payload["scope_type"], payload["scope_id"])
+	}
+
+	resolved := conditionOf(obj, netboxv1alpha1.ConditionRefsResolved)
+	if resolved.Status != metav1.ConditionTrue || !strings.Contains(resolved.Message, "scope") {
+		t.Errorf("RefsResolved = %s/%q, want True naming scope", resolved.Status, resolved.Message)
+	}
+}
+
+// TestEmptyGenericFKClearsBothColumns covers the union written and left empty, which is an
+// instruction rather than an omission: clear the reference.
+//
+// Both columns are nulled, not one. NetBox validates the pair together, so a `scope_id` of
+// null against a `scope_type` that still names a model is a rejected payload at best.
+func TestEmptyGenericFKClearsBothColumns(t *testing.T) {
+	obj := fakeObject()
+	obj.Spec.Scope = &fakeScope{}
+
+	nb := &fakeClient{created: liveTag(7)}
+	engine := engineWith(t, scopedDescriptor(), nb, &fakeRefs{resolution: resolver.Resolution{
+		ByField: map[string]resolver.FieldRefs{"scope": {{}}},
+	}})
+
+	if _, err := engine.Reconcile(context.Background(), obj); err != nil {
+		t.Fatalf("Reconcile() = %v", err)
+	}
+
+	payload := nb.lastPayload()
+
+	for _, column := range []string{"scope_type", "scope_id"} {
+		value, written := payload[column]
+		if !written || value != nil {
+			t.Errorf("payload[%s] = %v (written: %v), want an explicit null", column, value, written)
+		}
+	}
+}
+
+// TestClaimedButAbsentGenericFKWritesNeitherColumn is the guard against NBO-079 (#169)
+// turning a union nobody wrote into a union written empty.
+//
+// #169 gives optional fields three states by reading `metadata.managedFields`: a spec field
+// another manager has claimed but the spec no longer carries is restored to its Go **empty
+// value** before the payload is built, so `description: ""` can clear a NetBox description.
+// For a union the Go empty value is `{}` -- and an empty union is this file's instruction to
+// *clear both columns*. Composed naively the two rules read "somebody else once mentioned
+// scope, so detach the object", which nobody asked for and which no manifest states.
+//
+// It does not fire, and the reason is structural rather than lucky: #169 derives the empty
+// form by reflection over the spec struct and produces one only for a slice, a map or a
+// scalar. A struct and a pointer to one are deliberately excluded -- a nil pointer already
+// marshals to `null`, which is a state of its own -- and a union member field is exactly a
+// `*struct`. So there is no empty form to restore and the field stays absent.
+//
+// This test is what keeps that true, and it asserts both halves of "absent", because a
+// regression could land as either one. Neither column is written, and RefsResolved is
+// AllResolved: a union restored to `{}` would show up first as a *declared* reference this
+// pass has to account for, and only then as two nulls on the wire.
+func TestClaimedButAbsentGenericFKWritesNeitherColumn(t *testing.T) {
+	obj := fakeObject()
+	obj.Spec.Scope = nil
+
+	// A Flux/SSA-shaped claim on the union field, which is what #169 reads.
+	obj.ManagedFields = []metav1.ManagedFieldsEntry{{
+		Manager:    "kustomize-controller",
+		Operation:  metav1.ManagedFieldsOperationApply,
+		APIVersion: fakeGVK.GroupVersion().String(),
+		FieldsType: "FieldsV1",
+		FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:spec":{"f:scope":{}}}`)},
+	}}
+
+	nb := &fakeClient{created: liveTag(7)}
+	engine := engineWith(t, scopedDescriptor(), nb, &fakeRefs{resolution: resolver.Resolution{
+		ByField: map[string]resolver.FieldRefs{},
+	}})
+
+	if _, err := engine.Reconcile(context.Background(), obj); err != nil {
+		t.Fatalf("Reconcile() = %v", err)
+	}
+
+	payload := nb.lastPayload()
+	for _, column := range []string{"scope_type", "scope_id"} {
+		if value, written := payload[column]; written {
+			t.Errorf("payload[%s] = %v, want the column absent: an unwritten union is not an empty one",
+				column, value)
+		}
+	}
+
+	if got := conditionOf(obj, netboxv1alpha1.ConditionRefsResolved).Reason; got != netboxv1alpha1.ReasonAllResolved {
+		t.Errorf("RefsResolved reason = %q, want %q: the spec declares no union to resolve",
+			got, netboxv1alpha1.ReasonAllResolved)
+	}
+}
+
+// TestRefusedGenericFKIsTerminalAndWritesNothingToTheColumns pins the refusal path: an illegal
+// target is reported, both columns are left alone, and nothing comes back on a timer.
+func TestRefusedGenericFKIsTerminalAndWritesNothingToTheColumns(t *testing.T) {
+	obj := fakeObject()
+	obj.Spec.Scope = &fakeScope{SiteRef: &fakeRef{Name: "ams"}}
+
+	err := &resolver.Error{
+		Cause: resolver.ErrRefTypeNotAllowed, Field: "scope",
+		Detail: `siteRef resolves to object type "dcim.site", and scope_type accepts only [dcim.region]`,
+	}
+
+	nb := &fakeClient{created: liveTag(7)}
+	engine := engineWith(t, scopedDescriptor(), nb, &fakeRefs{resolution: resolver.Resolution{
+		ByField: map[string]resolver.FieldRefs{},
+		Blocked: []resolver.Blocker{{
+			Field: "scope", Reason: resolver.Classify(err).Reason, Err: err,
+		}},
+	}})
+
+	result, reconcileErr := engine.Reconcile(context.Background(), obj)
+	if reconcileErr != nil {
+		t.Fatalf("Reconcile() = %v", reconcileErr)
+	}
+
+	payload := nb.lastPayload()
+	for _, column := range []string{"scope_type", "scope_id"} {
+		if value, written := payload[column]; written {
+			t.Errorf("payload[%s] = %v, want the column left alone", column, value)
+		}
+	}
+
+	resolved := conditionOf(obj, netboxv1alpha1.ConditionRefsResolved)
+	if resolved.Reason != netboxv1alpha1.ReasonRefTypeNotAllowed {
+		t.Errorf("RefsResolved reason = %q, want %q", resolved.Reason, netboxv1alpha1.ReasonRefTypeNotAllowed)
+	}
+
+	// The endpoint's own resync, and nothing sooner: no NetBox object appearing and no CR
+	// being created makes an illegal target legal.
+	assertRequeue(t, result.RequeueAfter, testResync)
+}

@@ -17,6 +17,7 @@ How the engine behaves, and why.
 | [Deletion](concepts/deletion.md) | What `deletionPolicy: Delete` and `Retain` each do, why the finalizer goes on before the first write and comes off after the last one, what a `PROTECT`-blocked delete looks like and how to get out of it |
 | [Drift detection](concepts/drift.md) | Why what NetBox returns is not what you wrote, and the eight comparison rules that stop a reconcile loop from PATCHing forever |
 | [Field ownership](concepts/field-ownership.md) | The three states of an optional field -- absent, empty, set -- how to write each, how `metadata.managedFields` tells them apart, and what happens when there is no ownership metadata to read |
+| [Generic references](concepts/generic-refs.md) | What a polymorphic foreign key is, why the `app_label.model` spelling is written down once, why the schema digest's `REQ` on a `GenericForeignKey` row must be ignored, and how a `*_type` / `*_id` pair is kept atomic |
 | [Errors and retries](concepts/errors-and-retries.md) | Which NetBox failure becomes which typed error, what gets retried and where, and why more than one lookup match is an error rather than a guess |
 | [Lookups](concepts/lookups.md) | How a natural key becomes a query string, why `?name__ie=` exists, and why a null filter is pinned rather than omitted |
 | [References](concepts/references.md) | How one object points at another, the four resolution modes, what the API server rejects before a bad reference reaches the operator, and what it takes to cross a namespace |
@@ -31,6 +32,7 @@ One page per CRD: every field, every condition, every way it fails.
 | [`NetBoxRegion`](reference/netboxregion.md) | The first kind whose identity depends on a reference: two natural keys, why a top-level region is a different identity rather than a missing filter, and why a child region waits instead of guessing |
 | [`NetBoxTag`](reference/netboxtag.md) | The first NetBox object kind: `slug` as a natural key, adoption and `Conflict`, `objectTypes` as content-type strings, and what happens when two namespaces claim one slug |
 | [`NetBoxSite`](reference/netboxsite.md) | A choice column and two decimals that need no per-kind handling, a globally-unique slug over namespaced CRDs, and which of `dcim.Site`'s foreign keys are deliberately absent |
+| [Generic references](reference/genericref.md) | The union shape a polymorphic foreign key takes in a spec: one member per legal target, `<= 1` versus `== 1`, and why an empty union clears the reference while an absent one does not |
 | [`NetBoxRefGrant`](reference/netboxrefgrant.md) | The kind that describes no NetBox object: which namespaces may reference into this one, the wildcard and selector forms that keep one grant per catalogue namespace, why `NetBoxEndpoint` is the one exception, and why a grant is not NetBox authorisation |
 
 ### The shape of a reference page

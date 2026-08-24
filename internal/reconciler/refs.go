@@ -87,21 +87,7 @@ func (p *pass) resolveRefs(ctx context.Context, declared []string) error {
 		return err
 	}
 
-	// Descriptor order rather than map order: the resolved list ends up in a condition
-	// message, and a message that reorders itself between passes is unreviewable.
-	resolved := make([]string, 0, len(resolution.ByField))
-	notes := make([]string, 0, len(resolution.ByField))
-
-	for _, field := range p.desc.Fields {
-		refs, ok := resolution.ByField[field.Spec]
-		if !ok {
-			continue
-		}
-
-		p.applyRef(field, refs)
-		resolved = append(resolved, field.Spec)
-		notes = append(notes, unreadyTargets(field, refs)...)
-	}
+	resolved, notes := p.applyResolved(resolution)
 
 	if len(resolved) == len(declared) {
 		logf.FromContext(ctx).V(1).Info("resolved every reference",
@@ -129,7 +115,7 @@ func (p *pass) resolveRefs(ctx context.Context, declared []string) error {
 // It still has to be *said*, though. A referrer reporting Ready=True over an id whose object
 // is unfinished is exactly what somebody debugging needs told, and RefsResolved is the
 // condition they are already reading.
-func unreadyTargets(field registry.Field, refs resolver.FieldRefs) []string {
+func unreadyTargets(spec string, refs resolver.FieldRefs) []string {
 	notes := make([]string, 0, len(refs))
 
 	for _, ref := range refs {
@@ -138,7 +124,7 @@ func unreadyTargets(field registry.Field, refs resolver.FieldRefs) []string {
 		}
 
 		notes = append(notes, fmt.Sprintf("%s -> %s: resolved, target not ready (%s)",
-			field.Spec, ref.Target, ref.TargetNotReady))
+			spec, ref.Target, ref.TargetNotReady))
 	}
 
 	return notes
@@ -171,6 +157,77 @@ func (p *pass) resolution(ctx context.Context) (resolver.Resolution, error) {
 	}
 
 	return resolution, nil
+}
+
+// applyResolved writes every resolved reference into the payload and reports which spec
+// fields those were, plus the note each unready target owes the condition.
+//
+// Descriptor order rather than map order: the resolved list ends up in a condition message,
+// and a message that reorders itself between passes is unreviewable. The ordinary fields
+// first and the polymorphic pairs after, because that is the order the Descriptor declares
+// them in and neither list is a subset of the other.
+func (p *pass) applyResolved(resolution resolver.Resolution) (resolved, notes []string) {
+	resolved = make([]string, 0, len(resolution.ByField))
+	notes = make([]string, 0, len(resolution.ByField))
+
+	for _, field := range p.desc.Fields {
+		refs, ok := resolution.ByField[field.Spec]
+		if !ok {
+			continue
+		}
+
+		p.applyRef(field, refs)
+		resolved = append(resolved, field.Spec)
+		notes = append(notes, unreadyTargets(field.Spec, refs)...)
+	}
+
+	for _, pair := range p.desc.GenericFKs {
+		refs, ok := resolution.ByField[pair.Spec]
+		if !ok {
+			continue
+		}
+
+		p.applyGenericFK(pair, refs)
+		resolved = append(resolved, pair.Spec)
+		notes = append(notes, unreadyTargets(pair.Spec, refs)...)
+	}
+
+	return resolved, notes
+}
+
+// applyGenericFK writes both halves of a polymorphic reference, and is the only thing that
+// ever writes either.
+//
+// Both columns every time, from one resolved Result. That is what makes the pair atomic on
+// the way out: there is no code path that can set an id against a type it was not resolved
+// with, which is the failure NetBox answers by attaching the object to a completely
+// different row that happens to share a primary key.
+//
+// The zero Result is the union written empty, and clears both columns rather than leaving
+// them out. Leaving them out would mean "do not manage this reference", which is what an
+// *absent* field means -- an empty one is an instruction.
+//
+// Not written into p.spec, unlike applyRef: a natural key filtering on one of these needs two
+// filters, and there is no single value to offer. No descriptor names a generic FK in a
+// natural key yet; the one that does -- ipam.VLANGroup, unique on
+// (scope_type, scope_id, slug) -- lands with NBO-018, and until then params() refuses such a
+// candidate loudly rather than sending a lookup with half an identity.
+func (p *pass) applyGenericFK(pair registry.GenericFKSpec, refs resolver.FieldRefs) {
+	p.desired[pair.TypeField], p.desired[pair.IDField] = genericFKValues(refs)
+	p.state.Resolved = append(p.state.Resolved, pair.Spec)
+}
+
+// genericFKValues renders one resolved polymorphic reference as its two column values.
+//
+// One FieldRefs holding exactly one Result, which is what ResolveAll files for a union: the
+// pair is one reference, so there is no list here and no partial-list rule to apply. A zero
+// Result -- the union written empty -- is the pair cleared.
+func genericFKValues(refs resolver.FieldRefs) (objectType, id any) {
+	if len(refs) == 0 || refs[0].ObjectType == "" {
+		return nil, nil
+	}
+
+	return refs[0].ObjectType, refs[0].ID
 }
 
 // applyRef puts a resolved id everywhere the rest of the pass looks for it.
@@ -221,8 +278,8 @@ func refValues(field registry.Field, refs resolver.FieldRefs) (payload, filterab
 //
 // Two kinds of them, and they are reported differently because they are fixed differently: a
 // reference the resolver refused carries its own reason and requeue, while one the resolver
-// never saw is a generic foreign key, whose target is a union of Kinds rather than one and
-// whose dispatch is NBO-019.
+// never saw is a reference this build cannot resolve at all -- a to-many reference, whose
+// cardinality no Descriptor states yet (NBO-041).
 func (p *pass) reportUnresolved(
 	ctx context.Context, resolution resolver.Resolution, declared, resolved, notes []string,
 ) {

@@ -58,7 +58,7 @@ func IndexValue(gvk schema.GroupVersionKind, namespace, name string) string {
 // silently absent turns every watch built on it into a reconcile that never happens.
 func AddIndexes(ctx context.Context, fi client.FieldIndexer, s *runtime.Scheme, ds []registry.Descriptor) error {
 	for _, d := range ds {
-		if len(refFields(d)) == 0 {
+		if len(refFields(d)) == 0 && len(d.GenericFKs) == 0 {
 			continue
 		}
 
@@ -106,12 +106,29 @@ func refFields(d registry.Descriptor) []registry.Field {
 // Distinct, because a kind with three references into one catalogue Kind needs one watch on
 // it and not three: the map function behind the watch finds referrers through the index,
 // which does not care which field produced the key.
+//
+// The polymorphic pairs are in here too, and that is the point of them being here rather
+// than in a second mechanism: every legal target of a generic FK gets the same watch a typed
+// reference gets, so an IP address waiting on an interface converges on the interface
+// becoming Ready instead of on the endpoint's resync (#25).
 func RefTargets(d registry.Descriptor) []schema.GroupVersionKind {
+	return refTargets(registryLookup{}, d)
+}
+
+// refTargets is RefTargets against a given reverse index, so a test can supply one rather
+// than registering a kind into the package-level registry.
+func refTargets(lookup objectTypes, d registry.Descriptor) []schema.GroupVersionKind {
 	targets := make([]schema.GroupVersionKind, 0, len(d.Fields))
 
 	for _, field := range refFields(d) {
 		if !slices.Contains(targets, field.Target) {
 			targets = append(targets, field.Target)
+		}
+	}
+
+	for _, target := range genericTargets(lookup, d) {
+		if !slices.Contains(targets, target) {
+			targets = append(targets, target)
 		}
 	}
 
@@ -176,6 +193,16 @@ func nameRefTargets(obj client.Object, d registry.Descriptor) []RefNode {
 	if err != nil {
 		return nil
 	}
+
+	// The union members come in as ordinary references. A polymorphic reference is indexed
+	// under the object it selected, exactly as a typed one is, so the watch registered for
+	// that Kind finds this object without knowing the reference was polymorphic at all.
+	generics, err := genericFKsOf(obj, d)
+	if err != nil {
+		return nil
+	}
+
+	refs = append(refs, genericMemberRefs(generics)...)
 
 	from := RefNode{GVK: d.GVK, Key: types.NamespacedName{
 		Namespace: obj.GetNamespace(), Name: obj.GetName(),

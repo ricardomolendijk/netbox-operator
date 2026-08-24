@@ -81,6 +81,45 @@ func (f fakeDescriptors) Get(gvk schema.GroupVersionKind) (registry.Descriptor, 
 	return d, ok
 }
 
+// ByObjectType is the reverse index over the same fixed set, so a test can exercise the
+// AllowedTypes -> Kind lookup without registering a kind into the package-level registry.
+func (f fakeDescriptors) ByObjectType(objectType string) (registry.Descriptor, bool) {
+	for _, d := range f.byGVK {
+		if d.ObjectType == objectType {
+			return d, true
+		}
+	}
+
+	return registry.Descriptor{}, false
+}
+
+// scopePair is a polymorphic pair in the shape ipam.Prefix's `scope` and ipam.IPAddress's
+// `assignedObject` both have: two members whose Kinds are registered here and one whose Kind
+// is not, which is the M3/M4 ordering every real union is in.
+func scopePair() registry.GenericFKSpec {
+	return registry.GenericFKSpec{
+		TypeField:    "scope_type",
+		IDField:      "scope_id",
+		Spec:         "scope",
+		AllowedTypes: []string{"dcim.region", "dcim.site"},
+		Members: []registry.GenericFKMember{
+			{Spec: "regionRef", Target: regionGVK},
+			{Spec: "siteRef", Target: siteGVK},
+			{Spec: "tenantRef", Target: tenantGVK},
+		},
+	}
+}
+
+// genericDescriptor is a referrer carrying one polymorphic pair and nothing else, so a test
+// asserting on the pair is not also asserting on the ordinary references.
+func genericDescriptor() registry.Descriptor {
+	return registry.Descriptor{
+		GVK: siteGVK, Endpoint: "dcim/sites", ObjectType: "dcim.site",
+		Fields:     []registry.Field{{Spec: "name", API: "name"}},
+		GenericFKs: []registry.GenericFKSpec{scopePair()},
+	}
+}
+
 // target is one CR the resolver may read: the status the engine would have written, in the
 // unstructured form the resolver reads it in.
 type target struct {

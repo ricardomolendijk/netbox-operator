@@ -23,6 +23,10 @@ ever sees it.
 > [To-one and to-many](#to-one-and-to-many) and
 > [A reference needs an id](#a-reference-needs-an-id-not-a-ready-target).
 
+A **polymorphic** reference — one NetBox column pair that may point at any of several models
+— is a union of the references described here, and has a page of its own:
+[Generic references](generic-refs.md).
+
 ## What a reference is
 
 A reference names one NetBox object. It is not a NetBox id — except in the one escape
@@ -349,17 +353,19 @@ question a `kubectl wait` is asking.
 | The references depend on each other | `RefCycle` | Only on a spec change | No order of reconciles resolves it. See [Cycles](#cycles). |
 | The graph is too deep, or too wide, to walk | `RefDepthExceeded` | Only on a spec change | A 33-hop chain is a mistake, and the walk will not guess past its cap. |
 | Target Kind has no descriptor, or its CRD is not installed | `RefKindUnavailable` | **10 min** | The manifest is correct; the fix is an operator upgrade. |
+| A [polymorphic reference](generic-refs.md) names a target its column will not take | `RefTypeNotAllowed` | Only on a spec change | No object appearing anywhere makes an illegal target legal. |
 
 Two more reasons appear on `RefsResolved` and are not resolution failures at all:
-`AllResolved`, and `NotImplemented` for a reference this build cannot dispatch on — a
-[generic foreign key](descriptor.md), whose target is a union of Kinds
-([NBO-019](https://github.com/ricardomolendijk/netbox-operator/issues/31)). It is left out of
-the payload and reported, which keeps the object off `Ready` rather than writing a value the
-operator guessed at.
+`AllResolved`, and `NotImplemented` for a reference this build cannot dispatch on. As of
+NBO-019 that set is **empty**, and the reason survives as the guard rather than as a state: a
+declared reference that comes back neither resolved nor blocked is left out of the payload and
+reported, which keeps the object off `Ready` rather than writing a value the operator guessed
+at.
 
-A **to-many** reference is no longer among them. `tags`, `ipam.VRF.import_targets`,
-`dcim.Site.asns` and `dcim.Interface.wireless_lans` resolve element by element — see
-[to-one and to-many](#to-one-and-to-many).
+Neither of the two references that used to be in it is any more. A **to-many** reference —
+`tags`, `ipam.VRF.import_targets`, `dcim.Site.asns`, `dcim.Interface.wireless_lans` — resolves
+element by element (see [to-one and to-many](#to-one-and-to-many)), and a
+[generic foreign key](generic-refs.md) resolves through its union's dispatch table.
 
 When several references are unresolved, the condition carries the **first** blocker's
 reason — a reason is a single value tooling keys on — and a message naming every one of

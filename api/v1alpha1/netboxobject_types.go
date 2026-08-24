@@ -142,9 +142,14 @@ const (
 	ReasonAllResolved = "AllResolved"
 
 	// ReasonNotImplemented is on RefsResolved: the spec declares a reference this build
-	// cannot resolve at all -- a generic foreign key, whose target is a union of Kinds
-	// rather than one and whose dispatch is NBO-019. It is accepted, left out of the
-	// payload, and reported rather than silent.
+	// cannot resolve at all. It is accepted, left out of the payload, and reported rather
+	// than silent.
+	//
+	// Nothing is in that set any more. To-many references landed with NBO-088 and generic
+	// foreign keys with NBO-019, which were the two members. It stays as the guard rather
+	// than as a state: a declared reference the resolver neither resolved nor refused is a
+	// gap between the field map and the resolver, and it has to be reported on the object
+	// instead of dropped from the payload silently.
 	ReasonNotImplemented = "NotImplemented"
 
 	// The RefsResolved reasons for a reference that did not resolve. One per cause, each
@@ -196,6 +201,15 @@ const (
 	// sends its author hunting for one that does not exist, and the fix here is to flatten
 	// the hierarchy rather than to break a ring.
 	ReasonRefDepthExceeded = "RefDepthExceeded"
+
+	// ReasonRefTypeNotAllowed is on RefsResolved: a polymorphic reference names a target
+	// its NetBox column will not take -- a union member the Descriptor does not declare, or
+	// one whose `app_label.model` type is outside the pair's allowed types.
+	//
+	// Terminal, like RefCycle and unlike RefNotFound: no object appearing anywhere makes an
+	// illegal target legal, so there is no timer. The message names what was given and what
+	// the column accepts, because those two together are the whole fix.
+	ReasonRefTypeNotAllowed = "RefTypeNotAllowed"
 
 	// ReasonRefKindUnavailable is on RefsResolved: the target Kind has no descriptor, or
 	// its CRD is not installed. Distinct from RefNotFound because the manifest is correct
