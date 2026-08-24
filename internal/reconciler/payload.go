@@ -197,7 +197,7 @@ func (s specFields) params(k registry.NaturalKey) (netbox.Params, error) {
 	}
 
 	for _, field := range k.NullFields {
-		params.Null(field.Filter)
+		params.Null(field.Filter, netbox.NullColumn(field.Column))
 	}
 
 	return params, nil

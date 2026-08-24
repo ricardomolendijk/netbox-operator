@@ -27,6 +27,7 @@ rules:
   - netboxclustertypes
   - netboxdevices
   - netboxinterfaces
+  - netboxipaddressclaims
   - netboxipaddresses
   - netboxlocations
   - netboxprefixes
@@ -37,8 +38,11 @@ rules:
   - netboxtags
   - netboxtenantgroups
   - netboxtenants
+  - netboxvirtualdisks
+  - netboxvirtualmachines
   - netboxvlangroups
   - netboxvlans
+  - netboxvminterfaces
   - netboxvrfs
   verbs:
   - get
@@ -54,6 +58,7 @@ rules:
   - netboxclustertypes/finalizers
   - netboxdevices/finalizers
   - netboxinterfaces/finalizers
+  - netboxipaddressclaims/finalizers
   - netboxipaddresses/finalizers
   - netboxlocations/finalizers
   - netboxprefixes/finalizers
@@ -64,8 +69,11 @@ rules:
   - netboxtags/finalizers
   - netboxtenantgroups/finalizers
   - netboxtenants/finalizers
+  - netboxvirtualdisks/finalizers
+  - netboxvirtualmachines/finalizers
   - netboxvlangroups/finalizers
   - netboxvlans/finalizers
+  - netboxvminterfaces/finalizers
   - netboxvrfs/finalizers
   verbs:
   - update
@@ -78,6 +86,7 @@ rules:
   - netboxdevices/status
   - netboxendpoints/status
   - netboxinterfaces/status
+  - netboxipaddressclaims/status
   - netboxipaddresses/status
   - netboxlocations/status
   - netboxprefixes/status
@@ -88,8 +97,11 @@ rules:
   - netboxtags/status
   - netboxtenantgroups/status
   - netboxtenants/status
+  - netboxvirtualdisks/status
+  - netboxvirtualmachines/status
   - netboxvlangroups/status
   - netboxvlans/status
+  - netboxvminterfaces/status
   - netboxvrfs/status
   verbs:
   - get

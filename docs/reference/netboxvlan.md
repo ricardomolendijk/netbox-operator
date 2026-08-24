@@ -435,8 +435,8 @@ Three candidates, tried in this order:
 | # | Candidate | Query | Applicable when |
 |---|---|---|---|
 | 1 | `(group, vid)` | `?group_id=<id>&vid=<vid>` | `groupRef` **resolves** to an id |
-| 2 | `(site, vid)` where `group IS NULL` | `?site_id=<id>&vid=<vid>&group_id__isnull=true` | `siteRef` **resolves** and `groupRef` was **never declared** |
-| 3 | `vid` where both `IS NULL` | `?vid=<vid>&group_id__isnull=true&site_id__isnull=true` | neither `groupRef` nor `siteRef` was declared |
+| 2 | `(site, vid)` where `group IS NULL` | `?site_id=<id>&vid=<vid>&group_id=null` | `siteRef` **resolves** and `groupRef` was **never declared** |
+| 3 | `vid` where both `IS NULL` | `?vid=<vid>&group_id=null&site_id=null` | neither `groupRef` nor `siteRef` was declared |
 
 ### Only the first is a database constraint
 
@@ -472,7 +472,7 @@ natural key is not consulted again, so the ambiguity only ever bites on first ad
 
 ### The `group_id` pin is load-bearing
 
-`group_id__isnull=true` on candidates 2 and 3 is pinned rather than omitted, and on this kind
+`group_id=null` on candidates 2 and 3 is pinned rather than omitted, and on this kind
 that is not tidiness.
 
 Omitted, a VLAN whose group has not been created yet would match candidate 2 by site and `vid`,
@@ -508,7 +508,7 @@ because the intermediate state is legitimate, can be long-lived, and has to be g
 namespace ([object lifecycle](../concepts/object-lifecycle.md)).
 
 `status.naturalKey` records which of the three candidates ran, filter by filter, so a
-`{"vid": "20", "site_id": "12", "group_id__isnull": "true"}` tells you the engine treated the
+`{"vid": "20", "site_id": "12", "group_id": "null"}` tells you the engine treated the
 object as a sited, ungrouped VLAN — the non-unique branch.
 
 ## Conditions

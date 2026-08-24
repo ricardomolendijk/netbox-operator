@@ -241,7 +241,7 @@ func dcimDeviceKeys() []NaturalKey {
 				{Filter: "name", Spec: "name", Lookup: LookupIExact},
 				{Filter: "site_id", Spec: "siteRef"},
 			},
-			NullFields: []NullField{{Filter: "tenant_id", Spec: "tenantRef"}},
+			NullFields: []NullField{{Filter: "tenant_id", Spec: "tenantRef", Column: NullColumnRef}},
 		},
 	}
 }

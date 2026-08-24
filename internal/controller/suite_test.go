@@ -118,6 +118,10 @@ func startManager(cfg *rest.Config) (func(), error) {
 		return nil, fmt.Errorf("object controllers: %w", err)
 	}
 
+	if err := SetupClaimControllers(mgr, clients); err != nil {
+		return nil, fmt.Errorf("claim controllers: %w", err)
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		if err := mgr.Start(ctx); err != nil {

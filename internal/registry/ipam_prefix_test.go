@@ -158,17 +158,20 @@ func TestPrefixNaturalKeysPinTheVRF(t *testing.T) {
 		}},
 		{
 			Fields:     []KeyField{{Filter: "prefix", Spec: "prefix"}},
-			NullFields: []NullField{{Filter: "vrf_id", Spec: "vrfRef"}},
+			NullFields: []NullField{{Filter: "vrf_id", Spec: "vrfRef", Column: NullColumnRef}},
 		},
 	}
 	if !reflect.DeepEqual(d.NaturalKeys, want) {
 		t.Fatalf("NaturalKeys = %+v, want %+v", d.NaturalKeys, want)
 	}
 
-	// The pin is sent as an explicit `vrf_id__isnull`, never as an omitted filter
-	// (docs/concepts/lookups.md#why-a-null-filter-is-pinned-and-never-omitted).
-	if got := d.NaturalKeys[1].NullFields[0].Param(); got != "vrf_id__isnull" {
-		t.Errorf("the null pin renders as %q, want vrf_id__isnull", got)
+	// The pin goes out as an explicit `?vrf_id=null`, never as an omitted filter
+	// (docs/concepts/lookups.md#why-a-null-filter-is-pinned-and-never-omitted). `vrf` is a
+	// `ForeignKey` (docs/netbox-schema.md -> ipam.Prefix), which is what makes it the
+	// sentinel spelling rather than the numeric `__empty` one; internal/netbox pins the
+	// rendering itself.
+	if got := d.NaturalKeys[1].NullFields[0].Column; got != NullColumnRef {
+		t.Errorf("the null pin declares Column %q, want %q", got, NullColumnRef)
 	}
 }
 

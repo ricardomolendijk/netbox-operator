@@ -2,8 +2,11 @@ package registry
 
 import (
 	"errors"
+	"reflect"
 	"slices"
 	"testing"
+
+	"github.com/ricardomolendijk/netbox-operator/internal/netbox"
 )
 
 func TestKeyFieldParam(t *testing.T) {
@@ -38,14 +41,62 @@ func TestKeyFieldParam(t *testing.T) {
 	}
 }
 
-func TestNullFieldParam(t *testing.T) {
-	got := NullField{Filter: "vrf_id", Spec: "vrfRef"}.Param()
-	if got != "vrf_id__isnull" {
-		t.Fatalf("Param() = %q, want vrf_id__isnull", got)
+// TestNullPinRendersPerColumnClass is the registry half of #206: a pin declares its
+// column's filter class and the client turns that into whichever parameter NetBox
+// registers. The strings themselves, and the NetBox source behind each, are pinned in
+// internal/netbox (TestNullPinSpellingPerColumnType); this checks that a declaration
+// reaches them.
+func TestNullPinRendersPerColumnClass(t *testing.T) {
+	tests := map[string]struct {
+		field NullField
+		want  netbox.Params
+	}{
+		"foreign key": {
+			field: NullField{Filter: "vrf_id", Spec: "vrfRef", Column: NullColumnRef},
+			want:  netbox.Params{"vrf_id": "null"},
+		},
+		"char column": {
+			field: NullField{Filter: "rd", Spec: "rd", Column: NullColumnChar},
+			want:  netbox.Params{"rd": "null"},
+		},
+		"numeric column": {
+			field: NullField{Filter: "scope_id", Spec: "scope", Column: NullColumnNumeric},
+			want:  netbox.Params{"scope_id__empty": "true"},
+		},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			got := netbox.Params{}.Null(tc.field.Filter, netbox.NullColumn(tc.field.Column))
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("Null(%q, %q) = %v, want %v", tc.field.Filter, tc.field.Column, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestNullPinWithNoColumnClassIsRejected keeps the zero value from becoming a default. Every
+// spelling is wrong for some column, so a pin that does not say which class it targets has
+// to fail the boot rather than pick one.
+func TestNullPinWithNoColumnClassIsRejected(t *testing.T) {
+	key := NaturalKey{
+		Fields: []KeyField{{Filter: "name", Spec: "name"}},
+		// Deliberately no Column: this fixture proves the zero value is not a default.
+		// Do not "fix" it by declaring one.
+		NullFields: []NullField{{Filter: "parent_id", Spec: "parentRef"}},
+	}
+	if err := key.Validate(); !errors.Is(err, ErrUnknownNullColumn) {
+		t.Fatalf("Validate() = %v, want ErrUnknownNullColumn", err)
 	}
 }
 
 // params is every query parameter a candidate sends, value-matched fields first.
+//
+// A value-matched field is its parameter name; a null pin is the full `param=value` pair,
+// rendered by the client that actually sends it. Both halves matter. A ref pin's parameter
+// is the bare column name -- `?parent_id=null` -- so without the value a pin and a value
+// match are the same string and this test could not tell "no parent" from "some parent".
+// And going through netbox.Params means these expectations are the wire itself rather than
+// a second opinion about it, which is how #206 stayed invisible.
 func params(k NaturalKey) []string {
 	out := make([]string, 0, len(k.Fields)+len(k.NullFields))
 
@@ -54,7 +105,10 @@ func params(k NaturalKey) []string {
 	}
 
 	for _, field := range k.NullFields {
-		out = append(out, field.Param())
+		pin := netbox.Params{}.Null(field.Filter, netbox.NullColumn(field.Column))
+		for param, value := range pin {
+			out = append(out, param+"="+value)
+		}
 	}
 
 	return out
@@ -89,7 +143,7 @@ func TestDescriptorCandidates(t *testing.T) {
 			name:       "top-level Region pins parent_id to null",
 			descriptor: regionDescriptor(),
 			state:      SpecState{Declared: []string{"name"}, Resolved: []string{"name"}},
-			want:       [][]string{{"name", "parent_id__isnull"}},
+			want:       [][]string{{"name", "parent_id=null"}},
 		},
 		{
 			name:       "Region with an unresolved parent has no candidate at all",
@@ -110,7 +164,7 @@ func TestDescriptorCandidates(t *testing.T) {
 			name:       "Device without a tenant pins tenant_id to null",
 			descriptor: deviceDescriptor(),
 			state:      SpecState{Declared: []string{"name", "siteRef"}, Resolved: []string{"name", "siteRef"}},
-			want:       [][]string{{"name__ie", "site_id", "tenant_id__isnull"}},
+			want:       [][]string{{"name__ie", "site_id", "tenant_id=null"}},
 		},
 		{
 			name:       "assigned address in a VRF disambiguates on the assignment first",
@@ -132,8 +186,8 @@ func TestDescriptorCandidates(t *testing.T) {
 				Resolved: []string{"address", "assignedObject"},
 			},
 			want: [][]string{
-				{"address", "assigned_object_type", "assigned_object_id", "vrf_id__isnull"},
-				{"address", "vrf_id__isnull"},
+				{"address", "assigned_object_type", "assigned_object_id", "vrf_id=null"},
+				{"address", "vrf_id=null"},
 			},
 		},
 		{
@@ -146,7 +200,7 @@ func TestDescriptorCandidates(t *testing.T) {
 			name:       "unassigned global address",
 			descriptor: ipAddressDescriptor(),
 			state:      SpecState{Declared: []string{"address"}, Resolved: []string{"address"}},
-			want:       [][]string{{"address", "vrf_id__isnull"}},
+			want:       [][]string{{"address", "vrf_id=null"}},
 		},
 		{
 			name:       "nested group with no parent constraint keys on slug regardless",
@@ -186,12 +240,12 @@ func TestNaturalKeyValidate(t *testing.T) {
 			name: "value field and a null pin",
 			key: NaturalKey{
 				Fields:     []KeyField{{Filter: "name", Spec: "name"}},
-				NullFields: []NullField{{Filter: "parent_id", Spec: "parentRef"}},
+				NullFields: []NullField{{Filter: "parent_id", Spec: "parentRef", Column: NullColumnRef}},
 			},
 		},
 		{
 			name:    "no value field",
-			key:     NaturalKey{NullFields: []NullField{{Filter: "parent_id", Spec: "parentRef"}}},
+			key:     NaturalKey{NullFields: []NullField{{Filter: "parent_id", Spec: "parentRef", Column: NullColumnRef}}},
 			wantErr: ErrNoKeyFields,
 		},
 		{
@@ -221,7 +275,7 @@ func TestNaturalKeyValidate(t *testing.T) {
 			name: "filter both matched and pinned",
 			key: NaturalKey{
 				Fields:     []KeyField{{Filter: "vrf_id", Spec: "vrfRef"}},
-				NullFields: []NullField{{Filter: "vrf_id", Spec: "vrfRef"}},
+				NullFields: []NullField{{Filter: "vrf_id", Spec: "vrfRef", Column: NullColumnRef}},
 			},
 			wantErr: ErrNullFieldConflict,
 		},

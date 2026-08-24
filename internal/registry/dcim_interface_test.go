@@ -65,8 +65,11 @@ func TestInterfaceClosesTheIPAssignmentUnionMember(t *testing.T) {
 	// The rest of the union, so the count is a fact in the repository rather than a claim in
 	// a pull-request description.
 	for objectType, wantRegistered := range map[string]bool{
-		"dcim.interface":             true,
-		"virtualization.vminterface": false,
+		"dcim.interface": true,
+		// NBO-029 landed while this branch was in flight, so this one is true now too. The
+		// table is written to be updated as each member arrives rather than to assert a
+		// moment -- two of three, and `ipam.fhrpgroup` has no Kind and no M4 ticket.
+		"virtualization.vminterface": true,
 		"ipam.fhrpgroup":             false,
 	} {
 		if _, got := ByObjectType(objectType); got != wantRegistered {

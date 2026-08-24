@@ -34,36 +34,10 @@ type InterfaceType string
 // +kubebuilder:validation:Enum=half;full;auto
 type InterfaceDuplex string
 
-// InterfaceMode is one value of NetBox's InterfaceModeChoices: how an interface treats
-// 802.1Q tags.
-//
-// docs/netbox-schema.md -> dcim.Interface records the column as
-// `mode (BaseInterface) CharField len=50 choices=InterfaceModeChoices` -- the choice class
-// and no members. The four values are read from `netbox/dcim/choices.py` lines 1544-1547,
-// `InterfaceModeChoices`, in the same 4.6.8 tree the digest was taken from.
-//
-// Shared with virtualization.VMInterface, because the column is: both inherit it from
-// `dcim.BaseInterface`, so this type is declared once rather than per interface kind. It
-// lives in this file because `dcim.BaseInterface` is where NetBox declares it.
-//
-// +kubebuilder:validation:Enum=access;tagged;tagged-all;q-in-q
-type InterfaceMode string
-
-const (
-	// InterfaceModeAccess carries one untagged VLAN.
-	InterfaceModeAccess InterfaceMode = "access"
-
-	// InterfaceModeTagged carries the tagged VLANs listed on the interface, plus an
-	// optional untagged one.
-	InterfaceModeTagged InterfaceMode = "tagged"
-
-	// InterfaceModeTaggedAll carries every tagged VLAN, so `taggedVLANs` is not enumerated.
-	InterfaceModeTaggedAll InterfaceMode = "tagged-all"
-
-	// InterfaceModeQinQ is 802.1ad double tagging, where `qinqSVLANRef` is the service
-	// VLAN.
-	InterfaceModeQinQ InterfaceMode = "q-in-q"
-)
+// InterfaceMode is declared in virtualization_vminterface.go, where NBO-029 landed it.
+// NetBox declares the column on dcim.BaseInterface, so this file is arguably the more natural
+// home -- but one declaration shared by both interface kinds is the point, and moving it is a
+// rename rather than a fix. Both kinds use the same values (dcim/choices.py InterfaceModeChoices).
 
 // InterfacePoEMode is one value of NetBox's InterfacePoEModeChoices: which end of a
 // Power-over-Ethernet link this interface is.

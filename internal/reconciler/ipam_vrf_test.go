@@ -318,10 +318,16 @@ func TestVRFWithAnRDIsLookedUpByRDAlone(t *testing.T) {
 
 // TestVRFWithoutAnRDIsLookedUpByNameAndANullRD is the fallback candidate, pin included.
 //
-// `rd__isnull=true` rather than the filter merely being left out: candidates are tried in
-// order and the engine falls through when one matches nothing, so a name-only candidate would
-// be reached by a VRF that *does* declare an rd whose object does not exist yet. It would find
-// an unrelated VRF of that name, adopt it, and PATCH its own rd onto it.
+// `?rd=null` rather than the filter merely being left out: candidates are tried in order and
+// the engine falls through when one matches nothing, so a name-only candidate would be reached
+// by a VRF that *does* declare an rd whose object does not exist yet. It would find an
+// unrelated VRF of that name, adopt it, and PATCH its own rd onto it.
+//
+// The sentinel and not `?rd__empty=true`, even though `rd` is a CharField and NetBox does
+// register `__empty` on one. That lookup is a string-length test, so it matches the empty string as well
+// as NULL (netbox/extras/lookups.py:69-73), and `rd` is `blank=True null=True` with no
+// normalisation on save -- so an empty string is a reachable, different value
+// (docs/concepts/lookups.md#how-a-null-pin-is-spelled-and-why-it-depends-on-the-column).
 func TestVRFWithoutAnRDIsLookedUpByNameAndANullRD(t *testing.T) {
 	obj := vrfObject(nil)
 	obj.Spec.RD = ""
@@ -333,7 +339,7 @@ func TestVRFWithoutAnRDIsLookedUpByNameAndANullRD(t *testing.T) {
 		t.Fatalf("Reconcile() = %v", err)
 	}
 
-	want := netbox.Params{"name": "Donkerslootstraat (RTM)", "rd__isnull": "true"}
+	want := netbox.Params{"name": "Donkerslootstraat (RTM)", "rd": "null"}
 	if got := nb.calls[0].params; !reflect.DeepEqual(got, want) {
 		t.Errorf("lookup params = %v, want %v", got, want)
 	}
