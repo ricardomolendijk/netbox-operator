@@ -25,6 +25,7 @@ rules:
   - netboxclustergroups
   - netboxclusters
   - netboxclustertypes
+  - netboxipaddressclaims
   - netboxipaddresses
   - netboxlocations
   - netboxprefixes
@@ -50,6 +51,7 @@ rules:
   - netboxclustergroups/finalizers
   - netboxclusters/finalizers
   - netboxclustertypes/finalizers
+  - netboxipaddressclaims/finalizers
   - netboxipaddresses/finalizers
   - netboxlocations/finalizers
   - netboxprefixes/finalizers
@@ -72,6 +74,7 @@ rules:
   - netboxclusters/status
   - netboxclustertypes/status
   - netboxendpoints/status
+  - netboxipaddressclaims/status
   - netboxipaddresses/status
   - netboxlocations/status
   - netboxprefixes/status

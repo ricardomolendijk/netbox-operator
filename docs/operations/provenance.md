@@ -60,18 +60,29 @@ Onto every managed object, on create and on adopt, and re-applied on any later u
 | Owning CR's UID | `custom_fields.k8s_uid` | `metadata.uid` of the CR | NBO-006: answers "is this the same object", which a name cannot |
 | Cluster | `custom_fields.k8s_cluster` | `spec.managedBy.clusterID`, verbatim | NBO-047: two clusters managing one object differ here and nowhere else |
 | Owning CR | `custom_fields.k8s_owner` | `<lowercased kind>/<namespace>/<name>` | The human-readable half: which manifest to go and edit |
-| Allocation identity | `custom_fields.k8s_allocation_identity` | **nothing, yet** | [ADR-0005 §3](../decisions/0005-gitops-coexistence.md): the definition is created so the allocation engine (NBO-036) can write one |
+| Allocation identity | `custom_fields.k8s_allocation_identity` | `sha256(url \n namespace \n kind \n name)[:16]`, written by a **claim** and by nothing else | [ADR-0005 §3](../decisions/0005-gitops-coexistence.md): it is how a claim finds its own previous allocation, so the same manifest reclaims the same address on a rebuilt cluster ([claims](../concepts/claims.md)) |
 
 `k8s_owner` is spelled the same way as the `netbox.kubeforge.org/generated-by` annotation in
 [ADR-0005 §2](../decisions/0005-gitops-coexistence.md), so one string identifies a CR on both
 sides of the fence.
 
-`k8s_allocation_identity` is created and left empty on purpose. NetBox answers a
-`custom_fields` key that has no `extras.CustomField` behind it with a **400**, so the
-definition has to exist before the first claim can write one; creating it now is what unblocks
-that work rather than making the first claim fail. Set
-`allocationIdentityField: ""` on an endpoint that will never serve a claim and it is not
-created at all.
+`k8s_allocation_identity` is the one field the ordinary stamp never writes: the value belongs to
+the allocation engine, and an object that is not the result of a claim carries the definition
+and no value. NetBox answers a `custom_fields` key that has no `extras.CustomField` behind it
+with a **400**, so the definition has to exist before the first claim can write one, which is
+why it is created for every stamping endpoint whether or not a claim ever uses it.
+
+Set `allocationIdentityField: ""` on an endpoint that will never serve a claim and it is not
+created at all — but note the consequence: a claim on that endpoint **refuses to allocate**,
+`Ready=False, Reason=IdempotencyKeyUnavailable`, zero POSTs. For a claim the identity store is
+mandatory rather than decorative, because without it a lost HTTP response is unrecoverable and
+every retry burns another address. The same is true of leaving `spec.managedBy` off entirely.
+
+The definition is created with `filter_logic: exact` rather than NetBox's own default of
+`loose`. Every one of these fields is an identity, and `?cf_k8s_allocation_identity=<value>`
+under loose filtering is a *substring* match — the wrong answer to "which object **is** this
+one". An existing definition is never narrowed to match, for the same reason the object-type
+list is only ever widened: it may be shared with your own use of it.
 
 ### Tags are merged, never replaced
 
@@ -198,7 +209,7 @@ there is nothing to report.
 |---|---|
 | `NetBoxSweep` (NBO-046) | Nothing to sweep. Every object looks like somebody else's, which is safe and useless |
 | Multi-writer conflicts (NBO-047) | Invisible. Two clusters reconciling one object just fight, and neither says so |
-| Allocation reclaim (ADR-0005 §3) | A claim cannot find its own previous allocation after a cluster rebuild, and allocates a new address |
+| Allocation reclaim (ADR-0005 §3) | A claim **refuses to allocate at all**: `Reason=IdempotencyKeyUnavailable`, zero POSTs. Not a degraded mode — see above |
 | Adoption audit (NBO-006) | An adopted object records nothing about who took it over except in the CR's own `status` |
 
 Drift detection, adoption, deletion and everything else in the engine are unaffected.

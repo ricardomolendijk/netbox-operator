@@ -224,3 +224,54 @@ func equalInts(a, b []int) bool {
 	}
 	return true
 }
+
+// ChoiceOf reads a NetBox choice column's value.
+//
+// NetBox serialises a choice as a nested `{"value": ..., "label": ...}` object on read and
+// accepts the bare value on write (docs/netbox-schema.md, choice columns), so a caller
+// comparing what NetBox holds against a value a Descriptor declares has to reach inside. A
+// bare string is accepted too, because the brief serialisers flatten it -- and because a
+// helper that only works on one of the two shapes is one every caller has to remember which.
+func ChoiceOf(v any) string {
+	if nested, ok := v.(map[string]any); ok {
+		return asString(nested["value"])
+	}
+
+	return asString(v)
+}
+
+// CustomFieldOf reads one custom field off an object, as a string.
+//
+// Empty for a field the object does not carry, for one NetBox returned as null, and for one
+// holding a non-string -- all three mean the same thing to every caller there is: this
+// object does not carry the value we are looking for.
+func CustomFieldOf(obj Object, name string) string {
+	fields, ok := obj[customFieldsKey].(map[string]any)
+	if !ok || name == "" {
+		return ""
+	}
+
+	return asString(fields[name])
+}
+
+// SetCustomField writes one custom field into a payload, creating the container if needed
+// and leaving every other key alone.
+//
+// A map[string]any rather than a map[string]string, and that is not cosmetic: Changes
+// compares `custom_fields` by casting the desired value to map[string]any, and a
+// map[string]string falls through to a whole-value comparison that never matches -- a PATCH
+// loop for the lifetime of the object. See provenance.mergeCustomFields, which is the same
+// trap in the other direction.
+func SetCustomField(obj Object, name, value string) {
+	if name == "" {
+		return
+	}
+
+	fields, ok := obj[customFieldsKey].(map[string]any)
+	if !ok {
+		fields = map[string]any{}
+	}
+
+	fields[name] = value
+	obj[customFieldsKey] = fields
+}

@@ -19,3 +19,4 @@ resources:
 - bases/netbox.kubeforge.org_netboxclustergroups.yaml
 - bases/netbox.kubeforge.org_netboxclusters.yaml
 - bases/netbox.kubeforge.org_netboxipaddresses.yaml
+- bases/netbox.kubeforge.org_netboxipaddressclaims.yaml

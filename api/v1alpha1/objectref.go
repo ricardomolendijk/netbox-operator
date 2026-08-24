@@ -269,6 +269,14 @@ type (
 	// address of the same kind (docs/netbox-schema.md -> ipam.IPAddress, `nat_inside
 	// ForeignKey -> ipam.IPAddress on_delete=SET_NULL`).
 	IPAddressRef ObjectRef
+	// PrefixRef points at a NetBoxPrefix (ipam.Prefix, ipam/prefixes).
+	//
+	// The first alias whose target is a *pool* rather than a plain foreign key: a
+	// NetBoxIPAddressClaim resolves it to the prefix it allocates out of
+	// (docs/decisions/0004-claims-first-allocation.md). Nothing about the alias is
+	// different for that -- the id is resolved by the same four modes and the same grant
+	// check -- which is the point of resolving a pool through an ordinary reference.
+	PrefixRef ObjectRef
 )
 
 // TargetGVK reports the Kind this reference resolves against.
@@ -413,6 +421,14 @@ func (r IPAddressRef) TargetGVK() schema.GroupVersionKind {
 // AsObjectRef returns the underlying reference.
 func (r IPAddressRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
 
+// TargetGVK reports the Kind this reference resolves against.
+func (r PrefixRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxPrefix")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r PrefixRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
 // Compile-time proof that every alias satisfies RefTarget. An alias that forgets its
 // methods fails the build here rather than at the first reconcile that needs it.
 var (
@@ -436,4 +452,5 @@ var (
 	_ RefTarget = ClusterTypeRef{}
 	_ RefTarget = VRFRef{}
 	_ RefTarget = IPAddressRef{}
+	_ RefTarget = PrefixRef{}
 )
