@@ -261,11 +261,33 @@ func genericFKValues(refs resolver.FieldRefs) (objectType, id any) {
 // or adopt needs the id under `parentRef`. Writing it into the decoded spec is what "a
 // reference has become an id" means to every later step.
 func (p *pass) applyRef(field registry.Field, refs resolver.FieldRefs) {
+	// A reference written empty is the column cleared: null in the payload, and nothing for a
+	// natural key to filter on. Declared but not resolved, exactly as an emptied EmptyIsNull
+	// scalar is (payload.go, writeValue and filterValue) -- so a candidate that matches on
+	// this field is inapplicable rather than filtering on id 0, which would adopt whatever
+	// NetBox returns for a primary key that cannot exist.
+	if cleared(field, refs) {
+		p.desired[field.API] = nil
+
+		return
+	}
+
 	payload, filterable := refValues(field, refs)
 
 	p.desired[field.API] = payload
 	p.spec[field.Spec] = filterable
 	p.state.Resolved = append(p.state.Resolved, field.Spec)
+}
+
+// cleared reports whether this to-one reference resolved to no object at all.
+//
+// The zero Result is the carrier, as it is for an empty union (genericFKValues reads the same
+// answer off ObjectType). Id zero is the sentinel and is safe as one: NetBox primary keys
+// start at 1, which is why v1alpha1.ObjectRef.ID rejects zero rather than treating it as
+// unset. A to-many field has no such state -- `[]` is its empty statement and resolves to an
+// empty list of ids, not to one absent id.
+func cleared(field registry.Field, refs resolver.FieldRefs) bool {
+	return !field.Class.ToMany() && len(refs) == 1 && refs[0].ID == 0
 }
 
 // refValues renders resolved references twice: as the value NetBox is sent, and as the value

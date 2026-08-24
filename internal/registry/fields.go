@@ -62,6 +62,24 @@ var (
 	// that cannot be built rather than fail, which is the worst of the three outcomes.
 	ErrToManyNaturalKey = errors.New("natural-key filter reads a to-many reference")
 
+	// ErrContainmentNotCascade is returned when the containment ref names a foreign key
+	// whose target's deletion does *not* cascade server-side.
+	//
+	// The containment parent is whichever FK the server cascades
+	// (docs/decisions/0003-ownership-and-references.md rule 4), so this is the check that
+	// turns the modelling error into a boot failure. An owner reference on a
+	// `PROTECT`-ed FK would promise a cluster-side cascade that NetBox refuses to perform:
+	// deleting the parent CR would garbage-collect the child CR, whose finalizer would then
+	// try a DELETE NetBox rejects, and the object would be gone from Kubernetes and still
+	// in NetBox. A `SET_NULL` FK is the same mistake in the other direction -- the row
+	// survives with the column cleared, and the CR that described it has been deleted.
+	ErrContainmentNotCascade = errors.New("containment ref does not cascade on delete")
+
+	// ErrCascadeNotRef is returned for a non-reference field declaring CascadeOnDelete.
+	// `on_delete` is a property of a foreign key, so on a scalar the flag is data nothing
+	// reads -- the same class of quietly-ignored declaration ErrTargetNotRef exists for.
+	ErrCascadeNotRef = errors.New("non-reference field declares CascadeOnDelete")
+
 	// ErrContainmentToMany is returned for a to-many containment ref. Kubernetes garbage
 	// collection waits for every owner, so two containment owners silently turn "delete the
 	// site" into "delete the site or the VRF" -- which is the argument
@@ -187,6 +205,26 @@ type Field struct {
 	// and the remaining aliases together, and turns the check on with them.
 	Target schema.GroupVersionKind
 
+	// CascadeOnDelete says NetBox deletes *this* object when the target of this reference
+	// is deleted -- the Django field's `on_delete=CASCADE`, read straight off
+	// docs/netbox-schema.md.
+	//
+	// It exists because it was the one thing a Descriptor could not express (#192), and the
+	// rule that needs it is not a matter of taste: the containment parent of ADR-0003 rule 4
+	// is *whichever FK the server cascades*. A `CASCADE` FK qualifies because the row goes
+	// away without the operator asking, so the CR has to go away with it or the engine's
+	// create-if-absent step resurrects what NetBox deliberately deleted. A `PROTECT` or
+	// `SET_NULL` FK does not qualify, because nothing on the server side disappears.
+	// validateContainment enforces that, so a Descriptor naming a non-cascading containment
+	// parent fails the boot rather than shipping a cascade that does the wrong thing.
+	//
+	// Meaningful only on a reference class -- ErrCascadeNotRef rejects it elsewhere -- and
+	// only load-bearing on the field ContainmentRef names. It is still worth declaring on
+	// every FK: it is the fact the M7 generator can emit from the OpenAPI schema's
+	// `on_delete` for ~90 Kinds, and a Kind whose only cascading FK is left undeclared is a
+	// Kind that silently gets no containment parent.
+	CascadeOnDelete bool
+
 	// EmptyIsNull says this column is cleared with `null` rather than with the empty
 	// string, so an emptied spec field is sent as JSON null.
 	//
@@ -197,10 +235,19 @@ type Field struct {
 	// every write, and the field still unclearable (#170). A text column needs nothing
 	// here: `description: ""` is how NetBox spells an empty description.
 	//
-	// Only meaningful on ClassValue. A reference's empty form is a nil pointer, which
-	// never reaches internal/reconciler's payload as an empty string, so setting this on
-	// one does nothing rather than something surprising -- and Validate does not reject it
-	// yet.
+	// On a ClassRefOne field it means the same thing about the same column: the reference
+	// may be written empty, and an empty one is the foreign key cleared with null rather
+	// than a reference that failed to resolve (#185). The spec field is then typed
+	// v1alpha1.OptionalRef rather than a strict ref alias, so `{}` is admissible in the
+	// first place -- the flag and the type are two halves of one decision, and a field that
+	// sets only the flag simply never receives an empty reference to act on. The resolver
+	// answers such a reference with the zero Result, and internal/reconciler writes null
+	// for it (resolver.Resolve, reconciler.applyRef).
+	//
+	// Meaningless on ClassRefMany, ClassObjectTypeList and ClassArray, where the empty
+	// statement is already `[]` and an empty *element* selects nothing at all: the resolver
+	// refuses one as malformed rather than clearing the column. Validate does not reject
+	// the combination yet.
 	EmptyIsNull bool
 }
 
@@ -301,6 +348,20 @@ func (d Descriptor) isRefSpecField(spec string) bool {
 	return ok
 }
 
+// cascadesOnDelete reports whether NetBox deletes this object when the target of spec is
+// deleted. Read off the ordinary field map or off the generic-FK pair, the same two places
+// declaresSpecField looks, so a containment parent reached through a generic-FK union needs
+// nothing special here.
+func (d Descriptor) cascadesOnDelete(spec string) bool {
+	if field, ok := d.FieldFor(spec); ok {
+		return field.CascadeOnDelete
+	}
+
+	generic, ok := d.GenericFKFor(spec)
+
+	return ok && generic.CascadeOnDelete
+}
+
 // validateFieldMap checks the field map itself and every reference into it. It is where a
 // spec name that does not round-trip to an API name is caught, which is the whole reason
 // the map is explicit.
@@ -345,6 +406,10 @@ func (d Descriptor) validateFieldEntries() error {
 			errs = append(errs, fmt.Errorf("%w: %s -> %s", ErrTargetNotRef, field.Spec, field.Target))
 		}
 
+		if !field.Class.Ref() && field.CascadeOnDelete {
+			errs = append(errs, fmt.Errorf("%w: %s", ErrCascadeNotRef, field.Spec))
+		}
+
 		seenSpec[field.Spec], seenAPI[field.API] = struct{}{}, struct{}{}
 	}
 
@@ -386,6 +451,13 @@ func (d Descriptor) validateContainment() error {
 
 	if !d.isRefSpecField(d.ContainmentRef) {
 		return fmt.Errorf("%w: %s", ErrContainmentNotRef, d.ContainmentRef)
+	}
+
+	// The cascade check, and the reason it is here rather than in a review checklist: an
+	// owner reference on a foreign key NetBox does not cascade is a cluster-side cascade
+	// with no server-side counterpart, which deletes the CR and leaves the row.
+	if !d.cascadesOnDelete(d.ContainmentRef) {
+		return fmt.Errorf("%w: %s", ErrContainmentNotCascade, d.ContainmentRef)
 	}
 
 	return nil

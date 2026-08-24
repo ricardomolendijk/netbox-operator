@@ -11,6 +11,18 @@ func init() { MustRegister(ipamPrefixDescriptor()) }
 
 // ipamPrefixDescriptor is ipam.Prefix as data.
 //
+// prefixScopeFK is the scope union as ipam.Prefix carries it: cascading, because all four
+// scope targets -- dcim.Region, dcim.SiteGroup, dcim.Site and dcim.Location -- declare a
+// `prefixes` GenericRelation, so deleting any of them deletes the prefixes scoped to it
+// (docs/netbox-schema.md). ScopeFK leaves the flag to the caller because that is not true of
+// every scoped kind: `clusters` and `wireless_lans` are declared on only two of the four.
+func prefixScopeFK() GenericFKSpec {
+	scope := ScopeFK("scope")
+	scope.CascadeOnDelete = true
+
+	return scope
+}
+
 // The first scoped kind, and the reason registry.ScopeFK exists: one line declares the
 // `(scope_type, scope_id)` pair, the four object types NetBox permits in it, the four CR
 // spec fields that select them, and the four read-only caches that must never be written.
@@ -102,7 +114,7 @@ func ipamPrefixDescriptor() Descriptor {
 		// `app_label.model` strings NetBox accepts, the four CR spec fields that select
 		// them and the cache list, so this kind cannot get the `dcim.sitegroup` spelling
 		// wrong or forget a cache column.
-		GenericFKs: []GenericFKSpec{ScopeFK("scope")},
+		GenericFKs: []GenericFKSpec{prefixScopeFK()},
 
 		// The four columns every ChangeLoggedModel carries, plus the scope caches, plus the
 		// two hierarchy counters.
@@ -117,11 +129,18 @@ func ipamPrefixDescriptor() Descriptor {
 		ReadOnly: append(ScopeCacheColumns(),
 			"created", "last_updated", "url", "display", "_depth", "_children"),
 
-		// docs/decisions/0003-ownership-and-references.md rule 4 names `scopeRef` as this
-		// kind's containment parent by name, so deleting the NetBoxSite a prefix is scoped
-		// to takes the prefix with it. Exactly one, because Kubernetes garbage collection
-		// waits for *every* owner: adding `vrfRef` as a second would turn "delete the site
-		// or the VRF and the prefix goes" into "delete both", silently.
+		// The containment parent, and under docs/decisions/0003-ownership-and-references.md
+		// rule 4 it is not a preference: the containment parent is whichever FK the *server*
+		// cascades. Every one of the four scope targets declares a `prefixes` GenericRelation
+		// (docs/netbox-schema.md), so deleting the NetBoxSite a prefix is scoped to takes the
+		// prefix with it, and the owner reference is what makes the CR go too.
+		//
+		// `vrfRef` is ruled out by the same rule rather than by taste: `ipam.Prefix.vrf` is
+		// `on_delete=PROTECT`, so NetBox *refuses* to delete a VRF that still has prefixes and
+		// there is no server-side deletion for an owner reference to mirror. Exactly one in any
+		// case, because Kubernetes garbage collection waits for *every* owner: a second owner
+		// would turn "delete the site or the VRF and the prefix goes" into "delete both",
+		// silently.
 		ContainmentRef: "scope",
 	}
 }

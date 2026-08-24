@@ -42,6 +42,10 @@ func dcimSiteGroupDescriptor() Descriptor {
 			{
 				Spec: "parentRef", API: "parent", Class: ClassRefOne,
 				Target: netboxv1alpha1.SiteGroupRef{}.TargetGVK(),
+				// `parent TreeForeignKey -> dcim.SiteGroup on_delete=CASCADE`
+				// (docs/netbox-schema.md -> dcim.SiteGroup), the same column dcim.Region
+				// declares and the reason this kind has a containment parent at all.
+				CascadeOnDelete: true,
 			},
 		},
 
@@ -72,6 +76,17 @@ func dcimSiteGroupDescriptor() Descriptor {
 				NullFields: []NullField{{Filter: "parent_id", Spec: "parentRef"}},
 			},
 		},
+
+		// `parentRef` is the containment parent, selected by the cascade rule and not by
+		// preference: `dcim.SiteGroup.parent` is `on_delete=CASCADE`, so deleting a site group
+		// in NetBox deletes its descendants server-side (ADR-0003 rule 4).
+		//
+		// It had none until #198, and the failure that made available is the one #192
+		// described for dcim.Region: the child CR outlives the row it described, finds nothing
+		// at status.id on the next reconcile, and the engine's create-if-absent step
+		// **re-creates a site group NetBox deliberately deleted**. The one FK this kind has,
+		// so the rule picks it with no tiebreak.
+		ContainmentRef: "parentRef",
 
 		UpdateStrategy: UpdatePatch,
 

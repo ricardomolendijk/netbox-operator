@@ -332,3 +332,97 @@ func TestOperatorOwnsOwnerReferencesAndNeverSpec(t *testing.T) {
 			reconciler.FieldManager, managerNames(child.ManagedFields))
 	}
 }
+
+// TestACascadeDeletedParentDoesNotRecreateItsChild is the failure the containment rule exists
+// to prevent: `dcim.Region.parent` is `on_delete=CASCADE`, so deleting a region in NetBox
+// deletes its descendants server-side, and a child CR that outlives its row would find nothing
+// at `status.id` and re-create a region NetBox deliberately deleted.
+//
+// What this can and cannot prove, stated plainly because the gap is the whole point. In a real
+// cluster the defence is the owner reference: the garbage collector removes the child CR when
+// the parent goes, so there is no CR left to re-create anything. envtest runs no
+// kube-controller-manager and therefore no garbage collector, so that half cannot be asserted
+// here at all -- it is #29's e2e gate, deferred to post-v1. This test asserts the two halves
+// that are reachable:
+//
+//   - the child carries an owner reference naming the *live* parent's real uid, which is
+//     exactly what GC reads to decide to delete it; and
+//   - with the parent gone and the row cascaded away, the engine's create-if-absent step does
+//     not fire -- the second line of defence, and the one that stops the resurrection on a
+//     cluster where the cascade has not happened yet.
+//
+// The second is real rather than incidental: every one of dcim.Region's natural-key candidates
+// reads `parent_id` or pins it null, so a child whose `parentRef` no longer resolves has no
+// applicable candidate and locate() waits instead of creating. `status.id` being cleared to
+// zero is the probe that a pass actually got that far -- a pass that had created would have
+// written a fresh id there instead.
+//
+// That the probe is live was checked the only way it can be: with the parent CR left in place
+// and only the row cascaded away, the engine re-creates it within a resync (status.id 102 ->
+// 103). So the zero below is the guard working, not a count that is always zero.
+func TestACascadeDeletedParentDoesNotRecreateItsChild(t *testing.T) {
+	ns := newNamespace(t)
+	stub, target := newNetBoxStub(t, regionKind)
+	readyEndpoint(t, ns, target)
+
+	makeRegion(t, ns, "parent", nil)
+	eventually(t, "the parent to become Ready", func() bool { return regionIsReady(ns, "parent") })
+
+	makeRegion(t, ns, "child", func(r *netboxv1alpha1.NetBoxRegion) {
+		r.Spec.ParentRef = &netboxv1alpha1.RegionRef{Name: "parent"}
+	})
+	eventually(t, "the child to become Ready", func() bool { return regionIsReady(ns, "child") })
+	eventually(t, "the child to be owned by its parent", func() bool {
+		return len(childOwnerRefs(t, ns)) == 1
+	})
+
+	childID := fetchRegion(ns, "child").Status.ID
+	if childID == 0 {
+		t.Fatal("the child has no status.id, so there is no row for a cascade to take")
+	}
+
+	// The precondition that makes the zero at the end mean something: there is a row named
+	// `child` right now, so a later count of zero is the engine declining to re-create it and
+	// not the probe reading a value it always reads.
+	if got := stub.countByKey("child"); got != 1 {
+		t.Fatalf("netbox holds %d region(s) named `child` before the cascade, want 1", got)
+	}
+
+	// Half one: the reference GC would act on. Asserted by uid rather than for presence,
+	// because an owner reference carrying anything else is not a weaker cascade -- GC reads an
+	// owner it cannot resolve as one that is gone and deletes the dependent at once.
+	owner := childOwnerRefs(t, ns)[0]
+	if parent := fetchRegion(ns, "parent"); owner.UID != parent.UID {
+		t.Fatalf("owner uid = %q, want the live parent's uid %q", owner.UID, parent.UID)
+	}
+
+	// The parent CR first, and only then the row. On a real cluster both are simultaneous --
+	// the finalizer's DELETE is what triggers the server-side cascade -- but the stub models no
+	// foreign keys, and removing the row first would leave a window in which the child still
+	// resolves its parent and legitimately re-creates a row somebody deleted behind the
+	// operator's back. That is drift correction working, not the bug under test.
+	if err := apiClient.Delete(context.Background(), fetchRegion(ns, "parent")); err != nil {
+		t.Fatalf("deleting the parent: %v", err)
+	}
+	eventually(t, "the parent CR to be gone", func() bool { return fetchRegion(ns, "parent") == nil })
+
+	stub.cascade(childID)
+
+	// Half two. `status.id` clears only on a pass that fetched the row, got a 404 and fell
+	// through to the natural key -- so this is the gate that a reconcile really reached the
+	// point where a create-if-absent would have happened.
+	eventually(t, "the child to notice its row is gone", func() bool {
+		region := fetchRegion(ns, "child")
+
+		return region != nil && region.Status.ID == 0
+	})
+
+	if got := stub.countByKey("child"); got != 0 {
+		t.Errorf("netbox holds %d region(s) named `child`, want 0: the create-if-absent step "+
+			"re-created a row NetBox cascade-deleted", got)
+	}
+
+	if regionIsReady(ns, "child") {
+		t.Error("the child reports Ready with no parent and no row")
+	}
+}

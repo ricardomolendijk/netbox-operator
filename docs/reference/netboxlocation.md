@@ -106,11 +106,11 @@ Two things follow from it, and neither is optional behaviour:
 - **It is the containment reference.** The descriptor declares it as such, which under
   [ADR-0003](../decisions/0003-ownership-and-references.md) rule 4 makes the `NetBoxSite` this
   location's containment parent — the Kubernetes counterpart of NetBox's own
-  `on_delete=CASCADE`. Exactly one field may carry that, which is why `parentRef` does not:
-  Kubernetes garbage collection waits for *every* owner, so two containment owners would
-  silently turn "delete the site" into "delete the site or the parent location".
-  **No owner reference is written in this build** — see
-  [the site does not cascade yet](#the-site-is-the-containment-parent-and-does-not-cascade-yet).
+  `on_delete=CASCADE`. Exactly one field may carry that, which is why `parentRef` does not,
+  even though `parent` is `CASCADE` too: Kubernetes garbage collection waits for *every*
+  owner, so two containment owners would silently turn "delete the site" into "delete the site
+  **and** the parent location". See
+  [why the site and not the parent](#why-the-site-and-not-the-parent).
 
 ### `spec.parentRef`
 
@@ -182,6 +182,7 @@ See [provenance](../operations/provenance.md).
 | `Ready` | the location exists in NetBox and matches the spec | anything else | `Synced`, `WaitingForEndpoint`, `WaitingForKey`, `WaitingForRef`, `Conflict`, `AdoptOnly`, `Invalid`, `APIError`, `DryRunPending`, `ReportPending` |
 | `Synced` | the last write succeeded, or no drift was found | drift found and not corrected | `NoDrift`, `DriftCorrected`, `DriftReported`, `DriftDetectedDryRun` |
 | `RefsResolved` | `siteRef`, and `parentRef` if set, resolved | either does not resolve | `AllResolved`, `RefNotFound`, `RefNotReady`, `RefTargetFailed`, `RefAmbiguous`, `RefDenied`, `RefCycle`, `RefDepthExceeded` |
+| `ParentOwned` | `siteRef` resolved to a site in this namespace, so deleting it cascades | `siteRef` resolved to a site in another namespace, to a raw `id` or `slug`, or ownership was declined | `ParentOwned`, `CascadeUnavailable`, `ParentOwnershipDisabled` |
 | `Deleting` | never | while terminating and NetBox is not settled | `Protected`, `WaitingForEndpoint`, `APIError`, `Invalid` |
 
 ## Kind-specific behaviour
@@ -201,22 +202,34 @@ refuses to create rather than guessing. It is asserted on recorded traffic in
 `internal/controller/dcim_location_controller_test.go`, because a version that reported the
 reference and created the object anyway would look identical in the status.
 
-### The site is the containment parent, and does not cascade yet
+### Why the site and not the parent
 
-`siteRef` is declared as this kind's containment reference, so under
-[ADR-0003](../decisions/0003-ownership-and-references.md) rule 4 the `NetBoxSite` is meant to
-become a **non-controller owner** of this CR: `kubectl delete netboxsite home` would then take
-its locations with it, matching what `on_delete=CASCADE` already does inside NetBox.
+`siteRef` is this kind's containment reference, so the `NetBoxSite` becomes a
+**non-controller owner** of this CR and `kubectl delete netboxsite home` takes its locations
+with it — matching what `on_delete=CASCADE` already does inside NetBox.
 
-**Nothing writes that owner reference in this build.** The declaration is on the descriptor
-(`ContainmentRef: "siteRef"`) and the mechanism that reads it — owner references, the
-`CascadeUnavailable` condition for a reference that cannot legally be one, and the
-`parent-ownership` opt-outs — is the half of NBO-014 that has not landed. Until it does,
-deleting a site leaves its `NetBoxLocation` CRs behind, each reporting
-`RefsResolved=False, Reason=RefNotFound`.
+This is the one kind where the choice needs an argument, because **both** candidates cascade:
+`dcim.Location.site` and `dcim.Location.parent` are each `on_delete=CASCADE`, and
+[ADR-0003](../decisions/0003-ownership-and-references.md) rule 4 allows exactly one. `siteRef`
+wins on three counts:
 
-`parentRef` is also `CASCADE` in NetBox and is deliberately **not** the containment ref: a kind
-gets exactly one containment parent.
+- **`site` is required and `parent` is not.** A containment parent on the optional `parentRef`
+  would leave every *top-level* location — the common shape — with no owner reference at all.
+  `siteRef` is set on every location there can be.
+- **Deleting the site is the larger deletion.** It cascades to every location in the site,
+  nested ones included, so its rows are a superset of what deleting any one parent location
+  takes.
+- **The parent path is already covered, by identity rather than by ownership.** Every natural-key
+  candidate on this kind reads `parent_id` or pins it null, so a location whose `parentRef`
+  stops resolving has *no applicable candidate*: the engine reports
+  `Ready=False, Reason=WaitingForKey` and waits, instead of re-creating a row NetBox
+  cascade-deleted. That is the failure the containment rule exists to prevent, and on this path
+  it is unreachable without the owner reference.
+
+The owner reference is only set when the site is in the same namespace, because an owner
+reference may never cross one. A location whose site lives in a shared catalogue namespace
+reports `ParentOwned=False, Reason=CascadeUnavailable` and does not cascade — the common shape,
+so read that condition before relying on it. See [ownership](../concepts/ownership.md).
 
 ### A `parentRef` cycle is reported on both objects
 
@@ -272,7 +285,7 @@ side by side while diagnosing a `WaitingForRef`.
 | `RefsResolved=False`, `Reason=RefCycle` | Two locations name each other as parent. Edit either one. |
 | `Ready=False`, `Reason=Conflict` | More than one NetBox location matched, or one matched and `onConflict` is `Fail`. `status.naturalKey` shows what was searched. |
 | A second location appeared after an edit | `spec.name` or `spec.siteRef` was changed. See [Renaming changes identity](#renaming-changes-identity). |
-| The site was deleted and the location CR is still there | Expected in this build: the containment owner reference is declared and not yet written. See [above](#the-site-is-the-containment-parent-and-does-not-cascade-yet). |
+| The site was deleted and the location CR is still there | Read `ParentOwned`. `CascadeUnavailable` means the site was in another namespace, where an owner reference is illegal. See [why the site and not the parent](#why-the-site-and-not-the-parent). |
 | A delete hangs, `Reason=Protected` | Racks or devices in NetBox still reference the location. The message names them. |
 
 ## Related
