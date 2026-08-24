@@ -31,6 +31,7 @@ rules:
   - netbox.populator.io
   resources:
   - netboxendpoints/status
+  - netboxsites/status
   - netboxtags/status
   verbs:
   - get
@@ -39,6 +40,7 @@ rules:
 - apiGroups:
   - netbox.populator.io
   resources:
+  - netboxsites
   - netboxtags
   verbs:
   - get
@@ -49,6 +51,7 @@ rules:
 - apiGroups:
   - netbox.populator.io
   resources:
+  - netboxsites/finalizers
   - netboxtags/finalizers
   verbs:
   - update

@@ -1,0 +1,32 @@
+apiVersion: netbox.populator.io/v1alpha1
+kind: NetBoxSite
+metadata:
+  name: home
+  namespace: default
+spec:
+  # The NetBoxEndpoint to write through, in this namespace. There is no cluster-wide
+  # default endpoint; see config/samples/netbox_v1alpha1_netboxendpoint.yaml.
+  endpointRef: homelab
+
+  name: Home
+  # The natural key. NetBox enforces slug uniqueness globally, so the first namespace to
+  # claim `home` gets it and a second NetBoxSite with this slug reports Conflict.
+  slug: home
+
+  # A choice field. NetBox returns it as {"value","label"} and accepts the bare value;
+  # the engine's comparison handles that without a per-kind field class.
+  status: active
+
+  description: Home lab
+  facility: Spare room
+
+  # Decimals. NetBox returns these as strings padded to their decimal_places, so
+  # "51.924400" comes back for the 51.9244 written here. Compared numerically.
+  latitude: "51.9244"
+  longitude: "4.4777"
+
+  timeZone: Europe/Amsterdam
+  physicalAddress: |
+    Example Street 1
+    3011 Rotterdam
+  comments: Managed by netbox-operator.

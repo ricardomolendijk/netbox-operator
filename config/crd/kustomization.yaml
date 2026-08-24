@@ -3,3 +3,4 @@ kind: Kustomization
 resources:
 - bases/netbox.populator.io_netboxendpoints.yaml
 - bases/netbox.populator.io_netboxtags.yaml
+- bases/netbox.populator.io_netboxsites.yaml

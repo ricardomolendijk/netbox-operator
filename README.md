@@ -95,7 +95,7 @@ power, modules, cabling), circuits and VPN deliberately last.
 |---|---|---|
 | Connection | [`NetBoxEndpoint`](docs/reference/netboxendpoint.md) | **Available** (M1) |
 | `extras` | [`NetBoxTag`](docs/reference/netboxtag.md) | **Available** (M1) |
-| `dcim` | `NetBoxSite` | M1 |
+| `dcim` | [`NetBoxSite`](docs/reference/netboxsite.md) | **Available** (M1) |
 | `tenancy` | `NetBoxTenantGroup`, `NetBoxTenant` | M3 |
 | `ipam` | `NetBoxVRF`, `NetBoxRouteTarget`, `NetBoxVLAN`, `NetBoxVLANGroup`, `NetBoxPrefix`, `NetBoxIPAddress` | M3 |
 | `virtualization` | `NetBoxClusterType`, `NetBoxClusterGroup`, `NetBoxCluster`, `NetBoxVirtualMachine`, `NetBoxVMInterface`, `NetBoxVirtualDisk` | M4 |
