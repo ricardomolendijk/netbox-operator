@@ -8,6 +8,14 @@
 // parent will not clean this object up. It never sets an illegal one and it never quietly
 // does nothing.
 //
+// The second thing legality depends on is the *member* a polymorphic reference resolved
+// through, because a generic FK's cascade is declared per target model and members of one
+// union can disagree (#214). So the decision is made per pass rather than once at boot -- and
+// a decision that can change has to be reversible: an object that moves to a member NetBox
+// does not cascade from, or out of the reference altogether, has the owner reference *removed*
+// (disown). A stale containment owner reference is worse than none, because garbage collection
+// reads it as a live owner of an object that no longer references it.
+//
 // There is no switch on Kind here. Which spec field is the containment parent arrives as
 // data on the Descriptor (registry.Descriptor.ContainmentRef), which is why a kind added
 // tomorrow gets its owner reference from its descriptor alone and this file does not change.
@@ -25,6 +33,7 @@ package reconciler
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -55,7 +64,7 @@ type OwnerWriter interface {
 func (p *pass) ownParent(ctx context.Context) error {
 	parent, applicable := p.containmentParent()
 	if !applicable {
-		return nil
+		return p.disown(ctx)
 	}
 
 	if reason, message, refused := p.refusesOwnership(parent); refused {
@@ -68,10 +77,35 @@ func (p *pass) ownParent(ctx context.Context) error {
 		logf.FromContext(ctx).V(1).Info("no containment owner reference",
 			"action", "own", "reason", reason, "cause", message)
 
-		return nil
+		return p.disown(ctx)
 	}
 
 	return p.own(ctx, ownerReferenceTo(parent))
+}
+
+// disown removes the containment owner reference an earlier pass set, when this pass sets
+// none. It is the other half of own, and the reason both exist is that the answer changes
+// under the object.
+//
+// A containment reference is not decided once. Its member can change -- `regionRef` to
+// `siteRef` on the scope union -- and with it whether NetBox cascades at all (#214); the
+// parent can move namespace; the ref can be cleared; the annotation can be set to `false`.
+// Every one of those turns a reference this step wrote into one it would now refuse, and an
+// owner reference nobody removes is not merely untidy:
+//
+//   - Left beside a new one, the object has two containment owners. Garbage collection ANDs
+//     them, so "delete the site *or* the region" becomes "delete both" -- the exact reading
+//     ADR-0003 rule 4 refuses a list of parents to avoid.
+//   - Left alone, it is a promise about an object this one no longer references. Deleting
+//     that former parent garbage-collects this object, whose finalizer then deletes a NetBox
+//     row that was never in its scope.
+//
+// Removing is always the safe direction: an object with no owner reference is not collected,
+// so the failure mode of over-removing is a missing cascade that the next pass restores,
+// while the failure mode of under-removing is a deletion nobody asked for.
+func (p *pass) disown(ctx context.Context) error {
+	return p.writeOwners(ctx, dropContainmentOwners(p.obj, p.desc.ContainmentTargets(),
+		metav1.OwnerReference{}), "disowned by its containment parent", "")
 }
 
 // containmentParent is the resolved containment reference, and whether this object has one
@@ -120,6 +154,25 @@ func (p *pass) refusesOwnership(parent resolver.Result) (reason, message string,
 			p.desc.ContainmentRef, parent.Mode), true
 	}
 
+	// The cascade the owner reference mirrors is per union member, not per reference: a
+	// generic FK's cascade is declared on each target model, so one member of a union can
+	// cascade while its sibling does not (#214). Asked here rather than at boot because the
+	// member is not known until the reference resolves -- validateContainment already refused
+	// the descriptor if *no* member cascades, so reaching this means this object picked one of
+	// the members that does not.
+	//
+	// Refused rather than set, because an owner reference without a server-side cascade is
+	// the failure this whole rule exists to prevent, pointing the other way: garbage
+	// collection would delete the CR while the NetBox row it describes stays behind.
+	if !p.desc.CascadesFrom(p.desc.ContainmentRef, parent.TargetGVK) {
+		return netboxv1alpha1.ReasonCascadeUnavailable, fmt.Sprintf(
+			"%s resolved to %s %s, and netbox does not delete this object when that is deleted, "+
+				"so no owner reference was added: deleting it will not delete this object. Another "+
+				"member of %s may cascade -- the cascade of a polymorphic reference is declared per "+
+				"target model",
+			p.desc.ContainmentRef, parent.TargetGVK.Kind, parent.Target, p.desc.ContainmentRef), true
+	}
+
 	// The sharp edge of this whole mechanism, and the reason it is a condition rather than a
 	// line in the docs: the same manifest cascades or does not depending on where the two
 	// objects live. A grant authorises the *reference*; nothing can authorise the owner
@@ -147,7 +200,26 @@ func (p *pass) own(ctx context.Context, owner metav1.OwnerReference) error {
 		fmt.Sprintf("owned by %s %s/%s, so deleting it garbage-collects this object",
 			owner.Kind, p.obj.GetNamespace(), owner.Name))
 
-	if !addOwner(p.obj, owner) {
+	// Both, and in this order, because a move is one event and not two: an object that went
+	// from `regionRef` to `siteRef` needs the NetBoxRegion entry gone and the NetBoxSite entry
+	// present after one pass. Dropping first also keeps the object from ever being observed
+	// with two containment owners, which garbage collection would AND.
+	changed := dropContainmentOwners(p.obj, p.desc.ContainmentTargets(), owner)
+
+	if addOwner(p.obj, owner) {
+		changed = true
+	}
+
+	return p.writeOwners(ctx, changed, "owned by its containment parent",
+		owner.Kind+"/"+owner.Name)
+}
+
+// writeOwners persists metadata.ownerReferences when this pass changed them, and says so.
+//
+// One writer for own and disown, so the "no OwnerWriter is wired" case and the error wrapping
+// cannot drift apart between the two.
+func (p *pass) writeOwners(ctx context.Context, changed bool, message, owner string) error {
+	if !changed {
 		return nil
 	}
 
@@ -160,12 +232,12 @@ func (p *pass) own(ctx context.Context, owner metav1.OwnerReference) error {
 		// in this pass reads metadata.ownerReferences, and this error ends the pass -- the
 		// controller re-reads the object from the cache next time round -- so there is no
 		// version of the object that could outlive the failed write and be acted on.
-		return fmt.Errorf("owning %s/%s by %s %s: %w", p.obj.GetNamespace(), p.obj.GetName(),
-			owner.Kind, owner.Name, err)
+		return fmt.Errorf("writing the owner references of %s/%s: %w",
+			p.obj.GetNamespace(), p.obj.GetName(), err)
 	}
 
-	logf.FromContext(ctx).Info("owned by its containment parent",
-		"action", "own", "ref", p.desc.ContainmentRef, "owner", owner.Kind+"/"+owner.Name)
+	logf.FromContext(ctx).Info(message,
+		"action", "own", "ref", p.desc.ContainmentRef, "owner", owner)
 
 	return nil
 }
@@ -236,6 +308,73 @@ func addOwner(obj client.Object, owner metav1.OwnerReference) bool {
 	obj.SetOwnerReferences(append(refs, owner))
 
 	return true
+}
+
+// dropContainmentOwners removes the containment owner references this step is responsible for
+// and that this pass would not set, and reports whether anything changed.
+//
+// `targets` are the Kinds the containment ref may resolve to (registry.ContainmentTargets), and
+// they are what makes this narrow enough to be safe. An entry is removed only when all three
+// hold:
+//
+//   - It names one of those Kinds, so it is in the containment slot rather than somebody
+//     else's owner reference. An owner reference to a Kind this ref cannot point at is not
+//     this step's to reason about, and is left alone -- which is what keeps "it never removes
+//     an owner reference it did not add" true of everything outside the slot.
+//   - It is not `keep`, the reference this pass is setting. Passing the zero value removes
+//     every candidate, which is what disown wants.
+//   - It is not a controller reference. Rule 3 owns that one: it belongs to whatever created
+//     the object, it is the marker child materialisation reads to know which children it may
+//     prune, and ADR-0003's dedupe rule says a controller reference naming the same parent
+//     wins over the containment one. Removing it would take that away, and removing it *and*
+//     appending a non-controller entry for the same parent would be the downgrade addOwner
+//     exists to avoid.
+//
+// So the one thing it can take away that a human put there is a hand-written *non-controller*
+// owner reference naming a Kind the containment ref points at -- which is the operator's own
+// slot, and which this step would have written itself the moment the reference resolved.
+func dropContainmentOwners(obj client.Object, targets []schema.GroupVersionKind,
+	keep metav1.OwnerReference,
+) bool {
+	refs := obj.GetOwnerReferences()
+	kept := make([]metav1.OwnerReference, 0, len(refs))
+
+	for _, existing := range refs {
+		if containmentSlot(existing, targets) && !sameOwner(existing, keep) {
+			continue
+		}
+
+		kept = append(kept, existing)
+	}
+
+	if len(kept) == len(refs) {
+		return false
+	}
+
+	obj.SetOwnerReferences(kept)
+
+	return true
+}
+
+// containmentSlot reports whether an owner reference occupies the containment slot: a
+// non-controller reference to one of the Kinds the containment ref resolves to.
+//
+// Group and Kind, not the version, for the reason sameOwner ignores it: one object referenced
+// as v1alpha1 and as v1beta1 is one object, and a stale entry written under an older version
+// is exactly the kind this has to be able to remove.
+func containmentSlot(owner metav1.OwnerReference, targets []schema.GroupVersionKind) bool {
+	if owner.Controller != nil && *owner.Controller {
+		return false
+	}
+
+	group, err := schema.ParseGroupVersion(owner.APIVersion)
+	if err != nil {
+		return false
+	}
+
+	return slices.ContainsFunc(targets, func(target schema.GroupVersionKind) bool {
+		return target.Group == group.Group && target.Kind == owner.Kind
+	})
 }
 
 // sameOwner reports whether two owner references name the same object.
