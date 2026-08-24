@@ -128,6 +128,28 @@ order of weight:
 
 Reconsidered only if §3 proves insufficient in practice. Tracked as an open decision.
 
+### 4b. Disaster recovery, since §3 depends on NetBox
+
+The one case the deterministic identity does not cover is NetBox itself being lost. The
+identity lets a claim reclaim its address **because NetBox still holds the object**; restore
+NetBox from empty and there is nothing to reclaim, so every claim allocates afresh.
+
+**The answer is to restore NetBox from backup, not to keep a second copy in Git.** Stated
+plainly because it is the question Git write-back is usually reaching for:
+
+- NetBox is a database with a backup story. If it is the source of truth for allocated
+  addresses -- and under §3 it is -- then it needs backups for the same reason any database
+  does, and this operator does not change that.
+- A rebuilt-from-empty NetBox has lost far more than addresses: every device, interface,
+  cable and VLAN the operator did not create. Addresses would be the least of it.
+- Git write-back would protect one field of one kind against a failure that has already
+  destroyed everything else. It is not a disaster-recovery strategy, it is a partial one
+  that invites people to skip the real one.
+
+So: back up NetBox. After a restore, the operator reconciles against whatever the restore
+contains and reclaims by identity; anything the backup predates is allocated again, and the
+claims that changed are visible in `status.address`.
+
 ### 5. All of it is configurable, and the Helm chart is where
 
 Nothing above is compiled in. Chart values (NBO-061):
