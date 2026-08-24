@@ -125,6 +125,21 @@ func nestedIDs(v any) []int {
 	return ids
 }
 
+// Unwrap reduces NetBox's read representation of a related or choice field to the value
+// that gets written: a foreign key's nested object to its id, a choice column's
+// {"value","label"} to its value.
+//
+// Exported for internal/export, which has to invert a payload rather than compare one --
+// and "what does this read shape mean" has to have exactly one answer, or the exporter and
+// Drift disagree about a value and the round trip never settles. drift.go's unwrapNested
+// is this function.
+func Unwrap(v any) any { return unwrapNested(v) }
+
+// IDOf reads a single NetBox id out of either shape a foreign key arrives in: the bare id
+// it is written as, or the nested object it is read back as. The second result is false
+// when the column is null, which for a nullable FK is the normal case.
+func IDOf(v any) (int, bool) { return asInt(Unwrap(v)) }
+
 // IDsOf reads a list of NetBox ids out of either shape the API uses: the bare ids an M2M
 // field is written as, or the nested objects it is read back as.
 //

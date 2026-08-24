@@ -122,6 +122,10 @@ verify: manifests generate ## Fail if generated output is not committed.
 build: manifests generate fmt vet ## Build the manager binary.
 	go build -o bin/manager ./cmd/manager
 
+.PHONY: build-nbctl
+build-nbctl: fmt vet ## Build the nbctl CLI.
+	go build -o bin/nbctl ./cmd/nbctl
+
 .PHONY: run
 run: manifests generate fmt vet ## Run the manager against the current kubeconfig.
 	go run ./cmd/manager

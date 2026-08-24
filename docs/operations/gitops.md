@@ -251,8 +251,8 @@ wherever NetBox lives.
 What there is not, in any of this, is an operator-side path that writes a recovered value
 back into Git — see
 [there is no mode where NetBox wins](#there-is-no-mode-where-netbox-wins). If you want
-NetBox's post-restore contents as manifests, that is `nbctl export` (NBO-040), which writes
-files for a human to review and commit.
+NetBox's post-restore contents as manifests, that is
+[`nbctl export`](exporting.md), which writes files for a human to review and commit.
 
 ## Drift modes
 
@@ -347,8 +347,10 @@ Two things `Off` deliberately does **not** switch off:
 Promoting a NetBox-side edit back into a CR's `spec` is the obvious next feature request,
 and it is deliberately absent. It would make the operator a second writer to desired state,
 which is precisely what this page exists to prevent. If you want NetBox's current contents
-as manifests, that is `nbctl export` (NBO-040): it writes files for a human to review and
-commit, rather than a controller writing specs.
+as manifests, that is [`nbctl export`](exporting.md): it writes files for a human to review
+and commit, rather than a controller writing specs. It skips the objects the operator
+already manages, because those already have manifests in Git, and it never writes to Git
+itself -- you read the diff and you commit it.
 
 ## NetBox permissions
 
