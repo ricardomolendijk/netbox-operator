@@ -2,6 +2,7 @@ package reconciler
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -116,6 +117,17 @@ func TestClassify(t *testing.T) {
 			wantRequeue: transientRetry,
 		},
 		{
+			// Its own reason rather than the unclassified default: "the lookup paginated past
+			// the cap" looks nothing like a NetBox outage from the outside, and the fix is a
+			// filter or the cap rather than waiting (NBO-090).
+			name:        "a lookup that paginated past the page cap",
+			err:         &netbox.TruncatedError{Endpoint: "dcim/sites", MaxPages: 1000, Collected: 50000},
+			wantReason:  netboxv1alpha1.ReasonTruncated,
+			wantRequeue: truncatedRetry,
+			wantEvent:   netboxv1alpha1.EventInvalid,
+			wantSevere:  true,
+		},
+		{
 			name:        "anything the table does not cover is worth being loud about",
 			err:         errStatusWrite,
 			wantReason:  netboxv1alpha1.ReasonAPIError,
@@ -144,6 +156,31 @@ func TestClassify(t *testing.T) {
 				t.Errorf("severe = %v, want %v", got.severe, tc.wantSevere)
 			}
 		})
+	}
+}
+
+// TestClassifyTruncatedMessage is the reporting half of NBO-077. That ticket asserted the
+// engine writes nothing on a truncated lookup; nothing asserted what it tells the user, and
+// a condition saying only "results would be incomplete" leaves the reader without either of
+// the two fixes -- which are different fixes, and neither of them is "wait".
+func TestClassifyTruncatedMessage(t *testing.T) {
+	err := &netbox.TruncatedError{Endpoint: "dcim/sites", MaxPages: 1000, Collected: 50000}
+
+	message := classify(err, 5*time.Minute).message(err)
+
+	// The cap and how far it got, so the reader can tell "the filter did not apply" from
+	// "this endpoint really is that big" without reproducing the query by hand.
+	for _, want := range []string{"dcim/sites", "1000", "50000"} {
+		if !strings.Contains(message, want) {
+			t.Errorf("message = %q, want it to name %q", message, want)
+		}
+	}
+
+	// Both fixes, because the message is the only place a user meets this state.
+	for _, want := range []string{"narrowed", "MaxPages", "nothing was written"} {
+		if !strings.Contains(message, want) {
+			t.Errorf("message = %q, want it to say %q", message, want)
+		}
 	}
 }
 

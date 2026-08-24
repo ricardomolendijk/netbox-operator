@@ -106,14 +106,14 @@ func (p *pass) stop(ctx context.Context, err error) (ctrl.Result, error) {
 	// actually needed. classify has already decided whether this state is worth an Event at
 	// all; this decides whether it is worth saying again (see outcome.event).
 	if out.event != "" && changed {
-		p.engine.warn(p.obj, out.event, "%s", err.Error())
+		p.engine.warn(p.obj, out.event, "%s", out.message(err))
 	}
 
 	// Every pass, unguarded. The condition is the standing state -- which is precisely why
 	// the Event and the error line above need not repeat -- so it has to keep carrying this
 	// pass's reason, message and observedGeneration. finish() still writes nothing when
 	// none of the three moved.
-	p.condition(netboxv1alpha1.ConditionReady, false, out.reason, err.Error())
+	p.condition(netboxv1alpha1.ConditionReady, false, out.reason, out.message(err))
 
 	return p.finish(ctx, out.requeue)
 }

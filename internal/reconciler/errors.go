@@ -35,6 +35,15 @@ const (
 	// vanishedRetry is the wait after a write found the object gone. Immediate in
 	// practice: the next pass re-creates or re-adopts it.
 	vanishedRetry = time.Second
+
+	// truncatedRetry is the wait after a lookup paginated past the client's page cap.
+	//
+	// The same tier as a version mismatch (internal/controller, failureBackoff), for the
+	// same reason: a truncated list is not retryable at all -- the same request truncates in
+	// the same place -- so the only thing that clears it is a human narrowing the filter or
+	// raising MaxPages. Deliberately not the endpoint's resync, which a cluster is free to
+	// set to seconds: that would poll a query that cannot succeed.
+	truncatedRetry = 10 * time.Minute
 )
 
 // Engine-level reasons a reconcile stops. They are sentinels rather than messages so the
@@ -110,6 +119,25 @@ type outcome struct {
 	// derived from severe, because "waiting for the endpoint" and "NetBox is down" are
 	// both non-severe and only one of them is an error on a dashboard.
 	result string
+
+	// remedy is what to do about this state, appended to the error's own words. Empty for
+	// every failure whose error already ends in an instruction.
+	//
+	// It lives here rather than in the client because it is not something the client knows:
+	// the client reports what NetBox did, and which fix applies is a property of how the
+	// engine used the call. A truncated natural-key lookup is a filter that did not apply;
+	// the same truncation under a future prune would be a different sentence.
+	remedy string
+}
+
+// message is what the condition and the Event carry: the error's own words, and the remedy
+// when the table has one to add.
+func (o outcome) message(err error) string {
+	if o.remedy == "" {
+		return err.Error()
+	}
+
+	return err.Error() + "; " + o.remedy
 }
 
 // classify maps a failure onto what to record and when to come back.
@@ -118,6 +146,12 @@ type outcome struct {
 // of failure it saw (NBO-002), and NetBox's wording changes between releases. resync is
 // the endpoint's own interval, used for everything that will not improve on its own --
 // coming back sooner would just repeat the same refusal.
+//
+// Every error type internal/netbox exports has an arm below -- ValidationError, AuthError,
+// NotFoundError, ProtectedError, RateLimitError, TransientError, AmbiguousError and
+// TruncatedError. The unclassified default is for a failure that is none of them, and it is
+// generic on purpose, which is also what made it a good place for a missing arm to hide
+// (NBO-090). A new client error type belongs here in the same change that adds it.
 func classify(err error, resync time.Duration) outcome {
 	if waiting, ok := classifyWait(err, resync); ok {
 		return waiting
@@ -156,6 +190,7 @@ func classifyInvalid(err error, resync time.Duration) (outcome, bool) {
 	var validation *netbox.ValidationError
 	var protected *netbox.ProtectedError
 	var ambiguous *netbox.AmbiguousError
+	var truncated *netbox.TruncatedError
 	var refused *refusedAdoption
 
 	conflict := outcome{
@@ -170,6 +205,21 @@ func classifyInvalid(err error, resync time.Duration) (outcome, bool) {
 	switch {
 	case errors.As(err, &ambiguous), errors.As(err, &refused):
 		return conflict, true
+	// A lookup that paginated past the page cap. Its own reason rather than Invalid or
+	// APIError: the engine wrote nothing because it could not tell whether the object exists
+	// (NBO-077), and neither "NetBox rejected the payload" nor "NetBox is failing" sends the
+	// reader anywhere near the filter or the cap.
+	case errors.As(err, &truncated):
+		return outcome{
+			reason: netboxv1alpha1.ReasonTruncated, requeue: truncatedRetry,
+			// The same Event as a 400, because it is the same category of state -- one a
+			// human has to clear -- and the condition reason carries which.
+			event: netboxv1alpha1.EventInvalid, severe: true, result: metrics.ResultError,
+			remedy: fmt.Sprintf(
+				"nothing was written; either the filter did not apply and the lookup has to be narrowed,"+
+					" or %s holds more objects than the %d-page cap allows and MaxPages has to be raised",
+				truncated.Endpoint, truncated.MaxPages),
+		}, true
 	// A 409, or a body naming a protected relation: something else in NetBox has to change
 	// first, and the same request will fail identically until it does.
 	case errors.As(err, &protected):

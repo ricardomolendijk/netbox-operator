@@ -13,6 +13,7 @@ the type does not.
 | 429 | `RateLimitError` | Requeue after the server's `Retry-After`, not after a guess. |
 | 5xx, transport failure | `TransientError` | Exponential backoff with jitter. |
 | >1 match on a lookup that must identify one object | `AmbiguousError` | Never a silent choice — see below. |
+| a list that hit the page cap | `TruncatedError` | `Ready=False, Reason=Truncated`, a **10-minute** requeue and no write of any kind — see [Runaway lists](#runaway-lists). |
 
 Match with `errors.As`, never by comparing messages:
 
@@ -111,6 +112,29 @@ Either way a human raises `MaxPages` or narrows the filter, which is what `error
 
 The same reasoning applies with more force to anything acting on *absence*: a prune or a
 sweep deleting what it did not see in a truncated list would delete real data.
+
+### What the engine reports
+
+`Ready=False, Reason=Truncated` — its own reason rather than the generic `APIError` a
+failure the table does not cover would get. From the outside "the lookup paginated past the
+cap" and "NetBox is unreachable" look alike and are not: one is fixed by narrowing the filter
+or raising `MaxPages`, the other by waiting, and a reader sent to the wrong one of those
+loses the afternoon.
+
+The condition message carries the endpoint, the cap, how many objects had been collected when
+it was hit, and both fixes:
+
+```
+list of dcim/sites truncated at the 1000-page cap after 50000 objects; results would be
+incomplete; nothing was written; either the filter did not apply and the lookup has to be
+narrowed, or dcim/sites holds more objects than the 1000-page cap allows and MaxPages has to
+be raised
+```
+
+The requeue is **10 minutes**, the same tier as an unsupported NetBox version and for the
+same reason: the request is not retryable at all, so the only thing that clears it is a
+person. It is deliberately not the endpoint's `resyncInterval`, which a cluster is free to
+set to seconds — that would poll a query that cannot succeed.
 
 ## Secrets
 
