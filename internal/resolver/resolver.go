@@ -1,7 +1,7 @@
 // Package resolver is the only place a reference becomes a NetBox id.
 //
 // Everything the operator does about ordering -- what it requeues, what it reports, what
-// NBO-013's watches will re-enqueue -- is a consequence of how precisely this package
+// the ref watches re-enqueue (index.go) -- is a consequence of how precisely this package
 // classifies "I cannot resolve this yet". So every failure is a typed error carrying the
 // field it came from, and `ErrRefNotReady` is a *state* rather than a failure: a graph
 // applied in any order converges only if "the target has not been created yet" is normal.
@@ -159,8 +159,9 @@ type Blocker struct {
 	// Reason is the RefsResolved condition reason.
 	Reason string
 
-	// Requeue is when to decide again. Zero means "nothing here improves on its own":
-	// the caller falls back to its own resync until NBO-013's watches land.
+	// Requeue is when to decide again. Zero means "no timer improves on this": an event on
+	// the object being waited for is what clears it, and the ref watches (index.go) are
+	// what deliver one. The caller's own resync is the backstop, not the mechanism.
 	Requeue time.Duration
 
 	// Err is the typed error, for a caller that needs to branch on it.

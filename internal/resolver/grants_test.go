@@ -440,7 +440,7 @@ func TestDeniedReferenceIsBlockedRatherThanFailed(t *testing.T) {
 	}
 
 	// Nothing here improves on a timer: writing the grant is the fix, and the event that
-	// arrives when somebody does is what should wake the object up (NBO-013).
+	// arrives when somebody does is what wakes the object up (the grant watch, NBO-013).
 	if got := resolution.Requeue(); got != 0 {
 		t.Errorf("Requeue() = %s, want no timer for a state a grant clears", got)
 	}

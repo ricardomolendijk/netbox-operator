@@ -10,8 +10,10 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 
@@ -50,12 +52,24 @@ func SetupObjectControllers(mgr ctrl.Manager, clients *ClientCache) error {
 		return err
 	}
 
+	// Before any controller is built, so every index exists before the cache it belongs to
+	// starts: an index added afterwards is an error, and one that is silently missing turns
+	// every ref watch below into a reconcile that never happens.
+	//
+	// Here rather than in main() so that the one call covering all ~120 kinds is next to the
+	// one watch registration covering all ~120 kinds, and so the envtest suite -- which
+	// calls this function and not main() -- exercises the real wiring.
+	if err := resolver.AddIndexes(context.Background(), mgr.GetFieldIndexer(),
+		mgr.GetScheme(), registry.List()); err != nil {
+		return fmt.Errorf("registering the reference indexes: %w", err)
+	}
+
 	// One provider for every kind: it is stateless beyond the two caches it reads, and a
 	// copy per kind would only multiply the pointers.
 	endpoints := &endpointProvider{reader: mgr.GetClient(), clients: clients}
 
 	for _, kind := range kinds {
-		if err := newObjectController(mgr, endpoints, kind).setup(mgr, kind.name); err != nil {
+		if err := newObjectController(mgr, endpoints, kind).setup(mgr, kind); err != nil {
 			return err
 		}
 	}
@@ -69,6 +83,11 @@ type namedKind struct {
 	// Written down because it also names the Event recorder and every error about the
 	// controller, and those must agree.
 	name string
+
+	// gvk is the kind's group-version-kind, which the scheme already had to resolve in
+	// order to name the controller. Kept because the descriptor -- and through it every
+	// reference this kind declares -- is keyed on it.
+	gvk schema.GroupVersionKind
 
 	// proto is deep-copied to get an empty object of this kind. A prototype rather than a
 	// constructor function, because it is the same value controller-runtime's For() needs:
@@ -93,7 +112,7 @@ func namedKinds(scheme *runtime.Scheme) ([]namedKind, error) {
 			return nil, fmt.Errorf("resolving the group-version-kind of %T: %w", proto, err)
 		}
 
-		kinds = append(kinds, namedKind{name: strings.ToLower(gvk.Kind), proto: proto})
+		kinds = append(kinds, namedKind{name: strings.ToLower(gvk.Kind), gvk: gvk, proto: proto})
 	}
 
 	slices.SortFunc(kinds, func(a, b namedKind) int { return cmp.Compare(a.name, b.name) })
@@ -182,15 +201,52 @@ func (c *objectController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	return result, nil
 }
 
-// setup registers this controller with the manager.
+// setup registers this controller with the manager, together with the watches that make a
+// reference converge on an event rather than on a resync.
+//
+// The ref watches are registered here, once, for every kind: they are computed from the
+// kind's Descriptor (internal/controller/refwatch.go), so this call does not change when a
+// kind is added and a kind cannot be added having forgotten them.
 //
 // No watch on the NetBoxEndpoint: an object whose endpoint is not Ready requeues on the
 // engine's own short interval, and a watch that fans one endpoint out to every object in
 // its namespace is a thundering herd worth designing rather than adding here.
-func (c *objectController) setup(mgr ctrl.Manager, name string) error {
-	if err := ctrl.NewControllerManagedBy(mgr).For(c.proto).Named(name).Complete(c); err != nil {
-		return fmt.Errorf("building the %s controller: %w", name, err)
+func (c *objectController) setup(mgr ctrl.Manager, kind namedKind) error {
+	b := ctrl.NewControllerManagedBy(mgr).For(c.proto).Named(kind.name)
+
+	if err := c.watchRefs(mgr, b, kind); err != nil {
+		return err
 	}
+
+	if err := b.Complete(c); err != nil {
+		return fmt.Errorf("building the %s controller: %w", kind.name, err)
+	}
+
+	return nil
+}
+
+// watchRefs adds this kind's reference watches, and none if it declares no reference.
+//
+// A kind with no descriptor is left without them rather than failing the boot. The engine
+// already reports that as an error on the object's own reconcile, which names the kind and
+// the object; refusing to start would turn one unregistered kind into a manager that never
+// reconciles any of the other hundred and nineteen.
+func (c *objectController) watchRefs(mgr ctrl.Manager, b *builder.Builder, kind namedKind) error {
+	d, known := registry.Get(kind.gvk)
+	if !known || len(resolver.RefTargets(d)) == 0 {
+		return nil
+	}
+
+	// Through specGuard like every other route to the API server from this controller, even
+	// though a map function only ever lists: one wrapper rather than one per caller is what
+	// keeps a future collaborator wired from mgr.GetClient() directly the visible odd one out.
+	reader := specGuard{mgr.GetClient()}
+
+	if err := WatchRefs(b, reader, mgr.GetScheme(), d); err != nil {
+		return fmt.Errorf("watching the reference targets of %s: %w", kind.name, err)
+	}
+
+	WatchGrants(b, reader, mgr.GetScheme(), d)
 
 	return nil
 }

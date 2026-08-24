@@ -49,6 +49,7 @@ func TestMetricsAreOnTheControllerRuntimeRegistry(t *testing.T) {
 		"netbox_operator_drift_corrected_total",
 		"netbox_operator_drift_detected_total",
 		"netbox_operator_endpoint_reconcile_total",
+		"netbox_operator_ref_enqueue_total",
 		"netbox_operator_reconcile_duration_seconds",
 		"netbox_operator_reconcile_total",
 	}
@@ -69,7 +70,10 @@ func TestMetricsAreOnTheControllerRuntimeRegistry(t *testing.T) {
 // code).
 func TestNoUnboundedLabels(t *testing.T) {
 	forbidden := []string{"name", "namespace", "object", "url", "uid", "id", "message"}
-	allowed := []string{"kind", "result", "endpoint", "method", "code", "field"}
+	// targetKind and referrerKind are Kind names off a Descriptor, exactly like `kind`: the
+	// pair is one edge of NetBox's foreign-key graph, and neither half is user input.
+	allowed := []string{"kind", "result", "endpoint", "method", "code", "field",
+		"targetKind", "referrerKind"}
 
 	for name, family := range gathered(t) {
 		for _, label := range labelsOf(family) {
@@ -127,6 +131,7 @@ func TestMain(m *testing.M) {
 	DriftDetected.WithLabelValues("NetBoxFake", "name").Inc()
 	DriftCorrected.WithLabelValues("NetBoxFake", "name").Inc()
 	EndpointReconcileTotal.WithLabelValues("Ready").Inc()
+	RefEnqueueTotal.WithLabelValues("NetBoxFake", "NetBoxFake").Inc()
 	ClientCacheSize.Set(0)
 
 	os.Exit(m.Run())

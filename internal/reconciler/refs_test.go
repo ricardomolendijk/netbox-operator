@@ -91,7 +91,7 @@ func TestUnresolvedRefKeepsTheObjectFromReadiness(t *testing.T) {
 	}{
 		{
 			// The first-apply case: the target CR exists and has not reconciled yet. No timer,
-			// so the endpoint's resync is the retry until NBO-013's watch lands.
+			// so the ref watch is what re-enqueues it, with the endpoint's resync as the backstop.
 			name:        "a target that is not ready yet",
 			resolution:  blockedOnParent(resolver.ErrRefNotReady, 0),
 			wantRefs:    netboxv1alpha1.ReasonRefNotReady,

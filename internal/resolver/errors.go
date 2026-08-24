@@ -186,8 +186,9 @@ type Outcome struct {
 	Reason string
 
 	// Requeue is when to come back, and zero for the states where coming back on a timer
-	// adds nothing: an event -- a CR appearing, a grant being written, in NBO-013 a watch
-	// firing -- is what clears them. A caller with a resync of its own uses that instead.
+	// adds nothing: an event -- a CR appearing, a target gaining an id, a grant being
+	// written -- is what clears them, and the ref watches in index.go are what turn one
+	// into a reconcile. A caller with a resync of its own keeps it as a backstop.
 	Requeue time.Duration
 }
 
