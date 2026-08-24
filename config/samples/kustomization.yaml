@@ -6,3 +6,5 @@ resources:
 - netbox_v1alpha1_netboxtag.yaml
 - netbox_v1alpha1_netboxsite.yaml
 - netbox_v1alpha1_netboxrefgrant.yaml
+- netbox_v1alpha1_netboxtenantgroup.yaml
+- netbox_v1alpha1_netboxtenant.yaml
