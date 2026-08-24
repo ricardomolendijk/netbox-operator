@@ -253,12 +253,33 @@ func TestTagDriftIsCorrectedWithinOneResync(t *testing.T) {
 	readyEndpoint(t, ns, target)
 	makeTag(t, ns, "drifting", func(tag *netboxv1alpha1.NetBoxTag) { tag.Spec.Color = "2196f3" })
 
-	eventually(t, "Ready=True", func() bool { return tagIsReady(ns, "drifting") })
-	id := mustFetchTag(t, ns, "drifting").Status.ID
+	// Settled rather than merely Ready: the create's own pass reports Synced/DriftCorrected
+	// and the first resync after it reports NoDrift, so NoDrift is the point at which the
+	// object has nothing left to write. finish() writes no status once nothing has changed,
+	// which is what makes the resourceVersion captured here a usable signal below.
+	eventually(t, "Synced=NoDrift", func() bool {
+		tag := fetchTag(ns, "drifting")
+
+		return tag != nil &&
+			tagCondition(tag, netboxv1alpha1.ConditionSynced).Reason == netboxv1alpha1.ReasonNoDrift
+	})
+
+	settled := mustFetchTag(t, ns, "drifting")
+	id := settled.Status.ID
 
 	stub.setField(id, "color", "ff0000")
 
-	eventually(t, "the colour corrected", func() bool { return stub.get(id)["color"] == "2196f3" })
+	// Gating on the colour alone releases mid-pass: the engine PATCHes NetBox before it
+	// writes status, so status.id read straight afterwards is the pre-correction value and
+	// a recreate would go unnoticed (#159). The object was quiet at `settled`, so the only
+	// thing that can move its resourceVersion is the correcting pass's own status write --
+	// which is the last thing that pass does.
+	eventually(t, "the colour corrected and the correcting pass recorded", func() bool {
+		tag := fetchTag(ns, "drifting")
+
+		return tag != nil && tag.ResourceVersion != settled.ResourceVersion &&
+			stub.get(id)["color"] == "2196f3"
+	})
 
 	// Corrected in place. A new id would mean the engine created a second tag rather than
 	// recognising the one it already owned.
@@ -284,7 +305,15 @@ func TestTagDriftIsCorrectedWithinOneResync(t *testing.T) {
 func TestTagSpecEditPatchesOnlyTheChangedField(t *testing.T) {
 	ns := newNamespace(t)
 	stub, target := newNetBoxStub(t, tagKind)
-	readyEndpoint(t, ns, target)
+
+	// A resync-free endpoint, so that "two writes" is a fact rather than a sample. The
+	// suite's usual one-second resyncPeriod is what makes an exact count on the wire
+	// unsafe to assert (#159); no resync is needed here, because both writes this test
+	// counts come from a watch event -- the create and the spec edit -- and keeping the
+	// count exact is the whole of what "only the changed field" claims.
+	readyEndpointWith(t, ns, target, func(e *netboxv1alpha1.NetBoxEndpoint) {
+		e.Spec.ResyncPeriod = metav1.Duration{Duration: time.Hour}
+	})
 	makeTag(t, ns, "recoloured", func(tag *netboxv1alpha1.NetBoxTag) { tag.Spec.Color = "2196f3" })
 
 	eventually(t, "Ready=True", func() bool { return tagIsReady(ns, "recoloured") })
@@ -297,7 +326,22 @@ func TestTagSpecEditPatchesOnlyTheChangedField(t *testing.T) {
 		t.Fatalf("editing spec.color: %v", err)
 	}
 
-	eventually(t, "the new colour reached netbox", func() bool { return stub.get(id)["color"] == "4caf50" })
+	generation := tag.Generation
+
+	// The engine writes status after it writes NetBox, so observedGeneration reaching the
+	// edited generation is the signal that the whole pass finished -- where the colour
+	// arriving at the stub only means it started (#159). Ready=True as well, because a pass
+	// that stopped short stamps observedGeneration too.
+	eventually(t, "the spec edit fully reconciled", func() bool {
+		tag := fetchTag(ns, "recoloured")
+
+		return tag != nil && tag.Status.ObservedGeneration >= generation &&
+			tagCondition(tag, netboxv1alpha1.ConditionReady).Status == metav1.ConditionTrue
+	})
+
+	if got := stub.get(id)["color"]; got != "4caf50" {
+		t.Errorf("colour in netbox = %v, want the edited 4caf50", got)
+	}
 
 	writes := stub.recorded()
 	if len(writes) != 2 {

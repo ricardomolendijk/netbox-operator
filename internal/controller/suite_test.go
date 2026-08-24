@@ -180,6 +180,24 @@ func eventually(t *testing.T, what string, check func() bool) {
 	t.Fatalf("timed out waiting for %s", what)
 }
 
+// endpointIsReady is the endpoint-side tagIsReady, and the gate to use before reading
+// anything one of its reconciles produced.
+//
+// Reconcile calls Cache.put before it writes status, so a client cache read taken after
+// Ready=True cannot be racing a pass still in flight. A gate on the cache itself can:
+// nothing stops a later failing pass calling Cache.Forget between the gate and the read,
+// and a gate on a request arriving at the stub releases earlier still (NBO-091, #159).
+func endpointIsReady(ns, name string) bool {
+	e := &netboxv1alpha1.NetBoxEndpoint{}
+	if err := k8sClient.Get(context.Background(), client.ObjectKey{Namespace: ns, Name: name}, e); err != nil {
+		return false
+	}
+
+	c := conditionOf(e, netboxv1alpha1.ConditionReady)
+
+	return c != nil && c.Status == metav1.ConditionTrue
+}
+
 func conditionOf(e *netboxv1alpha1.NetBoxEndpoint, condType string) *metav1.Condition {
 	for i := range e.Status.Conditions {
 		if e.Status.Conditions[i].Type == condType {
