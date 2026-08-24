@@ -21,7 +21,8 @@ import (
 // assertion that can catch a kind being dropped from the provenance stamp.
 var stampedObjectTypes = []string{
 	"dcim.location", "dcim.region", "dcim.site", "dcim.sitegroup",
-	"ipam.prefix", "tenancy.tenant", "tenancy.tenantgroup",
+	"ipam.prefix", "ipam.routetarget", "ipam.vrf",
+	"tenancy.tenant", "tenancy.tenantgroup",
 }
 
 // objectTypesAsAny is the set the bootstrap will compute, in the []any shape a JSON payload

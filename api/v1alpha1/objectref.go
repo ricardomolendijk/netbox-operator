@@ -248,6 +248,8 @@ func (r VLANRef) TargetGVK() schema.GroupVersionKind { return GroupVersion.WithK
 
 // AsObjectRef returns the underlying reference.
 func (r VLANRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
 func (r RouteTargetRef) TargetGVK() schema.GroupVersionKind {
 	return GroupVersion.WithKind("NetBoxRouteTarget")
 }
