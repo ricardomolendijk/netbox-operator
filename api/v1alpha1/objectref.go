@@ -159,6 +159,15 @@ type (
 
 	// VRFRef points at a NetBoxVRF (ipam.VRF, ipam/vrfs).
 	VRFRef ObjectRef
+
+	// PrefixRef points at a NetBoxPrefix (ipam.Prefix, ipam/prefixes).
+	//
+	// The first alias whose target is a *pool* rather than a plain foreign key: a
+	// NetBoxIPAddressClaim resolves it to the prefix it allocates out of
+	// (docs/decisions/0004-claims-first-allocation.md). Nothing about the alias is
+	// different for that -- the id is resolved by the same four modes and the same grant
+	// check -- which is the point of resolving a pool through an ordinary reference.
+	PrefixRef ObjectRef
 )
 
 // TargetGVK reports the Kind this reference resolves against.
@@ -263,6 +272,14 @@ func (r VRFRef) TargetGVK() schema.GroupVersionKind { return GroupVersion.WithKi
 // AsObjectRef returns the underlying reference.
 func (r VRFRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
 
+// TargetGVK reports the Kind this reference resolves against.
+func (r PrefixRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxPrefix")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r PrefixRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
 // Compile-time proof that every alias satisfies RefTarget. An alias that forgets its
 // methods fails the build here rather than at the first reconcile that needs it.
 var (
@@ -280,4 +297,5 @@ var (
 	_ RefTarget = VLANRef{}
 	_ RefTarget = RouteTargetRef{}
 	_ RefTarget = VRFRef{}
+	_ RefTarget = PrefixRef{}
 )

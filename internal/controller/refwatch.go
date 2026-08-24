@@ -42,7 +42,15 @@ const grantKind = "NetBoxRefGrant"
 // per-kind registration would be ~120 identical calls and ~120 chances to leave one out,
 // and a missing one fails as "that kind converges only on its resync" -- which the resync
 // then hides.
-func WatchRefs(b *builder.Builder, c client.Client, s *runtime.Scheme, d registry.Descriptor) error {
+// extra predicates are OR-ed with TargetUsable, for a caller whose references depend on more
+// about a target than the id it resolves to. There is exactly one: a claim's pool, see
+// PoolChanged.
+func WatchRefs(
+	b *builder.Builder, c client.Client, s *runtime.Scheme, d registry.Descriptor,
+	extra ...predicate.Predicate,
+) error {
+	interesting := append([]predicate.Predicate{TargetUsable()}, extra...)
+
 	for _, gvk := range resolver.RefTargets(d) {
 		made, err := s.New(gvk)
 		if err != nil {
@@ -62,7 +70,7 @@ func WatchRefs(b *builder.Builder, c client.Client, s *runtime.Scheme, d registr
 
 		b.Watches(target,
 			handler.EnqueueRequestsFromMapFunc(EnqueueReferrers(c, s, d, gvk)),
-			builder.WithPredicates(TargetUsable()))
+			builder.WithPredicates(predicate.Or(interesting...)))
 	}
 
 	return nil

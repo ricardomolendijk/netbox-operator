@@ -32,6 +32,7 @@ rules:
   - netbox.kubeforge.org
   resources:
   - netboxendpoints/status
+  - netboxipaddressclaims/status
   - netboxlocations/status
   - netboxprefixes/status
   - netboxregions/status
@@ -49,6 +50,7 @@ rules:
 - apiGroups:
   - netbox.kubeforge.org
   resources:
+  - netboxipaddressclaims
   - netboxlocations
   - netboxprefixes
   - netboxregions
@@ -68,6 +70,7 @@ rules:
 - apiGroups:
   - netbox.kubeforge.org
   resources:
+  - netboxipaddressclaims/finalizers
   - netboxlocations/finalizers
   - netboxprefixes/finalizers
   - netboxregions/finalizers

@@ -1,0 +1,387 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.19.0
+  name: netboxipaddressclaims.netbox.kubeforge.org
+spec:
+  group: netbox.kubeforge.org
+  names:
+    kind: NetBoxIPAddressClaim
+    listKind: NetBoxIPAddressClaimList
+    plural: netboxipaddressclaims
+    shortNames:
+    - nbipclaim
+    - nbipc
+    singular: netboxipaddressclaim
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.address
+      name: Address
+      type: string
+    - jsonPath: .status.pool.display
+      name: Prefix
+      type: string
+    - jsonPath: .status.conditions[?(@.type=="Ready")].status
+      name: Ready
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          NetBoxIPAddressClaim asks NetBox for one free address out of a prefix, once.
+
+          Namespaced like every kind in v1alpha1 (docs/decisions/0002-crd-scoping.md).
+
+          **A claim always retains its NetBox object.** There is no `deletionPolicy` field: a
+          single-valued knob is not one, and Retain is the value that makes the deterministic
+          identity worth having -- delete the claim, re-apply the same manifest, get the same
+          address back. What stops that from being a silent leak is that the operator *reports*
+          it: deleting a claim emits the AddressRetained Event naming the address, the NetBox id and
+          the identity, and never deletes anything
+          (https://github.com/ricardomolendijk/netbox-operator/issues/182). To free the address,
+          delete the NetBox object.
+
+          The printer columns are the three things a human wants side by side: what was asked for,
+          what was handed out, and whether it stuck.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              NetBoxIPAddressClaimSpec asks for one free address out of a pool.
+
+              It is deliberately much smaller than NetBoxIPAddress's spec, and the difference is the
+              whole design: a claim's job is to *get* an address, and the desired state of the address
+              it got belongs to a NetBoxIPAddress CR
+              (docs/decisions/0004-claims-first-allocation.md). So there is no dnsName, no role, no
+              description and no assignedObject here. A field the claim could write once at allocation
+              and could never correct afterwards would be a field that lies the first time somebody
+              edits it, and this operator does not ship those -- it would take a declarative reconcile
+              of the allocated object to make one honest, which is exactly what NetBoxIPAddress is
+              (NBO-025) and what the claim will materialise as its child once that kind lands
+              (NBO-032).
+            properties:
+              allocationIdentity:
+                description: |-
+                  AllocationIdentity overrides the derived allocation identity.
+
+                  Unset -- the normal case -- the identity is derived from the endpoint's URL, this
+                  claim's namespace, its Kind and its name, which is what makes a claim re-applied to a
+                  rebuilt cluster reclaim the same address
+                  (docs/decisions/0005-gitops-coexistence.md section 3). Set it to the previous
+                  identity to carry an address across a *rename*, which the derived value cannot
+                  survive by construction.
+
+                  Immutable once set, and settable on a claim that has one already only in the sense
+                  that adding it is allowed and changing it is not: an identity that moves is a claim
+                  pointed at somebody else's address.
+
+                  Absent and empty mean the same thing here -- derive it -- so this field has two states
+                  rather than the three of docs/concepts/field-ownership.md. Nothing is written to NetBox
+                  from it directly, so there is no NetBox value for an empty string to clear.
+                maxLength: 64
+                pattern: ^[a-z0-9]+$
+                type: string
+                x-kubernetes-validations:
+                - message: allocationIdentity is immutable; changing it points this
+                    claim at a different allocation
+                  rule: self == oldSelf
+              endpointRef:
+                description: |-
+                  EndpointRef names the NetBoxEndpoint to allocate through, in this claim's own
+                  namespace.
+
+                  Declared here rather than inherited from NetBoxObjectSpec, because two of that
+                  struct's three fields mean nothing to a claim. `onConflict` is about adopting an
+                  object that matches a natural key, and a claim has no natural key -- it adopts by
+                  allocation identity and by nothing else. `deletionPolicy` is fixed at Retain, see the
+                  type comment on NetBoxIPAddressClaim. A field that is accepted and ignored is worse
+                  than a field that is not there.
+
+                  It also participates in the allocation identity: the same claim pointed at a different
+                  NetBox is a different allocation, and asking a second NetBox for the object of the
+                  first one would find nothing and allocate twice.
+                minLength: 1
+                type: string
+              prefixRef:
+                description: |-
+                  PrefixRef is the pool to allocate out of: a NetBoxPrefix, resolved by name, slug,
+                  lookup or id like any other reference, and subject to the same NetBoxRefGrant check
+                  when it crosses a namespace.
+
+                  Immutable. "Point this claim at a different prefix" is a different claim, and a CEL
+                  rule on the field is a better contract than a controller comparing the spec against
+                  status after the fact: the API server rejects the edit, so there is no window in which
+                  the claim's spec and its allocated address disagree.
+                properties:
+                  id:
+                    description: |-
+                      ID is a literal NetBox primary key: the escape hatch, and the only place in the API
+                      where a raw id is accepted.
+
+                      A pointer so that `id: 0` is distinguishable from unset. NetBox primary keys start
+                      at 1, so zero is never a real object and has to be rejected rather than silently
+                      treated as "no id".
+                    format: int64
+                    minimum: 1
+                    type: integer
+                  lookup:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      Lookup is a raw NetBox API filter, for an object no slug identifies -- a VLAN is
+                      `{vid: "20", site: "home"}` because its identity is a pair.
+
+                      `q` is rejected by the CEL rules along with the pagination and formatting
+                      parameters. It is NetBox's fuzzy search, and a fuzzy filter behind a reference that
+                      must identify exactly one object would make ambiguity the normal case rather than
+                      an error.
+                    maxProperties: 8
+                    type: object
+                  name:
+                    description: |-
+                      Name of a CR of the target Kind, resolved through that CR's `.status.id`.
+
+                      This is the mode to prefer: it is the only one that expresses a dependency the
+                      operator can wait on, which is what lets a graph applied in any order converge.
+                    maxLength: 253
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                    type: string
+                  namespace:
+                    description: |-
+                      Namespace of that CR. Defaults to the referring object's namespace.
+
+                      Load-bearing on the common path rather than an edge case: every Kind is namespaced
+                      in v1alpha1 (docs/decisions/0002-crd-scoping.md), so a team namespace pointing at a
+                      shared catalogue namespace is the normal shape. Crossing a namespace requires a
+                      NetBoxRefGrant in the target namespace (NBO-014).
+                    maxLength: 63
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                    type: string
+                  slug:
+                    description: |-
+                      Slug looks the object up in NetBox directly, for objects the operator does not
+                      manage. No CR needs to exist.
+
+                      Bounded at 100 characters because that is what NetBox's own column allows:
+                      `slug SlugField len=100` on every OrganizationalModel, NestedGroupModel and
+                      PrimaryModel (docs/netbox-schema.md -> dcim.Site, dcim.Region, extras.Tag).
+                    maxLength: 100
+                    pattern: ^[-a-zA-Z0-9_]+$
+                    type: string
+                type: object
+                x-kubernetes-validations:
+                - message: prefixRef is immutable; a claim allocates once, so pointing
+                    it at another prefix is a new claim
+                  rule: self == oldSelf
+                - message: exactly one of name, slug, lookup or id must be set
+                  rule: '[has(self.name) && size(self.name) > 0, has(self.slug) &&
+                    size(self.slug) > 0, has(self.lookup) && size(self.lookup) > 0,
+                    has(self.id)].filter(x, x).size() == 1'
+                - message: namespace may only be set together with name
+                  rule: '!has(self.namespace) || (has(self.name) && size(self.name)
+                    > 0)'
+                - message: lookup keys must be lowercase NetBox filter names
+                  rule: '!has(self.lookup) || self.lookup.all(k, k.matches(''^[a-z][a-z0-9_]*$''))'
+                - message: lookup may not set pagination, formatting or fuzzy-search
+                    parameters
+                  rule: '!has(self.lookup) || self.lookup.all(k, !(k in [''limit'',''offset'',''format'',''brief'',''ordering'',''q'']))'
+                - message: lookup values are limited to 200 characters
+                  rule: '!has(self.lookup) || self.lookup.all(k, size(self.lookup[k])
+                    <= 200)'
+            required:
+            - endpointRef
+            - prefixRef
+            type: object
+          status:
+            description: |-
+              NetBoxIPAddressClaimStatus is what the claim allocated, and everything needed to prove it
+              was allocated once.
+            properties:
+              address:
+                description: |-
+                  Address is the allocated address in CIDR notation.
+
+                  **Immutable, and the one field that must never be lost.** It is written after
+                  read-after-write verification and never rewritten: while it holds a value the
+                  reconciler's first guard clause returns before anything can allocate again. If the
+                  NetBox object behind it is deleted out from under a live claim the operator does not
+                  pick a new address -- by then something outside Kubernetes is using this one, a NIC's
+                  static configuration or a DNS record or a firewall rule, and silently moving it turns
+                  a NetBox bookkeeping accident into a live network change nobody asked for
+                  (docs/decisions/0004-claims-first-allocation.md).
+                type: string
+              allocatedAt:
+                description: |-
+                  AllocatedAt is when the address was first allocated or reclaimed. Never rewritten
+                  afterwards.
+                format: date-time
+                type: string
+              allocationIdentity:
+                description: |-
+                  AllocationIdentity is the identity written into the allocated object's custom field,
+                  and the key every future reclaim searches by.
+
+                  Reported because it is the one value that makes a leaked allocation findable: paste it
+                  into NetBox's custom-field filter and the object it belongs to comes back, whether or
+                  not the CR still exists.
+                type: string
+              claimUID:
+                description: |-
+                  ClaimUID is the metadata.uid of the claim that allocated this object.
+
+                  Recorded for debugging and for exactly one decision: an allocated object whose
+                  k8s_uid is not the current claim's is a reclaim by a re-created claim, which is
+                  legitimate and is worth an Event naming both. The identity, not this, is what
+                  reclaims -- a UID is regenerated precisely when the old address is most wanted back.
+                type: string
+              conditions:
+                description: Conditions follow the standard Kubernetes vocabulary.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              netboxID:
+                description: |-
+                  NetBoxID is the allocated object's NetBox primary key. Zero until an allocation is
+                  proven server-side: a DryRun endpoint reports what it would have done and writes
+                  nothing here.
+                format: int64
+                type: integer
+              observedGeneration:
+                description: |-
+                  ObservedGeneration is the spec generation this status refers to. Always set, because
+                  `kubectl wait` lies without it.
+                format: int64
+                type: integer
+              pool:
+                description: Pool is the pool this claim allocated out of, as resolved
+                  at allocation time.
+                properties:
+                  display:
+                    description: 'Display is the pool as a human reads it: a prefix
+                      in CIDR notation.'
+                    type: string
+                  endpoint:
+                    description: Endpoint is the pool's NetBox REST path, `ipam/prefixes`.
+                    type: string
+                  id:
+                    description: ID is the pool's NetBox primary key.
+                    format: int64
+                    type: integer
+                type: object
+              provenance:
+                description: |-
+                  Provenance is the stamp the allocated object carries in NetBox: the tag and the
+                  custom fields written with the allocating POST, as they were written.
+                properties:
+                  clusterID:
+                    description: ClusterID is the cluster identifier written into
+                      the cluster custom field.
+                    type: string
+                  customFields:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      CustomFields are the custom fields written, as NetBox names to the values sent.
+                      Empty for a kind whose NetBox model has no `custom_fields` column.
+
+                      These keys are also the only ones compared: NetBox merges a partial `custom_fields`
+                      PATCH and returns every custom field defined for the object type, including ones the
+                      operator knows nothing about, so it compares the keys it sets and leaves the rest
+                      alone. `custom_fields` therefore has two states rather than the three every other
+                      optional field has -- absent or empty means "manage nothing", not "clear everything",
+                      and a value written here cannot be removed through this API
+                      (docs/concepts/field-ownership.md, #171).
+                    type: object
+                  tag:
+                    description: |-
+                      Tag is the tag's slug, written by id. Empty for a kind whose NetBox model has no
+                      `tags` column.
+                    type: string
+                type: object
+              url:
+                description: URL is the allocated object's absolute NetBox URL, as
+                  returned by the API.
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

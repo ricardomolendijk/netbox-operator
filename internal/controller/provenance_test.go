@@ -19,16 +19,19 @@ import (
 // provenance.ObjectTypes sorts. The one hand-written copy of the set in this package:
 // adding a CustomFieldable kind adds a line here, and that is deliberate -- it is the only
 // assertion that can catch a kind being dropped from the provenance stamp.
+// It covers the claim kinds too: a NetBoxIPAddressClaim is not a NetBox object and still
+// writes custom fields onto the ipam.ipaddress it allocates, so `ipam.ipaddress` is in the
+// stamped set with no Descriptor of its own behind it (registry.ClaimObjectTypes).
 var stampedObjectTypes = []string{
 	"dcim.location", "dcim.region", "dcim.site", "dcim.sitegroup",
-	"ipam.prefix", "ipam.routetarget", "ipam.vrf",
+	"ipam.ipaddress", "ipam.prefix", "ipam.routetarget", "ipam.vrf",
 	"tenancy.tenant", "tenancy.tenantgroup",
 }
 
 // objectTypesAsAny is the set the bootstrap will compute, in the []any shape a JSON payload
 // decodes to, for seeding a NetBox that already has everything.
 func objectTypesAsAny() []any {
-	types := provenance.ObjectTypes(registry.List())
+	types := provenance.ObjectTypes(registry.List(), registry.ClaimObjectTypes()...)
 	out := make([]any, 0, len(types))
 
 	for _, objectType := range types {
