@@ -126,6 +126,7 @@ power, modules, cabling), circuits and VPN deliberately last.
 | `dcim` | [`NetBoxSite`](docs/reference/netboxsite.md) | **Available** (M1) |
 | Authorisation | [`NetBoxRefGrant`](docs/reference/netboxrefgrant.md) | **Available** (M2) |
 | `tenancy` | `NetBoxTenantGroup`, `NetBoxTenant` | M3 |
+| `tenancy` | [`NetBoxContactGroup`](docs/reference/netboxcontactgroup.md), [`NetBoxContactRole`](docs/reference/netboxcontactrole.md), [`NetBoxContact`](docs/reference/netboxcontact.md), [`NetBoxContactAssignment`](docs/reference/netboxcontactassignment.md) | **Available** (M10) |
 | `ipam` | `NetBoxVRF`, `NetBoxRouteTarget`, `NetBoxVLAN`, `NetBoxVLANGroup`, `NetBoxPrefix`, `NetBoxIPAddress` | M3 |
 | `virtualization` | `NetBoxClusterType`, `NetBoxClusterGroup`, `NetBoxCluster`, `NetBoxVirtualMachine`, `NetBoxVMInterface`, `NetBoxVirtualDisk` | M4 |
 | `dcim` | `NetBoxManufacturer`, `NetBoxDeviceRole`, `NetBoxDeviceType`, `NetBoxPlatform`, `NetBoxDevice`, `NetBoxInterface` | M4 |

@@ -1,0 +1,232 @@
+# Contacts, end to end: a group, a role, a contact, and the same contact attached to three
+# different kinds of object.
+#
+#   kubectl create namespace homelab
+#   kubectl apply -f docs/examples/contacts.yaml
+#   kubectl get nbcontact,nbcontactassignment -n homelab -w
+#
+# Replace the URL and the token before applying.
+#
+# What this file is really showing is the *assignment*, which is the widest polymorphic
+# reference in the operator: `spec.objectRef` takes one member per Kind a contact may be
+# attached to, and the member name is what pins the target Kind. There is no `kind:` field and
+# no content-type string to spell -- see docs/reference/netboxcontactassignment.md.
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: netbox-token
+  namespace: homelab
+  labels:
+    # Required. The operator's Secret cache selects on this label, so a Secret without it is
+    # invisible even when the name on the endpoint is right. See docs/operations/rbac.md.
+    netbox.kubeforge.org/endpoint-credential: "true"
+type: Opaque
+stringData:
+  # A NetBox API token with write access to the tenancy app.
+  token: "0123456789abcdef0123456789abcdef01234567"
+---
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxEndpoint
+metadata:
+  name: homelab
+  namespace: homelab
+spec:
+  url: https://netbox.home.arpa
+  tokenSecretRef:
+    name: netbox-token
+  resyncPeriod: 2m
+  mode: Apply
+---
+# A top-level contact group. Its identity is `(parent, name)`, so this is looked up with
+# `?parent_id=null&name=Operations` -- the null is pinned, not omitted, or every top-level
+# group would adopt a nested one of the same name.
+#
+# Unlike dcim.Region and dcim.SiteGroup, NetBox has no `name WHERE parent IS NULL` constraint
+# on contact groups, so two top-level groups may legitimately share a name. If one already
+# exists twice, this CR reports Ready=False, Reason=Conflict rather than guessing.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxContactGroup
+metadata:
+  name: operations
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  name: Operations
+  slug: operations
+  description: Everyone who gets paged
+---
+# A nested group. `parentRef` is the containment reference: `tenancy.ContactGroup.parent` is
+# CASCADE, so deleting the parent group in NetBox deletes this one server-side -- and the owner
+# reference is what removes this CR with it instead of recreating a row NetBox deleted.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxContactGroup
+metadata:
+  name: operations-network
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  name: Network
+  slug: operations-network
+  parentRef:
+    name: operations
+---
+# A role. An OrganizationalModel, so `slug` is globally unique and is the natural key.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxContactRole
+metadata:
+  name: technical
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  name: Technical
+  slug: technical
+  description: First line for anything that breaks
+---
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxContactRole
+metadata:
+  name: billing
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  name: Billing
+  slug: billing
+---
+# The contact itself. `name` is the lookup key and NetBox does not make it unique -- there is
+# no constraint and no column UNIQUE, only an index -- so two contacts called "NOC" are legal
+# server state and a second one makes this lookup ambiguous: Ready=False, Reason=Conflict.
+#
+# `groups` is a many-to-many, which is unusual: every other "group" in NetBox is one foreign
+# key. The listed set is the set -- NetBox replaces an M2M wholesale on PATCH -- so `[]` clears
+# the groups and omitting the field leaves NetBox's own alone.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxContact
+metadata:
+  name: noc
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  name: NOC
+  title: Network Operations Centre
+  phone: "+31 10 555 0100"
+  email: noc@example.net
+  address: Donkerslootstraat 155B, Rotterdam
+  link: https://wiki.example.net/noc
+  description: The rota, not a person
+
+  groups:
+    - name: operations
+    - name: operations-network
+---
+# A tenant to attach the contact to, so this file is a single `kubectl apply` rather than a
+# prerequisite hunt.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxTenant
+metadata:
+  name: acme
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  name: ACME
+  slug: acme
+---
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxSite
+metadata:
+  name: rtm1
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  name: RTM1
+  slug: rtm1
+  status: active
+---
+# The assignment. `objectRef` is a polymorphic reference and it is **required**: both NetBox
+# columns are non-nullable, so exactly one member must be set -- the API server rejects zero
+# and rejects two, before the operator sees the object.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxContactAssignment
+metadata:
+  name: noc-on-acme
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  objectRef:
+    tenantRef:
+      name: acme
+  contactRef:
+    name: noc
+  roleRef:
+    name: technical
+  priority: primary
+---
+# The same contact on a *site*. A different union member, so a different `object_type` in
+# NetBox -- and nothing in this manifest spells `dcim.site`, because the member name is what
+# selects the Kind and that Kind's own Descriptor carries the content-type string.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxContactAssignment
+metadata:
+  name: noc-on-rtm1
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  objectRef:
+    siteRef:
+      name: rtm1
+  contactRef:
+    name: noc
+  roleRef:
+    name: technical
+  priority: primary
+---
+# The same contact on the same tenant, under a different role. This is **not** drift on
+# `noc-on-acme`: `role` is part of NetBox's uniqueness constraint --
+# `(object_type, object_id, contact, role)` -- so these are two rows and both reconcile Ready.
+#
+# Change `roleRef` here to `technical` and this becomes a duplicate of `noc-on-acme`: one row,
+# and this CR reports Ready=False, Reason=Conflict.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxContactAssignment
+metadata:
+  name: noc-on-acme-billing
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  objectRef:
+    tenantRef:
+      name: acme
+  contactRef:
+    name: noc
+  roleRef:
+    name: billing
+  # Omit priority entirely to leave NetBox's own alone; set it to "" to clear one.
+---
+# An object the operator does not manage. `id` is the escape hatch and the only place in this
+# API where a raw NetBox primary key is accepted (ADR-0003) -- there is no CR for prefix 41,
+# and none is needed.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxContactAssignment
+metadata:
+  name: noc-on-unmanaged-prefix
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  objectRef:
+    prefixRef:
+      id: 41
+  contactRef:
+    name: noc
+  roleRef:
+    name: technical
