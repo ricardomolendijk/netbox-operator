@@ -18,3 +18,4 @@ resources:
 - netbox_v1alpha1_netboxclustertype.yaml
 - netbox_v1alpha1_netboxclustergroup.yaml
 - netbox_v1alpha1_netboxcluster.yaml
+- netbox_v1alpha1_netboxipaddress.yaml

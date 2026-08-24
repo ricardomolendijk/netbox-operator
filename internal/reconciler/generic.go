@@ -453,12 +453,16 @@ func (p *pass) lookup(ctx context.Context) (match, error) {
 		// for, and that is most of the answer when the lookup turned out to be ambiguous.
 		p.obj.NetBoxStatus().NaturalKey = params
 
+		// On a kind where NetBox may legitimately hold several objects matching one key,
+		// which of them is this CR's is decided by the provenance stamp rather than by the
+		// filter (decision #177, duplicate.go). A pass-through for every other kind.
+		found, err := p.duplicate(live, err)
 		if err != nil {
 			return match{}, lookupFailure(p.desc.Endpoint, params, err)
 		}
 
-		if live != nil {
-			return match{live: live, byNaturalKey: true}, nil
+		if found.live != nil {
+			return found, nil
 		}
 	}
 
