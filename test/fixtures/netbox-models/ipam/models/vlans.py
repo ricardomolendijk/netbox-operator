@@ -4,8 +4,10 @@ from django.db import models
 from django.db.models import Q
 from django.utils.translation import gettext_lazy as _
 
+from ipam.choices import PrefixStatusChoices, RoleKindChoices
 from ipam.constants import AMBIGUOUS_MAX_LENGTH, VRF_RD_MAX_LENGTH
 from netbox.models import OrganizationalModel, PrimaryModel
+from ipam.models.mixins import ComponentModel
 from netbox.models.mixins import CachedScopeMixin
 
 # A constant defined in the model module rather than in constants.py.
@@ -136,6 +138,20 @@ class Prefix(PrimaryModel):
     prefix = models.CharField(
         max_length=43,
     )
+    # An enum the AST can only name: `choices=PrefixStatusChoices` and a symbolic default. The
+    # members come from ipam/choices.py, and that ChoiceSet has a `key`, so a deployment can
+    # change them and a closed CRD enum would reject a legitimate value.
+    status = models.CharField(
+        max_length=50,
+        choices=PrefixStatusChoices,
+        default=PrefixStatusChoices.STATUS_ACTIVE,
+    )
+    # A grouped ChoiceSet with no `key`: flattened, closed, safe to pin as a CRD enum.
+    role_kind = models.CharField(
+        max_length=16,
+        choices=RoleKindChoices,
+        blank=True,
+    )
     vrf = models.ForeignKey(
         to='ipam.VRF',
         on_delete=models.PROTECT,
@@ -170,3 +186,8 @@ class PrefixAttachment(PrimaryModel):
     )
     object_id = models.PositiveBigIntegerField()
     parent = GenericForeignKey('object_type', 'object_id')
+
+
+class PrefixPort(ComponentModel, PrimaryModel):
+    """The ipam half of the two-apps-one-base-name pair: this must inherit ipam's
+    ComponentModel (`component_kind`), never dcim's (`name`, `label`)."""

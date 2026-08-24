@@ -27,6 +27,8 @@ rules:
   - netboxclustertypes
   - netboxdeviceroles
   - netboxdevicetypes
+  - netboxipaddressclaims
+  - netboxipaddresses
   - netboxlocations
   - netboxmanufacturers
   - netboxplatforms
@@ -55,6 +57,8 @@ rules:
   - netboxclustertypes/finalizers
   - netboxdeviceroles/finalizers
   - netboxdevicetypes/finalizers
+  - netboxipaddressclaims/finalizers
+  - netboxipaddresses/finalizers
   - netboxlocations/finalizers
   - netboxmanufacturers/finalizers
   - netboxplatforms/finalizers
@@ -80,6 +84,8 @@ rules:
   - netboxdeviceroles/status
   - netboxdevicetypes/status
   - netboxendpoints/status
+  - netboxipaddressclaims/status
+  - netboxipaddresses/status
   - netboxlocations/status
   - netboxmanufacturers/status
   - netboxplatforms/status

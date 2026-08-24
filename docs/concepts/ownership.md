@@ -62,9 +62,22 @@ convention somebody can forget.
 |---|---|---|
 | `NetBoxRegion` | `parentRef` | `parent` is `CASCADE`, and it is the only reference |
 | `NetBoxSiteGroup` | `parentRef` | same model, same `CASCADE` |
+| `NetBoxTenantGroup` | `parentRef` | same `CASCADE`; its `slug`-only key would not catch the miss |
 | `NetBoxLocation` | `siteRef` | `site` **and** `parent` are both `CASCADE`; `site` is the required one |
 | `NetBoxPrefix` | `scopeRef` | every scope target deletes its prefixes; `vrf` is `PROTECT` |
+| `NetBoxVLANGroup` | `scopeRef` | same, through `vlan_groups` on all four targets |
+| `NetBoxCluster` | `scopeRef` | every scope target deletes its clusters, by two different mechanisms — see below |
 | `NetBoxDevice` | *none* | every reference on it is `PROTECT` or `SET_NULL` |
+
+`NetBoxTenantGroup` is the row worth reading twice, because there the owner reference is
+carrying the weight on its own. The three `dcim` nested groups read `parent_id` in every
+natural-key candidate, so a child whose parent has gone has no usable identity and the engine
+waits even with no owner reference — a missing cascade there leaves a stale CR and nothing
+worse. `tenancy.TenantGroup` has no `meta.constraints`; its uniqueness is column-level and
+global, so it keys on `slug` alone and never asks about a parent. Its candidate stays
+applicable, finds nothing, and create-if-absent **re-creates a row NetBox deleted on purpose**
+(#203). Same missing declaration, one class worse outcome — and the reason a kind's containment
+parent is read off `on_delete` rather than off how catalogue-like the kind looks.
 
 `NetBoxLocation` is the only kind so far where two references qualify and there is one slot, so
 it needs a tiebreak. `siteRef` wins on three counts: `site` is required, so every location has
@@ -74,6 +87,54 @@ nested ones included, so it is the larger deletion; and the parent path is cover
 rather than by ownership — every one of this kind's natural-key candidates reads `parent_id` or
 pins it null, so a location whose `parentRef` stops resolving has no usable identity and the
 engine waits instead of creating. Choosing `parentRef` would trade all three away.
+
+### On a polymorphic reference, the cascade is per member
+
+`scopeRef` is one field with four legal targets, and **the cascade is a fact about each
+target, not about the field.** NetBox states it per target model, in one of two places:
+
+- a `GenericRelation` on the target — `dcim.Region` declares `clusters`, so deleting a region
+  deletes the clusters scoped to it;
+- or a denormalised `on_delete=CASCADE` column on the *referring* model —
+  `dcim.CachedScopeMixin` gives `ipam.Prefix`, `virtualization.Cluster` and
+  `wireless.WirelessLAN` a `_site` and a `_location` that are `CASCADE` (and a `_region` and
+  `_site_group` that are `SET_NULL`), maintained from `(scope_type, scope_id)` on every save.
+
+The two are complementary, which is why `clusters` is a `GenericRelation` on `dcim.Region` and
+`dcim.SiteGroup` and not on `dcim.Site` or `dcim.Location`: the `SET_NULL` targets need it to
+cascade at all, the `CASCADE` ones do not. Read together, every scoped kind cascades from all
+four of its scopes — and each member says so for itself, with its own citation:
+
+```go
+GenericFKs: []GenericFKSpec{ScopeFK("scope", ScopeCascadesFromEvery())},
+ContainmentRef: "scope",
+```
+
+So the descriptor's boot check is *some* member cascades, and **the owner reference is decided
+per object, from the member that object resolved through.** A kind whose members disagree
+keeps its containment parent for the members that cascade, and the objects using the others
+report `False/CascadeUnavailable` naming the member:
+
+```
+ParentOwned  False  CascadeUnavailable  scope resolved to NetBoxSite team-blue/hq, and netbox
+                                        does not delete this object when that is deleted, so
+                                        no owner reference was added […] Another member of
+                                        scope may cascade — the cascade of a polymorphic
+                                        reference is declared per target model
+```
+
+**Move an object between members and the owner reference moves with it**, in one pass: the
+entry for the member it left is removed as the new one is added. Moving to a member that does
+not cascade removes it and adds nothing. A stale entry would be worse than none — two
+containment owners are ANDed by garbage collection, and an entry naming an object this one no
+longer references is a cascade waiting to delete the wrong thing.
+
+`ScopeFK` cannot default those flags. Their value belongs to the referring kind, and the two
+mechanisms behind them live in two different places in `docs/netbox-schema.md`, so a caller
+supplies the table. Supplying it for *some* members and not others is a boot failure
+(`ErrMemberCascadePartial`) rather than a member that silently does not cascade: that silence
+is the direction that hurts, since a member wrongly reading "no cascade" leaves the CR behind
+when NetBox deletes the row, and the engine then recreates the row from the CR.
 
 ### When no foreign key qualifies
 
@@ -154,7 +215,7 @@ Conditions:
 | `ParentOwned` | Reason | What it means |
 |---|---|---|
 | `True` | `ParentOwned` | The owner reference is set. Deleting the parent garbage-collects this object. |
-| `False` | `CascadeUnavailable` | No owner reference is possible. Deleting the parent leaves this object behind. |
+| `False` | `CascadeUnavailable` | No owner reference is possible, or the union member this object resolved through is not one netbox cascades. Deleting the parent leaves this object behind. |
 | `False` | `ParentOwnershipDisabled` | You opted out with the annotation below. |
 | *absent* | — | This kind has no containment parent, or the spec did not set it. Nothing to cascade. |
 
@@ -168,15 +229,22 @@ object whose NetBox counterpart matches its spec is Ready regardless.
 
 ### Two things that are not the namespace rule
 
-`CascadeUnavailable` also covers the case where the containment reference names a NetBox row
-rather than a CR — written as `slug`, `lookup`, or the raw `id` escape hatch for a
-pre-existing object the operator does not manage. There is no Kubernetes object for an owner
-reference to point at, so there is no cascade. The message says which it was.
+`CascadeUnavailable` also covers two cases that have nothing to do with namespaces. The
+containment reference may name a NetBox row rather than a CR — written as `slug`, `lookup`, or
+the raw `id` escape hatch for a pre-existing object the operator does not manage — and then
+there is no Kubernetes object for an owner reference to point at. Or it may be a polymorphic
+reference resolved through a member NetBox does not cascade from, while a sibling member does
+([above](#on-a-polymorphic-reference-the-cascade-is-per-member)). The message says which it
+was.
 
 **A containment reference that has not resolved gets no `ParentOwned` condition at all.**
 That case is already `RefsResolved=False` naming itself, and reporting one fact under two
 conditions invites them to disagree. Look at `RefsResolved` first; `ParentOwned` is only
-about references that *did* resolve.
+about references that *did* resolve. The owner reference of a *previous* pass is still removed
+while the reference does not resolve: the operator cannot tell "the ref was deleted" from "the
+ref is not ready yet", and of the two answers only removal is safe — an object with no owner
+reference is never collected, so a cascade the next pass restores costs nothing, while a
+promise about a parent this object may no longer reference can delete it.
 
 ### An unregistered target Kind
 
@@ -209,11 +277,22 @@ individual ones, and an endpoint-level field would be a third deletion knob besi
 
 ## What the operator will not do to your object
 
-**It never removes or rewrites an owner reference it did not add.** The implementation only
-ever appends, so an owner reference set by another controller survives by construction rather
-than by a check somebody could forget. Adding is idempotent: an object already carrying the
-reference takes no write at all, which is what keeps a resync from patching every object in
-the cluster every ten minutes.
+**It never rewrites an owner reference, and never removes one outside the containment slot.**
+The slot is a *non-controller* owner reference naming one of the Kinds `ContainmentRef`
+resolves to: the operator's own, and the one it would have written itself. Everything else is
+left alone by construction rather than by a check somebody could forget — an owner reference
+set by another controller names another Kind, or is a controller reference, and either way this
+step cannot see it.
+
+Inside the slot it does remove, because the alternative is worse. The reference the slot holds
+can change — a `scopeRef` moved from a region to a site, a parent moved namespace, a ref
+cleared, the opt-out annotation added — and an entry nobody removes then names an object this
+one no longer references. Garbage collection reads that as a live owner: deleting that former
+parent deletes this object, whose finalizer deletes a NetBox row that was never in its scope.
+Two entries at once are worse still, since owners are ANDed.
+
+Adding and removing are both idempotent: an object already in the right state takes no write at
+all, which is what keeps a resync from patching every object in the cluster every ten minutes.
 
 **It never downgrades a controller reference.** If a controller owner reference already names
 the same parent — the case where child materialisation and containment point at the same
@@ -256,7 +335,15 @@ which is `on_delete=CASCADE` in NetBox:
 {Spec: "parentRef", API: "parent", Class: ClassRefOne, CascadeOnDelete: true},
 ```
 
-Getting that last one wrong is a boot failure (`ErrContainmentNotCascade`) rather than a
+On a polymorphic pair the cascade is stated per union member instead, and the boot check is
+that **some** member cascades — the per-object question is asked once the reference resolves:
+
+```go
+GenericFKs: []GenericFKSpec{ScopeFK("scope", ScopeCascadesFromEvery())},
+```
+
+Getting either wrong is a boot failure (`ErrContainmentNotCascade`, or
+`ErrMemberCascadePartial` for a union whose members are stated unevenly) rather than a
 cascade that does the wrong thing in production. There is no per-kind ownership code and no
 `switch` on Kind anywhere in the mechanism — which is enforced, not merely intended
 (`forbidigo`).

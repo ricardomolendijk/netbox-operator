@@ -183,17 +183,54 @@ for app in ['circuits','core','dcim','extras','ipam','netbox','tenancy','users',
                     for m in stmt.body:
                         if isinstance(m, ast.Assign) and isinstance(m.targets[0], ast.Name):
                             meta[m.targets[0].id] = ast.unparse(m.value)
-            if fields or any('Model' in b or 'Component' in b or 'Template' in b for b in bases):
-                key = f"{app}.{node.name}"
-                if key in out:
-                    # Whichever file the glob reached first won, and the other class's entire
-                    # field list was dropped -- silently, in either direction. A wrong field
-                    # list is worse than a missing one, so this stops the run.
-                    sys.exit(f"!! {key} is declared twice: {out[key]['file']} and "
-                             f"{os.path.relpath(f, ROOT)}. One class's field list would silently "
-                             f"replace the other's.")
-                out[key] = {'app': app, 'name': node.name, 'file': os.path.relpath(f, ROOT),
-                            'bases': bases, 'fields': fields, 'meta': meta}
+            # Every class in a models module is a candidate; which of them are models is
+            # decided below by reachability, not by whether a base class's *name* happens to
+            # contain "Model". `class CircuitType(BaseCircuitType)` has a docstring for a body
+            # and a base named none of those things, so both it and VirtualCircuitType -- two
+            # shipped API endpoints -- had no schema entry at all (NBO-041).
+            key = f"{app}.{node.name}"
+            if key in out:
+                # Whichever file the glob reached first won, and the other class's entire
+                # field list was dropped -- silently, in either direction. A wrong field
+                # list is worse than a missing one, so this stops the run.
+                sys.exit(f"!! {key} is declared twice: {out[key]['file']} and "
+                         f"{os.path.relpath(f, ROOT)}. One class's field list would silently "
+                         f"replace the other's.")
+            out[key] = {'app': app, 'name': node.name, 'file': os.path.relpath(f, ROOT),
+                        'bases': bases, 'fields': fields, 'meta': meta}
+
+# A class in a models module is a model if it declares columns, or if it inherits from one
+# that does -- however many hops away, and whatever the intervening classes are called. Run to
+# a fixed point so `CircuitType -> BaseCircuitType -> PrimaryModel` is reached regardless of
+# the order the glob walked the files in. Anything else in a models module (a manager, a plain
+# helper class) declares no column and reaches nothing that does, and is dropped.
+CANDIDATES = out
+BY_NAME_ALL = {}
+for v in CANDIDATES.values():
+    BY_NAME_ALL.setdefault(v['name'], []).append(v)
+
+def base_entries(v):
+    for b in v['bases']:
+        b = b.split('[')[0].split('.')[-1].strip()
+        # Own app first: `ComponentModel` is declared in both dcim and virtualization, and
+        # resolving it by bare name meant neither could be attributed -- so eleven shipped
+        # component Kinds lost `name`, `label`, `description` and their whole identity (NBO-041).
+        e = CANDIDATES.get(f"{v['app']}.{b}")
+        if e is None:
+            same = BY_NAME_ALL.get(b, [])
+            e = same[0] if len(same) == 1 else None
+        if e is not None:
+            yield e
+
+models = {k for k, v in CANDIDATES.items() if v['fields']}
+while True:
+    grown = {k for k, v in CANDIDATES.items()
+             if k not in models and any(f"{e['app']}.{e['name']}" in models for e in base_entries(v))}
+    if not grown:
+        break
+    models |= grown
+for k in [k for k in CANDIDATES if k not in models]:
+    del CANDIDATES[k]
 
 # A model's class body is only part of its column list. Walk each entry's bases
 # left-to-right, depth-first -- Django's own field-resolution order -- and merge in every
@@ -203,13 +240,13 @@ for app in ['circuits','core','dcim','extras','ipam','netbox','tenancy','users',
 # where a merge goes wrong invisibly.
 BY_NAME = {}
 for v in out.values():
-    # A bare class name is how a base is written in a subclass's declaration. The same name
-    # in two apps cannot be attributed, so it is dropped rather than guessed -- inventing an
-    # inherited column is worse than omitting one -- but the omission is said out loud.
+    # A bare class name is how a base is written in a subclass's declaration. Resolution is
+    # always own-app-first (see base_entries); BY_NAME is only the cross-app fallback, so a
+    # name in two apps is dropped from it rather than guessed at -- inventing an inherited
+    # column is worse than omitting one -- but the omission is said out loud, and only when
+    # some model actually needs the fallback for it.
     if v['name'] in BY_NAME:
         BY_NAME[v['name']] = None
-        print(f"!! {v['name']} is declared in more than one app: columns inherited from it cannot be attributed",
-              file=sys.stderr)
     else:
         BY_NAME[v['name']] = v
 
@@ -230,10 +267,20 @@ for v in out.values():
         if e: f['to'] = f"{e['app']}.{e['name']}"
         else: f['to_unresolved'] = True
 
+AMBIGUOUS = set()
+
 def ancestors(v, seen):
     for b in v['bases']:
-        e = BY_NAME.get(b.split('[')[0].split('.')[-1].strip())
-        if e is None or e['name'] in seen: continue
+        name = b.split('[')[0].split('.')[-1].strip()
+        # The declaring class's own app wins. `dcim.Interface` inherits dcim's ComponentModel,
+        # `virtualization.VMInterface` virtualization's; resolving by bare name alone found the
+        # name in two apps, gave up, and silently dropped every column both declare.
+        e = out.get(f"{v['app']}.{name}") or BY_NAME.get(name)
+        if e is None:
+            if name in BY_NAME:     # present, but in more than one app and not in this one
+                AMBIGUOUS.add((v['app'], v['name'], name))
+            continue
+        if e['name'] in seen: continue
         seen.add(e['name'])
         yield e
         yield from ancestors(e, seen)
@@ -259,6 +306,10 @@ for v in out.values():
                 shadowed.append(f"{entry['name']} ({entry['declared_by']})")
     v['fields'] += merged
     if shadowed: v['shadowed'] = shadowed
+
+for app_, model_, base_ in sorted(AMBIGUOUS):
+    print(f"!! {app_}.{model_}: base {base_} is declared in more than one app and not in {app_}: "
+          f"columns inherited from it cannot be attributed", file=sys.stderr)
 
 # `to='self'` names the model the column ends up on: NestedGroupModel.parent is
 # Region -> Region on Region and RackGroup -> RackGroup on RackGroup. Resolved per entry

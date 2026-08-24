@@ -64,7 +64,7 @@ func ipamVRFDescriptor() Descriptor {
 		//  2. `name` is `CharField REQ len=100` -- no UNIQUE -- so a name filter can
 		//     legitimately match several rows. It is a convention, not a constraint.
 		//
-		// `rd__isnull=true` is pinned on the second candidate rather than the candidate being
+		// `?rd=null` is pinned on the second candidate rather than the candidate being
 		// `name` alone as NBO-022's spec table has it, and the spec's own reasoning is why.
 		// Candidates are tried in order and the engine falls through when one matches
 		// nothing, so a name-only second candidate would be reached by a VRF that *does*
@@ -77,11 +77,19 @@ func ipamVRFDescriptor() Descriptor {
 		// What the pin does not do is make `name` unique. Two RD-less VRFs sharing a name
 		// still match, and that is reported as a Conflict naming both ids rather than
 		// resolved by taking the first row.
+		//
+		// The pin declares NullColumnChar, which is the only char pin the operator has, and
+		// it sends the null sentinel rather than the `__empty` suffix a char column also
+		// registers. `__empty` is a string-length test, so it matches the empty string as
+		// well as NULL, and `rd` is `blank=True null=True` with no normalisation on save --
+		// so the two are distinct reachable values and only one of them is "no route
+		// distinguisher"
+		// (docs/concepts/lookups.md#how-a-null-pin-is-spelled-and-why-it-depends-on-the-column).
 		NaturalKeys: []NaturalKey{
 			{Fields: []KeyField{{Filter: "rd", Spec: "rd"}}},
 			{
 				Fields:     []KeyField{{Filter: "name", Spec: "name"}},
-				NullFields: []NullField{{Filter: "rd", Spec: "rd"}},
+				NullFields: []NullField{{Filter: "rd", Spec: "rd", Column: NullColumnChar}},
 			},
 		},
 

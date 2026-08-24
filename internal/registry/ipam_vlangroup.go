@@ -26,14 +26,16 @@ func init() { MustRegister(ipamVLANGroupDescriptor()) }
 // `_location` with it; ipam.VLANGroup declares the two columns on the model itself and has
 // none of the four, so Cached is cleared below rather than the union being restated.
 func ipamVLANGroupDescriptor() Descriptor {
-	scope := ScopeFK("scope")
-	// The scope genuinely cascades, so it is a legal containment parent (NBO-193): every one
-	// of the four scope targets declares a `vlan_groups` GenericRelation -- dcim.Region,
-	// dcim.SiteGroup, dcim.Site and dcim.Location (docs/netbox-schema.md) -- so deleting any
-	// of them takes its VLAN groups with it. ScopeFK cannot default this: `clusters` and
-	// `wireless_lans` exist on only two of the four, so a union's cascade is a fact about the
-	// referring model rather than about the union.
-	scope.CascadeOnDelete = true
+	// The scope genuinely cascades from every member, so it is a legal containment parent
+	// (NBO-193), and it says so per member (#214): every one of the four scope targets
+	// declares a `vlan_groups` GenericRelation -- dcim.Region, dcim.SiteGroup, dcim.Site and
+	// dcim.Location (docs/netbox-schema.md) -- so deleting any of them takes its VLAN groups
+	// with it. Here the GenericRelation is the *whole* of the cascade: this model carries no
+	// cached scope columns, so unlike ipam.Prefix and virtualization.Cluster there is no
+	// `_site on_delete=CASCADE` behind the site and location members. ScopeFK cannot default
+	// the table -- a union's cascade is a fact about the referring model rather than about the
+	// union.
+	scope := ScopeFK("scope", ScopeCascadesFromEvery())
 
 	// The one difference from every other scoped kind, and the reason it is a mutation of the
 	// shared union rather than a copy of it: the members, the four permitted `app_label.model`
@@ -90,14 +92,26 @@ func ipamVLANGroupDescriptor() Descriptor {
 		// filters are eight separate names that would put the union's dispatch table in the
 		// natural key as well.
 		//
-		// Candidate 2 is the same constraint with both halves null, and the pins are the whole
+		// Candidate 2 is the same constraint with both halves null, and the pin is the whole
 		// point of it. Postgres treats NULLs as distinct, so with both scope columns null
 		// *neither* unique constraint fires and two globally-scoped groups can legitimately
 		// share a slug -- more than one match is therefore a real server state and is
-		// reported as a Conflict rather than resolved by taking the first. Omitting the pins
+		// reported as a Conflict rather than resolved by taking the first. Omitting the pin
 		// instead would be worse than non-unique: `?slug=mgmt` alone matches every scoped
 		// group with that slug too, so a global group would adopt a site's group
 		// (docs/concepts/lookups.md#why-a-null-filter-is-pinned-and-never-omitted).
+		//
+		// One pin, not two, even though candidate 1 matches both columns. `scope_id` is
+		// `PositiveBigIntegerField` (docs/netbox-schema.md -> ipam.VLANGroup) and NetBox
+		// registers a null filter for it -- `?scope_id__empty=true`. It registers none for
+		// `scope_type`, whose filter is MultiValueContentTypeFilter, and asking anyway is
+		// not merely useless but actively wrong: the sentinel makes the filter
+		// `scope_type__in=[]`, which matches nothing at all, so the engine would conclude
+		// the group does not exist and create a second one (see knownNullColumns for the
+		// NetBox lines). Pinning the id half alone loses nothing, because NetBox refuses one
+		// half of the pair without the other -- `Cannot set scope_type without scope_id` and
+		// its converse, netbox/ipam/models/vlans.py:105-109 -- so `scope_id IS NULL` is
+		// exactly the set of groups with no scope.
 		//
 		// The order is not a fallback. Applicable keeps the two apart in both directions: a
 		// group whose scope is declared but has not resolved yet matches neither candidate --
@@ -115,8 +129,7 @@ func ipamVLANGroupDescriptor() Descriptor {
 			{
 				Fields: []KeyField{{Filter: "slug", Spec: "slug"}},
 				NullFields: []NullField{
-					{Filter: ScopeTypeField, Spec: "scope"},
-					{Filter: ScopeIDField, Spec: "scope"},
+					{Filter: ScopeIDField, Spec: "scope", Column: NullColumnNumeric},
 				},
 			},
 		},

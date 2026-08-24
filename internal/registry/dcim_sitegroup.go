@@ -73,7 +73,7 @@ func dcimSiteGroupDescriptor() Descriptor {
 			},
 			{
 				Fields:     []KeyField{{Filter: "name", Spec: "name"}},
-				NullFields: []NullField{{Filter: "parent_id", Spec: "parentRef"}},
+				NullFields: []NullField{{Filter: "parent_id", Spec: "parentRef", Column: NullColumnRef}},
 			},
 		},
 

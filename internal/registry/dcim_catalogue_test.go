@@ -71,7 +71,9 @@ func TestCatalogueDescriptorsAreRegisteredAndValid(t *testing.T) {
 // have three different identities, so the base class cannot be what decides.
 //
 //   - dcim.DeviceRole is a NestedGroupModel with `(parent, slug)` plus `(slug)` conditioned on
-//     `parent__isnull=True`, so it needs the pin -- on `parent_id`.
+//     `parent__isnull=True`, so it needs the pin -- on `parent_id`. The Django condition and
+//     the query parameter are not the same string: NetBox registers only negation on an FK
+//     filter, so the wire spelling is the sentinel `?parent_id=null` (NBO-206).
 //   - dcim.Platform is a NestedGroupModel with `(manufacturer, slug)` plus `(slug)` conditioned
 //     on `manufacturer__isnull=True`, so it needs the pin -- on `manufacturer_id`, and its
 //     `parent` appears in no candidate at all.
@@ -97,7 +99,7 @@ func TestCatalogueNaturalKeysComeFromTheConstraints(t *testing.T) {
 				}},
 				{
 					Fields:     []KeyField{{Filter: "slug", Spec: "slug"}},
-					NullFields: []NullField{{Filter: "parent_id", Spec: "parentRef"}},
+					NullFields: []NullField{{Filter: "parent_id", Spec: "parentRef", Column: NullColumnRef}},
 				},
 			},
 		},
@@ -110,7 +112,7 @@ func TestCatalogueNaturalKeysComeFromTheConstraints(t *testing.T) {
 				}},
 				{
 					Fields:     []KeyField{{Filter: "slug", Spec: "slug"}},
-					NullFields: []NullField{{Filter: "manufacturer_id", Spec: "manufacturerRef"}},
+					NullFields: []NullField{{Filter: "manufacturer_id", Spec: "manufacturerRef", Column: NullColumnRef}},
 				},
 			},
 		},
@@ -155,7 +157,7 @@ func TestCatalogueCandidatesByState(t *testing.T) {
 		"a top-level device role": {
 			kind:  "NetBoxDeviceRole",
 			state: SpecState{Declared: []string{"slug"}, Resolved: []string{"slug"}},
-			want:  [][]string{{"slug", "parent_id__isnull"}},
+			want:  [][]string{{"slug", "parent_id=null"}},
 		},
 		"a nested device role never reaches the null variant": {
 			kind: "NetBoxDeviceRole",
@@ -174,7 +176,7 @@ func TestCatalogueCandidatesByState(t *testing.T) {
 			state: SpecState{
 				Declared: []string{"slug", "parentRef"}, Resolved: []string{"slug", "parentRef"},
 			},
-			want: [][]string{{"slug", "manufacturer_id__isnull"}},
+			want: [][]string{{"slug", "manufacturer_id=null"}},
 		},
 		"a platform whose manufacturer has not been created yet has no candidate": {
 			kind:  "NetBoxPlatform",

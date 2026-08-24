@@ -263,6 +263,20 @@ type (
 	// ClusterTypeRef points at a NetBoxClusterType (virtualization.ClusterType,
 	// virtualization/cluster-types).
 	ClusterTypeRef ObjectRef
+	// IPAddressRef points at a NetBoxIPAddress (ipam.IPAddress, ipam/ip-addresses).
+	//
+	// The only self-referential alias on a non-tree model: `nat_inside` points at another
+	// address of the same kind (docs/netbox-schema.md -> ipam.IPAddress, `nat_inside
+	// ForeignKey -> ipam.IPAddress on_delete=SET_NULL`).
+	IPAddressRef ObjectRef
+	// PrefixRef points at a NetBoxPrefix (ipam.Prefix, ipam/prefixes).
+	//
+	// The first alias whose target is a *pool* rather than a plain foreign key: a
+	// NetBoxIPAddressClaim resolves it to the prefix it allocates out of
+	// (docs/decisions/0004-claims-first-allocation.md). Nothing about the alias is
+	// different for that -- the id is resolved by the same four modes and the same grant
+	// check -- which is the point of resolving a pool through an ordinary reference.
+	PrefixRef ObjectRef
 	// DeviceRoleRef points at a NetBoxDeviceRole (dcim.DeviceRole, dcim/device-roles).
 	//
 	// dcim.DeviceRole and not ipam.Role: two separate models with two separate endpoints,
@@ -415,6 +429,22 @@ func (r ClusterTypeRef) TargetGVK() schema.GroupVersionKind {
 func (r ClusterTypeRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
 
 // TargetGVK reports the Kind this reference resolves against.
+func (r IPAddressRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxIPAddress")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r IPAddressRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r PrefixRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxPrefix")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r PrefixRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
 func (r DeviceRoleRef) TargetGVK() schema.GroupVersionKind {
 	return GroupVersion.WithKind("NetBoxDeviceRole")
 }
@@ -467,6 +497,9 @@ var (
 	_ RefTarget = ClusterRef{}
 	_ RefTarget = ClusterGroupRef{}
 	_ RefTarget = ClusterTypeRef{}
+	_ RefTarget = VRFRef{}
+	_ RefTarget = IPAddressRef{}
+	_ RefTarget = PrefixRef{}
 	_ RefTarget = DeviceRoleRef{}
 	_ RefTarget = DeviceTypeRef{}
 	_ RefTarget = ManufacturerRef{}

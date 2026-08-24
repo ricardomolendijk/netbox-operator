@@ -87,7 +87,7 @@ func dcimDeviceRoleDescriptor() Descriptor {
 			},
 			{
 				Fields:     []KeyField{{Filter: "slug", Spec: "slug"}},
-				NullFields: []NullField{{Filter: "parent_id", Spec: "parentRef"}},
+				NullFields: []NullField{{Filter: "parent_id", Spec: "parentRef", Column: NullColumnRef}},
 			},
 		},
 

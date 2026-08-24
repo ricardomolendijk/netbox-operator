@@ -87,7 +87,7 @@ func dcimPlatformDescriptor() Descriptor {
 			},
 			{
 				Fields:     []KeyField{{Filter: "slug", Spec: "slug"}},
-				NullFields: []NullField{{Filter: "manufacturer_id", Spec: "manufacturerRef"}},
+				NullFields: []NullField{{Filter: "manufacturer_id", Spec: "manufacturerRef", Column: NullColumnRef}},
 			},
 		},
 

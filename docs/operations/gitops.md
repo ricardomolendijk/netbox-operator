@@ -170,9 +170,44 @@ fresh one, and nothing is duplicated in NetBox:
 is the right default *in the CRD* — finding somebody else's object is not permission to take
 it over, and the difference between the two is one line in a manifest you control.
 
-The exception is an allocated address, which does not appear in Git at all. That is what the
-deterministic allocation identity is for: the same manifest reclaims the same address, so a
-rebuild converges rather than re-rolling (ADR-0005 §3, NBO-036).
+### Claims, which have no `onConflict` to set
+
+The exception is an allocated address, which does not appear in Git at all. A
+[`NetBoxIPAddressClaim`](../reference/netboxipaddressclaim.md) has no natural key to adopt by
+and therefore no `onConflict` field: it re-adopts by **allocation identity** instead, and that
+identity is derived from `(netbox url, namespace, kind, name)` — every one of which the same
+manifest still has on a fresh cluster (ADR-0005 §3).
+
+So a rebuild goes:
+
+1. **The claim comes back with an empty `status`.** No `address`, so the reconciler's
+   never-allocate-again guard does not fire, and the claim is about to allocate.
+2. **It searches NetBox for its own identity first**, unconditionally:
+   `GET /api/ipam/ip-addresses/?cf_k8s_allocation_identity=<identity>`.
+3. **The object from before is still there**, because a claim always retains its NetBox object
+   and because a torn-down cluster runs no finalizers either way.
+4. **So it is reclaimed rather than reallocated**: `status.address` comes back to the same
+   value, `Allocated=True, Reason=ReclaimedByIdentity`, an `AllocationReclaimed` Event, and
+   **zero** POSTs to `available-ips/`.
+
+Nothing has to be set in Git for that to work, which is the point — there is no claim
+equivalent of `onConflict: Adopt` to remember.
+
+Two things will make a rebuild hand out a *different* address, and both are visible:
+
+- **The claim was renamed.** The name is in the identity, so the renamed claim searches for
+  something nothing carries. Copy the old claim's `status.allocationIdentity` into
+  `spec.allocationIdentity` before renaming — and note that the old address stays allocated in
+  NetBox until somebody deletes it, reported by the `AddressRetained` Event the deletion
+  emitted.
+- **The `NetBoxEndpoint`'s URL changed.** The URL is in the identity too, because the same
+  claim pointed at a second NetBox is a second allocation. It is normalised, so a trailing
+  slash or a redundant `/api` is not a change; a different host is.
+
+`kubectl get nbipc -A` after a rebuild is the check: every `ADDRESS` should be the value it
+had, and `kubectl describe` should say `ReclaimedByIdentity` rather than `AddressAllocated`.
+The full table of what reclaim does and does not recover is in
+[claims](../concepts/claims.md#what-reclaim-can-and-cannot-recover).
 
 ## Restoring NetBox from backup
 
@@ -251,8 +286,8 @@ wherever NetBox lives.
 What there is not, in any of this, is an operator-side path that writes a recovered value
 back into Git — see
 [there is no mode where NetBox wins](#there-is-no-mode-where-netbox-wins). If you want
-NetBox's post-restore contents as manifests, that is `nbctl export` (NBO-040), which writes
-files for a human to review and commit.
+NetBox's post-restore contents as manifests, that is
+[`nbctl export`](exporting.md), which writes files for a human to review and commit.
 
 ## Drift modes
 
@@ -347,8 +382,10 @@ Two things `Off` deliberately does **not** switch off:
 Promoting a NetBox-side edit back into a CR's `spec` is the obvious next feature request,
 and it is deliberately absent. It would make the operator a second writer to desired state,
 which is precisely what this page exists to prevent. If you want NetBox's current contents
-as manifests, that is `nbctl export` (NBO-040): it writes files for a human to review and
-commit, rather than a controller writing specs.
+as manifests, that is [`nbctl export`](exporting.md): it writes files for a human to review
+and commit, rather than a controller writing specs. It skips the objects the operator
+already manages, because those already have manifests in Git, and it never writes to Git
+itself -- you read the diff and you commit it.
 
 ## NetBox permissions
 

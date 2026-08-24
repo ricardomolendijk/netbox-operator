@@ -14,6 +14,7 @@ import (
 
 	netboxv1alpha1 "github.com/ricardomolendijk/netbox-operator/api/v1alpha1"
 	"github.com/ricardomolendijk/netbox-operator/internal/netbox"
+	"github.com/ricardomolendijk/netbox-operator/internal/registry"
 )
 
 // Deletion intervals. A refused delete is not a failure to retry harder: it will keep
@@ -64,6 +65,17 @@ type FinalizerWriter interface {
 // deletion sequence, which drops the finalizer without a NetBox call, so the early claim
 // cannot make a CR undeletable.
 func (e *Engine) claim(ctx context.Context, obj Object) error {
+	return takeFinalizer(ctx, e.Finalizers, obj)
+}
+
+// takeFinalizer is Engine.claim's body, over any CR rather than only an engine-driven one.
+//
+// Shared because the allocation engine needs exactly this, for exactly the same reason
+// (claim.go): a claim that POSTs to an allocation endpoint before its finalizer is durable
+// is a CR that can die owing NetBox an object nobody is left to account for. Two copies of
+// the add-then-persist-then-roll-back-on-failure sequence would be two places for that
+// ordering to be got wrong.
+func takeFinalizer(ctx context.Context, writer FinalizerWriter, obj client.Object) error {
 	if controllerutil.ContainsFinalizer(obj, netboxv1alpha1.Finalizer) {
 		return nil
 	}
@@ -71,13 +83,13 @@ func (e *Engine) claim(ctx context.Context, obj Object) error {
 	// A missing collaborator is a wiring mistake, and it must say so rather than panic
 	// halfway through a pass. Claiming runs before any NetBox call, so failing here is
 	// also the safest place to fail: nothing has been created that could leak.
-	if e.Finalizers == nil {
+	if writer == nil {
 		return fmt.Errorf("%w: no FinalizerWriter is wired", errNotConfigured)
 	}
 
 	controllerutil.AddFinalizer(obj, netboxv1alpha1.Finalizer)
 
-	if err := e.Finalizers.UpdateFinalizers(ctx, obj); err != nil {
+	if err := writer.UpdateFinalizers(ctx, obj); err != nil {
 		// Put the in-memory object back the way the API server still sees it. Leaving the
 		// finalizer on a copy the API server rejected would let a later status write
 		// succeed against an object that never got protected.
@@ -159,7 +171,7 @@ func (p *pass) releaseWithoutDeleting() (release, bool) {
 		}, true
 	}
 
-	if deletionPolicyOf(p.obj) == netboxv1alpha1.DeletionRetain {
+	if deletionPolicyOf(p.obj, p.desc) == netboxv1alpha1.DeletionRetain {
 		return release{
 			event: netboxv1alpha1.EventRetained,
 			message: fmt.Sprintf("spec.deletionPolicy is Retain: netbox %s/%d is left in place",
@@ -347,12 +359,22 @@ func (p *pass) release(ctx context.Context, out release) (ctrl.Result, error) {
 	return ctrl.Result{}, nil
 }
 
-// deletionPolicyOf returns the object's deletion policy, defaulting to the one that leaves
-// nothing behind. The CRD defaults it as well; this is the guard for an object stored
-// before that default existed.
-func deletionPolicyOf(obj Object) netboxv1alpha1.DeletionPolicy {
+// deletionPolicyOf returns the object's deletion policy: the spec's when it states one, and
+// otherwise the default its kind declares.
+//
+// The default is not a CRD marker, and cannot be: spec.deletionPolicy is declared once on the
+// shared NetBoxObjectSpec, so a `+kubebuilder:default` there is the same value for every one
+// of ~120 kinds. Decision #176 made IPAM the exception -- deleting an ipam.IPAddress frees
+// the address for reallocation, which is destructive in a way deleting a tag is not -- so the
+// per-kind answer is data on the Descriptor, where every other per-kind fact lives.
+// docs/concepts/deletion.md carries the table.
+func deletionPolicyOf(obj Object, d registry.Descriptor) netboxv1alpha1.DeletionPolicy {
 	if policy := obj.NetBoxSpec().DeletionPolicy; policy != "" {
 		return policy
+	}
+
+	if d.RetainOnDelete {
+		return netboxv1alpha1.DeletionRetain
 	}
 
 	return netboxv1alpha1.DeletionDelete

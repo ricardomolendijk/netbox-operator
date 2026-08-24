@@ -145,7 +145,7 @@ func TestCatalogueLookupsPinTheirNullFilters(t *testing.T) {
 		"a top-level device role pins parent_id to null": {
 			kind:   "NetBoxDeviceRole",
 			object: deviceRole(nil),
-			want:   netbox.Params{"slug": "router", "parent_id__isnull": "true"},
+			want:   netbox.Params{"slug": "router", "parent_id": "null"},
 		},
 		"a nested device role is keyed on the pair": {
 			kind: "NetBoxDeviceRole",
@@ -158,7 +158,7 @@ func TestCatalogueLookupsPinTheirNullFilters(t *testing.T) {
 		"a vendor-neutral platform pins manufacturer_id to null, not parent_id": {
 			kind:   "NetBoxPlatform",
 			object: platform(nil),
-			want:   netbox.Params{"slug": "unifi-os", "manufacturer_id__isnull": "true"},
+			want:   netbox.Params{"slug": "unifi-os", "manufacturer_id": "null"},
 		},
 		"a platform under a manufacturer is keyed on the pair": {
 			kind: "NetBoxPlatform",
@@ -177,7 +177,7 @@ func TestCatalogueLookupsPinTheirNullFilters(t *testing.T) {
 				p.Spec.ParentRef = &netboxv1alpha1.PlatformRef{Name: "unifi"}
 			}),
 			refs: resolvedTo("parentRef", 9),
-			want: netbox.Params{"slug": "unifi-os", "manufacturer_id__isnull": "true"},
+			want: netbox.Params{"slug": "unifi-os", "manufacturer_id": "null"},
 		},
 		"a device type is keyed on its manufacturer and slug": {
 			kind:   "NetBoxDeviceType",

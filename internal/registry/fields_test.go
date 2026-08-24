@@ -3,6 +3,8 @@ package registry
 import (
 	"errors"
 	"testing"
+
+	"k8s.io/utils/ptr"
 )
 
 func TestDescriptorFieldFor(t *testing.T) {
@@ -123,7 +125,7 @@ func TestDescriptorValidateFieldMap(t *testing.T) {
 		{
 			name: "null pin names an undeclared spec field",
 			mutate: func(d *Descriptor) {
-				d.NaturalKeys[0].NullFields = []NullField{{Filter: "tenant_id", Spec: "tenantRef"}}
+				d.NaturalKeys[0].NullFields = []NullField{{Filter: "tenant_id", Spec: "tenantRef", Column: NullColumnRef}}
 			},
 			wantErr: ErrUnknownSpecField,
 		},
@@ -143,8 +145,9 @@ func TestDescriptorValidateFieldMap(t *testing.T) {
 				d.GenericFKs = []GenericFKSpec{{
 					TypeField: "scope_type", IDField: "scope_id",
 					AllowedTypes: []string{"dcim.site"}, Spec: "scopeRef",
-					Members:         []GenericFKMember{{Spec: "siteRef", Target: testGVK("NetBoxSite")}},
-					CascadeOnDelete: true,
+					Members: []GenericFKMember{
+						{Spec: "siteRef", Target: testGVK("NetBoxSite"), CascadeOnDelete: ptr.To(true)},
+					},
 				}}
 				d.ContainmentRef = "scopeRef"
 			},
@@ -248,7 +251,7 @@ func TestDescriptorValidateFieldMap(t *testing.T) {
 				d.Fields = append(d.Fields,
 					Field{Spec: "objectTypeRefs", API: "object_type_refs", Class: ClassRefMany})
 				d.NaturalKeys[0].NullFields = []NullField{
-					{Filter: "object_type_refs", Spec: "objectTypeRefs"},
+					{Filter: "object_type_refs", Spec: "objectTypeRefs", Column: NullColumnRef},
 				}
 			},
 			wantErr: ErrToManyNaturalKey,
