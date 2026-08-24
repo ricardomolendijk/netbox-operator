@@ -22,33 +22,9 @@ rules:
 - apiGroups:
   - netbox.kubeforge.org
   resources:
-  - netboxendpoints
-  - netboxrefgrants
-  verbs:
-  - get
-  - list
-  - watch
-- apiGroups:
-  - netbox.kubeforge.org
-  resources:
-  - netboxendpoints/status
-  - netboxlocations/status
-  - netboxprefixes/status
-  - netboxregions/status
-  - netboxroutetargets/status
-  - netboxsitegroups/status
-  - netboxsites/status
-  - netboxtags/status
-  - netboxtenantgroups/status
-  - netboxtenants/status
-  - netboxvrfs/status
-  verbs:
-  - get
-  - patch
-  - update
-- apiGroups:
-  - netbox.kubeforge.org
-  resources:
+  - netboxclustergroups
+  - netboxclusters
+  - netboxclustertypes
   - netboxlocations
   - netboxprefixes
   - netboxregions
@@ -68,6 +44,9 @@ rules:
 - apiGroups:
   - netbox.kubeforge.org
   resources:
+  - netboxclustergroups/finalizers
+  - netboxclusters/finalizers
+  - netboxclustertypes/finalizers
   - netboxlocations/finalizers
   - netboxprefixes/finalizers
   - netboxregions/finalizers
@@ -80,3 +59,33 @@ rules:
   - netboxvrfs/finalizers
   verbs:
   - update
+- apiGroups:
+  - netbox.kubeforge.org
+  resources:
+  - netboxclustergroups/status
+  - netboxclusters/status
+  - netboxclustertypes/status
+  - netboxendpoints/status
+  - netboxlocations/status
+  - netboxprefixes/status
+  - netboxregions/status
+  - netboxroutetargets/status
+  - netboxsitegroups/status
+  - netboxsites/status
+  - netboxtags/status
+  - netboxtenantgroups/status
+  - netboxtenants/status
+  - netboxvrfs/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - netbox.kubeforge.org
+  resources:
+  - netboxendpoints
+  - netboxrefgrants
+  verbs:
+  - get
+  - list
+  - watch

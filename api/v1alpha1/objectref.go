@@ -159,6 +159,23 @@ type (
 
 	// VRFRef points at a NetBoxVRF (ipam.VRF, ipam/vrfs).
 	VRFRef ObjectRef
+
+	// ClusterRef points at a NetBoxCluster (virtualization.Cluster,
+	// virtualization/clusters).
+	//
+	// Nothing in NBO-028 uses it: virtualization.Cluster is pointed *at* by
+	// virtualization.VirtualMachine and dcim.Device rather than pointing at itself. It ships
+	// with the Kind so that NBO-029's `clusterRef` is a field on a spec rather than a second
+	// branch's edit to this block.
+	ClusterRef ObjectRef
+
+	// ClusterGroupRef points at a NetBoxClusterGroup (virtualization.ClusterGroup,
+	// virtualization/cluster-groups).
+	ClusterGroupRef ObjectRef
+
+	// ClusterTypeRef points at a NetBoxClusterType (virtualization.ClusterType,
+	// virtualization/cluster-types).
+	ClusterTypeRef ObjectRef
 )
 
 // TargetGVK reports the Kind this reference resolves against.
@@ -263,6 +280,30 @@ func (r VRFRef) TargetGVK() schema.GroupVersionKind { return GroupVersion.WithKi
 // AsObjectRef returns the underlying reference.
 func (r VRFRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
 
+// TargetGVK reports the Kind this reference resolves against.
+func (r ClusterRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxCluster")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r ClusterRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r ClusterGroupRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxClusterGroup")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r ClusterGroupRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r ClusterTypeRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxClusterType")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r ClusterTypeRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
 // Compile-time proof that every alias satisfies RefTarget. An alias that forgets its
 // methods fails the build here rather than at the first reconcile that needs it.
 var (
@@ -280,4 +321,7 @@ var (
 	_ RefTarget = VLANRef{}
 	_ RefTarget = RouteTargetRef{}
 	_ RefTarget = VRFRef{}
+	_ RefTarget = ClusterRef{}
+	_ RefTarget = ClusterGroupRef{}
+	_ RefTarget = ClusterTypeRef{}
 )
