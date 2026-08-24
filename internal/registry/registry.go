@@ -428,7 +428,9 @@ type Descriptor struct {
 	// collection waits for every owner and two containment owners silently turn "delete
 	// the site or the VRF" into "delete both"
 	// (docs/decisions/0003-ownership-and-references.md rule 4). Empty when the kind has no
-	// containment parent, which is every catalogue kind.
+	// FK the server cascades -- which is not the same as "every catalogue kind", the
+	// equivalence #203 was: tenancy.TenantGroup is as catalogue-like as they come and its
+	// `parent` is CASCADE, so it has one.
 	//
 	// Which one it is, is not a judgement per Kind: it is whichever FK the *server*
 	// cascades, and validateContainment rejects a ref whose Field.CascadeOnDelete is false.
