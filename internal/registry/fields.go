@@ -186,6 +186,22 @@ type Field struct {
 	// now would mean inventing GVKs for Kinds nobody has built. NBO-012 lands the resolver
 	// and the remaining aliases together, and turns the check on with them.
 	Target schema.GroupVersionKind
+
+	// EmptyIsNull says this column is cleared with `null` rather than with the empty
+	// string, so an emptied spec field is sent as JSON null.
+	//
+	// It exists for NetBox's nullable non-text columns. dcim.Site.latitude and .longitude
+	// are DecimalFields (docs/netbox-schema.md -> dcim.Site): the API returns them as
+	// strings, so a spec holds one as a string, but DRF parses `""` as a number and
+	// rejects it -- which would make `latitude: ""` an admission-legal value that fails on
+	// every write, and the field still unclearable (#170). A text column needs nothing
+	// here: `description: ""` is how NetBox spells an empty description.
+	//
+	// Only meaningful on ClassValue. A reference's empty form is a nil pointer, which
+	// never reaches internal/reconciler's payload as an empty string, so setting this on
+	// one does nothing rather than something surprising -- and Validate does not reject it
+	// yet.
+	EmptyIsNull bool
 }
 
 // M2MFields are the NetBox columns compared as an order-independent id set: every to-many

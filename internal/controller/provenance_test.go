@@ -19,7 +19,10 @@ import (
 // provenance.ObjectTypes sorts. The one hand-written copy of the set in this package:
 // adding a CustomFieldable kind adds a line here, and that is deliberate -- it is the only
 // assertion that can catch a kind being dropped from the provenance stamp.
-var stampedObjectTypes = []string{"dcim.region", "dcim.site", "ipam.prefix", "tenancy.tenant", "tenancy.tenantgroup"}
+var stampedObjectTypes = []string{
+	"dcim.location", "dcim.region", "dcim.site", "dcim.sitegroup",
+	"ipam.prefix", "tenancy.tenant", "tenancy.tenantgroup",
+}
 
 // objectTypesAsAny is the set the bootstrap will compute, in the []any shape a JSON payload
 // decodes to, for seeding a NetBox that already has everything.

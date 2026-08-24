@@ -4,24 +4,24 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.19.0
-  name: netboxtenants.netbox.kubeforge.org
+  name: netboxsitegroups.netbox.kubeforge.org
 spec:
   group: netbox.kubeforge.org
   names:
-    kind: NetBoxTenant
-    listKind: NetBoxTenantList
-    plural: netboxtenants
+    kind: NetBoxSiteGroup
+    listKind: NetBoxSiteGroupList
+    plural: netboxsitegroups
     shortNames:
-    - nbtenant
-    singular: netboxtenant
+    - nbsitegroup
+    singular: netboxsitegroup
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
     - jsonPath: .spec.slug
       name: Slug
       type: string
-    - jsonPath: .spec.groupRef.name
-      name: Group
+    - jsonPath: .spec.parentRef.name
+      name: Parent
       type: string
     - jsonPath: .status.id
       name: ID
@@ -36,17 +36,9 @@ spec:
     schema:
       openAPIV3Schema:
         description: |-
-          NetBoxTenant is one tenancy.Tenant in NetBox.
+          NetBoxSiteGroup is one dcim.SiteGroup in NetBox.
 
-          Namespaced like every kind in v1alpha1 (docs/decisions/0002-crd-scoping.md), which is
-          what makes a cross-namespace slug collision routine rather than exotic: NetBox's
-          uniqueness is a database constraint and a namespace boundary does not partition it.
-
-          A `tenantRef` on some other kind is **not** a containment reference
-          (docs/decisions/0003-ownership-and-references.md rule 4): a tenant is an attribute of an
-          object, not its container, so it acquires no owner references from the objects that name
-          it and deleting it does not cascade to their prefixes and addresses. What happens instead
-          is NetBox's PROTECT refusing the delete.
+          Namespaced like every kind in v1alpha1 (docs/decisions/0002-crd-scoping.md).
         properties:
           apiVersion:
             description: |-
@@ -67,29 +59,19 @@ spec:
             type: object
           spec:
             description: |-
-              NetBoxTenantSpec describes one tenancy.Tenant.
+              NetBoxSiteGroupSpec describes one dcim.SiteGroup.
 
-              The kind almost every IPAM and DCIM model points at: `tenant ForeignKey ->
-              tenancy.Tenant on_delete=PROTECT` appears on ipam.VRF, ipam.VLAN, ipam.Prefix,
-              ipam.IPAddress, ipam.IPRange, ipam.ASN, dcim.Site, dcim.Device and more
-              (docs/netbox-schema.md). PROTECT is the half worth knowing before you delete one -- see
-              docs/reference/netboxtenant.md.
+              The sibling of NetBoxRegion rather than of NetBoxSite: dcim.SiteGroup is a
+              NestedGroupModel with the same inherited columns and the same pair of unique constraints
+              (docs/netbox-schema.md -> dcim.SiteGroup, bases and meta.constraints), so everything
+              NBO-011 established about a self-referential identity holds here unchanged. Where a Region
+              groups sites geographically, a SiteGroup groups them functionally -- branch, campus,
+              colo -- and NetBox keeps the two hierarchies independent.
 
-              Neither `name` nor `slug` is column-unique here, unlike on tenancy.TenantGroup: identity
-              comes from `meta.constraints`, which scope both per group. That is why this kind has two
-              natural-key candidates and a group pinned to null rather than omitted.
+              Like dcim.Region, every column is inherited: `OrganizationalModel` gives `name`, `slug`
+              and `description`, and `NestedGroupModel` adds `parent`. The schema entry itself lists
+              only the model's GenericRelations, which is what its own preamble warns about.
             properties:
-              comments:
-                description: |-
-                  Comments is the tenant's long-form notes field.
-
-                  Also inherited from PrimaryModel, and a TextField rather than a CharField: it has no
-                  max_length, so there is no MaxLength marker to derive.
-
-                  Omit it to leave NetBox's own value alone; set it to `""` to clear the value in
-                  NetBox. The two are different intents and the operator can tell them apart
-                  (docs/concepts/field-ownership.md).
-                type: string
               deletionPolicy:
                 default: Delete
                 description: |-
@@ -104,10 +86,7 @@ spec:
                 type: string
               description:
                 description: |-
-                  Description is free text shown next to the tenant.
-
-                  Inherited from PrimaryModel (docs/netbox-schema.md -> tenancy.Tenant,
-                  `description (PrimaryModel) CharField len=200`).
+                  Description is free text shown next to the site group.
 
                   Omit it to leave NetBox's own value alone; set it to `""` to clear the value in
                   NetBox. The two are different intents and the operator can tell them apart
@@ -121,21 +100,37 @@ spec:
                   reference cannot be resolved into one.
                 minLength: 1
                 type: string
-              groupRef:
+              name:
                 description: |-
-                  GroupRef files this tenant under a NetBoxTenantGroup
-                  (docs/netbox-schema.md -> tenancy.Tenant, `group ForeignKey -> tenancy.TenantGroup
-                  on_delete=SET_NULL`).
+                  Name is the site group's name.
 
-                  Part of this kind's identity, not just an attribute of it: leaving it unset makes a
-                  *groupless* tenant, which is a different natural key rather than the same key with a
-                  filter omitted, so the lookup pins `group_id__isnull=true` instead of dropping the
-                  filter (docs/concepts/lookups.md). Declaring it and having it not resolve yet makes
-                  neither candidate applicable, and the engine waits rather than adopting an unrelated
-                  groupless tenant of the same slug.
+                  Not globally unique: `dcim.SiteGroup.meta.constraints` makes it unique per parent,
+                  with a separate constraint for top-level groups. That is why this kind has two
+                  natural-key candidates rather than one.
+                maxLength: 100
+                minLength: 1
+                type: string
+              onConflict:
+                default: Fail
+                description: OnConflict is what to do when NetBox already holds a
+                  matching object.
+                enum:
+                - Fail
+                - Adopt
+                - AdoptOnly
+                type: string
+              parentRef:
+                description: |-
+                  ParentRef nests this site group under another one.
 
-                  SET_NULL rather than PROTECT, so deleting the group in NetBox clears this column
-                  rather than refusing -- the next reconcile finds the drift and PATCHes it back.
+                  Self-referential (`parent -> self`). Leaving it unset makes a top-level group, which
+                  is a different natural key rather than the same key with a field omitted -- see
+                  docs/concepts/lookups.md on why a null filter is pinned.
+
+                  Resolved to a NetBox id before the payload is built. Until it resolves, the object
+                  reports RefsResolved=False naming this field, and `parent` is left out of the payload
+                  rather than sent as null. A change to the target re-enqueues this object directly, so
+                  applying parent and child in either order converges without waiting for a resync.
                 properties:
                   id:
                     description: |-
@@ -209,38 +204,8 @@ spec:
                 - message: lookup values are limited to 200 characters
                   rule: '!has(self.lookup) || self.lookup.all(k, size(self.lookup[k])
                     <= 200)'
-              name:
-                description: |-
-                  Name is the tenant's label in the NetBox UI.
-
-                  **Not** column-unique (docs/netbox-schema.md -> tenancy.Tenant, `name CharField REQ
-                  len=100`). `meta.constraints` makes it unique per group, plus a separate constraint
-                  for groupless tenants, so two tenants may share a name under different groups. It is
-                  a candidate key and deliberately not the lookup key: `slug` is the stable identifier,
-                  and a rename that collides therefore fails as Ready=False/Invalid carrying NetBox's
-                  own 409 rather than being retried.
-                maxLength: 100
-                minLength: 1
-                type: string
-              onConflict:
-                default: Fail
-                description: OnConflict is what to do when NetBox already holds a
-                  matching object.
-                enum:
-                - Fail
-                - Adopt
-                - AdoptOnly
-                type: string
               slug:
-                description: |-
-                  Slug is the tenant's URL-safe identifier, and this kind's natural key.
-
-                  Unique *per group* rather than globally (docs/netbox-schema.md -> tenancy.Tenant,
-                  `meta.constraints`: `unique_group_slug` on `(group, slug)`, plus `unique_slug` on
-                  `(slug)` where `group IS NULL`). Two NetBoxTenants in different namespaces claiming
-                  one slug in one group is one tenant and a Conflict -- not two tenants
-                  (docs/decisions/0002-crd-scoping.md). `onConflict` already defaults to Fail, so that
-                  collision is loud unless somebody opted into Adopt; on a shared catalogue kind, do not.
+                description: Slug is the site group's URL-safe identifier.
                 maxLength: 100
                 minLength: 1
                 pattern: ^[-a-zA-Z0-9_]+$

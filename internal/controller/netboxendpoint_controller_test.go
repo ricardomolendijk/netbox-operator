@@ -467,10 +467,10 @@ func TestDeletingAnEndpointForgetsItsClient(t *testing.T) {
 	makeSecret(t, k8s, ns, "nb-token", "valid-token")
 	endpoint := makeEndpoint(t, k8s, ns, "transient", srv.URL, "nb-token", netboxv1alpha1.EndpointModeApply)
 
-	eventually(t, "client cached", func() bool {
-		_, _, ok := cache.Lookup(ns, "transient")
-		return ok
-	})
+	// Ready=True rather than the cache entry: put runs before the status write, so this
+	// gate cannot release mid-pass, and the next assertion added after it inherits a gate
+	// that is safe rather than one that only reads `ok` (#159, #164).
+	eventually(t, "Ready=True", func() bool { return endpointIsReady(ns, "transient") })
 	if err := k8s.Delete(context.Background(), endpoint); err != nil {
 		t.Fatalf("deleting endpoint: %v", err)
 	}
@@ -489,11 +489,29 @@ func TestTwoEndpointsInOneNamespaceAreIndependent(t *testing.T) {
 	makeEndpoint(t, k8s, ns, "prod", good.URL, "nb-token", netboxv1alpha1.EndpointModeApply)
 	makeEndpoint(t, k8s, ns, "lab", old.URL, "nb-token", netboxv1alpha1.EndpointModeApply)
 
-	eventually(t, "prod ready and lab refused", func() bool {
-		_, _, prodOK := cache.Lookup(ns, "prod")
-		_, _, labOK := cache.Lookup(ns, "lab")
-		return prodOK && !labOK
+	// Both endpoints are gated on their own status rather than on the cache, for the
+	// ordering #159 measured: the status write is the last thing a pass does, so the cache
+	// reads below cannot be pre-reconcile state.
+	eventually(t, "prod Ready=True and lab VersionSupported=False", func() bool {
+		if !endpointIsReady(ns, "prod") {
+			return false
+		}
+
+		lab := fetch(t, k8s, ns, "lab")
+		if lab == nil {
+			return false
+		}
+		c := conditionOf(lab, netboxv1alpha1.ConditionVersionSupported)
+
+		return c != nil && c.Status == metav1.ConditionFalse
 	})
+
+	if _, _, ok := cache.Lookup(ns, "prod"); !ok {
+		t.Error("no client cached for prod, which reports Ready=True")
+	}
+	if _, _, ok := cache.Lookup(ns, "lab"); ok {
+		t.Error("a client was cached for lab, whose NetBox version is unsupported")
+	}
 }
 
 // TestUnchangedReconcileWritesNoStatus is the endpoint controller's half of the property
