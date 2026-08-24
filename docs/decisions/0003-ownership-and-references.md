@@ -11,6 +11,13 @@ owner reference, and what cross-namespace containment therefore gives up
 **Amended:** 2026-08-24 — rule 4 built, and its mechanism recorded below: the condition it
 reports, and the parts of the prose that are deliberately not built
 ([#175](https://github.com/ricardomolendijk/netbox-operator/issues/175)).
+**Amended:** 2026-08-24 — rule 4 rewritten: **one** containment parent per Kind, chosen by
+whether the server cascades rather than by which reference reads like a container, with the
+garbage-collection reason it has to be one
+([#193](https://github.com/ricardomolendijk/netbox-operator/issues/193),
+[#198](https://github.com/ricardomolendijk/netbox-operator/issues/198)). The prose used to name
+two references for `NetBoxPrefix` and a `PROTECT`-ed foreign key for `NetBoxDevice`; both are
+corrected below, and `Descriptor.CascadeOnDelete` now makes the rule a boot check.
 
 ## The two different relationships
 
@@ -59,11 +66,16 @@ completes last.
 
 **4. A `parentRef` additionally sets a *non-controller* owner reference — when that is legal.**
 
-So that `kubectl delete netboxsite home` also removes the prefixes scoped to it, a
-ref that is genuinely a parent-child containment relationship (`scopeRef`,
-`siteRef`, `clusterRef`, `deviceRef`, `vrfRef`, `prefixRef`, `assignedObject`)
-contributes a **non-controller** owner reference to the referring object. Non-controller so it never
-competes with rule 3; GC still counts it, so the cascade works.
+So that `kubectl delete netboxsite home` also removes the prefixes scoped to it, **one** ref
+per Kind contributes a **non-controller** owner reference to the referring object.
+Non-controller so it never competes with rule 3; GC still counts it, so the cascade works.
+
+**Which ref that is, is not a judgement about which one reads like a container. It is
+whichever foreign key the *server* cascades.** A `CASCADE` foreign key qualifies; a `PROTECT`
+or `SET_NULL` one does not. The Descriptor says so per field — `Field.CascadeOnDelete`, read
+straight off `on_delete` in `docs/netbox-schema.md` — and `validateContainment` **rejects a
+containment ref whose foreign key does not cascade**, so a modelling error that used to be
+silent is now a boot failure.
 
 It is added **only when the reference is legal as an owner reference**. Since every kind
 is namespaced ([ADR-0002](0002-crd-scoping.md)), that reduces to a single rule: **same
@@ -95,20 +107,42 @@ endpoint with `spec.parentOwnership: false`. Default is on, because "delete the 
 its prefixes go too" is the behaviour people expect and the alternative is silent
 orphans in NetBox.
 
-**At most one containment owner reference per kind.** Kubernetes garbage collection
-deletes a dependent only once *every* owner is gone. Two containment references therefore
-give AND semantics — the object survives until both parents are deleted — while a user
-reading the manifest expects OR: "delete the site *or* the VRF and the prefix goes." The
-gap is silent and only shows up as an object that refuses to disappear.
+**Exactly one containment owner reference per kind, and the reason is Kubernetes garbage
+collection, not tidiness.** GC deletes a dependent only once *every* owner is gone, so owners
+are **ANDed**. Two containment references therefore mean the object survives until *both*
+parents are deleted, while a user reading the manifest expects OR: "delete the site *or* the
+VRF and the prefix goes." An earlier version of this rule named both `scopeRef` and `vrfRef`
+for `NetBoxPrefix`, which would have meant *deleting the site does not delete the prefix while
+the VRF exists* — the opposite of what the prose implied. The gap is silent and shows up only
+as an object that refuses to disappear, which is why `Descriptor.ContainmentRef` is a single
+string and not a list.
 
-So each kind nominates exactly **one** containment ref, and it is the required FK:
-`siteRef` for `NetBoxDevice`, `clusterRef` (else `siteRef`) for
-`NetBoxVirtualMachine`, `deviceRef` / `virtualMachineRef` for components, `scopeRef` for
-`NetBoxCluster` and `NetBoxPrefix`. Catalogue references — `manufacturerRef`,
-`deviceTypeRef`, `platformRef`, `tags` — contribute none; a catalogue is not a parent, and
-in the all-namespaced model those refs usually cross namespaces anyway, where an owner
-reference is illegal. A controller owner reference and a containment owner reference that
-name the same parent dedupe to one.
+The two rules together — one parent, chosen by cascade — give a mechanical answer per Kind
+rather than a per-Kind argument, which is what the M7 generator needs to fill in ~90 Kinds
+without a human deciding each one. Worked through:
+
+| Kind | Candidates | Containment parent | Why |
+|---|---|---|---|
+| `NetBoxRegion`, `NetBoxSiteGroup` | `parentRef` | `parentRef` | `parent` is `CASCADE`, and it is the only FK |
+| `NetBoxLocation` | `siteRef` (`CASCADE`), `parentRef` (`CASCADE`) | `siteRef` | two qualify; `site` is the **required** one, so every location has it, and deleting the site cascades to a superset of what deleting a parent location does |
+| `NetBoxPrefix` | `scopeRef` (cascades), `vrfRef` (`PROTECT`) | `scopeRef` | every scope target declares a `prefixes` `GenericRelation`; `vrf` is `PROTECT`, so NetBox refuses that deletion outright |
+| `NetBoxIPAddress` | `assignedObject` (cascades), `vrfRef` (`PROTECT`) | `assignedObject` | the `GenericRelation` case below |
+| `NetBoxDevice` | `siteRef`, `roleRef`, `deviceTypeRef`, `tenantRef`, `locationRef` (`PROTECT`), `platformRef` (`SET_NULL`) | **none** | not one of them cascades |
+
+`NetBoxDevice` is the case the earlier prose got wrong, and it is worth leaving visible rather
+than quietly dropping: `siteRef` reads exactly like a device's container, and
+`dcim.Device.site` is `on_delete=PROTECT`. **When no foreign key qualifies, a Kind gets no
+containment owner reference and no cascade.** That is a consequence and not a gap — NetBox
+refuses to delete a site that still has devices, so there is no server-side deletion for the
+owner reference to mirror, and an owner reference there would delete the CR while the row
+stayed behind. It is stated in [ownership](../concepts/ownership.md) so that nobody has to
+rediscover it from a descriptor.
+
+Catalogue references — `manufacturerRef`, `deviceTypeRef`, `platformRef`, `tags` — contribute
+none for the same reason and one more: a catalogue is not a parent, and in the all-namespaced
+model those refs usually cross namespaces anyway, where an owner reference is illegal. A
+controller owner reference and a containment owner reference that name the same parent dedupe
+to one.
 
 **`assignedObject` is on that list for a correctness reason, not an aesthetic one.**
 NetBox deletes an interface's IP addresses server-side through a `GenericRelation` when
@@ -116,9 +150,10 @@ the interface goes away. Without an owner reference, the `NetBoxIPAddress` CR ou
 the object it described, finds nothing at `status.id` on the next reconcile, and the
 engine's create-if-absent step **recreates the address** — resurrecting data NetBox
 deliberately deleted. The owner reference is what makes the CR disappear with its
-parent instead. Any ref whose target's deletion cascades server-side belongs in this
-list for the same reason; the general rule is *server-side cascade implies an owner
-reference*, and the list is the enumeration of where that is true.
+parent instead. That is the general rule — *server-side cascade implies an owner reference* —
+and it is why the cascade is the selection criterion rather than one input among several:
+every Kind that needs an owner reference needs it for this exact failure, and no Kind whose
+foreign key does not cascade has that failure to prevent.
 
 ### How rule 4 is implemented
 
@@ -145,6 +180,22 @@ prose above left open, settled here:
   `update` on the owner's `finalizers` subresource wherever
   `OwnerReferencesPermissionEnforcement` is enabled. A controller reference earns the flag by
   having created the child; a containment reference has not.
+- **The cascade rule is a boot check, not a review convention.** `Field.CascadeOnDelete` and
+  `GenericFKSpec.CascadeOnDelete` carry the `on_delete` a Kind's foreign key declares, and
+  `registry.validateContainment` returns `ErrContainmentNotCascade` for a `ContainmentRef`
+  naming one that is false. Before this, "does the target's deletion cascade server-side" was
+  the one fact a Descriptor could not express and lived in `docs/netbox-schema.md` and a
+  reviewer's head ([#192](https://github.com/ricardomolendijk/netbox-operator/issues/192)).
+  The flag is per foreign key rather than only on the containment ref, because it is a fact
+  about the column and the generator emits it from the schema either way.
+
+  What it still cannot express: a **generic FK whose union members disagree**. The flag is per
+  pair, and the scope cascade is a `GenericRelation` on each target model — `prefixes` and
+  `vlan_groups` exist on all four scope targets while `clusters` and `wireless_lans` exist only
+  on `dcim.Region` and `dcim.SiteGroup`. So `ipam.Prefix` may declare it and
+  `virtualization.Cluster` may not, and a Kind in that position gets no containment parent at
+  all rather than a cascade that is right for half its scopes.
+
 - **`spec.parentOwnership` on the endpoint is not built.** The per-object annotation is, and it
   covers the case; an endpoint-wide switch would be a third deletion knob beside
   `deletionPolicy` and `onConflict` for a need nobody has stated. Revisit if one is.

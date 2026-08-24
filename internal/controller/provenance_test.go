@@ -24,8 +24,11 @@ import (
 // stamped set with no Descriptor of its own behind it (registry.ClaimObjectTypes).
 var stampedObjectTypes = []string{
 	"dcim.location", "dcim.region", "dcim.site", "dcim.sitegroup",
-	"ipam.ipaddress", "ipam.prefix", "ipam.routetarget", "ipam.vrf",
-	"tenancy.tenant", "tenancy.tenantgroup",
+	// ipam.ipaddress is here without NetBoxIPAddress being registered: the claim kind
+	// contributes it through registry.ClaimObjectTypes(), because an allocated address needs
+	// the identity custom field to exist before the first POST.
+	"ipam.ipaddress", "ipam.prefix", "ipam.routetarget", "ipam.vlan", "ipam.vlangroup",
+	"ipam.vrf", "tenancy.tenant", "tenancy.tenantgroup",
 }
 
 // objectTypesAsAny is the set the bootstrap will compute, in the []any shape a JSON payload
