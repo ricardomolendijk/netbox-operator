@@ -547,8 +547,8 @@ func TestResolveAllReadsEachObjectOnce(t *testing.T) {
 		t.Fatalf("ResolveAll() = %v", err)
 	}
 
-	if got := resolution.ByField["parentRef"].ID; got != 12 {
-		t.Fatalf("ByField[parentRef].ID = %d, want 12", got)
+	if got := resolution.ByField["parentRef"].IDs(); len(got) != 1 || got[0] != 12 {
+		t.Fatalf("ByField[parentRef].IDs() = %v, want [12]", got)
 	}
 
 	// Two objects in the chain, two reads: the walk read `b` and `c`, and resolving `parentRef`
@@ -829,7 +829,7 @@ func regionDescriptor() registry.Descriptor {
 		GVK: regionGVK, Endpoint: "dcim/regions", ObjectType: "dcim.region",
 		Fields: []registry.Field{
 			{Spec: "name", API: "name"},
-			{Spec: "parentRef", API: "parent", Ref: true, Target: regionGVK},
+			{Spec: "parentRef", API: "parent", Class: registry.ClassRefOne, Target: regionGVK},
 		},
 		NaturalKeys: []registry.NaturalKey{
 			{Fields: []registry.KeyField{
@@ -849,7 +849,7 @@ func regionDescriptor() registry.Descriptor {
 func forkDescriptor() registry.Descriptor {
 	d := regionDescriptor()
 	d.Fields = append(d.Fields,
-		registry.Field{Spec: "altRef", API: "alt", Ref: true, Target: regionGVK})
+		registry.Field{Spec: "altRef", API: "alt", Class: registry.ClassRefOne, Target: regionGVK})
 
 	return d
 }

@@ -400,12 +400,12 @@ field they disagree about.
 
 ### `objectTypes` are content types, not references
 
-`object_types` is declared on the descriptor as an `ObjectTypeList` rather than an `M2M`
+`object_types` is declared with the field class `ObjectTypeList` rather than `RefMany`
 (`internal/registry/extras_tag.go`). Both are many-to-many and both compare
-order-independently, so the difference is invisible in the diff and total in effect: an
-`M2M` holds NetBox object ids resolved from sibling CRs, and a resolver told to resolve
+order-independently, so the difference is invisible in the diff and total in effect: a
+`RefMany` holds NetBox object ids resolved from sibling CRs, and a resolver told to resolve
 `dcim.device` would go looking for a CR that cannot exist. See
-[the descriptor](../concepts/descriptor.md#objecttypelists-versus-m2m).
+[field classes](../concepts/descriptor.md#field-classes).
 
 NetBox returns the list as `app_label.model` strings on this endpoint and as nested
 `{app_label, model}` objects on some others; both read shapes reduce to the same set, so
@@ -495,7 +495,7 @@ either it has not created one yet, or it refused to. `kubectl get nbtag` works t
 ## Related
 
 - [The Descriptor](../concepts/descriptor.md) — the per-kind data behind this page, and why
-  `object_types` is an `ObjectTypeList` and not an `M2M`.
+  `object_types` is an `ObjectTypeList` and not a `RefMany`.
 - [The reconcile engine](../concepts/engine.md) — the create/adopt/update decision, in one
   page.
 - [Drift detection](../concepts/drift.md) — why what NetBox returns is not what you wrote.

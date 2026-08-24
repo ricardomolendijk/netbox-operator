@@ -28,12 +28,11 @@ func tagDescriptor() Descriptor {
 			{Spec: "color", API: "color"},
 			{Spec: "description", API: "description"},
 			{Spec: "weight", API: "weight"},
-			{Spec: "objectTypes", API: "object_types"},
+			{Spec: "objectTypes", API: "object_types", Class: ClassObjectTypeList},
 		},
-		NaturalKeys:     []NaturalKey{{Fields: []KeyField{{Filter: "slug", Spec: "slug"}}}},
-		UpdateStrategy:  UpdatePatch,
-		ReadOnly:        []string{"created", "last_updated", "url", "display"},
-		ObjectTypeLists: []string{"object_types"},
+		NaturalKeys:    []NaturalKey{{Fields: []KeyField{{Filter: "slug", Spec: "slug"}}}},
+		UpdateStrategy: UpdatePatch,
+		ReadOnly:       []string{"created", "last_updated", "url", "display"},
 	}
 }
 
@@ -51,9 +50,13 @@ func vrfDescriptor() Descriptor {
 			{Spec: "rd", API: "rd"},
 			{Spec: "enforceUnique", API: "enforce_unique"},
 			{Spec: "description", API: "description"},
-			{Spec: "tenantRef", API: "tenant", Ref: true},
-			{Spec: "importTargets", API: "import_targets", Ref: true},
-			{Spec: "exportTargets", API: "export_targets", Ref: true},
+			{Spec: "tenantRef", API: "tenant", Class: ClassRefOne},
+			// The two to-many references NBO-088 was filed for. `import_targets` and
+			// `export_targets` are ManyToManyFields onto ipam.RouteTarget
+			// (docs/netbox-schema.md -> ipam.VRF), so one class says both that each is a list
+			// of references to resolve and that its value compares as an id set.
+			{Spec: "importTargets", API: "import_targets", Class: ClassRefMany},
+			{Spec: "exportTargets", API: "export_targets", Class: ClassRefMany},
 		},
 		NaturalKeys: []NaturalKey{
 			{Fields: []KeyField{{Filter: "rd", Spec: "rd"}}},
@@ -61,7 +64,6 @@ func vrfDescriptor() Descriptor {
 		},
 		UpdateStrategy: UpdatePatch,
 		ReadOnly:       []string{"created", "last_updated", "url", "display"},
-		M2M:            []string{"import_targets", "export_targets"},
 	}
 }
 
@@ -77,7 +79,7 @@ func regionDescriptor() Descriptor {
 			{Spec: "name", API: "name"},
 			{Spec: "slug", API: "slug"},
 			{Spec: "description", API: "description"},
-			{Spec: "parentRef", API: "parent", Ref: true},
+			{Spec: "parentRef", API: "parent", Class: ClassRefOne},
 		},
 		NaturalKeys: []NaturalKey{
 			{Fields: []KeyField{
@@ -111,14 +113,14 @@ func deviceDescriptor() Descriptor {
 		Fields: []Field{
 			{Spec: "name", API: "name"},
 			{Spec: "status", API: "status"},
-			{Spec: "siteRef", API: "site", Ref: true},
-			{Spec: "tenantRef", API: "tenant", Ref: true},
-			{Spec: "roleRef", API: "role", Ref: true},
-			{Spec: "deviceTypeRef", API: "device_type", Ref: true},
-			{Spec: "primaryIP4Ref", API: "primary_ip4", Ref: true},
-			{Spec: "primaryIP6Ref", API: "primary_ip6", Ref: true},
-			{Spec: "oobIPRef", API: "oob_ip", Ref: true},
-			{Spec: "virtualChassisRef", API: "virtual_chassis", Ref: true},
+			{Spec: "siteRef", API: "site", Class: ClassRefOne},
+			{Spec: "tenantRef", API: "tenant", Class: ClassRefOne},
+			{Spec: "roleRef", API: "role", Class: ClassRefOne},
+			{Spec: "deviceTypeRef", API: "device_type", Class: ClassRefOne},
+			{Spec: "primaryIP4Ref", API: "primary_ip4", Class: ClassRefOne},
+			{Spec: "primaryIP6Ref", API: "primary_ip6", Class: ClassRefOne},
+			{Spec: "oobIPRef", API: "oob_ip", Class: ClassRefOne},
+			{Spec: "virtualChassisRef", API: "virtual_chassis", Class: ClassRefOne},
 		},
 		NaturalKeys: []NaturalKey{
 			{Fields: []KeyField{
@@ -169,8 +171,8 @@ func ipAddressDescriptor() Descriptor {
 			{Spec: "address", API: "address"},
 			{Spec: "status", API: "status"},
 			{Spec: "dnsName", API: "dns_name"},
-			{Spec: "vrfRef", API: "vrf", Ref: true},
-			{Spec: "natInsideRef", API: "nat_inside", Ref: true},
+			{Spec: "vrfRef", API: "vrf", Class: ClassRefOne},
+			{Spec: "natInsideRef", API: "nat_inside", Class: ClassRefOne},
 		},
 		NaturalKeys: []NaturalKey{
 			{Fields: append([]KeyField{address, vrf}, assigned...)},
@@ -208,8 +210,8 @@ func clusterDescriptor() Descriptor {
 		Fields: []Field{
 			{Spec: "name", API: "name"},
 			{Spec: "status", API: "status"},
-			{Spec: "typeRef", API: "type", Ref: true},
-			{Spec: "groupRef", API: "group", Ref: true},
+			{Spec: "typeRef", API: "type", Class: ClassRefOne},
+			{Spec: "groupRef", API: "group", Class: ClassRefOne},
 		},
 		NaturalKeys: []NaturalKey{
 			{Fields: []KeyField{
@@ -247,7 +249,7 @@ func tenantGroupDescriptor() Descriptor {
 			{Spec: "name", API: "name"},
 			{Spec: "slug", API: "slug"},
 			{Spec: "description", API: "description"},
-			{Spec: "parentRef", API: "parent", Ref: true},
+			{Spec: "parentRef", API: "parent", Class: ClassRefOne},
 		},
 		NaturalKeys:    []NaturalKey{{Fields: []KeyField{{Filter: "slug", Spec: "slug"}}}},
 		UpdateStrategy: UpdatePatch,
@@ -364,14 +366,6 @@ func TestDescriptorValidate(t *testing.T) {
 			name:    "unknown scope",
 			mutate:  func(d *Descriptor) { d.Scope = "Global" },
 			wantErr: ErrUnknownScope,
-		},
-		{
-			name: "field is both m2m and object-type list",
-			mutate: func(d *Descriptor) {
-				d.M2M = []string{"object_types"}
-				d.ObjectTypeLists = []string{"object_types"}
-			},
-			wantErr: ErrFieldClassConflict,
 		},
 		{
 			name:    "deferred field with no name",

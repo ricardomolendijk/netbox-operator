@@ -82,14 +82,18 @@ func AddIndexes(ctx context.Context, fi client.FieldIndexer, s *runtime.Scheme, 
 // refFields are the reference fields of d that a Kubernetes event can ever arrive for: a
 // declared reference with a target Kind to watch.
 //
-// A Ref with no Target is left out because there is nothing to index it under. The resolver
-// reports such a field as RefKindUnavailable, which is a descriptor gap rather than a
+// A reference with no Target is left out because there is nothing to index it under. The
+// resolver reports such a field as RefKindUnavailable, which is a descriptor gap rather than a
 // manifest error, and it is not made better by an index key of `//ns/name`.
+//
+// Cardinality is not a distinction here. A to-many reference is watched exactly like a to-one
+// (NBO-088): each element gets its own index key, and the watch on the target Kind is the same
+// watch either way.
 func refFields(d registry.Descriptor) []registry.Field {
 	fields := make([]registry.Field, 0, len(d.Fields))
 
 	for _, field := range d.Fields {
-		if field.Ref && !field.Target.Empty() {
+		if field.Class.Ref() && !field.Target.Empty() {
 			fields = append(fields, field)
 		}
 	}
@@ -178,12 +182,20 @@ func nameRefTargets(obj client.Object, d registry.Descriptor) []RefNode {
 	}}
 	targets := make([]RefNode, 0, len(refs))
 
-	for _, ref := range refs {
-		if modeOf(ref.ref) != ModeName || ref.field.Target.Empty() {
+	for _, declared := range refs {
+		if declared.field.Target.Empty() {
 			continue
 		}
 
-		targets = append(targets, targetNode(from, ref))
+		// One key per element, so a to-many reference is woken by any of the objects it points
+		// at rather than by the first one (NBO-088).
+		for _, element := range declared.elements() {
+			if modeOf(element.ref) != ModeName {
+				continue
+			}
+
+			targets = append(targets, targetNode(from, element))
+		}
 	}
 
 	return targets

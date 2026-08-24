@@ -136,7 +136,7 @@ func (r *Resolver) Check(ctx context.Context, obj client.Object, d registry.Desc
 // checkFrom is Check over references the caller has already decoded, so a resolution pass
 // reads the spec once rather than once per thing it does with it.
 func (r *Resolver) checkFrom(
-	ctx context.Context, start RefNode, d registry.Descriptor, refs []declaredRef,
+	ctx context.Context, start RefNode, d registry.Descriptor, refs []fieldRefs,
 ) error {
 	walk := &cycleWalk{
 		resolver: r, start: start,
@@ -164,7 +164,11 @@ type hop struct {
 	// report names, because the field a user can edit is the one on the object whose
 	// condition they are reading -- naming a field on some object three hops away would be
 	// true and useless.
-	head declaredRef
+	//
+	// One element rather than one field: a to-many reference contributes one edge per element
+	// (NBO-088), and the message has to name the element that closed the ring rather than
+	// the field it happened to be written under.
+	head refElement
 }
 
 // cycleWalk is one breadth-first search away from one object.
@@ -323,21 +327,27 @@ func (w *cycleWalk) follow(ctx context.Context, edges []hop) ([]hop, error) {
 // head is the branch's field on the start object, and nil for the start object itself, whose
 // references are each the head of their own branch.
 func blockingHops(
-	from RefNode, d registry.Descriptor, refs []declaredRef, head *declaredRef,
+	from RefNode, d registry.Descriptor, refs []fieldRefs, head *refElement,
 ) []hop {
 	edges := make([]hop, 0, len(refs))
 
-	for _, ref := range refs {
-		if !blocking(d, ref) {
-			continue
-		}
+	for _, declared := range refs {
+		// One edge per element, so a ring closed by the third tag in a list is found and
+		// reported as that tag rather than as the field. A to-many reference is as capable of
+		// deadlocking a graph as a to-one, and the walk prunes on the node it arrives at, so
+		// the extra breadth costs nothing beyond the objects it would have read anyway.
+		for _, element := range declared.elements() {
+			if !blocking(d, element) {
+				continue
+			}
 
-		branch := ref
-		if head != nil {
-			branch = *head
-		}
+			branch := element
+			if head != nil {
+				branch = *head
+			}
 
-		edges = append(edges, hop{node: targetNode(from, ref), from: from, head: branch})
+			edges = append(edges, hop{node: targetNode(from, element), from: from, head: branch})
+		}
 	}
 
 	return edges
@@ -360,7 +370,7 @@ func blockingHops(
 //     Region whose parent is declared and unresolved matches no candidate and waits), so it
 //     genuinely blocks. A `lag` that no candidate names does not: the object is created and
 //     the field is PATCHed in later.
-func blocking(d registry.Descriptor, ref declaredRef) bool {
+func blocking(d registry.Descriptor, ref refElement) bool {
 	if modeOf(ref.ref) != ModeName {
 		return false
 	}
@@ -403,7 +413,7 @@ func inNaturalKey(d registry.Descriptor, spec string) bool {
 
 // targetNode is the object a reference points at, in the namespace it resolves in: the one it
 // names, or the referring object's own.
-func targetNode(from RefNode, ref declaredRef) RefNode {
+func targetNode(from RefNode, ref refElement) RefNode {
 	namespace := ref.ref.Namespace
 	if namespace == "" {
 		namespace = from.Key.Namespace
@@ -453,7 +463,7 @@ func (w *cycleWalk) tooLarge(edge hop) error {
 
 // blocked builds the typed error, reported against the reference on the object being
 // reconciled rather than against whichever edge the walk happened to be on.
-func (w *cycleWalk) blocked(cause error, head declaredRef, path RefPath, detail string) *Error {
+func (w *cycleWalk) blocked(cause error, head refElement, path RefPath, detail string) *Error {
 	return &Error{
 		Cause: cause, Field: head.field.Spec, Ref: head.ref, Mode: ModeName,
 		TargetGVK: head.field.Target, Target: targetNode(w.start, head).Key,

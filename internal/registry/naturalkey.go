@@ -150,6 +150,24 @@ func (k NaturalKey) Applicable(state SpecState) bool {
 	return true
 }
 
+// specFields are the CR spec fields this candidate reads, matched and pinned alike.
+//
+// Both halves, because both read the field: a pin asserts it holds nothing, which is as much
+// a statement about one value as matching it is.
+func (k NaturalKey) specFields() []string {
+	out := make([]string, 0, len(k.Fields)+len(k.NullFields))
+
+	for _, field := range k.Fields {
+		out = append(out, field.Spec)
+	}
+
+	for _, field := range k.NullFields {
+		out = append(out, field.Spec)
+	}
+
+	return out
+}
+
 // Validate reports every way this candidate is malformed.
 func (k NaturalKey) Validate() error {
 	return errors.Join(k.validateFields(), k.validateNullFields())

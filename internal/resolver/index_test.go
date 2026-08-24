@@ -144,8 +144,8 @@ func TestRefIndexerDeduplicatesOneTarget(t *testing.T) {
 	d := registry.Descriptor{
 		GVK: siteGVK, Endpoint: "dcim/sites", ObjectType: "dcim.site",
 		Fields: []registry.Field{
-			{Spec: "regionRef", API: "region", Ref: true, Target: regionGVK},
-			{Spec: "fallbackRegionRef", API: "fallback_region", Ref: true, Target: regionGVK},
+			{Spec: "regionRef", API: "region", Class: registry.ClassRefOne, Target: regionGVK},
+			{Spec: "fallbackRegionRef", API: "fallback_region", Class: registry.ClassRefOne, Target: regionGVK},
 		},
 	}
 
@@ -226,7 +226,7 @@ func TestAddIndexes(t *testing.T) {
 
 	regionDescriptor := registry.Descriptor{
 		GVK: regionGVK, Endpoint: "dcim/regions", ObjectType: "dcim.region",
-		Fields: []registry.Field{{Spec: "parentRef", API: "parent", Ref: true, Target: regionGVK}},
+		Fields: []registry.Field{{Spec: "parentRef", API: "parent", Class: registry.ClassRefOne, Target: regionGVK}},
 	}
 	// dcim.Site declares no reference in this milestone, and a kind with none must not be
 	// given an index: the index function encodes every object of its type to JSON on every
@@ -273,7 +273,7 @@ func TestAddIndexes(t *testing.T) {
 		// its watches quietly matching nothing.
 		unknown := registry.Descriptor{
 			GVK:    netboxv1alpha1.GroupVersion.WithKind("NetBoxNotAKind"),
-			Fields: []registry.Field{{Spec: "regionRef", API: "region", Ref: true, Target: regionGVK}},
+			Fields: []registry.Field{{Spec: "regionRef", API: "region", Class: registry.ClassRefOne, Target: regionGVK}},
 		}
 
 		if err := AddIndexes(context.Background(), &fakeFieldIndexer{}, scheme,
@@ -294,8 +294,8 @@ func TestRefTargets(t *testing.T) {
 		{
 			name: "one target per reference",
 			fields: []registry.Field{
-				{Spec: "regionRef", API: "region", Ref: true, Target: regionGVK},
-				{Spec: "tenantRef", API: "tenant", Ref: true, Target: tenantGVK},
+				{Spec: "regionRef", API: "region", Class: registry.ClassRefOne, Target: regionGVK},
+				{Spec: "tenantRef", API: "tenant", Class: registry.ClassRefOne, Target: tenantGVK},
 			},
 			want: []schema.GroupVersionKind{regionGVK, tenantGVK},
 		},
@@ -304,8 +304,8 @@ func TestRefTargets(t *testing.T) {
 			// referrers through the index, which does not care which field produced the key.
 			name: "two references to one kind are one target",
 			fields: []registry.Field{
-				{Spec: "regionRef", API: "region", Ref: true, Target: regionGVK},
-				{Spec: "fallbackRegionRef", API: "fallback_region", Ref: true, Target: regionGVK},
+				{Spec: "regionRef", API: "region", Class: registry.ClassRefOne, Target: regionGVK},
+				{Spec: "fallbackRegionRef", API: "fallback_region", Class: registry.ClassRefOne, Target: regionGVK},
 			},
 			want: []schema.GroupVersionKind{regionGVK},
 		},
@@ -316,7 +316,7 @@ func TestRefTargets(t *testing.T) {
 		},
 		{
 			name:   "a reference with no target kind is not watchable",
-			fields: []registry.Field{{Spec: "regionRef", API: "region", Ref: true}},
+			fields: []registry.Field{{Spec: "regionRef", API: "region", Class: registry.ClassRefOne}},
 			want:   []schema.GroupVersionKind{},
 		},
 	}

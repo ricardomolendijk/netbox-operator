@@ -52,7 +52,7 @@ func blockedOnParent(cause error, requeue time.Duration) resolver.Resolution {
 	err := refError("parentRef", cause)
 
 	return resolver.Resolution{
-		ByField: map[string]resolver.Result{},
+		ByField: map[string]resolver.FieldRefs{},
 		Blocked: []resolver.Blocker{{
 			Field: "parentRef", Reason: resolver.Classify(err).Reason, Requeue: requeue, Err: err,
 		}},
@@ -70,8 +70,8 @@ func refError(field string, cause error) error {
 
 // resolvedTo is a resolution that turned one reference into an id.
 func resolvedTo(field string, id int64) resolver.Resolution {
-	return resolver.Resolution{ByField: map[string]resolver.Result{
-		field: {ID: id, ObjectType: "extras.tag", Mode: resolver.ModeName},
+	return resolver.Resolution{ByField: map[string]resolver.FieldRefs{
+		field: {{ID: id, ObjectType: "extras.tag", Mode: resolver.ModeName}},
 	}}
 }
 

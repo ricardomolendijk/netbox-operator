@@ -65,9 +65,6 @@ var (
 	// on a kind that updates in place.
 	ErrRecreateOnWithoutRecreate = errors.New("recreateOn requires UpdateRecreate")
 
-	// ErrFieldClassConflict is returned for a field declared in two field classes.
-	ErrFieldClassConflict = errors.New("field is declared in two field classes")
-
 	// ErrEmptyField is returned for an empty entry in a field list.
 	ErrEmptyField = errors.New("empty field name")
 
@@ -201,23 +198,6 @@ type Descriptor struct {
 	// (docs/netbox-schema.md preamble). Writing one silently no-ops, which is a PATCH
 	// loop rather than an error.
 	ReadOnly []string
-
-	// M2M are many-to-many fields written as a list of NetBox object IDs.
-	M2M []string
-
-	// Arrays are Postgres ArrayFields, whose order is data rather than incidental:
-	// ipam.VLANGroup.vid_ranges and ipam.Service.ports (docs/netbox-schema.md). They are
-	// a separate class from M2M because comparing them order-independently would miss a
-	// reordering the user asked for, and comparing an M2M order-sensitively would PATCH
-	// forever — NetBox does not preserve M2M order.
-	Arrays []string
-
-	// ObjectTypeLists are many-to-many fields onto contenttypes.ContentType, whose
-	// values are `app_label.model` strings rather than references to NetBox objects:
-	// extras.Tag.object_types is the first (docs/netbox-schema.md -> extras.Tag). They are
-	// a separate class from M2M because a resolver told to resolve them would look for
-	// CRs that cannot exist.
-	ObjectTypeLists []string
 
 	// GenericFKs are the polymorphic foreign keys on this kind.
 	GenericFKs []GenericFKSpec
@@ -384,15 +364,18 @@ func (d Descriptor) matchedByNaturalKey(apiField string) bool {
 	return false
 }
 
+// validateFieldSets checks the two lists of API names that are still declared rather than
+// derived.
+//
+// The comparison classes are no longer among them. M2M, object-type lists and arrays come
+// off Field.Class now (Descriptor.M2MFields and friends), so a field cannot be in two of
+// them and there is nothing left to cross-check: one declaration, one answer (NBO-088).
 func (d Descriptor) validateFieldSets() error {
 	lists := []struct {
 		name   string
 		fields []string
 	}{
 		{"readOnly", d.ReadOnly},
-		{"m2m", d.M2M},
-		{"objectTypeLists", d.ObjectTypeLists},
-		{"arrays", d.Arrays},
 		{"recreateOn", d.RecreateOn},
 	}
 
@@ -401,18 +384,6 @@ func (d Descriptor) validateFieldSets() error {
 	for _, list := range lists {
 		if slices.Contains(list.fields, "") {
 			errs = append(errs, fmt.Errorf("%w: %s", ErrEmptyField, list.name))
-		}
-	}
-
-	for _, field := range d.ObjectTypeLists {
-		if slices.Contains(d.M2M, field) {
-			errs = append(errs, fmt.Errorf("%w: %s is both m2m and objectTypeList", ErrFieldClassConflict, field))
-		}
-	}
-
-	for _, field := range d.Arrays {
-		if slices.Contains(d.M2M, field) || slices.Contains(d.ObjectTypeLists, field) {
-			errs = append(errs, fmt.Errorf("%w: %s is an array and a list of references", ErrFieldClassConflict, field))
 		}
 	}
 
