@@ -126,13 +126,17 @@ func TestPrefixScopeIsTheSharedUnion(t *testing.T) {
 		t.Errorf("the scope pair is not prefixScopeFK():\n got %+v\nwant %+v", d.GenericFKs[0], want)
 	}
 
-	// The one field prefixScopeFK adds to the shared union, asserted on its own so that the
-	// DeepEqual above cannot pass with both sides false. Without it this kind has no
-	// containment parent at all: validateContainment refuses a ref that does not cascade
+	// The cascade prefixScopeFK adds to the shared union, asserted per member so that the
+	// DeepEqual above cannot pass with both sides unstated -- and per member because that is
+	// the shape of the fact (#214). Without it this kind has no containment parent at all:
+	// validateContainment refuses a ref where no member cascades
 	// (docs/decisions/0003-ownership-and-references.md rule 4).
-	if !d.GenericFKs[0].CascadeOnDelete {
-		t.Error("the scope pair does not declare CascadeOnDelete; every scope target declares " +
-			"a `prefixes` GenericRelation, so deleting one deletes the prefixes scoped to it")
+	for _, member := range d.GenericFKs[0].Members {
+		if member.CascadeOnDelete == nil || !*member.CascadeOnDelete {
+			t.Errorf("the scope member %s does not declare CascadeOnDelete; every scope target "+
+				"declares a `prefixes` GenericRelation, and dcim.CachedScopeMixin's `_site` and "+
+				"`_location` are CASCADE besides", member.Spec)
+		}
 	}
 }
 
@@ -154,17 +158,20 @@ func TestPrefixNaturalKeysPinTheVRF(t *testing.T) {
 		}},
 		{
 			Fields:     []KeyField{{Filter: "prefix", Spec: "prefix"}},
-			NullFields: []NullField{{Filter: "vrf_id", Spec: "vrfRef"}},
+			NullFields: []NullField{{Filter: "vrf_id", Spec: "vrfRef", Column: NullColumnRef}},
 		},
 	}
 	if !reflect.DeepEqual(d.NaturalKeys, want) {
 		t.Fatalf("NaturalKeys = %+v, want %+v", d.NaturalKeys, want)
 	}
 
-	// The pin is sent as an explicit `vrf_id__isnull`, never as an omitted filter
-	// (docs/concepts/lookups.md#why-a-null-filter-is-pinned-and-never-omitted).
-	if got := d.NaturalKeys[1].NullFields[0].Param(); got != "vrf_id__isnull" {
-		t.Errorf("the null pin renders as %q, want vrf_id__isnull", got)
+	// The pin goes out as an explicit `?vrf_id=null`, never as an omitted filter
+	// (docs/concepts/lookups.md#why-a-null-filter-is-pinned-and-never-omitted). `vrf` is a
+	// `ForeignKey` (docs/netbox-schema.md -> ipam.Prefix), which is what makes it the
+	// sentinel spelling rather than the numeric `__empty` one; internal/netbox pins the
+	// rendering itself.
+	if got := d.NaturalKeys[1].NullFields[0].Column; got != NullColumnRef {
+		t.Errorf("the null pin declares Column %q, want %q", got, NullColumnRef)
 	}
 }
 

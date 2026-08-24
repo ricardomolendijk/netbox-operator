@@ -197,13 +197,19 @@ spec:
                   object claiming to be synced while NetBox never received it.
                 type: object
               deletionPolicy:
-                default: Delete
                 description: |-
                   DeletionPolicy is what happens to the NetBox object when this CR is deleted.
 
                   Read fresh on every pass rather than latched when deletion starts, so switching it
                   to Retain on an object whose delete NetBox keeps refusing is a way out of that
                   state (docs/concepts/deletion.md).
+
+                  Left unset it is Delete for most kinds and Retain for the IPAM ones, where deleting
+                  the NetBox object destroys state rather than configuration -- an address freed for
+                  reallocation, a range whose ownership record is gone (decision #176). The default is
+                  therefore *not* a CRD marker: this field is declared once for every kind, so a marker
+                  here could only give them all the same answer. Each kind declares its own on its
+                  Descriptor and docs/concepts/deletion.md lists them.
                 enum:
                 - Delete
                 - Retain

@@ -309,6 +309,21 @@ func (s *netboxStubServer) list(w http.ResponseWriter, r *http.Request) {
 	defer s.mu.Unlock()
 
 	query := r.URL.Query()
+	// Stricter than NetBox on purpose. NetBox ignores a query parameter it does not
+	// recognise and answers with the *unfiltered* set (#206), so a stub that answers
+	// whatever it is asked cannot tell a filter the server would honour from one it would
+	// drop -- which is how every null pin went out as the non-existent `__isnull` through
+	// every test in this package. 400 is what makes the next misspelling visible.
+	for name := range query {
+		if !netbox.LookupRegistered(name) {
+			writeStubJSON(w, http.StatusBadRequest, netbox.Object{
+				"detail": "unknown filter " + name,
+			})
+
+			return
+		}
+	}
+
 	results := []netbox.Object{}
 	// Ordered by id rather than by map iteration, so a query matching more than one object
 	// answers the same way on every run and an ambiguity test cannot pass by luck.
@@ -458,10 +473,27 @@ func stubPatchValue(field string, stored, sent any) any {
 // same `app_label.model` strings it accepts on write (docs/netbox-schema.md -> extras.Tag,
 // a ManyToManyField onto contenttypes.ContentType), so it reads back as it was written and
 // there is no normalisation to reproduce.
+//
+// `tags` very much is. It is written as bare ids and read back as nested objects, and the
+// differ relies on that asymmetry (internal/netbox, sameIDSet reads the live side with
+// nestedIDs). A stub that echoed the ids made every provenance-stamped object report drift on
+// its own tag list and PATCH it on every resync -- the hot loop docs/concepts/drift.md opens
+// by warning about, invisible until a kind was tested with spec.managedBy on and a resync
+// short enough to observe (NBO-025).
 func netboxShape(obj netbox.Object) netbox.Object {
 	out := netbox.Object{}
 	for k, v := range obj {
 		out[k] = v
+	}
+
+	if ids := netbox.IDsOf(out["tags"]); len(ids) > 0 {
+		nested := make([]any, 0, len(ids))
+		for _, id := range ids {
+			nested = append(nested, map[string]any{
+				"id": float64(id), "display": fmt.Sprintf("tag-%d", id),
+			})
+		}
+		out["tags"] = nested
 	}
 
 	if value, ok := out["status"].(string); ok {
@@ -601,4 +633,37 @@ func decodeStub(w http.ResponseWriter, r *http.Request) (netbox.Object, bool) {
 	}
 
 	return payload, true
+}
+
+// TestStubRejectsAnUnregisteredFilter is the guard on the guard. The stub is what every test
+// in this package asserts against, so a stub that answers a filter NetBox would drop makes
+// the drop invisible -- which is exactly how every kind shipped with `?<filter>__isnull=true`
+// pinned on a candidate NetBox never applied (#206). NetBox itself will not tell you: it
+// ignores an unregistered parameter and returns the unfiltered set.
+func TestStubRejectsAnUnregisteredFilter(t *testing.T) {
+	stub, url := newNetBoxStub(t, regionKind)
+	stub.seed(netbox.Object{"name": "emea", "slug": "emea"})
+
+	for _, query := range []string{"slug=emea&parent_id__isnull=true", "slug=emea&slug__iexact=emea"} {
+		resp, err := http.Get(url + "/api/" + regionKind.endpoint + "/?" + query) //nolint:noctx // test client
+		if err != nil {
+			t.Fatalf("GET ?%s: %v", query, err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("GET ?%s = %d, want 400 -- the stub answered a filter NetBox drops", query, resp.StatusCode)
+		}
+	}
+
+	// The spellings NetBox does register still work, or the check is just an outage.
+	for _, query := range []string{"slug=emea&parent_id=null", "name__ie=EMEA", "slug__ic=eme"} {
+		resp, err := http.Get(url + "/api/" + regionKind.endpoint + "/?" + query) //nolint:noctx // test client
+		if err != nil {
+			t.Fatalf("GET ?%s: %v", query, err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("GET ?%s = %d, want 200", query, resp.StatusCode)
+		}
+	}
 }

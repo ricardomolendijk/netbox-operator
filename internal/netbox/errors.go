@@ -131,6 +131,14 @@ type AmbiguousError struct {
 	// endpoint sent none. Carried because "10.0.0.0/24" is what a human recognises and
 	// "11" is not, and the two together are enough to go and look.
 	Display []string
+
+	// Objects are the matches themselves, as NetBox returned them.
+	//
+	// Carried for the caller that has to *decide between* them rather than only report
+	// them: an ipam.IPAddress with spec.allowDuplicate identifies its own object by the
+	// provenance stamp on it (NBO-025), and the stamp is a custom field on the body. The
+	// alternative was a second request for data this response already contained.
+	Objects []Object
 }
 
 func (e *AmbiguousError) Error() string {
@@ -167,7 +175,9 @@ func (e *AmbiguousError) Matches() string {
 // and the display of each out of the matches so that no caller has to ask NetBox a second
 // time to find out what it hit.
 func ambiguous(endpoint string, params Params, matches []Object) *AmbiguousError {
-	err := &AmbiguousError{Endpoint: endpoint, Params: params, Matched: len(matches)}
+	err := &AmbiguousError{
+		Endpoint: endpoint, Params: params, Matched: len(matches), Objects: matches,
+	}
 
 	for _, obj := range matches {
 		id, ok := obj.ID()

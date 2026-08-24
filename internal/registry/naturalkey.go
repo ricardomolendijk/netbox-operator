@@ -23,6 +23,12 @@ var (
 	// ErrNullFieldConflict is returned when one filter is both pinned to null and matched
 	// against a value.
 	ErrNullFieldConflict = errors.New("filter is both null-pinned and value-matched")
+
+	// ErrUnknownNullColumn is returned for a null pin that does not say which filter class
+	// backs its column, or names one the client cannot spell. The zero value lands here on
+	// purpose: NetBox spells a null pin differently per class and there is no default that
+	// is safe for all of them.
+	ErrUnknownNullColumn = errors.New("unknown null-pinned column class")
 )
 
 // Lookup is a NetBox filter-expression modifier, appended to a query parameter after a
@@ -47,6 +53,48 @@ const (
 // knownLookups is what a natural key may use. Substring, prefix and negation lookups are
 // deliberately absent: a natural key has to identify at most one object and those cannot.
 var knownLookups = []Lookup{LookupExact, LookupIExact}
+
+// NullColumn says which of NetBox's filter classes backs a null-pinned column, which is
+// what decides the wire spelling of the pin. The constants are spelled the same as
+// netbox.NullColumn, which is where each one's evidence and emitted parameter live; they
+// are repeated here for the same reason the Lookup constants are, because neither package
+// imports the other.
+//
+// It is declared per pin rather than derived, because the fact it records lives in
+// docs/netbox-schema.md -- the column's Django field class -- and nothing in Go reads that
+// document yet. Writing it down at the declaration puts it next to the citation the rest of
+// the descriptor already carries.
+type NullColumn string
+
+const (
+	// NullColumnRef is a foreign key: `ForeignKey` in the digest, `?parent_id=null` on the
+	// wire.
+	NullColumnRef NullColumn = "ref"
+
+	// NullColumnChar is a char column: `CharField` in the digest, `?rd=null` on the wire.
+	NullColumnChar NullColumn = "char"
+
+	// NullColumnNumeric is a numeric column that is not a foreign key -- the id half of a
+	// generic FK is the only one so far. `PositiveBigIntegerField` in the digest,
+	// `?scope_id__empty=true` on the wire.
+	NullColumnNumeric NullColumn = "numeric"
+)
+
+// knownNullColumns is what a null pin may declare. There is no zero value in the list, so
+// a pin that omits the class fails Validate rather than getting a default.
+//
+// A content-type column has no entry, and cannot: `scope_type` is a ForeignKey to
+// contenttypes.ContentType filtered by MultiValueContentTypeFilter, so NetBox registers
+// neither spelling for it. `__empty` is dropped -- the `empty` ORM lookup is registered on
+// CharField and JSONField only (netbox/extras/lookups.py:128-129), so resolve_field raises
+// FieldLookupError and BaseFilterSet skips the filter (netbox/netbox/filtersets.py:232-234)
+// -- and the sentinel is worse than dropped: `'null'.lower().split('.')` raises ValueError,
+// the filter becomes `scope_type__in=[]` and the request matches *nothing*
+// (netbox/utilities/filters.py:190-207), so the engine would create a duplicate instead of
+// adopting. Pin the paired `_id` column, which for a generic FK asks the same question:
+// NetBox rejects one half of the pair without the other
+// (netbox/ipam/models/vlans.py:105-109).
+var knownNullColumns = []NullColumn{NullColumnRef, NullColumnChar, NullColumnNumeric}
 
 // KeyField is one filter of a natural-key candidate, matched against a value.
 type KeyField struct {
@@ -83,7 +131,7 @@ func (f KeyField) Param() string {
 // every VRF. An omitted filter makes every top-level Region, and every per-VRF prefix,
 // adopt an unrelated object.
 type NullField struct {
-	// Filter is the NetBox query parameter to pin, without the `__isnull` suffix.
+	// Filter is the NetBox query parameter to pin, without a lookup suffix.
 	Filter string
 
 	// Spec is the CR spec field this filter corresponds to. A candidate that asserts the
@@ -91,12 +139,14 @@ type NullField struct {
 	// be told which field to look at; without it a child Region matches the top-level
 	// candidate and the follow-up write reparents somebody else's data.
 	Spec string
-}
 
-// Param is the query parameter that pins this filter to null. NetBox spells it as a
-// Django `isnull` lookup and it is sent with the value `true`.
-func (f NullField) Param() string {
-	return f.Filter + "__isnull"
+	// Column is the filter class NetBox puts behind Filter, which is what decides the
+	// spelling netbox.Params.Null sends. Required -- see NullColumn.
+	//
+	// There is deliberately no Param() to go with KeyField's: a null pin has two possible
+	// spellings and only one place gets to choose between them, or the two copies drift and
+	// the losing one is invisible on the wire (#206).
+	Column NullColumn
 }
 
 // NaturalKey is one lookup candidate: the filters that together identify at most one
@@ -201,6 +251,10 @@ func (k NaturalKey) validateNullFields() error {
 			errs = append(errs, fmt.Errorf("%w: %+v", ErrEmptyFilter, field))
 
 			continue
+		}
+
+		if !slices.Contains(knownNullColumns, field.Column) {
+			errs = append(errs, fmt.Errorf("%w: %q on %q", ErrUnknownNullColumn, field.Column, field.Filter))
 		}
 
 		if slices.ContainsFunc(k.Fields, func(f KeyField) bool { return f.Filter == field.Filter }) {

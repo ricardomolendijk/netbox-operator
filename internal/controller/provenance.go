@@ -47,7 +47,7 @@ func (r *NetBoxEndpointReconciler) provision(ctx context.Context,
 		return provenance.Stamp{}, nil
 	}
 
-	result, err := provenance.Bootstrap(ctx, client, cfg, provenance.ObjectTypes(registry.List()))
+	result, err := provenance.Bootstrap(ctx, client, cfg, provenance.ObjectTypes(registry.List(), registry.ClaimObjectTypes()...))
 	if err != nil {
 		return provenance.Stamp{}, fmt.Errorf("bootstrapping netbox provenance: %w", err)
 	}

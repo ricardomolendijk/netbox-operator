@@ -153,7 +153,7 @@ and it is read straight off the schema:
 
 | Kind | `meta.constraints` | Column-level `UNIQUE` | Natural keys |
 |---|---|---|---|
-| `dcim.Region` | `(parent, name)`, `(name)` where `parent IS NULL`, `(parent, slug)`, `(slug)` where `parent IS NULL` | none | two, one pinning `parent_id__isnull` |
+| `dcim.Region` | `(parent, name)`, `(name)` where `parent IS NULL`, `(parent, slug)`, `(slug)` where `parent IS NULL` | none | two, one pinning `parent_id=null` |
 | `tenancy.TenantGroup` | **none** | `name`, `slug` | one, `slug` |
 
 So there is **no `parent_id` filter of any kind** in this kind's lookup — neither a matched
@@ -186,12 +186,38 @@ carries both `tags` and `custom_fields` and is stamped when the endpoint's
 | `Ready` | the group exists in NetBox and matches the spec | anything else | `Synced`, `WaitingForEndpoint`, `WaitingForRef`, `DeferredFieldPending`, `Conflict`, `AdoptOnly`, `Invalid`, `APIError`, `Truncated`, `DryRunPending` |
 | `Synced` | the last write succeeded, or no drift was found | drift found and not corrected | `NoDrift`, `DriftCorrected`, `DriftDetectedDryRun`, `DriftReported` |
 | `RefsResolved` | `parentRef` is unset, or resolved | `parentRef` is set and does not resolve | `AllResolved`, `RefNotFound`, `RefNotReady`, `RefDenied`, `RefAmbiguous`, `RefCycle`, `RefDepthExceeded` |
+| `ParentOwned` | `parentRef` resolved to a group in this namespace, so deleting it cascades | `parentRef` resolved to a group in another namespace, to a raw `id` or `slug`, or ownership was declined | `ParentOwned`, `CascadeUnavailable`, `ParentOwnershipDisabled` |
 | `Deleting` | never | while terminating and NetBox is not settled | `Protected`, `WaitingForEndpoint`, `APIError`, `Invalid` |
 
 Reason glossary and retry intervals: [`NetBoxTag`](netboxtag.md#conditions) and
 [errors and retries](../concepts/errors-and-retries.md).
 
 ## Kind-specific behaviour
+
+### A child group is owned by its parent
+
+`parentRef` is this kind's containment reference, so a child group carries a non-controller
+owner reference to its parent and `kubectl delete` on the parent takes its children's CRs with
+it. Not a judgement about which reference reads like a container: the containment parent is
+whichever foreign key the *server* cascades, and `tenancy.TenantGroup.parent` is
+`on_delete=CASCADE`.
+
+**This kind needs it more than the other nested groups do, and the reason is its identity.**
+`NetBoxRegion` and `NetBoxSiteGroup` read `parent_id` in every natural-key candidate, so a
+child whose `parentRef` no longer resolves has no usable identity and the engine waits. This
+kind keys on `slug` alone (`tenancy.TenantGroup` has no `meta.constraints` — see
+[Natural keys](#natural-keys)), and `slug` says nothing about a parent. So a child that outlived its
+cascade-deleted row still has an applicable candidate, finds nothing, and gets the row
+**re-created** — a group NetBox deleted on purpose, put back. The owner reference is what
+removes the CR before that pass can run, and here it is the only thing that does.
+
+The owner reference is only set when the parent is in the same namespace, because an owner
+reference may never cross one. A group whose parent lives in a shared catalogue namespace
+reports `ParentOwned=False, Reason=CascadeUnavailable` and does not cascade — and given the
+catalogue-plus-grant layout this page recommends under
+[Two namespaces, one slug](#two-namespaces-one-slug), that is the common case here, so read the
+condition before relying on the cascade. See [ownership](../concepts/ownership.md) for the
+whole rule and the opt-out annotation.
 
 ### A parent applied in the same batch converges
 
@@ -297,7 +323,7 @@ pair you want beside `ID` while diagnosing a pending deferral.
 | `Reason=Conflict` | `Ready=False` | Another namespace's CR already holds this slug, and `onConflict: Fail` | Decide who owns it; the message names the winner. |
 | `Reason=Invalid` after an edit | `Ready=False` | NetBox refused the write — usually a `name` another group holds | Change `spec.name`. |
 | A second group appeared after an edit | — | `spec.slug` was changed | See [Renaming the slug changes identity](#renaming-the-slug-changes-identity). |
-| Children vanished when this was deleted | — | `parent` is `on_delete=CASCADE` in NetBox | Not the operator. Delete children first if you want them kept. |
+| Children vanished when this was deleted | — | `parent` is `on_delete=CASCADE` in NetBox, and the child CRs are owned by this one | The row cascade is NetBox, the CR cascade is [the owner reference](#a-child-group-is-owned-by-its-parent). Delete children first if you want them kept — keeping the child CR alone does not help, since its row is gone either way. |
 
 ## Related
 

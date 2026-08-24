@@ -210,9 +210,9 @@ func TestSpecFieldsParams(t *testing.T) {
 			name: "a null pin is sent rather than omitted",
 			key: registry.NaturalKey{
 				Fields:     []registry.KeyField{{Filter: "slug", Spec: "slug"}},
-				NullFields: []registry.NullField{{Filter: "parent_id", Spec: "parentRef"}},
+				NullFields: []registry.NullField{{Filter: "parent_id", Spec: "parentRef", Column: registry.NullColumnRef}},
 			},
-			want: netbox.Params{"slug": "managed", "parent_id__isnull": "true"},
+			want: netbox.Params{"slug": "managed", "parent_id": "null"},
 		},
 		{
 			name:    "a filter with no value is refused rather than omitted",
@@ -313,10 +313,9 @@ func TestEnvelopeFieldsAreDerived(t *testing.T) {
 func scopedDescriptor() registry.Descriptor {
 	d := fakeDescriptor()
 	d.ReadOnly = append(slices.Clone(d.ReadOnly), registry.ScopeCacheColumns()...)
-	scope := registry.ScopeFK("scope")
 	// As ipam.Prefix carries it: every scope target declares a `prefixes` GenericRelation, so
-	// the pair cascades and may therefore be the containment parent.
-	scope.CascadeOnDelete = true
+	// every member cascades and the pair may therefore be the containment parent.
+	scope := registry.ScopeFK("scope", registry.ScopeCascadesFromEvery())
 	d.GenericFKs = []registry.GenericFKSpec{scope}
 	d.ContainmentRef = "scope"
 

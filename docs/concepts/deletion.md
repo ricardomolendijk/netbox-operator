@@ -24,6 +24,31 @@ is a leak nobody asked for. `Retain` is for the cases where the NetBox object ou
 is the *point*: migrating off the operator, an object that is shared with something else, and
 the IPAM kinds below.
 
+### Except for IPAM, where the default is `Retain`
+
+Deleting a tag or a site destroys *configuration*, which is cheap to recreate. Deleting an
+IPAM object destroys *state*: an `ipam.IPAddress` that is deleted is free for reallocation, so
+if a claim allocated it ([ADR-0004](../decisions/0004-claims-first-allocation.md)) deleting the
+CR hands somebody else an address this cluster believes it owns — and a `kubectl delete
+namespace` would do it to a whole range at once. That asymmetry is real, so it is encoded
+rather than averaged away (decision
+[#176](https://github.com/ricardomolendijk/netbox-operator/issues/176)).
+
+| Kind | Default | Why |
+|---|---|---|
+| [`NetBoxIPAddress`](../reference/netboxipaddress.md) | `Retain` | Deleting frees the address for reallocation, and if a claim allocated it that is destructive with no undo |
+| [`NetBoxTag`](../reference/netboxtag.md), [`NetBoxSite`](../reference/netboxsite.md), [`NetBoxRegion`](../reference/netboxregion.md) | `Delete` | Configuration: cheap to delete, cheap to recreate |
+
+Every other Kind defaults to `Delete`, and the IPAM Kinds still to come
+(`NetBoxPrefix`, `NetBoxIPRange`, `NetBoxVLAN`, `NetBoxVRF`) will join the first row.
+
+The default is **not** a `+kubebuilder:default` marker, and cannot be: `deletionPolicy` is
+declared once, on the envelope every Kind embeds, so a marker there would give ~120 Kinds one
+answer. The per-Kind value is data on the Kind's Descriptor
+(`registry.Descriptor.RetainOnDelete`), which the engine reads when the spec states nothing.
+One consequence worth knowing: `kubectl explain <kind>.spec.deletionPolicy` prints no default,
+so this table is where the answer lives.
+
 ```yaml
 spec:
   endpointRef: homelab
@@ -60,7 +85,21 @@ to `Retain`, everything else defaults to `Delete`.
 | `NetBoxVLAN` | `Retain` |
 | `NetBoxVLANGroup` | `Retain` |
 | `NetBoxVRF` | `Retain` |
+| `NetBoxIPAddressClaim` | `Retain`, and **there is no field** — see below |
 | every other kind (`NetBoxTag`, `NetBoxSite`, the catalogue kinds, …) | `Delete` |
+
+A claim goes one step further and carries no `deletionPolicy` at all
+([#182](https://github.com/ricardomolendijk/netbox-operator/issues/182)). A single-valued knob
+is not one, and `Retain` is the value that makes its deterministic allocation identity worth
+having: delete the claim, re-apply the same manifest, get the same address back. What stops
+that from being a silent leak is that the operator **reports** it — deleting a claim emits an
+`AddressRetained` Event naming the address, the NetBox id and the identity, and increments
+`netbox_operator_allocations_retained_total`. The operator never deletes an object it cannot
+prove is unused, and it cannot prove that of an allocated address; to free one, delete it in
+NetBox ([claims](claims.md#deleting-a-claim)).
+
+That deletion pass makes no NetBox call whatsoever, which is worth saying next to everything
+else on this page: a claim's finalizer cannot get stuck, however unreachable NetBox is.
 
 The asymmetry is deliberate, and the reason it is honest rather than inconsistent is that the
 two groups hold different sorts of thing: **an address a claim allocated is *state*; a tag is

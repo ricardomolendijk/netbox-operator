@@ -1,0 +1,30 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxIPAddressClaim
+metadata:
+  name: dns-eth0
+  namespace: default
+spec:
+  # The NetBoxEndpoint to allocate through, in this namespace. It must have
+  # spec.managedBy.clusterID set: the allocation identity is stored in a NetBox custom
+  # field, and an endpoint with nowhere to store one refuses to allocate rather than
+  # risking an address per retry.
+  endpointRef: homelab
+
+  # The pool. Immutable -- "point this claim at a different prefix" is a different claim --
+  # and resolved like any other reference, so `slug`, `lookup` and `id` work too, and a
+  # prefix in another namespace needs a NetBoxRefGrant there.
+  prefixRef:
+    name: home-lan
+
+  # Optional, and immutable. Leave it out: the identity is then derived from the endpoint's
+  # URL, this namespace, the Kind and this name, which is what makes re-applying this file
+  # to a rebuilt cluster reclaim the same address. Set it only to carry an address across a
+  # *rename*, which the derived value cannot survive.
+  # allocationIdentity: 9f2c41b7ae05d813
+
+# There is no deletionPolicy. A claim always retains its NetBox object, and deleting the
+# claim reports what was left behind rather than freeing it -- see
+# docs/concepts/claims.md#deleting-a-claim. The allocated address appears in
+# `status.address`, never in this file: docs/decisions/0005-gitops-coexistence.md section 4
+# is why the operator does not write it back to Git, and section 3 is why it does not have
+# to.

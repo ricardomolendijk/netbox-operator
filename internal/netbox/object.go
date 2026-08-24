@@ -125,6 +125,21 @@ func nestedIDs(v any) []int {
 	return ids
 }
 
+// Unwrap reduces NetBox's read representation of a related or choice field to the value
+// that gets written: a foreign key's nested object to its id, a choice column's
+// {"value","label"} to its value.
+//
+// Exported for internal/export, which has to invert a payload rather than compare one --
+// and "what does this read shape mean" has to have exactly one answer, or the exporter and
+// Drift disagree about a value and the round trip never settles. drift.go's unwrapNested
+// is this function.
+func Unwrap(v any) any { return unwrapNested(v) }
+
+// IDOf reads a single NetBox id out of either shape a foreign key arrives in: the bare id
+// it is written as, or the nested object it is read back as. The second result is false
+// when the column is null, which for a nullable FK is the normal case.
+func IDOf(v any) (int, bool) { return asInt(Unwrap(v)) }
+
 // IDsOf reads a list of NetBox ids out of either shape the API uses: the bare ids an M2M
 // field is written as, or the nested objects it is read back as.
 //
@@ -208,4 +223,55 @@ func equalInts(a, b []int) bool {
 		}
 	}
 	return true
+}
+
+// ChoiceOf reads a NetBox choice column's value.
+//
+// NetBox serialises a choice as a nested `{"value": ..., "label": ...}` object on read and
+// accepts the bare value on write (docs/netbox-schema.md, choice columns), so a caller
+// comparing what NetBox holds against a value a Descriptor declares has to reach inside. A
+// bare string is accepted too, because the brief serialisers flatten it -- and because a
+// helper that only works on one of the two shapes is one every caller has to remember which.
+func ChoiceOf(v any) string {
+	if nested, ok := v.(map[string]any); ok {
+		return asString(nested["value"])
+	}
+
+	return asString(v)
+}
+
+// CustomFieldOf reads one custom field off an object, as a string.
+//
+// Empty for a field the object does not carry, for one NetBox returned as null, and for one
+// holding a non-string -- all three mean the same thing to every caller there is: this
+// object does not carry the value we are looking for.
+func CustomFieldOf(obj Object, name string) string {
+	fields, ok := obj[customFieldsKey].(map[string]any)
+	if !ok || name == "" {
+		return ""
+	}
+
+	return asString(fields[name])
+}
+
+// SetCustomField writes one custom field into a payload, creating the container if needed
+// and leaving every other key alone.
+//
+// A map[string]any rather than a map[string]string, and that is not cosmetic: Changes
+// compares `custom_fields` by casting the desired value to map[string]any, and a
+// map[string]string falls through to a whole-value comparison that never matches -- a PATCH
+// loop for the lifetime of the object. See provenance.mergeCustomFields, which is the same
+// trap in the other direction.
+func SetCustomField(obj Object, name, value string) {
+	if name == "" {
+		return
+	}
+
+	fields, ok := obj[customFieldsKey].(map[string]any)
+	if !ok {
+		fields = map[string]any{}
+	}
+
+	fields[name] = value
+	obj[customFieldsKey] = fields
 }

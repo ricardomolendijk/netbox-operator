@@ -90,7 +90,7 @@ func TestVirtualMachineNaturalKeysAreTheFourConstraints(t *testing.T) {
 		}},
 		{
 			Fields:     []KeyField{name, {Filter: "cluster_id", Spec: "clusterRef"}},
-			NullFields: []NullField{{Filter: "tenant_id", Spec: "tenantRef"}},
+			NullFields: []NullField{{Filter: "tenant_id", Spec: "tenantRef", Column: NullColumnRef}},
 		},
 		{
 			Fields: []KeyField{
@@ -98,20 +98,20 @@ func TestVirtualMachineNaturalKeysAreTheFourConstraints(t *testing.T) {
 				{Filter: "device_id", Spec: "deviceRef"},
 				{Filter: "tenant_id", Spec: "tenantRef"},
 			},
-			NullFields: []NullField{{Filter: "cluster_id", Spec: "clusterRef"}},
+			NullFields: []NullField{{Filter: "cluster_id", Spec: "clusterRef", Column: NullColumnRef}},
 		},
 		{
 			Fields: []KeyField{name, {Filter: "device_id", Spec: "deviceRef"}},
 			NullFields: []NullField{
-				{Filter: "cluster_id", Spec: "clusterRef"},
-				{Filter: "tenant_id", Spec: "tenantRef"},
+				{Filter: "cluster_id", Spec: "clusterRef", Column: NullColumnRef},
+				{Filter: "tenant_id", Spec: "tenantRef", Column: NullColumnRef},
 			},
 		},
 		{
 			Fields: []KeyField{name, {Filter: "site_id", Spec: "siteRef"}},
 			NullFields: []NullField{
-				{Filter: "cluster_id", Spec: "clusterRef"},
-				{Filter: "device_id", Spec: "deviceRef"},
+				{Filter: "cluster_id", Spec: "clusterRef", Column: NullColumnRef},
+				{Filter: "device_id", Spec: "deviceRef", Column: NullColumnRef},
 			},
 		},
 	}

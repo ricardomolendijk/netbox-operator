@@ -263,6 +263,20 @@ type (
 	// ClusterTypeRef points at a NetBoxClusterType (virtualization.ClusterType,
 	// virtualization/cluster-types).
 	ClusterTypeRef ObjectRef
+	// IPAddressRef points at a NetBoxIPAddress (ipam.IPAddress, ipam/ip-addresses).
+	//
+	// The only self-referential alias on a non-tree model: `nat_inside` points at another
+	// address of the same kind (docs/netbox-schema.md -> ipam.IPAddress, `nat_inside
+	// ForeignKey -> ipam.IPAddress on_delete=SET_NULL`).
+	IPAddressRef ObjectRef
+	// PrefixRef points at a NetBoxPrefix (ipam.Prefix, ipam/prefixes).
+	//
+	// The first alias whose target is a *pool* rather than a plain foreign key: a
+	// NetBoxIPAddressClaim resolves it to the prefix it allocates out of
+	// (docs/decisions/0004-claims-first-allocation.md). Nothing about the alias is
+	// different for that -- the id is resolved by the same four modes and the same grant
+	// check -- which is the point of resolving a pool through an ordinary reference.
+	PrefixRef ObjectRef
 	// VirtualMachineRef points at a NetBoxVirtualMachine (virtualization.VirtualMachine,
 	// virtualization/virtual-machines).
 	VirtualMachineRef ObjectRef
@@ -285,10 +299,6 @@ type (
 
 	// IPAddressRef points at a NetBoxIPAddress (ipam.IPAddress, ipam/ip-addresses).
 	//
-	// What a `primary_ip4` / `primary_ip6` is, and therefore always a deferred field where
-	// it appears: the address needs an interface that needs the object that carries the
-	// address (docs/concepts/object-lifecycle.md). Kind lands with NBO-025.
-	IPAddressRef ObjectRef
 )
 
 // TargetGVK reports the Kind this reference resolves against.
@@ -465,6 +475,14 @@ func (r IPAddressRef) TargetGVK() schema.GroupVersionKind {
 // AsObjectRef returns the underlying reference.
 func (r IPAddressRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
 
+// TargetGVK reports the Kind this reference resolves against.
+func (r PrefixRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxPrefix")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r PrefixRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
 // Compile-time proof that every alias satisfies RefTarget. An alias that forgets its
 // methods fails the build here rather than at the first reconcile that needs it.
 var (
@@ -486,6 +504,9 @@ var (
 	_ RefTarget = ClusterRef{}
 	_ RefTarget = ClusterGroupRef{}
 	_ RefTarget = ClusterTypeRef{}
+	_ RefTarget = VRFRef{}
+	_ RefTarget = IPAddressRef{}
+	_ RefTarget = PrefixRef{}
 	_ RefTarget = VirtualMachineRef{}
 	_ RefTarget = DeviceRef{}
 	_ RefTarget = DeviceRoleRef{}
