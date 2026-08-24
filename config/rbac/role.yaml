@@ -34,12 +34,15 @@ rules:
   - netboxendpoints/status
   - netboxipaddresses/status
   - netboxlocations/status
+  - netboxprefixes/status
   - netboxregions/status
+  - netboxroutetargets/status
   - netboxsitegroups/status
   - netboxsites/status
   - netboxtags/status
   - netboxtenantgroups/status
   - netboxtenants/status
+  - netboxvrfs/status
   verbs:
   - get
   - patch
@@ -49,12 +52,15 @@ rules:
   resources:
   - netboxipaddresses
   - netboxlocations
+  - netboxprefixes
   - netboxregions
+  - netboxroutetargets
   - netboxsitegroups
   - netboxsites
   - netboxtags
   - netboxtenantgroups
   - netboxtenants
+  - netboxvrfs
   verbs:
   - get
   - list
@@ -66,11 +72,14 @@ rules:
   resources:
   - netboxipaddresses/finalizers
   - netboxlocations/finalizers
+  - netboxprefixes/finalizers
   - netboxregions/finalizers
+  - netboxroutetargets/finalizers
   - netboxsitegroups/finalizers
   - netboxsites/finalizers
   - netboxtags/finalizers
   - netboxtenantgroups/finalizers
   - netboxtenants/finalizers
+  - netboxvrfs/finalizers
   verbs:
   - update

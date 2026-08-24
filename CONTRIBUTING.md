@@ -83,6 +83,29 @@ nothing but two conventions:
 you never wrote is unmanaged; a field you wrote as empty is managed and cleared. See
 [`docs/concepts/field-ownership.md`](docs/concepts/field-ownership.md).
 
+### A list of references needs a `MaxItems`
+
+`ObjectRef` carries five CEL rules, and the API server costs each one at the list's
+**maximum** length. A `[]ObjectRef` with no maximum is costed as unbounded and the
+**whole CRD is refused at install** — while controller-gen, `kustomize build` and
+`make verify` all stay green, so the first sign of it is a failed deploy.
+
+So every to-many reference field carries the marker, and **256** is the bound to use
+unless the field has a narrower real-world maximum:
+
+```go
+// +optional
+// +kubebuilder:validation:MaxItems=256
+ImportTargetRefs []RouteTargetRef `json:"importTargets,omitempty"`
+```
+
+`TestEveryValidatedListIsBounded` (`api/v1alpha1/reflistbounds_test.go`) walks the
+generated CRDs and fails on any list whose items carry CEL rules and declares no
+`maxItems` — including one emitted by the M7 generator, which must emit the marker with
+every `RefMany` field. The measured cost ceiling (57 803 for a single such field; ~23 000
+each once ten of them share one CRD's budget) and why 256 rather than something larger is
+in [`docs/concepts/references.md`](docs/concepts/references.md#a-list-needs-a-bound).
+
 ### Core logic lives in one place
 
 - `internal/reconciler` — the only place a create/adopt/update/delete decision is made.

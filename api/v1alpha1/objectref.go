@@ -139,15 +139,26 @@ type (
 	// FHRPGroupRef points at a NetBoxFHRPGroup (ipam.FHRPGroup, ipam/fhrp-groups).
 	FHRPGroupRef ObjectRef
 
-	// VRFRef points at a NetBoxVRF (ipam.VRF, ipam/vrfs).
+	// RoleRef points at a NetBoxRole (ipam.Role, ipam/roles).
 	//
-	// Added by NBO-025 because ipam.IPAddress.vrf is part of that kind's identity
-	// (docs/netbox-schema.md -> ipam.IPAddress, `vrf ForeignKey -> ipam.VRF
-	// on_delete=PROTECT`). NBO-022 lands the Kind itself; until it does, `vrfRef` in
-	// `name` mode reports RefKindUnavailable while `slug`, `lookup` and `id` resolve
-	// against NetBox and work today.
-	VRFRef ObjectRef
+	// ipam.Role and not dcim.DeviceRole: they are separate models with separate endpoints,
+	// and this is the one a prefix, a VLAN and an IP range carry. Declared before the Kind
+	// exists (NBO-055), for the reason InterfaceRef is: the alias is where the target Kind
+	// and therefore the `ipam.role` object type is written down, and a field the API accepts
+	// and silently drops would be worse than one that reports RefKindUnavailable.
+	RoleRef ObjectRef
 
+	// VLANRef points at a NetBoxVLAN (ipam.VLAN, ipam/vlans).
+	VLANRef ObjectRef
+	// RouteTargetRef points at a NetBoxRouteTarget (ipam.RouteTarget, ipam/route-targets).
+	//
+	// The first alias used to-many: ipam.VRF's `import_targets` and `export_targets` are
+	// lists of these. One alias either way -- the resolver takes the target Kind off
+	// registry.Field.Target regardless of cardinality.
+	RouteTargetRef ObjectRef
+
+	// VRFRef points at a NetBoxVRF (ipam.VRF, ipam/vrfs).
+	VRFRef ObjectRef
 	// IPAddressRef points at a NetBoxIPAddress (ipam.IPAddress, ipam/ip-addresses).
 	//
 	// The only self-referential alias on a non-tree model: `nat_inside` points at another
@@ -233,6 +244,26 @@ func (r FHRPGroupRef) TargetGVK() schema.GroupVersionKind {
 func (r FHRPGroupRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
 
 // TargetGVK reports the Kind this reference resolves against.
+func (r RoleRef) TargetGVK() schema.GroupVersionKind { return GroupVersion.WithKind("NetBoxRole") }
+
+// AsObjectRef returns the underlying reference.
+func (r RoleRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r VLANRef) TargetGVK() schema.GroupVersionKind { return GroupVersion.WithKind("NetBoxVLAN") }
+
+// AsObjectRef returns the underlying reference.
+func (r VLANRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r RouteTargetRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxRouteTarget")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r RouteTargetRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
 func (r VRFRef) TargetGVK() schema.GroupVersionKind { return GroupVersion.WithKind("NetBoxVRF") }
 
 // AsObjectRef returns the underlying reference.
@@ -259,6 +290,10 @@ var (
 	_ RefTarget = InterfaceRef{}
 	_ RefTarget = VMInterfaceRef{}
 	_ RefTarget = FHRPGroupRef{}
+	_ RefTarget = RoleRef{}
+	_ RefTarget = VLANRef{}
+	_ RefTarget = RouteTargetRef{}
+	_ RefTarget = VRFRef{}
 	_ RefTarget = VRFRef{}
 	_ RefTarget = IPAddressRef{}
 )
