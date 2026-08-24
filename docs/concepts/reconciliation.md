@@ -394,6 +394,80 @@ Every delay in the table is jittered by ±10%, for the reason above.
 The through-line: **return an error only for a failure of the operator's own
 machinery.** Everything about the outside world is state, and state goes in `status`.
 
+## A declared reference is a precondition for the write
+
+**Decided** on [#195](https://github.com/ricardomolendijk/netbox-operator/issues/195), option C.
+The rule, in one sentence: **a reference the spec declares must resolve before the object is
+created or updated.** Three states, and the middle one is the change:
+
+| The spec | The engine |
+|---|---|
+| declares the reference, and it resolved | writes it, exactly as before |
+| **declares the reference, and it did not resolve** | **writes nothing at all** — no `POST`, no `PATCH`, not even the natural-key lookup — and reports which references it is waiting for |
+| does not declare the reference | writes immediately, with no key for it in the payload |
+
+Declared means *the spec sets the key*. Not "the kind has such a field", which would make one
+unreachable target Kind hold up every object that merely could have referenced it and turn
+every optional reference into a required one. `scope` absent is a global prefix and is created
+on the first pass; `scope: {siteRef: {name: home}}` waits for that site.
+
+For a to-many field, `[]` also counts as declared — [field ownership](field-ownership.md) is
+what makes an explicitly-empty field distinguishable from an absent one, and an empty list is a
+real instruction: NetBox's many-to-many write is a full replacement, so `[]` is how the column
+is cleared. It has nothing in it to resolve, so it is never a precondition. Blocking on it
+would deadlock every object that clears a list.
+
+### What it replaced, and why that was not a design
+
+The outcome used to depend on whether the reference happened to be part of the kind's natural
+key, which nobody chose:
+
+- `ipam.Prefix` is unique on `prefix`, so a candidate was applicable without the scope. An
+  unresolvable `scope` member got the row **created with the pair omitted**, holding
+  `RefsResolved=False` and `Ready=False`. NetBox held an unscoped prefix for as long as the
+  target was missing.
+- `dcim.Location` has `site_id` in every candidate, so an unresolved `siteRef` left no
+  applicable candidate and the engine wrote **nothing at all**.
+
+Same class of failure, opposite outcomes. The argument for creating anyway was convergence
+speed while a referenced Kind is unimplemented — a transient state of this project rather than
+of anyone's cluster — against a standing cost that does not go away: an object in NetBox that
+does not match its manifest, which nothing reading NetBox can tell from a finished one. That is
+close enough to what [ADR-0005](../decisions/0005-gitops-coexistence.md) exists to prevent to
+settle it.
+
+### The reason still says which failure it was
+
+The rule is one rule; the diagnosis is not flattened into it. `RefsResolved` carries the
+resolver's own reason — `RefKindUnavailable` for a reference whose target Kind has no
+descriptor, `RefNotReady` for a target that exists and holds no id yet, `RefNotFound` for one
+that is not there, and the five others in [references](references.md#what-happens-when-it-does-not-resolve).
+`Ready` reports `WaitingForRef`, because that is the question a `kubectl wait` is asking, and
+its message names the references that withheld the write. Nothing is logged at error and no
+Event is emitted: a graph applied in any order puts every object with a forward reference
+through this state, so it is normal.
+
+`WaitingForKey` is no longer how an unresolved identity-bearing reference reports itself. "No
+usable natural key" was the symptom; the unresolved reference is the cause, and the rule now
+fires before the lookup that produced the symptom.
+
+### Deferred fields are the exception, and the only one
+
+A [deferred field](object-lifecycle.md) does not block. That is not a hole in the rule — it is
+the case the rule cannot apply to. `DeferAlways` exists for a reference that *cannot* resolve
+before the object exists: `dcim.Device.primary_ip4` needs an address that needs an interface
+that needs the Device, so there is no apply order in which the precondition is satisfiable, and
+refusing to create the Device until it is would deadlock. `DeferIfUnresolved` is the same trade
+made conditionally, for a `parent` outside the natural key.
+
+So the engine creates such an object, strips or omits the deferred column, records the field in
+`status.deferredPending`, and applies it with a follow-up `PATCH`. A descriptor declaring
+`Deferred` is its author stating exactly that trade, for exactly that field — which is why it
+is data on the descriptor and not a rule in the engine.
+
+The omission is still not silent: a pending deferral holds `Ready=False`, with
+`WaitingForRef` while the reference has not resolved and `DeferredFieldPending` once it has.
+
 ## Condition conventions
 
 `setCondition` wraps `meta.SetStatusCondition`, which is what keeps
@@ -499,6 +573,6 @@ is precisely where a per-resync Event does the most damage while looking least l
 
 - Which NetBox failures are retried, where, and why — [errors and retries](errors-and-retries.md).
 - How a live object is compared against the desired payload — [drift detection](drift.md).
-- The per-object create/adopt/update loop, which is designed and not yet built —
+- The per-object create/adopt/update loop, and the two-pass write a deferred field takes —
   [object lifecycle](object-lifecycle.md).
 - Symptom-first diagnosis — [troubleshooting](../operations/troubleshooting.md).

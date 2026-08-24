@@ -223,7 +223,12 @@ whole rule and the opt-out annotation.
 
 `parentRef` is declared in `Descriptor.Deferred` with mode `IfUnresolved`
 (`internal/registry/tenancy_tenantgroup.go`), and that is only safe *because* `parent` is
-outside the natural key. Apply a parent and a child together and the child plays out like
+outside the natural key.
+
+It is also the **one exception** to the engine-wide rule that a declared reference is a
+precondition for the write ([the rule](../concepts/reconciliation.md#a-declared-reference-is-a-precondition-for-the-write)). A deferred field is exactly the case
+that rule cannot apply to, and the descriptor declaring `Deferred` is this kind's author opting
+into the trade for this field. Apply a parent and a child together and the child plays out like
 this:
 
 1. Pass one. `parentRef` does not resolve, so `parent` is left out of the payload. Candidate
@@ -235,8 +240,9 @@ this:
 A `NetBoxRegion` cannot do this, and the difference is instructive. There, `parent` *is* part
 of the identity, so creating the object without it would create an object with a different
 natural key from the one the lookup asked about — which is why a child region waits at
-`WaitingForKey` instead. Here the lookup asks the same question either way, so creating
-early cannot adopt the wrong object.
+`WaitingForRef` instead, and why `registry.ErrDeferredNaturalKey` refuses the combination at
+boot. Here the lookup asks the same question either way, so creating early cannot adopt the
+wrong object.
 
 The mode is `IfUnresolved` and not `Always`: a `parentRef` that resolves on the first pass
 belongs in the create payload. Stripping it would leave the group visibly top-level in NetBox

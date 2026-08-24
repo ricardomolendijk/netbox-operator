@@ -80,6 +80,25 @@ func newDeferral(d registry.Descriptor, state registry.SpecState, desired netbox
 	return out
 }
 
+// defers reports that this spec field is one the descriptor lets the engine write after the
+// create, so an unresolved one must not withhold the write.
+//
+// The exception to issue #195's precondition rule, and the reason deferred fields exist at
+// all: a `primary_ip4` that cannot be created until the Device is would deadlock against a
+// rule that refuses to create the Device until `primary_ip4` resolves. `!resolved` is
+// redundant against the caller's set -- blockedRefs only asks about references that did not
+// resolve -- and is kept because the two questions are different ones, and a future caller
+// asking this about a resolved field would get the wrong answer without it.
+func (d deferral) defers(spec string) bool {
+	for _, field := range d.fields {
+		if field.spec == spec && !field.resolved {
+			return true
+		}
+	}
+
+	return false
+}
+
 // writerOf returns the field-map entry that writes one NetBox column as a reference.
 //
 // The miss is unreachable in a booted manager -- registry.ErrDeferredNotRef rejects a

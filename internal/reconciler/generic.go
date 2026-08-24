@@ -258,6 +258,16 @@ func (e *Engine) Reconcile(ctx context.Context, obj Object) (ctrl.Result, error)
 		return ctrl.Result{}, err
 	}
 
+	// A reference the spec declares is a precondition for the write (issue #195). Before
+	// locate rather than before create, because the rule is about the update too: an object
+	// that already exists must not be PATCHed towards a payload a declared reference is
+	// missing from. After ownParent, because the owner reference is metadata on the CR rather
+	// than a NetBox write, and a child whose parent resolved should be collectable with it
+	// even while it waits on some other reference.
+	if blocked := p.blockedRefs(); len(blocked) > 0 {
+		return p.waitForRefs(ctx, blocked)
+	}
+
 	found, err := p.locate(ctx)
 	if err != nil {
 		return p.stop(ctx, err)

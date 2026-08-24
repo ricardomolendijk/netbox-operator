@@ -101,8 +101,12 @@ func TestReportModeTargetDoesNotBlockItsReferrers(t *testing.T) {
 // A target the engine refused to claim holds no id -- `onConflict: Refuse` means it never
 // adopted the object it found -- so the referrer waits with `RefNotReady`, which is what
 // `ErrRefNotReady` is now reserved for. Nothing is written for the reference, and nothing is
-// written to NetBox for the referrer either, because `parentRef` is part of dcim.Region's
-// identity: no candidate is applicable, so the engine cannot tell create from adopt.
+// written to NetBox for the referrer either: since issue #195 a reference the spec declares is
+// a precondition for the write, on every kind and whether or not the reference is part of the
+// identity. It happens to be part of dcim.Region's, which is why Ready reported
+// `WaitingForKey` here before #195 -- the lookup was reached and found no applicable
+// candidate. The rule now fires before the lookup, and the reason names the cause rather than
+// the symptom.
 //
 // The variant where a Conflict *does* hold an id -- a CR that adopted an object and later
 // described a different one -- is refused with `RefTargetFailed`, and is asserted in
@@ -150,14 +154,16 @@ func TestConflictedTargetStillBlocksItsReferrers(t *testing.T) {
 			resolved.Status, resolved.Reason, netboxv1alpha1.ReasonRefNotReady)
 	}
 
-	// Nothing created. `parentRef` is part of dcim.Region's identity, so with it unresolved no
-	// natural-key candidate applies and the engine must not guess (docs/concepts/lookups.md).
+	// Nothing created, because `parentRef` is declared and did not resolve. It is also part of
+	// dcim.Region's identity, so the engine could not have told create from adopt either
+	// (docs/concepts/lookups.md) -- two reasons for one outcome, and #195 is the one that no
+	// longer depends on which kind this is.
 	if got := stub.countByKey("Amsterdam"); got != 0 {
 		t.Errorf("netbox holds %d Amsterdam regions, want none", got)
 	}
 
-	if got := readyReason(child); got != netboxv1alpha1.ReasonWaitingForKey {
-		t.Errorf("Ready reason = %q, want %q", got, netboxv1alpha1.ReasonWaitingForKey)
+	if got := readyReason(child); got != netboxv1alpha1.ReasonWaitingForRef {
+		t.Errorf("Ready reason = %q, want %q", got, netboxv1alpha1.ReasonWaitingForRef)
 	}
 }
 
