@@ -421,7 +421,19 @@ to a declarative `NetBoxIPAddress` — the child the claim will own and material
 the kind, NBO-032 for the materialiser, at which point `status.ipAddressRef` and a `Bound`
 condition appear here). Until that exists, a pass-through field would be one the operator
 writes once at allocation and can never correct: it would lie the first time somebody edited
-it. `ipRangeRef` and `preferredFamily` arrive with NBO-064's other two claim kinds.
+it.
+
+`ipRangeRef` is not here either, and no longer because the pool kind was missing:
+[`NetBoxIPRange`](netboxiprange.md) ships with NBO-064, and `ip-ranges/{id}/available-ips/` is a
+real advisory-locked endpoint. What it needs is a claim descriptor that can name *two*
+mutually-exclusive pool sources, which means a pool list in the shared allocation engine --
+per-pool value fields, per-pool refusals, and a `status.pool.kind` to say which one answered.
+That is a change to the engine rather than a file beside it, so it is its own ticket, and it is
+also why the `PREFIX` printer column below has not been renamed to `POOL` yet.
+
+`preferredFamily` is not coming: a pool has exactly one address family, so with one pool per
+claim there is never a choice to express. It would earn its place only alongside a claim that
+can name several pools, or `count > 1`.
 
 ## Printer columns
 
@@ -464,6 +476,10 @@ side by side. `nbipclaim` and `nbipc` both resolve.
 - [ADR-0005 §3–§4](../decisions/0005-gitops-coexistence.md) — the deterministic identity, and
   why the address is not written back to Git.
 - [`NetBoxPrefix`](netboxprefix.md) — the pool.
+- [`NetBoxPrefixClaim`](netboxprefixclaim.md) and
+  [`NetBoxIPRangeClaim`](netboxiprangeclaim.md) — the other two claim kinds, and the
+  [locked/unlocked](../concepts/claims.md#locked-and-unlocked-allocation) distinction between
+  them.
 - [`NetBoxEndpoint`](netboxendpoint.md) — `managedBy`, `mode: DryRun`, `driftMode`.
 - [Provenance](../operations/provenance.md) — the custom fields the identity needs.
 - [Observability](../operations/observability.md) — `netbox_operator_allocations_total`.

@@ -1,4 +1,4 @@
-# Claims: allocating an address, exactly once
+# Claims: allocating from a pool, exactly once
 
 A `NetBoxIPAddress` says *"this address is mine"*. A **claim** says *"give me one from
 here"* — and the difference is not a convenience, it is a different lifecycle. A declarative
@@ -26,6 +26,16 @@ status:
 
 Field by field, the reference page is [`NetBoxIPAddressClaim`](../reference/netboxipaddressclaim.md).
 
+There are three claim kinds, and everything on this page is true of all three unless it says
+otherwise. They share one engine — one identity, one search, one read-after-write, one
+exhaustion tier, one report — and differ only in what they ask for:
+
+| Kind | Asks for | Mechanism |
+|---|---|---|
+| [`NetBoxIPAddressClaim`](../reference/netboxipaddressclaim.md) | one address out of a prefix | `POST prefixes/{id}/available-ips/`, locked |
+| [`NetBoxPrefixClaim`](../reference/netboxprefixclaim.md) | a child prefix out of a container | `POST prefixes/{id}/available-prefixes/`, locked |
+| [`NetBoxIPRangeClaim`](../reference/netboxiprangeclaim.md) | N consecutive addresses in a prefix | `POST ip-ranges/`, **unlocked** — see below |
+
 ## Two claims never get the same address
 
 Not because the operator is careful about ordering, and not because of leader election.
@@ -42,6 +52,51 @@ The consequence is that this operator takes **no client-side lock** and does **n
 serialise per pool. A client-side lock would be unnecessary inside one process and wrong
 across two — two clusters pointed at one NetBox are safe here, and they are safe for the same
 reason two workers of one cluster are.
+
+## Locked and unlocked allocation
+
+The sentence above — "NetBox takes an advisory lock" — is true of two of the three claim kinds
+and **not** of the third. That difference is the only thing about `NetBoxIPRangeClaim` an
+operator has to hold in their head, so it is worth stating plainly.
+
+NetBox 4.6.8 has exactly three allocation endpoints, and none of them places an ip-range:
+
+```
+prefixes/{id}/available-ips/         locked   an address out of a prefix
+prefixes/{id}/available-prefixes/    locked   a child prefix out of a prefix
+ip-ranges/{id}/available-ips/        locked   an address out of a range
+```
+
+There is no `available-ranges`. So a range claim computes the placement itself — from the
+*other ranges* in the parent's VRF, never from the addresses inside them — and creates it with
+an ordinary POST. Two claims can compute the same block.
+
+**They still cannot both have it.** `IPRange.clean()` refuses to save a range that overlaps
+another in the same VRF, and every API write runs it, so the loser gets a 400 that proves
+nothing was created. It recomputes from fresh state and tries again, five times, with jitter.
+
+| | Address and prefix claims | Range claims |
+|---|---|---|
+| Who prevents a collision | NetBox's advisory lock, before the write | `IPRange.clean()`, by rejecting the write |
+| What a loser sees | nothing — it is serialised, and gets a different object | a 400 naming the range that won |
+| What the operator does | one POST | up to five, one per recomputation |
+| Reasons it can report | `PoolExhausted` | `PoolExhausted` **or** `AllocationContended` |
+
+That last row is the visible consequence, and the reason the two reasons are not one:
+
+- **`PoolExhausted`** — the parent has no run of that size free. The fix is to widen it or to
+  delete a range.
+- **`AllocationContended`** — the space is there, and somebody else took this attempt's
+  candidate five times running. The fix is to wait; if it persists, more claims are competing
+  for that parent than it has room for.
+
+Told "exhausted" when the truth is "contended", a human goes looking for space that exists.
+Told "contended" when the pool is full, they wait forever. So the two are separate reasons with
+separate messages, and both wait ten minutes and both wake at once if the parent's CR changes.
+
+Neither mechanism is a client-side lock, and that is the rule rather than an accident of these
+three kinds: **any future claim kind must be able to name which server-side guarantee it relies
+on — a lock, or a rejection — and one that can name neither does not ship.**
 
 ## "Exactly once" survives a lost response
 
@@ -215,10 +270,25 @@ having said something that `available-ips` does not honour on its own.
 | `status: container` | A container's free space is subdivided by child prefixes rather than populated by addresses. A bare address out of one is almost always a mistake. |
 
 Both report `Reason=PoolNotAllocatable` naming the flag, and there is no override for either.
-For a container, allocate a child prefix instead (`NetBoxPrefixClaim`, NBO-064) or write a
-`NetBoxIPAddress` with an explicit address. `reserved` and `deprecated` are *not* refused:
-both are ordinary operational states, and holding a reserved prefix is done by allocating out
-of it.
+For a container, allocate a child prefix instead
+([`NetBoxPrefixClaim`](../reference/netboxprefixclaim.md)) or write a `NetBoxIPAddress` with an
+explicit address. `reserved` and `deprecated` are *not* refused: both are ordinary operational
+states, and holding a reserved prefix is done by allocating out of it.
+
+**`status: container` is a refusal for one claim kind and a precondition for another**, and that
+is the clearest illustration of why both lists are per-kind data rather than rules in shared
+code:
+
+| Kind | `mark_utilized: true` | `status: container` |
+|---|---|---|
+| `NetBoxIPAddressClaim` | refused | **refused** — a container is subdivided, not populated |
+| `NetBoxPrefixClaim` | refused | **expected** — subdividing is what it does |
+| `NetBoxIPRangeClaim` | refused | allowed, unremarked — a DHCP scope inside a container is ordinary |
+
+A prefix claim against a parent that is *not* a container allocates anyway and records a
+`PoolUnexpectedStatus` warning Event. Subdividing a network that is already in service is
+unusual rather than wrong, and NetBox's own `available-prefixes` view does not consult `status`
+at all — so refusing would be this operator inventing a rule the server does not have.
 
 There is no special case for a `/31`, `/32`, `/127` or `/128`. NetBox's own
 `Prefix.get_available_ips()` already decides whether the network and broadcast addresses are
@@ -366,9 +436,16 @@ field by hand.
 
 ## What is not here yet
 
-Two things this page will grow, named so that their absence is not mistaken for a gap in the
+Three things this page will grow, named so that their absence is not mistaken for a gap in the
 design:
 
+- **`spec.ipRangeRef` on `NetBoxIPAddressClaim`.** `ip-ranges/{id}/available-ips/` is a real,
+  advisory-locked endpoint, and allocating an address out of a *reserved range* is a sensible
+  thing to want. It is not here because a claim descriptor names exactly one pool field today,
+  and two mutually-exclusive pool sources on one Kind means a pool *list* in the shared engine:
+  per-pool value fields, per-pool refusals, and `status.pool.kind` to say which one answered.
+  That is a change to the allocation engine rather than a new descriptor beside it, so it is its
+  own ticket rather than a rider on this one.
 - **The child `NetBoxIPAddress`.** A claim's job is to *get* an address; the ongoing desired
   state of the address it got belongs to a declarative `NetBoxIPAddress` that the claim owns
   and materialises (`status.ipAddressRef`, a `Bound` condition). That kind lands with NBO-025
@@ -387,8 +464,9 @@ design:
   separate kind, why the inline form is sugar, why exhaustion waits.
 - [ADR-0005 §3](../decisions/0005-gitops-coexistence.md#3-allocations-survive-a-cluster-rebuild-without-writing-to-git):
   the deterministic identity, and §4 for why the address is not written back to Git.
-- [`NetBoxIPAddressClaim`](../reference/netboxipaddressclaim.md): every field, condition and
-  reason.
+- [`NetBoxIPAddressClaim`](../reference/netboxipaddressclaim.md),
+  [`NetBoxPrefixClaim`](../reference/netboxprefixclaim.md),
+  [`NetBoxIPRangeClaim`](../reference/netboxiprangeclaim.md): every field, condition and reason.
 - [Coexisting with Flux and Argo CD](../operations/gitops.md#rebuilding-a-cluster-from-git):
   the rebuild and restore walkthroughs.
 - [Provenance](../operations/provenance.md): what the stamp writes, and the custom fields the
