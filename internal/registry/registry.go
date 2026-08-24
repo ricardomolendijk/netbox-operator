@@ -74,6 +74,25 @@ var (
 	// ErrInvalidGenericFK is returned for a generic-FK spec missing a column or its
 	// legal targets.
 	ErrInvalidGenericFK = errors.New("incomplete generic-FK spec")
+
+	// ErrInvalidGenericFKMember is returned for a union member with no CR spec field name,
+	// no target Kind, or a name a sibling member already claims.
+	ErrInvalidGenericFKMember = errors.New("malformed generic-FK union member")
+
+	// ErrMemberTypeNotAllowed is returned when a union member's target Kind is registered
+	// and its object type is not in the pair's AllowedTypes.
+	//
+	// The pair's two declarations -- the union members, which say what the CR accepts, and
+	// AllowedTypes, which says what NetBox accepts -- have to agree, and this is the check
+	// that makes a disagreement a boot failure rather than a condition on somebody's
+	// object. It can only run over registered Kinds: a member naming a Kind this build does
+	// not carry yet is checked the first time a manifest uses it (NBO-019).
+	ErrMemberTypeNotAllowed = errors.New("union member's object type is not in allowedTypes")
+
+	// ErrDuplicateObjectType is returned when two descriptors claim one `app_label.model`
+	// string. It would make the reverse lookup ambiguous, and an ambiguous answer there is
+	// a generic FK resolved against the wrong Kind.
+	ErrDuplicateObjectType = errors.New("duplicate object type")
 )
 
 // objectTypePattern is the Django ContentType spelling: `model` is lowercased and
@@ -130,6 +149,25 @@ type DeferredField struct {
 	Mode DeferMode
 }
 
+// GenericFKMember is one member of the union behind a polymorphic pair: the CR spec field
+// that selects it, and the Kind it resolves against.
+//
+// The Kind and not the `app_label.model` string. That string is written down exactly once,
+// on the target's own Descriptor.ObjectType, and read from there -- so a member cannot point
+// at a type spelling no Kind actually has, which is a mistake NetBox answers with a silent
+// no-op rather than an error.
+type GenericFKMember struct {
+	// Spec is the union member's JSON field name, e.g. `interfaceRef`. It is what the
+	// resolver dispatches on: a table lookup keyed on the name the user wrote, never a
+	// switch on Kind.
+	Spec string
+
+	// Target is the Kind this member resolves against. Written as the matching typed
+	// alias's own answer, `v1alpha1.InterfaceRef{}.TargetGVK()`, so the alias stays the
+	// single source of truth for what it points at.
+	Target schema.GroupVersionKind
+}
+
 // GenericFKSpec describes one polymorphic foreign key: a `*_type` / `*_id` column pair
 // whose type half is written as an `app_label.model` string over the REST API
 // (docs/netbox-schema.md, generic-FK note).
@@ -149,6 +187,40 @@ type GenericFKSpec struct {
 	// field writes both columns, which is why it is declared here rather than in Fields:
 	// a Field maps one spec name to one API name, and this reference has two.
 	Spec string
+
+	// Members are the union's members: which CR spec field selects which Kind. It is the
+	// resolver's dispatch table, and the reason adding a legal target is a data change.
+	//
+	// Separate from AllowedTypes rather than derived from it, because the two say different
+	// things and both are load-bearing: AllowedTypes is what NetBox will accept in the
+	// `*_type` column, and Members is what this CRD offers a user. Validate cross-checks
+	// them, so a member the API accepts and NetBox would reject cannot ship.
+	Members []GenericFKMember
+}
+
+// MemberFor returns the union member a CR spec field selects.
+//
+// A linear scan over a handful of entries, for the same reason FieldFor is one: the
+// alternative is a map that has to be kept in step with the slice the M7 generator emits.
+func (g GenericFKSpec) MemberFor(spec string) (GenericFKMember, bool) {
+	for _, member := range g.Members {
+		if member.Spec == spec {
+			return member, true
+		}
+	}
+
+	return GenericFKMember{}, false
+}
+
+// MemberSpecs are the union's member field names, in declaration order. It is what the
+// "what is allowed" half of a rejection message names.
+func (g GenericFKSpec) MemberSpecs() []string {
+	specs := make([]string, 0, len(g.Members))
+	for _, member := range g.Members {
+		specs = append(specs, member.Spec)
+	}
+
+	return specs
 }
 
 // Descriptor is everything the engine needs to reconcile one kind, as data.
@@ -434,6 +506,37 @@ func (d Descriptor) validateGenericFKs() error {
 				errs = append(errs, fmt.Errorf("%w: %q on %s", ErrInvalidObjectType, objectType, generic.TypeField))
 			}
 		}
+
+		errs = append(errs, validateGenericFKMembers(generic))
+	}
+
+	return errors.Join(errs...)
+}
+
+// validateGenericFKMembers checks the union's dispatch table. A member with no name is
+// unreachable, a member with no target Kind cannot be resolved, and two members sharing a
+// name make dispatch pick whichever comes first.
+func validateGenericFKMembers(generic GenericFKSpec) error {
+	if len(generic.Members) == 0 {
+		return fmt.Errorf("%w: %s has no union members", ErrInvalidGenericFK, generic.TypeField)
+	}
+
+	errs := make([]error, 0, len(generic.Members))
+	seen := make(map[string]struct{}, len(generic.Members))
+
+	for _, member := range generic.Members {
+		if member.Spec == "" || member.Target.Empty() {
+			errs = append(errs, fmt.Errorf("%w: %+v on %s", ErrInvalidGenericFKMember, member, generic.TypeField))
+
+			continue
+		}
+
+		if _, dup := seen[member.Spec]; dup {
+			errs = append(errs, fmt.Errorf("%w: %s is declared twice on %s",
+				ErrInvalidGenericFKMember, member.Spec, generic.TypeField))
+		}
+
+		seen[member.Spec] = struct{}{}
 	}
 
 	return errors.Join(errs...)
@@ -455,14 +558,28 @@ func (d Descriptor) validateUpdates() error {
 type Registry struct {
 	// mu guards the state below. Get is called from every reconcile goroutine while Add
 	// is called from init(), and an invariant held only by documentation is not one.
-	mu         sync.RWMutex
-	byGVK      map[schema.GroupVersionKind]Descriptor
-	duplicates []schema.GroupVersionKind
+	mu    sync.RWMutex
+	byGVK map[schema.GroupVersionKind]Descriptor
+
+	// byObjectType is the reverse of Descriptor.ObjectType: the `app_label.model` string a
+	// generic FK writes, back to the Kind that answers for it.
+	//
+	// It exists because a polymorphic reference is declared in NetBox's vocabulary and
+	// watched in Kubernetes's. GenericFKSpec.AllowedTypes holds object-type strings, and
+	// without this there is no Kind behind one -- so a generic FK could not become a watch
+	// target and converged only on the referrer's resync (NBO-013, #25).
+	byObjectType map[string]schema.GroupVersionKind
+
+	duplicates     []schema.GroupVersionKind
+	duplicateTypes []string
 }
 
 // New returns an empty registry. Tests use it to stay off the package-level one.
 func New() *Registry {
-	return &Registry{byGVK: make(map[schema.GroupVersionKind]Descriptor)}
+	return &Registry{
+		byGVK:        make(map[schema.GroupVersionKind]Descriptor),
+		byObjectType: make(map[string]schema.GroupVersionKind),
+	}
 }
 
 // Add registers d. A GVK that is already registered is rejected and recorded, so the
@@ -478,9 +595,32 @@ func (r *Registry) Add(d Descriptor) error {
 		return fmt.Errorf("%w: %s", ErrDuplicateGVK, d.GVK)
 	}
 
+	if other, taken := r.byObjectType[d.ObjectType]; taken && d.ObjectType != "" {
+		r.duplicateTypes = append(r.duplicateTypes, d.ObjectType)
+
+		return fmt.Errorf("%w: %q is claimed by %s and %s", ErrDuplicateObjectType, d.ObjectType, other, d.GVK)
+	}
+
 	r.byGVK[d.GVK] = d
+	r.byObjectType[d.ObjectType] = d.GVK
 
 	return nil
+}
+
+// ByObjectType returns the descriptor that answers for an `app_label.model` string, which
+// is how a generic FK's declared target becomes a Kind to watch and a key to index.
+func (r *Registry) ByObjectType(objectType string) (Descriptor, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	gvk, ok := r.byObjectType[objectType]
+	if !ok {
+		return Descriptor{}, false
+	}
+
+	d, ok := r.byGVK[gvk]
+
+	return d, ok
 }
 
 // Get returns the descriptor for gvk.
@@ -510,14 +650,44 @@ func (r *Registry) Validate() error {
 	defer r.mu.RUnlock()
 
 	descriptors := r.list()
-	errs := make([]error, 0, len(descriptors)+len(r.duplicates))
+	errs := make([]error, 0, len(descriptors)+len(r.duplicates)+len(r.duplicateTypes))
 
 	for _, gvk := range r.duplicates {
 		errs = append(errs, fmt.Errorf("%w: %s", ErrDuplicateGVK, gvk))
 	}
 
+	for _, objectType := range r.duplicateTypes {
+		errs = append(errs, fmt.Errorf("%w: %q", ErrDuplicateObjectType, objectType))
+	}
+
 	for _, d := range descriptors {
-		errs = append(errs, d.Validate())
+		errs = append(errs, d.Validate(), r.validateUnionTypes(d))
+	}
+
+	return errors.Join(errs...)
+}
+
+// validateUnionTypes checks every union member whose Kind this build carries against the
+// pair's AllowedTypes.
+//
+// A registry-level check rather than a Descriptor one, because it needs the *target's*
+// descriptor to learn its object type -- which is exactly the property that keeps the
+// `app_label.model` spelling in one place. A member naming an unregistered Kind is passed
+// over here and reported at resolve time as RefKindUnavailable: the manifest is correct and
+// the fix is an operator upgrade, so it must not fail the boot of every other kind.
+func (r *Registry) validateUnionTypes(d Descriptor) error {
+	errs := make([]error, 0, len(d.GenericFKs))
+
+	for _, generic := range d.GenericFKs {
+		for _, member := range generic.Members {
+			target, registered := r.byGVK[member.Target]
+			if !registered || slices.Contains(generic.AllowedTypes, target.ObjectType) {
+				continue
+			}
+
+			errs = append(errs, fmt.Errorf("%w: %s -> %s is %q, allowed are %v",
+				ErrMemberTypeNotAllowed, generic.Spec, member.Spec, target.ObjectType, generic.AllowedTypes))
+		}
 	}
 
 	return errors.Join(errs...)
@@ -553,6 +723,11 @@ func MustRegister(d Descriptor) {
 // Get returns the descriptor registered for gvk.
 func Get(gvk schema.GroupVersionKind) (Descriptor, bool) {
 	return defaultRegistry.Get(gvk)
+}
+
+// ByObjectType returns the descriptor registered for an `app_label.model` string.
+func ByObjectType(objectType string) (Descriptor, bool) {
+	return defaultRegistry.ByObjectType(objectType)
 }
 
 // List returns every registered descriptor, ordered by GVK.

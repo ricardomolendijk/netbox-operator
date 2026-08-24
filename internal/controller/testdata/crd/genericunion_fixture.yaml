@@ -1,0 +1,73 @@
+# A test-only CRD carrying both generic-FK union shapes, so the CEL rules NBO-019 specifies
+# are proved against a real API server rather than read and believed.
+#
+# It exists because no shipped Kind carries a polymorphic pair yet: v1alpha1.IPAssignment
+# lands here ahead of NetBoxIPAddress (NBO-025), and a CEL rule on a type no CRD embeds is
+# never compiled by anything. The `<= 1` rule below is asserted byte-identical to the one on
+# IPAssignment by TestUnionCELRuleMatchesTheAPIType, so this fixture cannot drift away from
+# the type it stands in for.
+#
+# Its group is deliberately not netbox.kubeforge.org: nothing here is API surface, and a
+# fixture sharing the real group could be mistaken for one.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: genericunionfixtures.test.netbox.kubeforge.org
+spec:
+  group: test.netbox.kubeforge.org
+  names:
+    kind: GenericUnionFixture
+    listKind: GenericUnionFixtureList
+    plural: genericunionfixtures
+    singular: genericunionfixture
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required:
+                - requiredPair
+              properties:
+                # The nullable shape: both columns of the pair are nullable, so selecting
+                # nothing is legal and means "unassigned".
+                nullablePair:
+                  type: object
+                  x-kubernetes-validations:
+                    - rule: "[has(self.interfaceRef), has(self.vmInterfaceRef), has(self.fhrpGroupRef)].filter(x, x).size() <= 1"
+                      message: at most one of interfaceRef, vmInterfaceRef or fhrpGroupRef may be set
+                  properties:
+                    interfaceRef:
+                      type: object
+                      properties:
+                        name: {type: string}
+                    vmInterfaceRef:
+                      type: object
+                      properties:
+                        name: {type: string}
+                    fhrpGroupRef:
+                      type: object
+                      properties:
+                        name: {type: string}
+                # The REQ shape: both columns are non-null, so exactly one member must be
+                # set -- and the union field itself has to be required, or an absent field
+                # would satisfy the pair by never being evaluated.
+                requiredPair:
+                  type: object
+                  x-kubernetes-validations:
+                    - rule: "[has(self.deviceRef), has(self.virtualMachineRef)].filter(x, x).size() == 1"
+                      message: exactly one of deviceRef or virtualMachineRef must be set
+                  properties:
+                    deviceRef:
+                      type: object
+                      properties:
+                        name: {type: string}
+                    virtualMachineRef:
+                      type: object
+                      properties:
+                        name: {type: string}

@@ -18,6 +18,10 @@ ever sees it.
 > [Crossing a namespace](#crossing-a-namespace) and [Cycles](#cycles). What is still missing on the cycle side is the
 > engine's half: a `RefCycle` Event, and a `refs_unresolved` metric to alert on.
 
+A **polymorphic** reference — one NetBox column pair that may point at any of several models
+— is a union of the references described here, and has a page of its own:
+[Generic references](generic-refs.md).
+
 ## What a reference is
 
 A reference names one NetBox object. It is not a NetBox id — except in the one escape
@@ -269,7 +273,7 @@ for any reference that stops resolving.
 
 ## What happens when it does not resolve
 
-Every failure is one of seven causes. Each maps to exactly one `RefsResolved` reason and one
+Every failure is one of eight causes. Each maps to exactly one `RefsResolved` reason and one
 retry interval; `Ready` reports `WaitingForRef` for all of them, because that is the
 question a `kubectl wait` is asking.
 
@@ -282,14 +286,13 @@ question a `kubectl wait` is asking.
 | The references depend on each other | `RefCycle` | Only on a spec change | No order of reconciles resolves it. See [Cycles](#cycles). |
 | The graph is too deep, or too wide, to walk | `RefDepthExceeded` | Only on a spec change | A 33-hop chain is a mistake, and the walk will not guess past its cap. |
 | Target Kind has no descriptor, or its CRD is not installed | `RefKindUnavailable` | **10 min** | The manifest is correct; the fix is an operator upgrade. |
+| A [polymorphic reference](generic-refs.md) names a target its column will not take | `RefTypeNotAllowed` | Only on a spec change | No object appearing anywhere makes an illegal target legal. |
 
 Two more reasons appear on `RefsResolved` and are not resolution failures at all:
 `AllResolved`, and `NotImplemented` for a reference this build cannot dispatch on — a
-[generic foreign key](descriptor.md), whose target is a union of Kinds
-([NBO-019](https://github.com/ricardomolendijk/netbox-operator/issues/31)), or a **to-many**
-reference such as `tags`, since neither `ObjectRef` nor `Field` carries a cardinality. Both
-are left out of the payload and reported, which keeps the object off `Ready` rather than
-writing one id where a list belongs.
+**to-many** reference such as `tags`, since neither `ObjectRef` nor `Field` carries a
+cardinality. It is left out of the payload and reported, which keeps the object off `Ready`
+rather than writing one id where a list belongs.
 
 When several references are unresolved, the condition carries the **first** blocker's
 reason — a reason is a single value tooling keys on — and a message naming every one of

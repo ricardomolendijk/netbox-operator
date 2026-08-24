@@ -43,7 +43,14 @@ func TestMain(m *testing.M) {
 	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
 
 	testEnv = &envtest.Environment{
-		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "config", "crd", "bases")},
+		// The shipped CRDs, plus the generic-FK union fixture. The fixture is a test-only
+		// group carrying the two CEL shapes NBO-019 specifies, because no shipped Kind
+		// embeds a polymorphic union until NBO-025 and a CEL rule no CRD carries is never
+		// compiled by anything.
+		CRDDirectoryPaths: []string{
+			filepath.Join("..", "..", "config", "crd", "bases"),
+			filepath.Join("testdata", "crd"),
+		},
 		ErrorIfCRDPathMissing: true,
 	}
 	cfg, err := testEnv.Start()

@@ -187,6 +187,15 @@ const (
 	// the hierarchy rather than to break a ring.
 	ReasonRefDepthExceeded = "RefDepthExceeded"
 
+	// ReasonRefTypeNotAllowed is on RefsResolved: a polymorphic reference names a target
+	// its NetBox column will not take -- a union member the Descriptor does not declare, or
+	// one whose `app_label.model` type is outside the pair's allowed types.
+	//
+	// Terminal, like RefCycle and unlike RefNotFound: no object appearing anywhere makes an
+	// illegal target legal, so there is no timer. The message names what was given and what
+	// the column accepts, because those two together are the whole fix.
+	ReasonRefTypeNotAllowed = "RefTypeNotAllowed"
+
 	// ReasonRefKindUnavailable is on RefsResolved: the target Kind has no descriptor, or
 	// its CRD is not installed. Distinct from RefNotFound because the manifest is correct
 	// and the fix is an operator upgrade rather than an edit.

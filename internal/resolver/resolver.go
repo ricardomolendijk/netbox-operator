@@ -236,7 +236,12 @@ func (r *Resolver) ResolveAll(ctx context.Context, nb LookupClient, obj client.O
 		return Resolution{}, err
 	}
 
-	resolution := Resolution{ByField: make(map[string]Result, len(refs))}
+	generics, err := genericFKsOf(obj, d)
+	if err != nil {
+		return Resolution{}, err
+	}
+
+	resolution := Resolution{ByField: make(map[string]Result, len(refs)+len(generics))}
 	referrer := types.NamespacedName{Namespace: obj.GetNamespace(), Name: obj.GetName()}
 
 	pass := r.forPass()
@@ -255,18 +260,44 @@ func (r *Resolver) ResolveAll(ctx context.Context, nb LookupClient, obj client.O
 			Field: declared.field, Ref: declared.ref,
 		})
 
-		var refErr *Error
-		switch {
-		case err == nil:
-			resolution.ByField[declared.field.Spec] = result
-		case errors.As(err, &refErr):
-			resolution.Blocked = append(resolution.Blocked, blockerFor(refErr))
-		default:
+		if err := record(&resolution, declared.field.Spec, result, err); err != nil {
+			return Resolution{}, err
+		}
+	}
+
+	for _, generic := range generics {
+		result, err := pass.ResolveGenericFK(ctx, GenericRequest{
+			NetBox: nb, Referrer: referrer, ReferrerGVK: d.GVK,
+			Pair: generic.pair, Union: generic.union,
+		})
+
+		if err := record(&resolution, generic.pair.Spec, result, err); err != nil {
 			return Resolution{}, err
 		}
 	}
 
 	return resolution, nil
+}
+
+// record files one reference's outcome, and returns the error only for the failures that are
+// not about a reference at all.
+//
+// Keyed on the CR spec field, which for a polymorphic pair is the union's own field and not
+// the member that resolved: the engine writes both columns from one entry, so one entry is
+// what it has to find.
+func record(resolution *Resolution, spec string, result Result, err error) error {
+	var refErr *Error
+
+	switch {
+	case err == nil:
+		resolution.ByField[spec] = result
+	case errors.As(err, &refErr):
+		resolution.Blocked = append(resolution.Blocked, blockerFor(refErr))
+	default:
+		return err
+	}
+
+	return nil
 }
 
 // forPass is the resolver one resolution pass uses: this one, over one snapshot of the
@@ -541,6 +572,11 @@ func (registryLookup) Get(gvk schema.GroupVersionKind) (registry.Descriptor, boo
 	return registry.Get(gvk)
 }
 
+// ByObjectType returns the descriptor registered for an `app_label.model` string.
+func (registryLookup) ByObjectType(objectType string) (registry.Descriptor, bool) {
+	return registry.ByObjectType(objectType)
+}
+
 // declaredRef is one reference the descriptor declares and the object sets.
 type declaredRef struct {
 	field registry.Field
@@ -554,26 +590,20 @@ type declaredRef struct {
 // representation where both ends of the field map agree -- and it costs a generated kind no
 // per-kind code at all.
 //
-// Generic FKs are deliberately absent. One of those spec fields writes two columns and its
-// legal targets are a union rather than one Kind, which is NBO-019's dispatch and not this
-// one's.
+// Generic FKs are deliberately absent: one of those spec fields writes two columns and its
+// legal targets are a union rather than one Kind, so it is read by genericFKsOf and resolved
+// by ResolveGenericFK. Keeping them out of here is also what keeps them out of the cycle walk
+// -- see genericfk.go on why no union that ships today can be a blocking edge.
 func refsOf(obj client.Object, d registry.Descriptor) ([]declaredRef, error) {
-	encoded, err := json.Marshal(obj)
+	spec, err := specMapOf(obj)
 	if err != nil {
-		return nil, fmt.Errorf("encoding %s/%s: %w", obj.GetNamespace(), obj.GetName(), err)
-	}
-
-	var decoded struct {
-		Spec map[string]json.RawMessage `json:"spec"`
-	}
-	if err := json.Unmarshal(encoded, &decoded); err != nil {
-		return nil, fmt.Errorf("decoding the spec of %s/%s: %w", obj.GetNamespace(), obj.GetName(), err)
+		return nil, err
 	}
 
 	refs := make([]declaredRef, 0, len(d.Fields))
 
 	for _, field := range d.Fields {
-		raw, set := decoded.Spec[field.Spec]
+		raw, set := spec[field.Spec]
 		if !field.Ref || !set || string(raw) == "null" {
 			continue
 		}
@@ -597,6 +627,27 @@ func refsOf(obj client.Object, d registry.Descriptor) ([]declaredRef, error) {
 	}
 
 	return refs, nil
+}
+
+// specMapOf returns obj's spec as JSON names to undecoded values.
+//
+// One encode shared by the ordinary references and the polymorphic ones, so a pass that has
+// both does not serialise the object twice -- and so both read the object through exactly the
+// same representation the API server stores.
+func specMapOf(obj client.Object) (map[string]json.RawMessage, error) {
+	encoded, err := json.Marshal(obj)
+	if err != nil {
+		return nil, fmt.Errorf("encoding %s/%s: %w", obj.GetNamespace(), obj.GetName(), err)
+	}
+
+	var decoded struct {
+		Spec map[string]json.RawMessage `json:"spec"`
+	}
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		return nil, fmt.Errorf("decoding the spec of %s/%s: %w", obj.GetNamespace(), obj.GetName(), err)
+	}
+
+	return decoded.Spec, nil
 }
 
 // isList reports whether a spec value is a JSON array, which is how a to-many reference

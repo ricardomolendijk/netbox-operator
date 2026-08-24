@@ -140,6 +140,7 @@ func TestDescriptorValidateFieldMap(t *testing.T) {
 				d.GenericFKs = []GenericFKSpec{{
 					TypeField: "scope_type", IDField: "scope_id",
 					AllowedTypes: []string{"dcim.site"}, Spec: "scopeRef",
+					Members: []GenericFKMember{{Spec: "siteRef", Target: testGVK("NetBoxSite")}},
 				}}
 				d.ContainmentRef = "scopeRef"
 			},

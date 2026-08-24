@@ -87,6 +87,17 @@ var (
 	// distinguishable at the API level too (#121), and "clear this foreign key" will be an
 	// explicit instruction rather than an empty reference read as one.
 	ErrRefMalformed = errors.New("no mode set")
+
+	// ErrRefTypeNotAllowed is a polymorphic reference naming a target its column will not
+	// take: a union member the Descriptor does not declare, or one whose object type is
+	// outside the pair's AllowedTypes.
+	//
+	// Terminal, and deliberately not ErrRefNotFound. Nothing that happens in NetBox or in
+	// the cluster makes an illegal target legal, so retrying is burning the workqueue to
+	// re-derive the same refusal -- only an edit to the manifest, or to the Descriptor,
+	// clears it. The message therefore has to carry both halves: what was given, and what
+	// the column accepts.
+	ErrRefTypeNotAllowed = errors.New("target type not allowed")
 )
 
 // Requeue delays for the states that do not clear themselves.
@@ -224,6 +235,10 @@ func Classify(err error) Outcome {
 		return Outcome{Reason: netboxv1alpha1.ReasonRefDepthExceeded}
 	case errors.Is(err, ErrRefKindUnavailable):
 		return Outcome{Reason: netboxv1alpha1.ReasonRefKindUnavailable, Requeue: humanRetry}
+	case errors.Is(err, ErrRefTypeNotAllowed):
+		// No timer, for the same reason a cycle gets none: the verdict is a property of the
+		// manifest and the Descriptor, and an edit to either arrives as a watch event.
+		return Outcome{Reason: netboxv1alpha1.ReasonRefTypeNotAllowed}
 	default:
 		return Outcome{Reason: netboxv1alpha1.ReasonInvalid}
 	}

@@ -467,3 +467,106 @@ func TestNoResolverReportsRatherThanDrops(t *testing.T) {
 		t.Errorf("Ready reason = %q, want %q", got, netboxv1alpha1.ReasonWaitingForRef)
 	}
 }
+
+// TestResolvedGenericFKWritesBothColumns is the atomicity contract, asserted where it
+// matters: on the payload NetBox receives.
+//
+// The type half and the id half are one reference. An id written against a stale type is not
+// a partial update -- it points the object at a row of a different model that happens to
+// share a primary key, which NetBox accepts without complaint. So the assertion is on both
+// keys of the payload and never on the condition alone.
+func TestResolvedGenericFKWritesBothColumns(t *testing.T) {
+	obj := fakeObject()
+	obj.Spec.Scope = &fakeScope{SiteRef: &fakeRef{Name: "ams"}}
+
+	nb := &fakeClient{created: liveTag(7)}
+	engine := engineWith(t, scopedDescriptor(), nb, &fakeRefs{resolution: resolver.Resolution{
+		ByField: map[string]resolver.Result{
+			"scope": {ID: 31, ObjectType: "dcim.site", Mode: resolver.ModeName},
+		},
+	}})
+
+	if _, err := engine.Reconcile(context.Background(), obj); err != nil {
+		t.Fatalf("Reconcile() = %v", err)
+	}
+
+	payload := nb.lastPayload()
+	if payload["scope_type"] != "dcim.site" || payload["scope_id"] != int64(31) {
+		t.Errorf("payload (scope_type, scope_id) = (%v, %v), want (dcim.site, 31)",
+			payload["scope_type"], payload["scope_id"])
+	}
+
+	resolved := conditionOf(obj, netboxv1alpha1.ConditionRefsResolved)
+	if resolved.Status != metav1.ConditionTrue || !strings.Contains(resolved.Message, "scope") {
+		t.Errorf("RefsResolved = %s/%q, want True naming scope", resolved.Status, resolved.Message)
+	}
+}
+
+// TestEmptyGenericFKClearsBothColumns covers the union written and left empty, which is an
+// instruction rather than an omission: clear the reference.
+//
+// Both columns are nulled, not one. NetBox validates the pair together, so a `scope_id` of
+// null against a `scope_type` that still names a model is a rejected payload at best.
+func TestEmptyGenericFKClearsBothColumns(t *testing.T) {
+	obj := fakeObject()
+	obj.Spec.Scope = &fakeScope{}
+
+	nb := &fakeClient{created: liveTag(7)}
+	engine := engineWith(t, scopedDescriptor(), nb, &fakeRefs{resolution: resolver.Resolution{
+		ByField: map[string]resolver.Result{"scope": {}},
+	}})
+
+	if _, err := engine.Reconcile(context.Background(), obj); err != nil {
+		t.Fatalf("Reconcile() = %v", err)
+	}
+
+	payload := nb.lastPayload()
+
+	for _, column := range []string{"scope_type", "scope_id"} {
+		value, written := payload[column]
+		if !written || value != nil {
+			t.Errorf("payload[%s] = %v (written: %v), want an explicit null", column, value, written)
+		}
+	}
+}
+
+// TestRefusedGenericFKIsTerminalAndWritesNothingToTheColumns pins the refusal path: an illegal
+// target is reported, both columns are left alone, and nothing comes back on a timer.
+func TestRefusedGenericFKIsTerminalAndWritesNothingToTheColumns(t *testing.T) {
+	obj := fakeObject()
+	obj.Spec.Scope = &fakeScope{SiteRef: &fakeRef{Name: "ams"}}
+
+	err := &resolver.Error{
+		Cause: resolver.ErrRefTypeNotAllowed, Field: "scope",
+		Detail: `siteRef resolves to object type "dcim.site", and scope_type accepts only [dcim.region]`,
+	}
+
+	nb := &fakeClient{created: liveTag(7)}
+	engine := engineWith(t, scopedDescriptor(), nb, &fakeRefs{resolution: resolver.Resolution{
+		ByField: map[string]resolver.Result{},
+		Blocked: []resolver.Blocker{{
+			Field: "scope", Reason: resolver.Classify(err).Reason, Err: err,
+		}},
+	}})
+
+	result, reconcileErr := engine.Reconcile(context.Background(), obj)
+	if reconcileErr != nil {
+		t.Fatalf("Reconcile() = %v", reconcileErr)
+	}
+
+	payload := nb.lastPayload()
+	for _, column := range []string{"scope_type", "scope_id"} {
+		if value, written := payload[column]; written {
+			t.Errorf("payload[%s] = %v, want the column left alone", column, value)
+		}
+	}
+
+	resolved := conditionOf(obj, netboxv1alpha1.ConditionRefsResolved)
+	if resolved.Reason != netboxv1alpha1.ReasonRefTypeNotAllowed {
+		t.Errorf("RefsResolved reason = %q, want %q", resolved.Reason, netboxv1alpha1.ReasonRefTypeNotAllowed)
+	}
+
+	// The endpoint's own resync, and nothing sooner: no NetBox object appearing and no CR
+	// being created makes an illegal target legal.
+	assertRequeue(t, result.RequeueAfter, testResync)
+}

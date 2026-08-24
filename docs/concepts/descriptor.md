@@ -52,12 +52,21 @@ golden output contains no `{{if eq .Model "…"}}`.
 | `ReadOnly` | `[]string` | Fields the operator must never write. | `["_depth", "_children", "created", "last_updated", "url", "display"]` |
 | `M2M` | `[]string` | Many-to-many fields written as a list of NetBox object IDs. | `["import_targets", "export_targets"]` |
 | `ObjectTypeLists` | `[]string` | Many-to-many fields onto `contenttypes.ContentType`, written as `app_label.model` strings. | `["object_types"]` |
-| `GenericFKs` | `[]GenericFKSpec` | The polymorphic `*_type` / `*_id` column pairs on this kind. | `{scope_type, scope_id, [dcim.region dcim.sitegroup dcim.site dcim.location]}` |
+| `GenericFKs` | `[]GenericFKSpec` | The polymorphic `*_type` / `*_id` column pairs on this kind. | `{scope_type, scope_id, scope, [dcim.region dcim.sitegroup dcim.site dcim.location], [regionRef siteGroupRef siteRef locationRef]}` |
 | `ContainmentRef` | `string` | The one spec ref whose target gets a non-controller owner reference. Empty for catalogue kinds. | `siteRef` |
 
-`GenericFKSpec` is three fields — `TypeField`, `IDField` and `AllowedTypes`, the last in the
-same spelling as `ObjectType`. It drives resolver dispatch and ref watches, so adding a
-member to the union stays a data change.
+`GenericFKSpec` is five fields. `TypeField` and `IDField` are the two columns; `Spec` is the
+one CR field they are both written from — declared here rather than in `Fields`, because a
+`Field` maps one spec name to one API name and this reference has two. `AllowedTypes` is what
+NetBox accepts in the type column, in the same spelling as `ObjectType`. `Members` is the
+resolver's dispatch table: one entry per union member, each naming the CR field that selects
+it and the *Kind* it resolves against — the Kind and never the type string, so the
+`app_label.model` spelling stays written down in exactly one place.
+
+The last two are cross-checked at boot in both directions, so a union that offers a target
+NetBox would reject in that column fails to start. Adding a member to a union is therefore a
+change to `api/v1alpha1` and this table and nothing else. See
+[Generic references](generic-refs.md).
 
 Four entries in that table are worth spelling out.
 

@@ -276,6 +276,10 @@ func scopedDescriptor() registry.Descriptor {
 		IDField:      "scope_id",
 		AllowedTypes: []string{"dcim.site", "dcim.region"},
 		Spec:         "scope",
+		Members: []registry.GenericFKMember{
+			{Spec: "siteRef", Target: netboxv1alpha1.SiteRef{}.TargetGVK()},
+			{Spec: "regionRef", Target: netboxv1alpha1.RegionRef{}.TargetGVK()},
+		},
 	}}
 	d.ContainmentRef = "scope"
 

@@ -38,6 +38,11 @@ being stuck when it is not:
   [`NetBoxRefGrant`](../reference/netboxrefgrant.md) permitting it. The message names the
   grant to create and the namespace to create it in, and writing it takes effect within a
   second — there is no resync to wait out.
+- **`RefTypeNotAllowed`** — a
+  [polymorphic reference](../reference/genericref.md) names a target its NetBox column will
+  not take. This one really is stuck, and deliberately: there is no retry, because no object
+  appearing anywhere makes an illegal target legal. The message names what you gave and what
+  the column accepts; fix the manifest and it clears on the next event.
 
 When every reference resolved, the same condition says so and names them
 (`reason=AllResolved`, `message="resolved parentRef, tenantRef"`), so the message is also

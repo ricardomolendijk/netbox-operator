@@ -53,7 +53,18 @@ type fakeSpec struct {
 	// apply order sets it at create time.
 	PrimaryIP4Ref *fakeRef `json:"primaryIP4Ref,omitempty"`
 
+	// Scope is the polymorphic reference NBO-019 is about: one spec field that writes the
+	// two columns of a generic foreign key.
+	Scope *fakeScope `json:"scope,omitempty"`
+
 	Unmapped string `json:"unmapped,omitempty"`
+}
+
+// fakeScope is a generic-FK union, in the shape v1alpha1.IPAssignment has: one typed member
+// per legal target, at most one set.
+type fakeScope struct {
+	SiteRef   *fakeRef `json:"siteRef,omitempty"`
+	RegionRef *fakeRef `json:"regionRef,omitempty"`
 }
 
 // fakeKind is a stand-in for a generated kind.

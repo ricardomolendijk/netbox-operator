@@ -87,19 +87,7 @@ func (p *pass) resolveRefs(ctx context.Context, declared []string) error {
 		return err
 	}
 
-	// Descriptor order rather than map order: the resolved list ends up in a condition
-	// message, and a message that reorders itself between passes is unreviewable.
-	resolved := make([]string, 0, len(resolution.ByField))
-
-	for _, field := range p.desc.Fields {
-		result, ok := resolution.ByField[field.Spec]
-		if !ok {
-			continue
-		}
-
-		p.applyRef(field, result)
-		resolved = append(resolved, field.Spec)
-	}
+	resolved := p.applyResolved(resolution)
 
 	if len(resolved) == len(declared) {
 		logf.FromContext(ctx).V(1).Info("resolved every reference", "action", "build", "refs", resolved)
@@ -134,6 +122,70 @@ func (p *pass) resolution(ctx context.Context) (resolver.Resolution, error) {
 	return resolution, nil
 }
 
+// applyResolved writes every resolved reference into the payload and reports which spec
+// fields those were.
+//
+// Descriptor order rather than map order: the resolved list ends up in a condition message,
+// and a message that reorders itself between passes is unreviewable. The ordinary fields
+// first and the polymorphic pairs after, because that is the order the Descriptor declares
+// them in and neither list is a subset of the other.
+func (p *pass) applyResolved(resolution resolver.Resolution) []string {
+	resolved := make([]string, 0, len(resolution.ByField))
+
+	for _, field := range p.desc.Fields {
+		result, ok := resolution.ByField[field.Spec]
+		if !ok {
+			continue
+		}
+
+		p.applyRef(field, result)
+		resolved = append(resolved, field.Spec)
+	}
+
+	for _, pair := range p.desc.GenericFKs {
+		result, ok := resolution.ByField[pair.Spec]
+		if !ok {
+			continue
+		}
+
+		p.applyGenericFK(pair, result)
+		resolved = append(resolved, pair.Spec)
+	}
+
+	return resolved
+}
+
+// applyGenericFK writes both halves of a polymorphic reference, and is the only thing that
+// ever writes either.
+//
+// Both columns every time, from one resolved Result. That is what makes the pair atomic on
+// the way out: there is no code path that can set an id against a type it was not resolved
+// with, which is the failure NetBox answers by attaching the object to a completely
+// different row that happens to share a primary key.
+//
+// The zero Result is the union written empty, and clears both columns rather than leaving
+// them out. Leaving them out would mean "do not manage this reference", which is what an
+// *absent* field means -- an empty one is an instruction.
+//
+// Not written into p.spec, unlike applyRef: a natural key filtering on one of these needs two
+// filters, and there is no single value to offer. No descriptor names a generic FK in a
+// natural key yet; the one that does -- ipam.VLANGroup, unique on
+// (scope_type, scope_id, slug) -- lands with NBO-018, and until then params() refuses such a
+// candidate loudly rather than sending a lookup with half an identity.
+func (p *pass) applyGenericFK(pair registry.GenericFKSpec, result resolver.Result) {
+	p.desired[pair.TypeField], p.desired[pair.IDField] = genericFKValues(result)
+	p.state.Resolved = append(p.state.Resolved, pair.Spec)
+}
+
+// genericFKValues renders one resolved polymorphic reference as its two column values.
+func genericFKValues(result resolver.Result) (objectType, id any) {
+	if result.ObjectType == "" {
+		return nil, nil
+	}
+
+	return result.ObjectType, result.ID
+}
+
 // applyRef puts a resolved id everywhere the rest of the pass looks for it.
 //
 // Two places, because the two vocabularies are both real: the payload holds NetBox column
@@ -154,8 +206,8 @@ func (p *pass) applyRef(field registry.Field, result resolver.Result) {
 //
 // Two kinds of them, and they are reported differently because they are fixed differently: a
 // reference the resolver refused carries its own reason and requeue, while one the resolver
-// never saw is a generic foreign key, whose target is a union of Kinds rather than one and
-// whose dispatch is NBO-019.
+// never saw is a reference this build cannot resolve at all -- a to-many reference, whose
+// cardinality no Descriptor states yet (NBO-041).
 func (p *pass) reportUnresolved(
 	ctx context.Context, resolution resolver.Resolution, declared, resolved []string,
 ) {

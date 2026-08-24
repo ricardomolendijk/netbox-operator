@@ -7,6 +7,8 @@ import (
 
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+
+	netboxv1alpha1 "github.com/ricardomolendijk/netbox-operator/api/v1alpha1"
 )
 
 func testGVK(kind string) schema.GroupVersionKind {
@@ -190,6 +192,15 @@ func ipAddressDescriptor() Descriptor {
 				"ipam.fhrpgroup",
 			},
 			Spec: "assignedObject",
+			// The union members as v1alpha1.IPAssignment declares them, each pinned to
+			// the Kind by its own typed alias rather than by a GVK written out here --
+			// so a renamed member or a re-aimed alias fails the descriptor rather than
+			// silently resolving against the wrong Kind.
+			Members: []GenericFKMember{
+				{Spec: "interfaceRef", Target: netboxv1alpha1.InterfaceRef{}.TargetGVK()},
+				{Spec: "vmInterfaceRef", Target: netboxv1alpha1.VMInterfaceRef{}.TargetGVK()},
+				{Spec: "fhrpGroupRef", Target: netboxv1alpha1.FHRPGroupRef{}.TargetGVK()},
+			},
 		}},
 		ContainmentRef: "vrfRef",
 	}
@@ -228,6 +239,12 @@ func clusterDescriptor() Descriptor {
 			IDField:      "scope_id",
 			AllowedTypes: []string{"dcim.region", "dcim.sitegroup", "dcim.site", "dcim.location"},
 			Spec:         "scope",
+			Members: []GenericFKMember{
+				{Spec: "regionRef", Target: testGVK("NetBoxRegion")},
+				{Spec: "siteGroupRef", Target: testGVK("NetBoxSiteGroup")},
+				{Spec: "siteRef", Target: testGVK("NetBoxSite")},
+				{Spec: "locationRef", Target: testGVK("NetBoxLocation")},
+			},
 		}},
 		ContainmentRef: "scope",
 	}
@@ -587,6 +604,9 @@ func TestRegistryValidateReportsBadDescriptor(t *testing.T) {
 func TestMustRegisterPanicsOnDuplicate(t *testing.T) {
 	d := tagDescriptor()
 	d.GVK = testGVK("NetBoxMustRegisterFixture")
+	// Its own object type as well as its own Kind: the reverse index is one-to-one, so a
+	// fixture borrowing extras.tag would be refused for that instead of for its GVK.
+	d.ObjectType = "extras.mustregisterfixture"
 
 	MustRegister(d)
 
