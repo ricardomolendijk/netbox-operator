@@ -1,0 +1,55 @@
+# A test-only CRD for the server-side-apply half of NBO-032, which is the half that cannot be
+# faked: the field-ownership bookkeeping, the 409 that names the fields it refused over, and
+# "an identical apply bumps no resourceVersion" all live in the API server. controller-runtime's
+# fake client accepts an apply patch and neither writes the response back nor keeps the object
+# applyable a second time, so the decisions in internal/reconciler/children.go are tested
+# against a hand-written fake there and the mechanics are tested against a real API server here.
+#
+# It is a fixture rather than one of the shipped Kinds for one reason: every shipped Kind has a
+# controller running in this suite, and a controller writing status bumps the resourceVersion
+# this test is asserting has not moved. A Kind nothing reconciles is the only clean subject.
+#
+# Its group is deliberately not netbox.kubeforge.org, for the reason objectref_fixture.yaml
+# gives: nothing here is API surface, and a fixture sharing the real group could be mistaken
+# for one.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: childfixtures.test.netbox.kubeforge.org
+spec:
+  group: test.netbox.kubeforge.org
+  names:
+    kind: ChildFixture
+    listKind: ChildFixtureList
+    plural: childfixtures
+    singular: childfixture
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        # A status subresource, like every shipped Kind, so that a status in an apply body is
+        # ignored exactly as it is in production -- the materialiser sends the whole object and
+        # must not thereby claim ownership of a field the child's own controller writes.
+        status: {}
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                # managed is a field the materialiser sets, so a hand edit to it is reverted.
+                managed:
+                  type: string
+                # unmanaged is a field the materialiser never sets, so a hand edit to it is
+                # kept: the operator does not manage fields it was not told about, which is
+                # the same rule it applies to NetBox columns.
+                unmanaged:
+                  type: string
+            status:
+              type: object
+              properties:
+                note:
+                  type: string

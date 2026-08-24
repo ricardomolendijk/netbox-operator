@@ -15,6 +15,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	netboxv1alpha1 "github.com/ricardomolendijk/netbox-operator/api/v1alpha1"
+	"github.com/ricardomolendijk/netbox-operator/internal/reconciler"
 )
 
 // recordingClient is a client.Client that reaches no API server and remembers whether the
@@ -128,6 +129,42 @@ func TestSpecGuardRefusesSpecWrites(t *testing.T) {
 			write: func(_ *testing.T, guard specGuard, obj client.Object) error {
 				return guard.Update(context.Background(), obj)
 			},
+		},
+		{
+			// The materialiser's own write, in the shape it actually makes it: an apply patch
+			// carrying the whole object. It is admitted for the same reason the Update above
+			// is -- the controller owner reference says the operator created this -- and it
+			// is a separate row because an apply patch is the one write in the operator whose
+			// body always contains a spec, so a guard that refused it would break NBO-032
+			// outright.
+			name: "an apply patch of a materialised child is allowed",
+			obj: &netboxv1alpha1.NetBoxTag{ObjectMeta: metav1.ObjectMeta{
+				Namespace: "team-a", Name: "vm-eth0",
+				OwnerReferences: []metav1.OwnerReference{{
+					APIVersion: netboxv1alpha1.GroupVersion.String(),
+					Kind:       "NetBoxVirtualMachine",
+					Name:       "vm",
+					Controller: ptr.To(true),
+				}},
+			}},
+			write: func(_ *testing.T, guard specGuard, obj client.Object) error {
+				return guard.Patch(context.Background(), obj, client.Apply,
+					client.FieldOwner(reconciler.ChildFieldManager))
+			},
+		},
+		{
+			// The other half, and the backstop children.go's non-hijacking check is the front
+			// of: if that GET-before-write were ever removed, the materialiser applying over a
+			// hand-written CR would be refused here rather than silently taking it over.
+			name: "an apply patch of a CR the operator did not create is refused",
+			obj: &netboxv1alpha1.NetBoxTag{ObjectMeta: metav1.ObjectMeta{
+				Namespace: "team-a", Name: "handwritten",
+			}},
+			write: func(_ *testing.T, guard specGuard, obj client.Object) error {
+				return guard.Patch(context.Background(), obj, client.Apply,
+					client.FieldOwner(reconciler.ChildFieldManager))
+			},
+			wantRefused: true,
 		},
 		{
 			// The row that keeps ADR-0003 rule 4 from disabling this guard across a cluster.
