@@ -1,0 +1,38 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxLocation
+metadata:
+  name: ground-floor
+  namespace: default
+spec:
+  endpointRef: homelab
+
+  name: Ground floor
+  slug: ground-floor
+  status: active
+  facility: Building A
+  description: Top-level location within the site
+
+  # Required, and this kind's containment parent: deleting the NetBoxSite cascades to this
+  # object. Until it resolves no natural-key candidate applies -- both start at `site` --
+  # so nothing is written to NetBox rather than a location being created in the wrong site.
+  siteRef:
+    name: home
+---
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxLocation
+metadata:
+  name: rack-row-1
+  namespace: default
+spec:
+  endpointRef: homelab
+
+  name: Rack row 1
+  slug: rack-row-1
+
+  siteRef:
+    name: home
+
+  # Nested inside the location above. Identity is (site, parent, name), so both references
+  # have to resolve before this object can be looked up at all.
+  parentRef:
+    name: ground-floor

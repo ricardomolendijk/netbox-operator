@@ -32,7 +32,9 @@ rules:
   - netbox.kubeforge.org
   resources:
   - netboxendpoints/status
+  - netboxlocations/status
   - netboxregions/status
+  - netboxsitegroups/status
   - netboxsites/status
   - netboxtags/status
   - netboxtenantgroups/status
@@ -44,7 +46,9 @@ rules:
 - apiGroups:
   - netbox.kubeforge.org
   resources:
+  - netboxlocations
   - netboxregions
+  - netboxsitegroups
   - netboxsites
   - netboxtags
   - netboxtenantgroups
@@ -58,7 +62,9 @@ rules:
 - apiGroups:
   - netbox.kubeforge.org
   resources:
+  - netboxlocations/finalizers
   - netboxregions/finalizers
+  - netboxsitegroups/finalizers
   - netboxsites/finalizers
   - netboxtags/finalizers
   - netboxtenantgroups/finalizers

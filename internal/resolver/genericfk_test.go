@@ -381,8 +381,10 @@ func TestEveryAllowedTypeIsWatched(t *testing.T) {
 // NBO-018 and NBO-019 reached this independently for their own unions; it is asserted once,
 // here, because it is a property of a member with no Descriptor and not of any one union.
 func TestUnavailableMemberKindIsReportedInEveryMode(t *testing.T) {
-	// tenantRef is the declared member kinds() registers no Descriptor for -- the same
-	// position NetBoxSiteGroup and NetBoxLocation are in for the scope union until M4.
+	// tenantRef is the declared member kinds() registers no Descriptor for. NetBoxSiteGroup
+	// and NetBoxLocation were the shipped example until NBO-066 gave them Descriptors; the
+	// property is about a member with no Descriptor, so it is asserted on a union member that
+	// still has none rather than restated per union.
 	for name, ref := range map[string]any{
 		"name":   map[string]any{"name": "acme"},
 		"slug":   map[string]any{"slug": "acme"},

@@ -107,10 +107,11 @@ lives; every kind in `v1alpha1` is namespaced regardless
 | `siteRef` | `NetBoxSite` | `dcim.site` |
 | `locationRef` | `NetBoxLocation` | `dcim.location` |
 
-`NetBoxSiteGroup` and `NetBoxLocation` have no Descriptor in this build
-([NBO-066 (#79)](https://github.com/ricardomolendijk/netbox-operator/issues/79), NBO-048), so
-those two members report `RefKindUnavailable` in **all four** modes — `slug`, `lookup` and
-`id` need the target's REST endpoint, and only a Descriptor holds it.
+All four members have a Descriptor as of
+[NBO-066 (#79)](https://github.com/ricardomolendijk/netbox-operator/issues/79), so the union
+is resolvable end to end: `siteGroupRef` and `locationRef` used to report
+`RefKindUnavailable` in **all four** modes, because `slug`, `lookup` and `id` each need the
+target's REST endpoint and only a Descriptor holds it.
 
 ```yaml
 apiVersion: netbox.kubeforge.org/v1alpha1
