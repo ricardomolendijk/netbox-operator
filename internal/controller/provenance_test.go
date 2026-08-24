@@ -175,14 +175,10 @@ func TestEndpointAdoptsDefinitionsMadeByHand(t *testing.T) {
 
 	stub.seedExtras("extras/tags", netbox.Object{"name": "k8s-managed", "slug": "k8s-managed"})
 
-	// The seeded object_types come from the registry rather than from a literal list. The
-	// bootstrap widens a definition that covers fewer types than the build has stampable
-	// kinds, so a hardcoded pair would turn every new kind into a PATCH this test reports as
-	// a bug -- and adding a kind is meant to touch no shared code at all.
-	types := make([]any, 0, len(registry.List()))
-	for _, objectType := range provenance.ObjectTypes(registry.List()) {
-		types = append(types, objectType)
-	}
+	// The seeded object_types come from the registry rather than from a literal list (see
+	// objectTypesAsAny). The bootstrap widens a definition covering fewer types than the
+	// build has stampable kinds, so a hardcoded pair would turn every new kind into a PATCH
+	// this test reports as a bug -- and adding a kind is meant to touch no shared code.
 
 	for _, name := range []string{"k8s_uid", "k8s_cluster", "k8s_owner", "k8s_allocation_identity"} {
 		// Derived, not listed. This test's subject is adoption -- "NetBox already had
