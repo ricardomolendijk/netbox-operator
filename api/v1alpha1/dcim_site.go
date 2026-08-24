@@ -121,18 +121,30 @@ type NetBoxSiteSpec struct {
 	// (internal/netbox/drift.go, scalarEqual), so `"51.9244"` and NetBox's `"51.924400"`
 	// are the same value and produce no PATCH.
 	//
+	// Omit it to leave NetBox's own value alone; set it to `""` to clear the value in
+	// NetBox. The two are different intents and the operator can tell them apart
+	// (docs/concepts/field-ownership.md). A cleared coordinate is written as `null` rather
+	// than as an empty string, which is what NetBox's nullable DecimalField takes -- see
+	// registry.Field.EmptyIsNull.
+	//
 	// The pattern caps the fraction at six digits and the integer part at two, both read
 	// straight off docs/netbox-schema.md -> dcim.Site: `latitude DecimalField decimal(8,6)`,
 	// so eight digits total with six after the point. (`longitude` is decimal(9,6), which is
-	// why its pattern allows three integer digits and this one does not.) The -90..90 range
-	// CEL enforces is the tighter constraint on top.
-	// +kubebuilder:validation:Pattern=`^-?[0-9]{1,2}(\.[0-9]{1,6})?$`
-	// +kubebuilder:validation:XValidation:rule="double(self) >= -90.0 && double(self) <= 90.0",message="latitude must be between -90 and 90 degrees"
+	// why its pattern allows three integer digits and this one does not.) The `^$` alternative
+	// is the clear, and the CEL rule has to admit it too: `double("")` is an error, so a rule
+	// that did not short-circuit would reject at admission the one value clearing uses (#170).
+	// The -90..90 range is the tighter constraint on top.
+	// +kubebuilder:validation:Pattern=`^$|^-?[0-9]{1,2}(\.[0-9]{1,6})?$`
+	// +kubebuilder:validation:XValidation:rule="self == \"\" || (double(self) >= -90.0 && double(self) <= 90.0)",message="latitude must be between -90 and 90 degrees"
 	// +optional
 	Latitude string `json:"latitude,omitempty"`
 
 	// Longitude is the site's GPS longitude in decimal degrees, as a string. A string for
 	// the same reason as Latitude.
+	//
+	// Omit it to leave NetBox's own value alone; set it to `""` to clear the value in
+	// NetBox. The two are different intents and the operator can tell them apart
+	// (docs/concepts/field-ownership.md). Cleared as `null`, for the reason Latitude gives.
 	//
 	// Three integer digits, not two: longitude runs to +-180. NBO-009 states both columns
 	// as `decimal(8,6)`, which would cap this at 99.999999 and reject every longitude east
@@ -141,8 +153,8 @@ type NetBoxSiteSpec struct {
 	// digits here it says so, and the site reports Ready=False, Reason=Invalid carrying
 	// NetBox's own message -- which is a great deal easier to diagnose than an admission
 	// rejection of a correct value.
-	// +kubebuilder:validation:Pattern=`^-?[0-9]{1,3}(\.[0-9]{1,6})?$`
-	// +kubebuilder:validation:XValidation:rule="double(self) >= -180.0 && double(self) <= 180.0",message="longitude must be between -180 and 180 degrees"
+	// +kubebuilder:validation:Pattern=`^$|^-?[0-9]{1,3}(\.[0-9]{1,6})?$`
+	// +kubebuilder:validation:XValidation:rule="self == \"\" || (double(self) >= -180.0 && double(self) <= 180.0)",message="longitude must be between -180 and 180 degrees"
 	// +optional
 	Longitude string `json:"longitude,omitempty"`
 

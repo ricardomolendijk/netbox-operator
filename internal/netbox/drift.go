@@ -126,6 +126,12 @@ const customFieldsKey = "custom_fields"
 // operator knows nothing about. Diffing the whole map would make the operator try to
 // null out every unmanaged custom field on every reconcile -- and NetBox merges a partial
 // custom_fields PATCH, so sending only the managed subset is both correct and sufficient.
+//
+// The cost is that this container has two states where every other optional field has
+// three: an empty map means "manage nothing" rather than "clear everything", so a value
+// once written cannot be removed. Documented rather than fixed
+// (docs/concepts/field-ownership.md, #171) -- the alternative fights every other writer on
+// the instance.
 func customFieldsEqual(have, want any) bool {
 	desired, ok := want.(map[string]any)
 	if !ok {
