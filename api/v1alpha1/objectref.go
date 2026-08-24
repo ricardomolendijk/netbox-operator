@@ -114,6 +114,9 @@ type (
 	// SiteGroupRef points at a NetBoxSiteGroup (dcim.SiteGroup, dcim/site-groups).
 	SiteGroupRef ObjectRef
 
+	// LocationRef points at a NetBoxLocation (dcim.Location, dcim/locations).
+	LocationRef ObjectRef
+
 	// TenantRef points at a NetBoxTenant (tenancy.Tenant, tenancy/tenants).
 	TenantRef ObjectRef
 )
@@ -147,6 +150,14 @@ func (r SiteGroupRef) TargetGVK() schema.GroupVersionKind {
 func (r SiteGroupRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
 
 // TargetGVK reports the Kind this reference resolves against.
+func (r LocationRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxLocation")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r LocationRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
 func (r TenantRef) TargetGVK() schema.GroupVersionKind {
 	return GroupVersion.WithKind("NetBoxTenant")
 }
@@ -161,5 +172,6 @@ var (
 	_ RefTarget = RegionRef{}
 	_ RefTarget = SiteRef{}
 	_ RefTarget = SiteGroupRef{}
+	_ RefTarget = LocationRef{}
 	_ RefTarget = TenantRef{}
 )
