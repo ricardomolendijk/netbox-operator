@@ -12,6 +12,7 @@ import (
 	netboxv1alpha1 "github.com/ricardomolendijk/netbox-operator/api/v1alpha1"
 	"github.com/ricardomolendijk/netbox-operator/internal/netbox"
 	"github.com/ricardomolendijk/netbox-operator/internal/provenance"
+	"github.com/ricardomolendijk/netbox-operator/internal/registry"
 )
 
 // managedBy is the spec block every test here sets, with an explicit cluster identifier
@@ -160,7 +161,7 @@ func TestEndpointAdoptsDefinitionsMadeByHand(t *testing.T) {
 	stub.seedExtras("extras/tags", netbox.Object{"name": "k8s-managed", "slug": "k8s-managed"})
 	for _, name := range []string{"k8s_uid", "k8s_cluster", "k8s_owner", "k8s_allocation_identity"} {
 		stub.seedExtras("extras/custom-fields", netbox.Object{
-			"name": name, "object_types": []any{"dcim.site", "dcim.region"},
+			"name": name, "object_types": seededObjectTypes(),
 		})
 	}
 
@@ -171,6 +172,31 @@ func TestEndpointAdoptsDefinitionsMadeByHand(t *testing.T) {
 		t.Errorf("bootstrap wrote %s %s against a netbox that already had everything",
 			write.Method, write.Endpoint)
 	}
+}
+
+// seededObjectTypes is every object type the bootstrap would declare, read off the registry
+// rather than listed.
+//
+// Listed, it was `{"dcim.site", "dcim.region"}` and it broke the moment a kind was added --
+// the operator widened the seeded definitions to cover the new object type, which is correct
+// behaviour and made this test fail for it. That is a fixture that has to be edited every
+// time a CustomFieldable kind lands, which is exactly the per-kind maintenance the registry
+// exists to remove.
+//
+// Deriving it does not weaken the test, because the object-type list is not what this test
+// asserts: TestEndpointBootstrapsProvenanceDefinitions above checks the contents of what is
+// created, naming dcim.site and dcim.region and excluding extras.tag. What this test asserts
+// is *adoption* -- that a NetBox already holding everything is written to zero times -- and
+// "everything" is by definition whatever the registry says.
+func seededObjectTypes() []any {
+	types := provenance.ObjectTypes(registry.List())
+	out := make([]any, 0, len(types))
+
+	for _, objectType := range types {
+		out = append(out, objectType)
+	}
+
+	return out
 }
 
 // TestEndpointBootstrapDisabled is the opt-out: nothing is created, the condition names what
