@@ -1,0 +1,18 @@
+# Namespaces holding endpoint credential Secrets: the operator's Secret blast radius.
+#
+# One namespace per line. This file is the only thing you edit to widen or narrow it --
+# `make manifests` regenerates rbac.yaml (a Role and RoleBinding per namespace) and
+# manager_env_patch.yaml (the namespace list the manager builds its informers from) from
+# it, and `make verify` fails if you forget.
+#
+# Every namespace listed here is a namespace in which a compromised operator can read
+# every Secret, so keep the list to the namespaces that actually hold NetBoxEndpoint
+# credentials. An endpoint in a namespace that is not listed reports Ready=False with
+# reason SecretMissing, naming the namespace and this file.
+#
+# `*` is not accepted here. Reading Secrets cluster-wide needs a cluster-wide grant this
+# repository deliberately no longer ships; docs/operations/rbac.md says what to add if you
+# want it back.
+
+# The namespace config/samples and docs/examples put their endpoint in.
+default

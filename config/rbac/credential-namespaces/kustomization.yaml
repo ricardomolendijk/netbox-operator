@@ -1,0 +1,14 @@
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+# A component rather than a resource directory: it has to reach the manager Deployment as
+# well as add Roles, and only a component's patches are applied to what the parent
+# kustomization has already accumulated.
+#
+# Both files below are generated from namespaces.txt by `make manifests`
+# (hack/credential-rbac.sh). Do not edit them.
+resources:
+- rbac.yaml
+
+patches:
+- path: manager_env_patch.yaml

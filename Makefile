@@ -50,6 +50,11 @@ manifests: controller-gen ## Generate CRDs and RBAC into config/.
 		paths="./..." \
 		output:crd:artifacts:config=config/crd/bases \
 		output:rbac:artifacts:config=config/rbac
+	@# The Secret grant controller-gen cannot express: a marker only ever produces a
+	@# cluster-wide rule, and the namespaces holding endpoint credentials are deploy-time
+	@# configuration. Generated from config/rbac/credential-namespaces/namespaces.txt into
+	@# config/rbac, so `make verify` covers it like anything else generated (NBO-072).
+	./hack/credential-rbac.sh
 
 .PHONY: fmt
 fmt: ## Format the Go code.
