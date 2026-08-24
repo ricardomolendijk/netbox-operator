@@ -376,6 +376,19 @@ reader tell "reconciled and healthy" from "not yet looked at since the last edit
 it, `kubectl wait --for=condition=Ready` returns immediately on a stale `True` from
 before the spec change, and any automation built on that quietly does the wrong thing.
 
+**A standing failure is reported once.** Both the endpoint controller's `fail` and the
+engine's `stop` emit their `Warning` Event and their error-level log line only on the
+transition into a state — keyed on the condition's `status` and `reason`, never its
+message, since a timeout whose wording differs by a millisecond is not a state change —
+and log the repeats at debug instead. The condition is written on every pass regardless,
+because the condition *is* the standing state, and that is exactly why the Event does not
+need to repeat: a spec NetBox keeps rejecting would otherwise produce an Event and an
+error line every resync forever, and a flood of duplicate Events evicts the ones somebody
+needed. Metrics are the deliberate exception — `netbox_operator_reconcile_total` and
+`netbox_operator_endpoint_reconcile_total` count every pass, because they are counters of
+reconciles rather than of changes, and a `rate()` over them is how the retry rate of a
+stuck object is visible at all.
+
 **The three condition types** (`api/v1alpha1/netboxendpoint_types.go:8`–`:17`):
 
 | Type | Meaning | Set to `False` by |
