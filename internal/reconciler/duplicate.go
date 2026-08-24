@@ -120,7 +120,7 @@ func (p *pass) claimStamped(matches []netbox.Object) (match, error) {
 	}
 
 	if len(mine) == 1 {
-		return p.own(mine[0])
+		return p.claimOwnStamp(mine[0])
 	}
 
 	if len(unstamped) > 0 {
@@ -138,13 +138,18 @@ func (p *pass) claimStamped(matches []netbox.Object) (match, error) {
 	return match{}, nil
 }
 
-// own is the match that carries this CR's stamp.
+// claimOwnStamp is the match that carries this CR's stamp.
+//
+// Named for what it does rather than the shorter `own`, which NBO's owner-reference step
+// (owners.go, landed separately) already uses for setting a Kubernetes owner reference. Two
+// methods called `own` on one type meant one of them lost -- the textual merge was clean
+// because they live in different files, and only the compiler saw it.
 //
 // byNaturalKey is deliberately false: an object stamped with this CR's own metadata.uid was
 // created by this CR, so it is not an adoption and must not need spec.onConflict. status.id
 // is written here for the same reason claim() writes it on the adoption path -- update()
 // PATCHes by the recorded id, and this is the pass that learned it.
-func (p *pass) own(live netbox.Object) (match, error) {
+func (p *pass) claimOwnStamp(live netbox.Object) (match, error) {
 	id, ok := live.ID()
 	if !ok {
 		return match{}, fmt.Errorf("%w: matched by its provenance stamp", errNoObjectID)
