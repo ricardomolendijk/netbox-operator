@@ -31,6 +31,28 @@ const (
 	// stable value rather than one that flaps on every write.
 	ConditionDriftDetected = "DriftDetected"
 
+	// ConditionParentOwned reports whether deleting this object's containment parent will
+	// take this object with it: True when the non-controller owner reference of
+	// ADR-0003 rule 4 is set, False when it cannot be or was declined.
+	//
+	// It exists because the answer is not a property of the manifest. An owner reference is
+	// legal only inside one namespace and a NetBox foreign key is not, so the *same* spec
+	// cascades in a namespace that holds its parent and does not in one that points at a
+	// shared catalogue -- and the difference is otherwise invisible until somebody deletes
+	// the parent and finds this object still here. That is not a discovery to leave to
+	// deletion day, so it is a standing condition rather than an Event: an Event ages out of
+	// the namespace within the hour, and this state is permanent for as long as the two
+	// objects live where they live.
+	//
+	// Set only on a kind whose Descriptor names a ContainmentRef *and* whose spec sets it.
+	// A kind with no containment parent -- every catalogue kind -- has no cascade to
+	// report and carries no such condition, rather than a page of objects all saying
+	// "not applicable".
+	//
+	// It never influences Ready. A missing cascade is a statement about deletion, and an
+	// object whose NetBox counterpart matches its spec is Ready whatever happens later.
+	ConditionParentOwned = "ParentOwned"
+
 	// ConditionDeleting reports what the engine is doing about the NetBox object behind a
 	// CR that carries a deletion timestamp.
 	//
@@ -55,6 +77,21 @@ const Finalizer = "netbox.kubeforge.org/finalizer"
 // guarantees an object left behind in NetBox, which is sometimes the right trade and is
 // never the default.
 const SkipFinalizerAnnotation = "netbox.kubeforge.org/skip-finalizer"
+
+// ParentOwnershipAnnotation opts one object out of the containment owner reference of
+// ADR-0003 rule 4. Set it to "false" and no owner reference is added, so deleting the
+// containment parent leaves this object alone.
+//
+// The default is on, because "delete the site and its prefixes go too" is what people
+// expect and the alternative is silent orphans in NetBox. This is the escape for the case
+// where it is wrong, and it is per-object rather than per-endpoint deliberately: the
+// objects that want to outlive their parent are individual ones, and an endpoint-wide
+// switch would be a third deletion knob next to deletionPolicy and onConflict.
+//
+// Only "false" opts out. Any other value, the annotation being absent included, is the
+// default -- so a typo leaves the documented behaviour in place rather than silently
+// disabling a cascade somebody is relying on.
+const ParentOwnershipAnnotation = "netbox.kubeforge.org/parent-ownership"
 
 // Condition reasons for an object CR. The vocabulary is deliberately small: a reason is
 // keyed on by tooling and by the docs, so a new one is a documented addition rather than
@@ -215,6 +252,35 @@ const (
 	// its CRD is not installed. Distinct from RefNotFound because the manifest is correct
 	// and the fix is an operator upgrade rather than an edit.
 	ReasonRefKindUnavailable = "RefKindUnavailable"
+
+	// ReasonParentOwned is on ParentOwned: the containment parent's owner reference is set,
+	// so deleting the parent garbage-collects this object.
+	ReasonParentOwned = "ParentOwned"
+
+	// ReasonCascadeUnavailable is on ParentOwned: the containment parent resolved, and no
+	// owner reference to it is legal, so deleting the parent will *not* remove this object.
+	//
+	// One reason for both causes, because the consequence and the fix are the same shape --
+	// the parent is not a Kubernetes object this one may depend on -- and the message names
+	// which it was. The two causes:
+	//
+	//   - The parent is in another namespace. An owner reference may not cross one, ever
+	//     (ADR-0002 makes every kind namespaced, so this is the whole of the legality rule).
+	//     A NetBoxRefGrant authorises the *reference*; nothing can authorise the owner
+	//     reference, because the garbage collector is not namespace-aware and Kubernetes
+	//     resolves a cross-namespace owner as absent -- which would delete this object
+	//     immediately rather than never.
+	//   - The parent was written as a `slug`, a `lookup` or a raw `id`, so it names a NetBox
+	//     row and there is no CR for an owner reference to point at.
+	ReasonCascadeUnavailable = "CascadeUnavailable"
+
+	// ReasonParentOwnershipDisabled is on ParentOwned: the object carries
+	// ParentOwnershipAnnotation set to "false", so the owner reference was not added.
+	//
+	// Distinct from CascadeUnavailable, which is the operator reporting that it *cannot*.
+	// This one is somebody having decided that it should not, and conflating the two would
+	// send whoever set the annotation looking for a namespace problem that does not exist.
+	ReasonParentOwnershipDisabled = "ParentOwnershipDisabled"
 
 	// ReasonProtected is on Deleting: NetBox refused the delete because something still
 	// references the object. Nothing about this object can clear it -- the referring

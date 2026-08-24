@@ -140,9 +140,26 @@ tells you the engine treated the object as top-level.
 | `Ready` | the region exists in NetBox and matches the spec | anything else | `Synced`, `WaitingForEndpoint`, `WaitingForKey`, `Conflict`, `AdoptOnly`, `Invalid`, `APIError`, `DryRunPending` |
 | `Synced` | the last write succeeded, or no drift was found | drift found and not corrected | `NoDrift`, `DriftCorrected`, `DriftDetectedDryRun` |
 | `RefsResolved` | `parentRef` is unset | `parentRef` is set — always, in this build | `AllResolved`, `NotImplemented` |
+| `ParentOwned` | `parentRef` resolved to a region in this namespace, so deleting it cascades | `parentRef` resolved to a region in another namespace, to a raw `id` or `slug`, or ownership was declined | `ParentOwned`, `CascadeUnavailable`, `ParentOwnershipDisabled` |
 | `Deleting` | never | while terminating and NetBox is not settled | `Protected`, `WaitingForEndpoint`, `APIError`, `Invalid` |
 
 ## Kind-specific behaviour
+
+### A child region is owned by its parent
+
+`parentRef` is this kind's containment reference, so a sub-region carries a non-controller
+owner reference to its parent and `kubectl delete` on the parent takes its children with it.
+
+That is not a convenience. `dcim.Region.parent` is `on_delete=CASCADE`, so deleting a region
+in NetBox deletes its descendants server-side — and without the owner reference the child CR
+would outlive the row it described, find nothing at `status.id`, and be **recreated** by the
+engine's create-if-absent step.
+
+The owner reference is only set when the parent is in the same namespace, because an owner
+reference may never cross one. A region whose parent lives in a shared catalogue namespace
+reports `ParentOwned=False, Reason=CascadeUnavailable` and does not cascade — which is the
+common shape, so read that condition before relying on the cascade. See
+[ownership](../concepts/ownership.md) for the whole rule and the opt-out annotation.
 
 ### A child region waits rather than guessing
 

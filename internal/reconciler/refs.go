@@ -87,6 +87,12 @@ func (p *pass) resolveRefs(ctx context.Context, declared []string) error {
 		return err
 	}
 
+	// Kept for ownParent, keyed by the descriptor's own spelling of the containment field.
+	// One lookup rather than a branch inside applyResolved, because ByField is keyed the
+	// same way for an ordinary reference and for a generic-FK union -- so a containment
+	// parent reached through the scope union of #179 needs no second case here.
+	p.containment = resolution.ByField[p.desc.ContainmentRef]
+
 	resolved, notes := p.applyResolved(resolution)
 
 	if len(resolved) == len(declared) {
