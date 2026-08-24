@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/ricardomolendijk/netbox-operator/internal/netbox"
+	"github.com/ricardomolendijk/netbox-operator/internal/provenance"
 )
 
 // stubWrite is one mutating request the stub received.
@@ -405,11 +406,42 @@ func (s *netboxStubServer) object(w http.ResponseWriter, r *http.Request, id int
 		}
 		s.writes = append(s.writes, stubWrite{Method: http.MethodPatch, ID: id, Payload: payload})
 		for k, v := range payload {
-			obj[k] = v
+			obj[k] = stubPatchValue(k, obj[k], v)
 		}
 		s.objects[id] = netboxShape(obj)
 		writeStubJSON(w, http.StatusOK, s.objects[id])
 	}
+}
+
+// stubPatchValue is what one column becomes when a PATCH names it. Replacement, except for
+// the one container NetBox merges instead.
+//
+// CustomFieldsDataField.to_internal_value starts from what is stored and overlays the
+// submitted keys -- `data = {**self.parent.instance.custom_field_data, **data}`
+// (extras/api/customfields.py) -- which is the entire reason the operator is allowed to send
+// a partial container and compare only the keys it sets (customFieldsEqual,
+// internal/netbox/drift.go). A stub that replaced it would delete an unmanaged custom field
+// on the operator's first write and so hide the bug the merge exists to prevent.
+//
+// A null in the submitted map is a value like any other here: it overwrites, and the read
+// gives it back as null, which is how a removal settles (#196).
+func stubPatchValue(field string, stored, sent any) any {
+	if field != provenance.CustomFieldsField {
+		return sent
+	}
+
+	submitted, ok := sent.(map[string]any)
+	if !ok {
+		return sent
+	}
+
+	merged := map[string]any{}
+	if existing, ok := stored.(map[string]any); ok {
+		maps.Copy(merged, existing)
+	}
+	maps.Copy(merged, submitted)
+
+	return merged
 }
 
 // netboxShape rewrites a stored object into the shape NetBox returns on read: choice

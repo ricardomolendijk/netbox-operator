@@ -179,6 +179,15 @@ func fakeDescriptor() registry.Descriptor {
 	}
 }
 
+// customFieldableDescriptor is a kind whose NetBox model mixes in CustomFieldsMixin, which
+// fakeDescriptor's extras.Tag deliberately does not.
+func customFieldableDescriptor() registry.Descriptor {
+	d := fakeDescriptor()
+	d.CustomFieldable = true
+
+	return d
+}
+
 // parentedDescriptor keys on its parent, like dcim.Region: with the parent declared and
 // unresolvable, no candidate applies at all.
 func parentedDescriptor() registry.Descriptor {
