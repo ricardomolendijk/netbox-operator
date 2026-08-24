@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -131,16 +132,26 @@ func newNamespace(t *testing.T) string {
 	return newNamespaceSuffixed(t, "")
 }
 
+// nsSeq numbers every namespace this process hands out. The test name alone is not unique
+// across iterations, so `go test -count=2` used to fail every test on "namespaces ... already
+// exists" -- and a suite that cannot be run twice cannot be used to hunt a flake, which is
+// the whole instrument NBO-091 needed.
+var nsSeq atomic.Uint64
+
 // newNamespaceSuffixed is newNamespace for a test that needs more than one. A NetBox slug
 // is unique globally while a CRD is namespaced, so "the same object claimed from two
 // namespaces" is a case that cannot be written with one namespace per test.
 func newNamespaceSuffixed(t *testing.T, suffix string) string {
 	t.Helper()
+	seq := fmt.Sprintf("-%d", nsSeq.Add(1))
 	name := "nbtest-" + strings.ToLower(strings.NewReplacer("/", "-", "_", "-").Replace(t.Name()))
-	if len(name) > 60-len(suffix) {
-		name = name[:60-len(suffix)]
+	// A namespace name is a DNS label, so the whole thing has to fit in 63 characters; the
+	// suffix and the sequence are the parts that carry meaning, so the test name is what
+	// gives way.
+	if budget := 63 - len(suffix) - len(seq); len(name) > budget {
+		name = name[:budget]
 	}
-	name += suffix
+	name += suffix + seq
 	if err := k8sClient.Create(context.Background(), &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{Name: name},
 	}); err != nil {
@@ -151,6 +162,12 @@ func newNamespaceSuffixed(t *testing.T, suffix string) string {
 
 // eventually polls until check passes or the deadline expires. Simpler than pulling in
 // gomega for the handful of assertions here.
+//
+// 20 seconds is not a tight budget and raising it fixes nothing. Every wait in this package
+// was measured (NBO-091): the slowest is the drift-correction chain at ~1s, everything else
+// lands on the first or second poll, and neither `-cpu 1` nor a load average of 78 on 11
+// cores moves any of them or produces a single timeout. A test here that fails is failing
+// for a reason, and a longer deadline would only make it slower to find out.
 func eventually(t *testing.T, what string, check func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(20 * time.Second)
