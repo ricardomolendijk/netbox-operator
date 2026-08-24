@@ -88,6 +88,7 @@ spec:
                 type: string
               customFields:
                 additionalProperties:
+                  nullable: true
                   type: string
                 description: |-
                   CustomFields are NetBox custom-field values to write, keyed by NetBox custom-field
