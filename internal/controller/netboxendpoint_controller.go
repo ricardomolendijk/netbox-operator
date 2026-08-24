@@ -146,7 +146,10 @@ func (r *NetBoxEndpointReconciler) ready(ctx context.Context, e *netboxv1alpha1.
 	logf.FromContext(ctx).V(debugUnless(became)).Info("endpoint ready",
 		"action", "probe",
 		"url", e.Spec.URL, "netboxVersion", status.Version,
-		"mode", cfg.Mode, "plugins", status.Plugins,
+		// cfg.Mode rather than spec.mode, because driftMode: Report overrides it: the line
+		// has to report the mode the client is actually in, or a suppressed write looks
+		// like a bug.
+		"mode", cfg.Mode, "driftMode", e.Spec.DriftMode, "plugins", status.Plugins,
 		"insecureSkipVerify", cfg.InsecureSkipVerify)
 
 	if became {
@@ -208,7 +211,7 @@ func (r *NetBoxEndpointReconciler) buildConfig(ctx context.Context, e *netboxv1a
 	cfg := netbox.Config{
 		URL:   e.Spec.URL,
 		Token: token,
-		Mode:  netbox.Mode(e.Spec.Mode),
+		Mode:  clientMode(e),
 		// No client-side retries on the probe. The controller already requeues, one
 		// worker serves every endpoint, and four retries behind a 30s timeout let a
 		// single black-holed NetBox stall every other endpoint for minutes.
@@ -240,6 +243,23 @@ func (r *NetBoxEndpointReconciler) buildConfig(ctx context.Context, e *netboxv1a
 		return netbox.Config{}, fmt.Errorf("ca bundle secret %s has no key %q", name, key)
 	}
 	return cfg, nil
+}
+
+// clientMode collapses the two spec fields that can stop a write into the one thing the
+// client enforces.
+//
+// driftMode: Report has to be genuinely non-mutating -- a mode that writes and logs
+// teaches people to distrust it, which is worse than not offering it -- and the only way to
+// promise that is to hand the engine a client that cannot write. The alternative, a flag
+// the engine consults before each mutation, is a promise that lasts until the first write
+// path somebody forgets to guard, and the finalizer's delete is already a second one
+// (docs/decisions/0005-gitops-coexistence.md).
+func clientMode(e *netboxv1alpha1.NetBoxEndpoint) netbox.Mode {
+	if e.Spec.DriftMode == netboxv1alpha1.DriftReport {
+		return netbox.ModeDryRun
+	}
+
+	return netbox.Mode(e.Spec.Mode)
 }
 
 // fail records why the endpoint is not usable and drops any cached client, so object

@@ -24,6 +24,9 @@ spec:
     - jsonPath: .spec.mode
       name: Mode
       type: string
+    - jsonPath: .spec.driftMode
+      name: Drift
+      type: string
     - jsonPath: .status.netboxVersion
       name: Version
       type: string
@@ -63,6 +66,16 @@ spec:
           spec:
             description: NetBoxEndpointSpec describes one NetBox instance.
             properties:
+              driftMode:
+                default: Correct
+                description: |-
+                  DriftMode is what to do about a NetBox object that no longer matches its CR:
+                  Correct, Report or Off.
+                enum:
+                - Correct
+                - Report
+                - "Off"
+                type: string
               mode:
                 default: Apply
                 description: Mode is Apply or DryRun.
@@ -87,8 +100,9 @@ spec:
                 type: object
               resyncPeriod:
                 default: 10m
-                description: ResyncPeriod re-checks NetBox for drift even when no
-                  CR changed.
+                description: |-
+                  ResyncPeriod re-checks NetBox for drift even when no CR changed. Ignored when
+                  driftMode is Off, which is what "no periodic resync" means.
                 type: string
               timeout:
                 default: 30s

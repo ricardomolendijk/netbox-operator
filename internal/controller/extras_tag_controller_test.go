@@ -289,6 +289,14 @@ func decodeTag(w http.ResponseWriter, r *http.Request) (netbox.Object, bool) {
 // anything else here. A test cannot wait for the ten-minute default.
 func readyEndpoint(t *testing.T, ns, target string) {
 	t.Helper()
+	readyEndpointWith(t, ns, target, nil)
+}
+
+// readyEndpointWith is readyEndpoint for a test that needs a field it does not set:
+// spec.driftMode, whose three values are three different operators
+// (gitops_test.go, NBO-065).
+func readyEndpointWith(t *testing.T, ns, target string, mutate func(*netboxv1alpha1.NetBoxEndpoint)) {
+	t.Helper()
 	makeSecret(t, k8sClient, ns, "nb-token", "valid-token")
 
 	endpoint := &netboxv1alpha1.NetBoxEndpoint{
@@ -297,8 +305,12 @@ func readyEndpoint(t *testing.T, ns, target string) {
 			URL:            target,
 			TokenSecretRef: netboxv1alpha1.SecretKeyRef{Name: "nb-token"},
 			Mode:           netboxv1alpha1.EndpointModeApply,
+			DriftMode:      netboxv1alpha1.DriftCorrect,
 			ResyncPeriod:   metav1.Duration{Duration: time.Second},
 		},
+	}
+	if mutate != nil {
+		mutate(endpoint)
 	}
 	if err := k8sClient.Create(context.Background(), endpoint); err != nil {
 		t.Fatalf("creating endpoint in %s: %v", ns, err)

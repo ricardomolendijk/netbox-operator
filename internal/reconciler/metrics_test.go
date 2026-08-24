@@ -27,22 +27,30 @@ var results = []string{
 	metrics.ResultUnchanged,
 	metrics.ResultDeleted,
 	metrics.ResultDryRun,
+	metrics.ResultReported,
 	metrics.ResultWaiting,
 	metrics.ResultError,
 }
 
+// adoptedID is the NetBox id adoptedObject() has already recorded. Written down because
+// driftedTag has to describe the same object: a live object under another id sends the
+// engine down the recover-and-relookup path instead of the compare-and-patch one every
+// resync takes.
+const adoptedID = 7
+
 // adoptedObject is a CR that has already recorded its NetBox id, so the engine locates by
-// id and goes straight to the compare-and-patch path every resync takes.
+// id and goes straight to the compare-and-patch path.
 func adoptedObject() *fakeKind {
 	obj := fakeObject()
-	obj.Status.ID = 7
+	obj.Status.ID = adoptedID
 
 	return obj
 }
 
-// driftedTag is liveTag with one field a human has changed underneath the operator.
-func driftedTag(id int) netbox.Object {
-	live := liveTag(id)
+// driftedTag is adoptedObject()'s live tag with one field a human has changed underneath
+// the operator.
+func driftedTag() netbox.Object {
+	live := liveTag(adoptedID)
 	live["color"] = "ff0000"
 
 	return live
@@ -83,7 +91,7 @@ func TestReconcileMetrics(t *testing.T) {
 			name:   "a corrected field is counted as both detected and corrected",
 			object: adoptedObject,
 			client: func(*testing.T) *fakeClient {
-				return &fakeClient{get: driftedTag(7), patched: liveTag(7)}
+				return &fakeClient{get: driftedTag(), patched: liveTag(7)}
 			},
 			wantResult:    metrics.ResultUpdated,
 			wantDrift:     []string{"color"},
@@ -94,7 +102,7 @@ func TestReconcileMetrics(t *testing.T) {
 			descriptor: fakeDescriptor(),
 			object:     adoptedObject,
 			client: func(t *testing.T) *fakeClient {
-				return &fakeClient{get: driftedTag(7), dryRun: dryRunClient(t)}
+				return &fakeClient{get: driftedTag(), dryRun: dryRunClient(t)}
 			},
 			wantResult: metrics.ResultDryRun,
 			wantDrift:  []string{"color"},

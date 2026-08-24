@@ -46,7 +46,9 @@ func (p *endpointProvider) Endpoint(namespace, name string) (reconciler.Endpoint
 
 	// No DryRun field to populate: the client reports suppression on the return value of
 	// every mutating call, so the engine reads it from the answer rather than from a copy
-	// of the mode that an adapter could forget to set. See NBO-076.
+	// of the mode that an adapter could forget to set. See NBO-076. driftMode below is
+	// carried for the opposite reason -- it decides what the engine *says* and when it
+	// comes back, neither of which is readable off a write that never happened.
 	endpoint := reconciler.Endpoint{Client: nbClient}
 
 	cr := &netboxv1alpha1.NetBoxEndpoint{}
@@ -57,11 +59,12 @@ func (p *endpointProvider) Endpoint(namespace, name string) (reconciler.Endpoint
 		// not caught up. The only thing missing is the resync period; refusing the
 		// endpoint over it would stall every object in the namespace for a state that
 		// resolves itself in milliseconds. Endpoint.Resync of zero means the engine's own
-		// default, which is the same ten minutes the CRD defaults to.
+		// default, which is the same ten minutes the CRD defaults to, and an empty
+		// DriftMode means Correct, which is the CRD's default too.
 		return endpoint, true
 	}
 
-	endpoint.Resync = cr.Spec.ResyncPeriod.Duration
+	endpoint.Resync, endpoint.DriftMode = cr.Spec.ResyncPeriod.Duration, cr.Spec.DriftMode
 
 	return endpoint, true
 }

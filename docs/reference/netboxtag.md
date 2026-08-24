@@ -292,8 +292,9 @@ to the cluster. That is what makes a no-drift resync free.
 
 | Type | `True` when | `False` when | Reasons it can carry |
 |---|---|---|---|
-| `Ready` | the tag exists in NetBox and matches the spec | anything else at all | `Synced`, `WaitingForEndpoint`, `WaitingForKey`, `Conflict`, `AdoptOnly`, `Invalid`, `APIError`, `DryRunPending` |
-| `Synced` | the last write succeeded, or the last check found no drift | drift was found and not corrected — which today means DryRun | `NoDrift`, `DriftCorrected`, `DriftDetectedDryRun` |
+| `Ready` | the tag exists in NetBox and matches the spec | anything else at all | `Synced`, `WaitingForEndpoint`, `WaitingForKey`, `Conflict`, `AdoptOnly`, `Invalid`, `APIError`, `DryRunPending`, `ReportPending` |
+| `Synced` | the last write succeeded, or the last check found no drift | drift was found and not corrected — `mode: DryRun` or `driftMode: Report` | `NoDrift`, `DriftCorrected`, `DriftDetectedDryRun`, `DriftReported` |
+| `DriftDetected` | NetBox differs from the spec and nothing was sent to change it | nothing differed, or the difference was corrected | `NoDrift`, `DriftCorrected`, `DriftDetected` |
 | `RefsResolved` | every reference in the spec resolved | never, on this kind | `AllResolved` |
 | `Deleting` | never | while the CR is terminating and the NetBox side is not settled | `Protected`, `WaitingForEndpoint`, `APIError`, `Invalid` |
 
@@ -305,6 +306,13 @@ the engine could be proved with first.
 `Deleting` is only ever `False`. The finalizer comes off the moment the NetBox side settles,
 so a `True` would have to sit on a CR that no longer exists to carry it; the `Reason` is
 therefore always *what is holding the deletion up*.
+
+`DriftDetected` answers a different question from `Synced`: `Synced` is about what the engine
+did, `DriftDetected` is about what NetBox currently holds. It is the one to alert on while an
+endpoint is in `driftMode: Report`, where `Ready=False` is expected and permanent. It is
+`False` after a correction as well as after a pass that found nothing, so it is a stable
+statement rather than a value that flaps on every write, and its message carries the field
+list — "there is drift" is not something anyone can act on.
 
 ### Reasons
 
@@ -318,9 +326,12 @@ therefore always *what is holding the deletion up*.
 | `Invalid` | `Ready` | NetBox rejected the payload, or the spec cannot be turned into one. Retrying it unchanged cannot succeed |
 | `APIError` | `Ready`, `Deleting` | NetBox was unreachable, rate limiting, failing, or rejected the token |
 | `DryRunPending` | `Ready` | the endpoint is `mode: DryRun`, so the write was reported and not sent |
-| `NoDrift` | `Synced` | the live tag already matched; nothing was sent |
-| `DriftCorrected` | `Synced` | fields differed and were PATCHed. The message is the change set, `field: old → new` |
+| `ReportPending` | `Ready` | the endpoint is `driftMode: Report`, so the write was reported and not sent. Distinct from `DryRunPending` because it is a different field to change |
+| `NoDrift` | `Synced`, `DriftDetected` | the live tag already matched; nothing was sent |
+| `DriftCorrected` | `Synced`, `DriftDetected` | fields differed and were PATCHed. The message is the change set, `field: old → new` |
 | `DriftDetectedDryRun` | `Synced` | fields differ and the endpoint is in DryRun, so they were reported rather than corrected |
+| `DriftReported` | `Synced` | fields differ and the endpoint is `driftMode: Report`, so they were reported rather than corrected |
+| `DriftDetected` | `DriftDetected` | NetBox differs from the spec and nothing was sent. The message is the change set, or a note that NetBox holds no such object at all |
 | `AllResolved` | `RefsResolved` | every reference resolved. Always, on this kind |
 | `Protected` | `Deleting` | NetBox refused the delete because something still references the tag. NetBox's own message is carried through verbatim |
 
@@ -467,6 +478,8 @@ either it has not created one yet, or it refused to. `kubectl get nbtag` works t
 | `READY=False`, message is a transport or 5xx error | `Ready=False, Reason=APIError` | NetBox is unreachable or failing. Not this object's fault, so nothing is failed permanently | Check the endpoint; retried every 30s |
 | `READY=False`, message says 401 or 403 | `Ready=False, Reason=APIError` | the token is wrong or lacks write permission on `extras.tag` | Fix the Secret. The endpoint reports it too, and is the better place to look |
 | Drift reported and never corrected | `Ready=False, Reason=DryRunPending`, `Synced=False, Reason=DriftDetectedDryRun` | the endpoint is `mode: DryRun` | Set `mode: Apply` on the `NetBoxEndpoint` |
+| Drift reported and never corrected | `Ready=False, Reason=ReportPending`, `Synced=False, Reason=DriftReported`, `DriftDetected=True` | the endpoint is `driftMode: Report`, which sends nothing at all | Set `driftMode: Correct`. See [gitops](../operations/gitops.md) |
+| A colour edited in the NetBox UI is never corrected | `Ready=True`, `DriftDetected=False`, and NetBox still holds the edit | the endpoint is `driftMode: Off`, so nothing re-checks on a timer | Set `driftMode: Correct`, or touch the CR |
 | A colour edited in the NetBox UI comes back | `Ready=True, Synced=True, Reason=DriftCorrected` | working as designed: a UI edit is drift | Change `spec.color`, or set the endpoint to `DryRun` while you investigate |
 | A description set in NetBox is not removed by clearing `spec.description` | `Ready=True, Synced=True, Reason=NoDrift` | an empty string is indistinguishable from an absent field | See [`spec` omission is Go-level](#spec-omission-is-go-level-not-yaml-level) |
 | Two tags in NetBox where there should be one | `Ready=True` on both CRs | two `NetBoxTag`s with **different** slugs — `slug` is the natural key, `name` is not | Give them the same slug and delete one CR, or accept both |

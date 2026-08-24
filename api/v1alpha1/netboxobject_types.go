@@ -17,6 +17,20 @@ const (
 	// milestone this condition reports NotImplemented rather than lying.
 	ConditionRefsResolved = "RefsResolved"
 
+	// ConditionDriftDetected is true when NetBox differs from the spec and the operator
+	// has not corrected it -- driftMode: Report, or a DryRun endpoint.
+	//
+	// Separate from Synced=False rather than folded into it because it answers a
+	// different question: Synced is about what the engine did, DriftDetected is about
+	// what NetBox currently holds. It is the condition to alert on while an endpoint is
+	// in Report mode, where Ready=False is expected and permanent, and it carries the
+	// field list so the answer to "what would the operator change" is in the object
+	// rather than only in a log line.
+	//
+	// False after a correction and False when there was nothing to correct, so it is a
+	// stable value rather than one that flaps on every write.
+	ConditionDriftDetected = "DriftDetected"
+
 	// ConditionDeleting reports what the engine is doing about the NetBox object behind a
 	// CR that carries a deletion timestamp.
 	//
@@ -78,7 +92,16 @@ const (
 	// make this object correct was reported and not sent.
 	ReasonDryRunPending = "DryRunPending"
 
-	// ReasonNoDrift is on Synced: the live object already matches, and nothing was sent.
+	// ReasonReportPending is on Ready: the endpoint's driftMode is Report, so the write
+	// that would make this object correct was reported and not sent.
+	//
+	// Distinct from ReasonDryRunPending because the two are configured in different
+	// fields and fixed in different ways, and a reason that named DryRun on an endpoint
+	// whose mode is Apply would send the reader to the wrong one.
+	ReasonReportPending = "ReportPending"
+
+	// ReasonNoDrift is on Synced and on DriftDetected: the live object already matches,
+	// and nothing was sent.
 	ReasonNoDrift = "NoDrift"
 
 	// ReasonDriftCorrected is on Synced: fields differed and were PATCHed.
@@ -87,6 +110,14 @@ const (
 	// ReasonDriftDetectedDryRun is on Synced: fields differ and the endpoint is in
 	// DryRun, so they were reported rather than corrected.
 	ReasonDriftDetectedDryRun = "DriftDetectedDryRun"
+
+	// ReasonDriftReported is on Synced: fields differ and the endpoint's driftMode is
+	// Report, so they were reported rather than corrected.
+	ReasonDriftReported = "DriftReported"
+
+	// ReasonDriftDetected is on DriftDetected: NetBox differs from the spec and nothing
+	// was sent to change it. The message is the change set, `field: old → new`.
+	ReasonDriftDetected = "DriftDetected"
 
 	// ReasonAllResolved is on RefsResolved: every reference resolved.
 	ReasonAllResolved = "AllResolved"
@@ -115,6 +146,15 @@ const (
 	EventRecreated = "Recreated"
 	EventConflict  = "Conflict"
 	EventInvalid   = "Invalid"
+
+	// EventDriftDetected is drift found and deliberately left alone under
+	// driftMode: Report. Normal rather than Warning: nothing has malfunctioned, the
+	// endpoint is doing what it was configured to do, and a Warning per object per resync
+	// would make the mode unusable in the adoption week it exists for.
+	//
+	// It replaces the write Event rather than joining it, because "updated" and "would
+	// have updated" must not read alike in `kubectl describe`.
+	EventDriftDetected = "DriftDetected"
 
 	// EventDeleted is the NetBox object gone, whether this operator removed it or found
 	// it already absent.
