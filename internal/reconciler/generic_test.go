@@ -344,7 +344,12 @@ func TestEngineReconcile(t *testing.T) {
 			noRefsCondition: true,
 		},
 		{
-			name: "a declared reference is reported and left out of the payload",
+			// The object is created without the reference and reports Ready=False, which is
+			// issue #132: on a kind whose identity does not include the reference, reporting
+			// Ready would make `kubectl wait --for=condition=Ready` pass over a field NetBox
+			// never received. TestUnresolvedRefKeepsTheObjectFromReadiness is the dedicated
+			// case; this one holds the line for the whole outcome table.
+			name: "a declared reference that does not resolve is created without it and is not Ready",
 			object: func() *fakeKind {
 				obj := fakeObject()
 				obj.Spec.ParentRef = &fakeRef{Name: "europe"}
@@ -357,8 +362,9 @@ func TestEngineReconcile(t *testing.T) {
 			wantMethods: []string{"LIST", "POST"},
 			wantPayload: netbox.Object{"name": "Managed", "slug": "managed", "color": "9e9e9e"},
 			wantID:      7,
-			wantReady:   metav1.ConditionTrue,
-			wantReason:  netboxv1alpha1.ReasonSynced,
+			wantReady:   metav1.ConditionFalse,
+			wantReason:  netboxv1alpha1.ReasonWaitingForRef,
+			wantMessage: "parentRef",
 			wantSynced:  netboxv1alpha1.ReasonDriftCorrected,
 			wantRefs:    netboxv1alpha1.ReasonNotImplemented,
 			wantEvents:  []string{"Normal/Created"},

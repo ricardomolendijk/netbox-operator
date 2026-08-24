@@ -19,7 +19,23 @@ import (
 )
 
 // ready records a reconcile that got the object where the spec says it should be.
+//
+// Except when a reference did not: RefsResolved=False implies Ready=False with
+// ReasonWaitingForRef (issue #132). On a kind where the reference is not part of the natural
+// key, the object is created without it -- and reporting Ready there would mean `kubectl
+// apply` succeeding, `kubectl wait --for=condition=Ready` passing, and NetBox never seeing
+// the value. Ready=False is what makes the omission something an automation can notice.
 func (p *pass) ready(ctx context.Context) (ctrl.Result, error) {
+	if p.refs.message != "" {
+		p.condition(netboxv1alpha1.ConditionReady, false,
+			netboxv1alpha1.ReasonWaitingForRef, p.refs.message)
+
+		// resync() rather than driftResync(): an object with an unresolved reference has not
+		// settled, so driftMode: Off must not switch off the one retry that will ever resolve
+		// it. Same argument stop() makes for an object waiting on its endpoint.
+		return p.finish(ctx, p.refs.wait(p.resync()))
+	}
+
 	p.condition(netboxv1alpha1.ConditionReady, true, netboxv1alpha1.ReasonSynced,
 		fmt.Sprintf("netbox %s/%d matches the spec", p.desc.Endpoint, p.obj.NetBoxStatus().ID))
 

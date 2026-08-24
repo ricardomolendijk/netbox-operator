@@ -21,7 +21,7 @@ label on shipped code is worse than no label at all.
 | Endpoint reconcile loop, conditions, requeue policy | Built (NBO-004) | [reconciliation](reconciliation.md) |
 | The shared `status` envelope | Built (NBO-006) | `api/v1alpha1/netboxobject_types.go` |
 | **The deferred-field second pass** | **Designed, not implemented** | below |
-| **Reference resolution** | **Designed, not implemented** | NBO-012 (#24) |
+| Reference resolution: four modes, typed errors | Built (NBO-012) | [references](references.md) |
 | **Inline child materialisation** | **Designed, not implemented** | NBO-032 (#45) |
 
 Nothing pending is stubbed. There is no hook that returns "nothing to do", because an empty

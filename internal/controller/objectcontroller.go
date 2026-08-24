@@ -17,6 +17,7 @@ import (
 
 	"github.com/ricardomolendijk/netbox-operator/internal/reconciler"
 	"github.com/ricardomolendijk/netbox-operator/internal/registry"
+	"github.com/ricardomolendijk/netbox-operator/internal/resolver"
 )
 
 // objectKinds are the kinds to build a controller for, filled by one init() per kind.
@@ -127,7 +128,13 @@ func newObjectController(mgr ctrl.Manager, endpoints reconciler.Endpoints, kind 
 		Client: writer,
 		proto:  kind.proto,
 		engine: &reconciler.Engine{
-			Endpoints:  endpoints,
+			Endpoints: endpoints,
+
+			// The resolver only ever reads, and it reads through the same guarded client as
+			// everything else here: the reference target it fetches is another kind's CR, and
+			// the one route to the API server is what makes "the operator never writes a spec"
+			// checkable rather than merely intended.
+			Refs:       &resolver.Resolver{Objects: writer},
 			Status:     statusWriter{writer},
 			Finalizers: finalizerWriter{writer},
 			Events:     mgr.GetEventRecorderFor(kind.name),

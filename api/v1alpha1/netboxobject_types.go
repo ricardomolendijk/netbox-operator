@@ -122,10 +122,45 @@ const (
 	// ReasonAllResolved is on RefsResolved: every reference resolved.
 	ReasonAllResolved = "AllResolved"
 
-	// ReasonNotImplemented is on RefsResolved: the spec declares references and this
-	// build does not resolve any (NBO-012). They are accepted and left out of the
-	// payload, which is reported rather than silent.
+	// ReasonNotImplemented is on RefsResolved: the spec declares a reference this build
+	// cannot resolve at all -- a generic foreign key, whose target is a union of Kinds
+	// rather than one and whose dispatch is NBO-019. It is accepted, left out of the
+	// payload, and reported rather than silent.
 	ReasonNotImplemented = "NotImplemented"
+
+	// The RefsResolved reasons for a reference that did not resolve. One per cause, each
+	// with its own requeue policy in internal/resolver -- see docs/concepts/references.md
+	// for the table. Ready reports WaitingForRef for every one of them: one reason for
+	// "a reference is missing", and these for which.
+
+	// ReasonRefNotFound is on RefsResolved: nothing to point at. No CR of that name, no
+	// NetBox object matching that slug or lookup, or a raw id NetBox does not hold.
+	ReasonRefNotFound = "RefNotFound"
+
+	// ReasonRefNotReady is on RefsResolved: the target CR exists and has no NetBox id yet.
+	//
+	// A state rather than a failure, and the common case on a first apply. The message
+	// quotes the target's own Ready reason when it has one, so a target that is *failing*
+	// does not read as a referrer that is broken.
+	ReasonRefNotReady = "RefNotReady"
+
+	// ReasonRefAmbiguous is on RefsResolved: a slug or lookup matched several NetBox
+	// objects. The message names every id, because the next step is a human choosing
+	// between them.
+	ReasonRefAmbiguous = "RefAmbiguous"
+
+	// ReasonRefDenied is on RefsResolved: a cross-namespace reference with no
+	// NetBoxRefGrant permitting it (NBO-014).
+	ReasonRefDenied = "RefDenied"
+
+	// ReasonRefCycle is on RefsResolved: the reference depends on itself, so no order of
+	// reconciles resolves it and only a spec change can.
+	ReasonRefCycle = "RefCycle"
+
+	// ReasonRefKindUnavailable is on RefsResolved: the target Kind has no descriptor, or
+	// its CRD is not installed. Distinct from RefNotFound because the manifest is correct
+	// and the fix is an operator upgrade rather than an edit.
+	ReasonRefKindUnavailable = "RefKindUnavailable"
 
 	// ReasonProtected is on Deleting: NetBox refused the delete because something still
 	// references the object. Nothing about this object can clear it -- the referring

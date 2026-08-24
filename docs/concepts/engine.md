@@ -151,12 +151,13 @@ only per-kind code the engine needs is two one-line methods returning the embedd
 and status.
 
 A value's shape then decides what can be done with it: a scalar is written and can carry a
-filter, a list is written and cannot, and a `Ref` field is neither until
-`internal/resolver` lands (NBO-012). Until then a declared reference is left out of the
-payload and reported as `RefsResolved=False, Reason=NotImplemented`, which is the M1 contract
-NBO-009 states. Which also means: a natural key that filters on a reference has no usable
-candidate yet, so such an object waits rather than creating a duplicate. That is the correct
-outcome, and it is the same code path that will handle a genuinely unresolved parent later.
+filter, a list is written and cannot, and a `Ref` field is neither until `internal/resolver`
+has turned it into an id (NBO-012). One resolution per pass, and the id it yields goes both
+into the payload and into the spec the natural key filters on — so a key that matches on a
+reference becomes usable exactly when the reference resolves, and an object whose parent is
+declared but unresolved still waits rather than creating a duplicate. An unresolved
+reference is reported on `RefsResolved` and left out of the payload, and the object does not
+reach `Ready`; see [references](references.md).
 
 ## Drift decides the PATCH
 
@@ -210,7 +211,7 @@ table itself and why NetBox's wording is not something to match on.
 |---|---|---|
 | `Ready` | the object exists in NetBox and matches the spec | `Synced`, `WaitingForEndpoint`, `WaitingForKey`, `WaitingForRef`, `Conflict`, `AdoptOnly`, `Invalid`, `APIError`, `DryRunPending` |
 | `Synced` | the last write succeeded and nothing has drifted since | `NoDrift`, `DriftCorrected`, `DriftDetectedDryRun` |
-| `RefsResolved` | every reference resolved to an id | `AllResolved`, `NotImplemented` |
+| `RefsResolved` | every reference resolved to an id | `AllResolved`, `RefNotFound`, `RefNotReady`, `RefAmbiguous`, `RefDenied`, `RefCycle`, `RefKindUnavailable`, `NotImplemented` |
 
 Requeues carry ±10% jitter, so a manifest applied all at once does not resync in lockstep
 for the rest of its life and turn one NetBox into the bottleneck.
@@ -219,7 +220,8 @@ for the rest of its life and turn one NetBox into the bottleneck.
 
 The engine's collaborators are consumer-defined interfaces, so it is testable with no NetBox
 and no cluster: `Reader` and `Writer` (a NetBox client), `Endpoints` (a `spec.endpointRef`
-to a client), `Descriptors` (per-kind facts), `StatusWriter` and `Recorder`. A kind's
+to a client), `Descriptors` (per-kind facts), `RefResolver` (a reference to an id),
+`StatusWriter` and `Recorder`. A kind's
 controller supplies them and does nothing else — a controller containing business logic has
 taken work that belongs to the engine.
 
@@ -232,6 +234,6 @@ func (t *NetBoxTag) NetBoxStatus() *NetBoxObjectStatus { return &t.Status }
 
 ## Not here yet
 
-Finalizers and deletion (NBO-007), reference resolution (NBO-012), deferred two-pass
-patching (NBO-015) and inline children (NBO-032) are each their own ticket. None of them is
-stubbed: an empty hook that returns "nothing to do" reads as implemented and is not.
+Deferred two-pass patching (NBO-015) and inline children (NBO-032) are each their own
+ticket. Neither is stubbed: an empty hook that returns "nothing to do" reads as implemented
+and is not.
