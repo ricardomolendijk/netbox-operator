@@ -167,7 +167,10 @@ func fakeDescriptor() registry.Descriptor {
 			// The map shape for the three-state table (NBO-079). A map is compared as a value,
 			// so it is ClassValue; only its clearability is what NBO-079 added.
 			{Spec: "localContextData", API: "local_context_data"},
-			{Spec: "parentRef", API: "parent", Class: registry.ClassRefOne},
+			// CascadeOnDelete, so this field can stand in for a containment parent: a
+			// descriptor naming a non-cascading ref fails registry validation
+			// (docs/decisions/0003-ownership-and-references.md rule 4).
+			{Spec: "parentRef", API: "parent", Class: registry.ClassRefOne, CascadeOnDelete: true},
 			{Spec: "asnRefs", API: "asns", Class: registry.ClassRefMany},
 		},
 		NaturalKeys:    []registry.NaturalKey{{Fields: []registry.KeyField{{Filter: "slug", Spec: "slug"}}}},

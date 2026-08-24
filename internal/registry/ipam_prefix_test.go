@@ -122,8 +122,17 @@ func TestPrefixScopeIsTheSharedUnion(t *testing.T) {
 		t.Fatalf("GenericFKs = %+v, want exactly the scope pair", d.GenericFKs)
 	}
 
-	if want := ScopeFK("scope"); !reflect.DeepEqual(d.GenericFKs[0], want) {
-		t.Errorf("the scope pair is not registry.ScopeFK(\"scope\"):\n got %+v\nwant %+v", d.GenericFKs[0], want)
+	if want := prefixScopeFK(); !reflect.DeepEqual(d.GenericFKs[0], want) {
+		t.Errorf("the scope pair is not prefixScopeFK():\n got %+v\nwant %+v", d.GenericFKs[0], want)
+	}
+
+	// The one field prefixScopeFK adds to the shared union, asserted on its own so that the
+	// DeepEqual above cannot pass with both sides false. Without it this kind has no
+	// containment parent at all: validateContainment refuses a ref that does not cascade
+	// (docs/decisions/0003-ownership-and-references.md rule 4).
+	if !d.GenericFKs[0].CascadeOnDelete {
+		t.Error("the scope pair does not declare CascadeOnDelete; every scope target declares " +
+			"a `prefixes` GenericRelation, so deleting one deletes the prefixes scoped to it")
 	}
 }
 

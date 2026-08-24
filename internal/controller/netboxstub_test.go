@@ -478,6 +478,25 @@ func (s *netboxStubServer) seed(obj netbox.Object) int64 {
 	return id
 }
 
+// cascade removes rows server-side without the operator having asked, which is what
+// NetBox's `on_delete=CASCADE` does to a nested group's descendants when their parent is
+// deleted. The stub does not model foreign keys, so a test that needs the cascade stages it.
+//
+// Distinct from a DELETE arriving at the stub: nothing is recorded in writes, because the
+// point is that the operator did not do this.
+func (s *netboxStubServer) cascade(ids ...int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, id := range ids {
+		if _, ok := s.objects[id]; !ok {
+			s.t.Fatalf("stub has no object %d to cascade away", id)
+		}
+
+		delete(s.objects, id)
+	}
+}
+
 // setField changes a value server-side, as a human editing the NetBox UI would. This is how
 // drift is created in a test.
 func (s *netboxStubServer) setField(id int64, name string, value any) {
