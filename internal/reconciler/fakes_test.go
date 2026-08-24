@@ -53,6 +53,10 @@ type fakeSpec struct {
 	// apply order sets it at create time.
 	PrimaryIP4Ref *fakeRef `json:"primaryIP4Ref,omitempty"`
 
+	// Scope is the polymorphic reference NBO-018 is about: one spec field, two NetBox
+	// columns, and four legal target Kinds.
+	Scope *netboxv1alpha1.ScopeRef `json:"scope,omitempty"`
+
 	Unmapped string `json:"unmapped,omitempty"`
 }
 
@@ -77,6 +81,7 @@ func (f *fakeKind) DeepCopyObject() runtime.Object {
 	f.DeepCopyInto(&out.ObjectMeta)
 	out.Status = *f.Status.DeepCopy()
 	out.Spec.ObjectTypes = slices.Clone(f.Spec.ObjectTypes)
+	out.Spec.Scope = f.Spec.Scope.DeepCopy()
 
 	return &out
 }

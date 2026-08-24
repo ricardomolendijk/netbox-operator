@@ -85,12 +85,23 @@ func AddIndexes(ctx context.Context, fi client.FieldIndexer, s *runtime.Scheme, 
 // A Ref with no Target is left out because there is nothing to index it under. The resolver
 // reports such a field as RefKindUnavailable, which is a descriptor gap rather than a
 // manifest error, and it is not made better by an index key of `//ns/name`.
+//
+// A polymorphic reference contributes one entry per union member. They share the union's
+// spec name, which is right: only the Target is read from here -- by RefTargets, to know
+// what to watch -- and a NetBoxSite becoming Ready has to wake every object that could be
+// scoped to it, whichever member of the union names it.
 func refFields(d registry.Descriptor) []registry.Field {
 	fields := make([]registry.Field, 0, len(d.Fields))
 
 	for _, field := range d.Fields {
 		if field.Ref && !field.Target.Empty() {
 			fields = append(fields, field)
+		}
+	}
+
+	for _, generic := range d.GenericFKs {
+		for _, member := range generic.Members {
+			fields = append(fields, registry.Field{Spec: generic.Spec, Ref: true, Target: member.Target})
 		}
 	}
 

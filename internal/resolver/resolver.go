@@ -250,6 +250,15 @@ func (r *Resolver) ResolveAll(ctx context.Context, nb LookupClient, obj client.O
 	}
 
 	for _, declared := range refs {
+		if declared.detail != "" {
+			resolution.Blocked = append(resolution.Blocked, blockerFor(&Error{
+				Cause: ErrRefMalformed, Field: declared.field.Spec,
+				TargetGVK: declared.field.Target, Detail: declared.detail,
+			}))
+
+			continue
+		}
+
 		result, err := pass.Resolve(ctx, Request{
 			NetBox: nb, Referrer: referrer, ReferrerGVK: d.GVK,
 			Field: declared.field, Ref: declared.ref,
@@ -545,6 +554,17 @@ func (registryLookup) Get(gvk schema.GroupVersionKind) (registry.Descriptor, boo
 type declaredRef struct {
 	field registry.Field
 	ref   netboxv1alpha1.ObjectRef
+
+	// detail is set when the reference is malformed in a way that is knowable from the spec
+	// alone, and it is the only field that matters when it is: ResolveAll reports such a
+	// reference as ErrRefMalformed without asking the resolver, because there is nothing to
+	// resolve and nothing a NetBox read would add.
+	//
+	// The one producer today is a scope union with two members set, which ScopeRef's CEL
+	// rule makes unreachable through the API server. It refuses rather than picking the
+	// first member: silently choosing between two scopes a user asked for is exactly the
+	// class of mistake this type exists to prevent.
+	detail string
 }
 
 // refsOf reads the references out of obj's spec, in descriptor order.
@@ -554,9 +574,10 @@ type declaredRef struct {
 // representation where both ends of the field map agree -- and it costs a generated kind no
 // per-kind code at all.
 //
-// Generic FKs are deliberately absent. One of those spec fields writes two columns and its
-// legal targets are a union rather than one Kind, which is NBO-019's dispatch and not this
-// one's.
+// Generic FKs are read too, through GenericFKSpec.Members: one of those spec fields writes
+// two columns and its legal targets are a union rather than one Kind, so the member that is
+// set is what names the Kind. The result is keyed by the *union's* spec field, because that
+// is the one field the payload builder writes both columns from.
 func refsOf(obj client.Object, d registry.Descriptor) ([]declaredRef, error) {
 	encoded, err := json.Marshal(obj)
 	if err != nil {
@@ -596,7 +617,91 @@ func refsOf(obj client.Object, d registry.Descriptor) ([]declaredRef, error) {
 		refs = append(refs, declaredRef{field: field, ref: ref})
 	}
 
+	unions, err := unionRefs(decoded.Spec, d)
+	if err != nil {
+		return nil, fmt.Errorf("decoding %s/%s: %w", obj.GetNamespace(), obj.GetName(), err)
+	}
+
+	return append(refs, unions...), nil
+}
+
+// unionRefs reads the polymorphic references out of a decoded spec, in descriptor order.
+//
+// A union field the spec does not set is skipped, and so is one that sets no member: an
+// absent scope means "do not manage it" and an empty one means "no scope", and neither is a
+// reference to resolve. The payload builder is what turns the second into a written pair of
+// nulls -- see internal/reconciler/payload.go, which reads the same union with the same
+// member list.
+func unionRefs(spec map[string]json.RawMessage, d registry.Descriptor) ([]declaredRef, error) {
+	refs := make([]declaredRef, 0, len(d.GenericFKs))
+
+	for _, generic := range d.GenericFKs {
+		raw, set := spec[generic.Spec]
+		if !set || string(raw) == "null" {
+			continue
+		}
+
+		var union map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &union); err != nil {
+			return nil, fmt.Errorf("decoding %s: %w", generic.Spec, err)
+		}
+
+		declared, found, err := unionMember(union, generic)
+		if err != nil {
+			return nil, err
+		}
+
+		if found {
+			refs = append(refs, declared)
+		}
+	}
+
 	return refs, nil
+}
+
+// unionMember picks the one member a union sets.
+//
+// The Field it reports carries the *union's* spec name and no API name. The union's name is
+// what the payload builder and the condition message both use, and there is no single API
+// name to report: the pair is two columns, and naming one of them here would invite a caller
+// to write half a reference.
+func unionMember(
+	union map[string]json.RawMessage, generic registry.GenericFKSpec,
+) (declaredRef, bool, error) {
+	set := make([]registry.GenericFKMember, 0, len(generic.Members))
+
+	for _, member := range generic.Members {
+		if raw, ok := union[member.Field]; ok && string(raw) != "null" {
+			set = append(set, member)
+		}
+	}
+
+	if len(set) == 0 {
+		return declaredRef{}, false, nil
+	}
+
+	field := registry.Field{Spec: generic.Spec, Ref: true, Target: set[0].Target}
+
+	if len(set) > 1 {
+		return declaredRef{field: field, detail: bothSet(generic, set)}, true, nil
+	}
+
+	var ref netboxv1alpha1.ObjectRef
+	if err := json.Unmarshal(union[set[0].Field], &ref); err != nil {
+		return declaredRef{}, false, fmt.Errorf("decoding %s.%s: %w", generic.Spec, set[0].Field, err)
+	}
+
+	return declaredRef{field: field, ref: ref}, true, nil
+}
+
+// bothSet renders the members a union set when it may set only one.
+func bothSet(generic registry.GenericFKSpec, set []registry.GenericFKMember) string {
+	names := make([]string, 0, len(set))
+	for _, member := range set {
+		names = append(names, generic.Spec+"."+member.Field)
+	}
+
+	return fmt.Sprintf("%s are all set, and at most one may be", strings.Join(names, ", "))
 }
 
 // isList reports whether a spec value is a JSON array, which is how a to-many reference

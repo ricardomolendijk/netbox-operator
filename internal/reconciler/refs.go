@@ -101,6 +101,16 @@ func (p *pass) resolveRefs(ctx context.Context, declared []string) error {
 		resolved = append(resolved, field.Spec)
 	}
 
+	for _, generic := range p.desc.GenericFKs {
+		result, ok := resolution.ByField[generic.Spec]
+		if !ok {
+			continue
+		}
+
+		p.applyGenericFK(generic, result)
+		resolved = append(resolved, generic.Spec)
+	}
+
 	if len(resolved) == len(declared) {
 		logf.FromContext(ctx).V(1).Info("resolved every reference", "action", "build", "refs", resolved)
 		p.condition(netboxv1alpha1.ConditionRefsResolved, true, netboxv1alpha1.ReasonAllResolved,
@@ -150,12 +160,28 @@ func (p *pass) applyRef(field registry.Field, result resolver.Result) {
 	p.state.Resolved = append(p.state.Resolved, field.Spec)
 }
 
+// applyGenericFK writes both halves of a polymorphic reference.
+//
+// Both, always, and never one. NetBox validates the pair together, and an id sent against a
+// stale type does not fail -- it points the object at whatever holds that primary key in the
+// other model. The type string is the *target* kind's Descriptor.ObjectType, carried on the
+// Result, so the `app_label.model` spelling is read from the one place that owns it rather
+// than assembled here.
+//
+// Nothing is written into p.spec, unlike applyRef, and nothing into state.Resolved. A
+// natural-key candidate matches one filter per spec field and this reference is two columns,
+// so no candidate can name the union -- see docs/concepts/scopes.md.
+func (p *pass) applyGenericFK(generic registry.GenericFKSpec, result resolver.Result) {
+	p.desired[generic.TypeField] = result.ObjectType
+	p.desired[generic.IDField] = result.ID
+}
+
 // reportUnresolved records the references that did not become ids.
 //
 // Two kinds of them, and they are reported differently because they are fixed differently: a
 // reference the resolver refused carries its own reason and requeue, while one the resolver
-// never saw is a generic foreign key, whose target is a union of Kinds rather than one and
-// whose dispatch is NBO-019.
+// never saw is a polymorphic reference whose descriptor declares no union members, so there
+// is no Kind to dispatch on yet.
 func (p *pass) reportUnresolved(
 	ctx context.Context, resolution resolver.Resolution, declared, resolved []string,
 ) {

@@ -85,9 +85,18 @@ func (s specFields) desired(d registry.Descriptor) (netbox.Object, registry.Spec
 		state.Declared = append(state.Declared, name)
 
 		field, mapped := d.FieldFor(name)
+		generic, union := d.GenericFKFor(name)
 
 		switch {
-		case mapped && field.Ref, !mapped && isGenericFK(d, name):
+		case mapped && field.Ref:
+			refs = append(refs, name)
+		case union && clearsUnion(value, generic):
+			// An empty union is an instruction, not an omission: it says "no scope", and
+			// both columns have to be sent as null to carry it out. Omitting the pair would
+			// leave whatever NetBox holds in place, so a scope could be set through this API
+			// and never cleared through it.
+			desired[generic.TypeField], desired[generic.IDField] = nil, nil
+		case union:
 			refs = append(refs, name)
 		case mapped:
 			desired[field.API] = value
@@ -149,10 +158,30 @@ func filterValue(value any) (string, bool) {
 	}
 }
 
-func isGenericFK(d registry.Descriptor, spec string) bool {
-	_, ok := d.GenericFKFor(spec)
+// clearsUnion reports whether a polymorphic reference the spec sets names none of its
+// members, which is the instruction to write both of its columns as null.
+//
+// A pair whose descriptor declares no members at all is deliberately not that. The engine
+// cannot read such a union, and clearing a column because it could not be understood would
+// wipe a scope the user asked for; it is reported unresolved instead, which is what the
+// engine did before unions could be resolved.
+func clearsUnion(value any, generic registry.GenericFKSpec) bool {
+	if len(generic.Members) == 0 {
+		return false
+	}
 
-	return ok
+	union, ok := value.(map[string]any)
+	if !ok {
+		return false
+	}
+
+	for _, member := range generic.Members {
+		if union[member.Field] != nil {
+			return false
+		}
+	}
+
+	return true
 }
 
 // fieldRules translates the descriptor's field classes into the comparison rules Drift
