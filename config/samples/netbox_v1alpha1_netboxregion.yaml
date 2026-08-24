@@ -1,0 +1,39 @@
+apiVersion: netbox.populator.io/v1alpha1
+kind: NetBoxRegion
+metadata:
+  name: europe
+  namespace: default
+spec:
+  # The NetBoxEndpoint to write through, in this namespace. There is no cluster-wide
+  # default endpoint; see config/samples/netbox_v1alpha1_netboxendpoint.yaml.
+  endpointRef: homelab
+
+  name: Europe
+  slug: europe
+  description: Top-level region
+
+  # No parentRef, which makes this a top-level region. That is a different natural key
+  # rather than the same key with a filter left out: NetBox is unique on (parent, name)
+  # and separately on (name) where parent IS NULL, so the lookup pins `parent_id__isnull`
+  # instead of omitting it. See docs/concepts/lookups.md.
+---
+apiVersion: netbox.populator.io/v1alpha1
+kind: NetBoxRegion
+metadata:
+  name: eu-west
+  namespace: default
+spec:
+  endpointRef: homelab
+
+  name: EU West
+  slug: eu-west
+
+  # Nested under the region above. Identified by (parent, name), so this object cannot be
+  # looked up until its parent exists -- and until then the engine waits rather than
+  # creating, because a lookup that dropped `parent` would match an unrelated top-level
+  # region and adopt it.
+  #
+  # Resolution is NBO-012. Applying this today reports the reference unresolved and leaves
+  # `parent` out of the payload.
+  parentRef:
+    name: europe

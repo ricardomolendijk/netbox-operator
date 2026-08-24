@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 // Field-map validation failures. Each is a distinct sentinel so callers and tests
@@ -43,6 +45,11 @@ var (
 	// ErrGenericFKNotSpecField is returned for a generic FK with no CR spec field behind
 	// it, or one whose columns are also mapped as ordinary fields.
 	ErrGenericFKNotSpecField = errors.New("generic FK spec field is missing or conflicts with the field map")
+
+	// ErrTargetNotRef is returned for a non-reference field carrying a target Kind. It is
+	// almost always a missing `Ref: true`, and left alone it produces a field the resolver
+	// ignores and the engine writes to NetBox verbatim.
+	ErrTargetNotRef = errors.New("non-reference field declares a target kind")
 )
 
 // Field maps one CR spec field to the NetBox field it is written as.
@@ -76,6 +83,25 @@ type Field struct {
 	// only in internal/resolver (NBO-012) — so until then a declared ref is reported and
 	// left out, which is the M1 contract NBO-009 states.
 	Ref bool
+
+	// Target is the Kind a Ref resolves against, and must be empty on anything else.
+	//
+	// Data rather than the accessor closure NBO-011's spec proposed. Nothing in a
+	// Descriptor is a func — see this package's comment — because a closure cannot be
+	// emitted by the M7 generator, printed in a diff or linted. It is also unnecessary:
+	// the engine already reads a spec through its JSON representation rather than through
+	// per-kind getters, so the target Kind is the only thing the resolver needs from here.
+	//
+	// Write it as the matching typed alias's own answer,
+	// `v1alpha1.RegionRef{}.TargetGVK()`, so the alias stays the single source of truth
+	// for what it points at.
+	//
+	// A Ref without a Target is not rejected yet. It will have to be, since the resolver
+	// cannot dispatch without one, but typed aliases exist for five Kinds so far and the
+	// descriptors for the rest name targets that have no alias to point at — requiring it
+	// now would mean inventing GVKs for Kinds nobody has built. NBO-012 lands the resolver
+	// and the remaining aliases together, and turns the check on with them.
+	Target schema.GroupVersionKind
 }
 
 // FieldFor returns the mapping for a CR spec field. A linear scan over a few dozen
@@ -159,6 +185,10 @@ func (d Descriptor) validateFieldEntries() error {
 
 		if slices.Contains(d.ReadOnly, field.API) {
 			errs = append(errs, fmt.Errorf("%w: %s -> %s", ErrFieldReadOnly, field.Spec, field.API))
+		}
+
+		if !field.Ref && !field.Target.Empty() {
+			errs = append(errs, fmt.Errorf("%w: %s -> %s", ErrTargetNotRef, field.Spec, field.Target))
 		}
 
 		seenSpec[field.Spec], seenAPI[field.API] = struct{}{}, struct{}{}
