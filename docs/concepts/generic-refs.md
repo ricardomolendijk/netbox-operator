@@ -302,11 +302,12 @@ A kind carrying the pair and no caches — `ipam.VLANGroup` declares `scope_type
 on the model itself — clears `Cached` on the returned value.
 
 Everything else about a scope is the mechanism above: the [three
-instructions](#resolution-one-union-one-pair), the [atomic pair](#why-the-pair-is-atomic), the
-[watches](#watches-what-makes-a-polymorphic-reference-converge), and
-`RefKindUnavailable` for `NetBoxSiteGroup` and `NetBoxLocation` until
-[their Kinds exist](#kinds-that-do-not-exist-yet)
-([NBO-066 (#79)](https://github.com/ricardomolendijk/netbox-operator/issues/79), NBO-048).
+instructions](#resolution-one-union-one-pair), the [atomic pair](#why-the-pair-is-atomic) and
+the [watches](#watches-what-makes-a-polymorphic-reference-converge). Unlike `IPAssignment`,
+every member of this union now has a Descriptor —
+[NBO-066 (#79)](https://github.com/ricardomolendijk/netbox-operator/issues/79) added
+`NetBoxSiteGroup` and `NetBoxLocation` — so none of the four reports
+[`RefKindUnavailable`](#kinds-that-do-not-exist-yet).
 
 ## What a generic FK deliberately does not do
 

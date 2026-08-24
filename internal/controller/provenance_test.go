@@ -12,6 +12,7 @@ import (
 	netboxv1alpha1 "github.com/ricardomolendijk/netbox-operator/api/v1alpha1"
 	"github.com/ricardomolendijk/netbox-operator/internal/netbox"
 	"github.com/ricardomolendijk/netbox-operator/internal/provenance"
+	"github.com/ricardomolendijk/netbox-operator/internal/registry"
 )
 
 // managedBy is the spec block every test here sets, with an explicit cluster identifier
@@ -158,9 +159,20 @@ func TestEndpointAdoptsDefinitionsMadeByHand(t *testing.T) {
 	stub.withProvenance()
 
 	stub.seedExtras("extras/tags", netbox.Object{"name": "k8s-managed", "slug": "k8s-managed"})
+
+	// The seeded object_types come from the registry rather than from a list written here.
+	// A hand-written pair was correct until the next custom-fieldable kind landed, at which
+	// point the bootstrap widened the definitions -- correctly -- and this test read the
+	// resulting PATCH as a duplicate. provenance.ObjectTypes' own comment says exactly that
+	// about hand-maintained lists; a test is not an exception to it.
+	types := make([]any, 0, len(registry.List()))
+	for _, objectType := range provenance.ObjectTypes(registry.List()) {
+		types = append(types, objectType)
+	}
+
 	for _, name := range []string{"k8s_uid", "k8s_cluster", "k8s_owner", "k8s_allocation_identity"} {
 		stub.seedExtras("extras/custom-fields", netbox.Object{
-			"name": name, "object_types": []any{"dcim.site", "dcim.region"},
+			"name": name, "object_types": types,
 		})
 	}
 

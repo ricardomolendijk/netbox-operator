@@ -5,4 +5,6 @@ resources:
 - netbox_v1alpha1_netboxregion.yaml
 - netbox_v1alpha1_netboxtag.yaml
 - netbox_v1alpha1_netboxsite.yaml
+- netbox_v1alpha1_netboxsitegroup.yaml
+- netbox_v1alpha1_netboxlocation.yaml
 - netbox_v1alpha1_netboxrefgrant.yaml
