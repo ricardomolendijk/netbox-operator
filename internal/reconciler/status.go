@@ -45,7 +45,14 @@ func (p *pass) pending(ctx context.Context, reason, message string) (ctrl.Result
 // chosen deliberately.
 func (p *pass) stop(ctx context.Context, err error) (ctrl.Result, error) {
 	out := classify(err, p.resync())
+
+	// Counted on every pass, including the repeats whose Event and error line are
+	// suppressed below. The asymmetry is deliberate: reconcile_total is a count of
+	// reconciles, not of changes, so a rate() over it is the retry rate of a standing
+	// failure -- exactly the signal that would disappear if the metric were made
+	// transition-triggered like the Event. Do not "fix" it to match.
 	p.result = out.result
+
 	log := logf.FromContext(ctx).WithValues("reason", out.reason, "action", "stop")
 
 	// A write that 404s means the object went away between locating it and writing it.
@@ -56,19 +63,60 @@ func (p *pass) stop(ctx context.Context, err error) (ctrl.Result, error) {
 		p.obj.NetBoxStatus().ID, p.obj.NetBoxStatus().Adopted = 0, false
 	}
 
-	if out.severe {
+	// Whether this pass is entering the failed state or repeating one the object is already
+	// in. Read before the condition below overwrites it: the stored condition is the only
+	// memory the engine has across passes, which is what makes this a guard rather than a
+	// cache.
+	changed := p.transitioned(netboxv1alpha1.ConditionReady, metav1.ConditionFalse, out.reason)
+
+	switch {
+	case out.severe && changed:
 		log.Error(err, "reconcile stopped")
-	} else {
+	case out.severe:
+		// Debug on a repeat. A Conflict or an Invalid requeues at the endpoint's resync,
+		// so at error a spec NetBox keeps rejecting is an identical error line every ten
+		// minutes for the lifetime of the process -- and this is the path every object of
+		// every kind takes, so it buries whatever is actually new. The information is
+		// still here for anyone who turns the verbosity up, and the condition below
+		// carries the standing state (CONTRIBUTING.md, "Logging"; NBO-010 made the same
+		// call in the endpoint controller's fail()).
+		log.V(1).Info("reconcile is still stopped", "err", err.Error())
+	default:
 		log.V(1).Info("reconcile waiting", "err", err.Error())
 	}
 
-	if out.event != "" {
+	// On the transition only. An Event is an API object: it costs etcd, it counts against
+	// the namespace's retention, and a duplicate every resync evicts the Events somebody
+	// actually needed. classify has already decided whether this state is worth an Event at
+	// all; this decides whether it is worth saying again (see outcome.event).
+	if out.event != "" && changed {
 		p.engine.warn(p.obj, out.event, "%s", err.Error())
 	}
 
+	// Every pass, unguarded. The condition is the standing state -- which is precisely why
+	// the Event and the error line above need not repeat -- so it has to keep carrying this
+	// pass's reason, message and observedGeneration. finish() still writes nothing when
+	// none of the three moved.
 	p.condition(netboxv1alpha1.ConditionReady, false, out.reason, err.Error())
 
 	return p.finish(ctx, out.requeue)
+}
+
+// transitioned reports whether writing this condition would change the object's state.
+//
+// Status and reason only; the message is deliberately excluded. A stop message is the
+// underlying error's own wording -- a timeout whose text differs by a millisecond, a
+// NetBox body that lists the same field errors in another order -- and none of that is a
+// state change. Keying on it would re-fire the Event and the error line on every retry,
+// which is the whole thing the guard exists to prevent.
+//
+// It reads the status as stored rather than the live conditions, so it answers "has this
+// changed since the last pass" even for a condition an earlier step of this same pass has
+// already touched.
+func (p *pass) transitioned(condType string, status metav1.ConditionStatus, reason string) bool {
+	existing := meta.FindStatusCondition(p.before.Conditions, condType)
+
+	return existing == nil || existing.Status != status || existing.Reason != reason
 }
 
 // condition sets one condition, always stamping the generation it was observed at.
@@ -158,7 +206,9 @@ func jitter(d time.Duration) time.Duration {
 	return d - time.Duration(spread/2) + time.Duration(rand.Int64N(spread)) //nolint:gosec // spreading load, not a secret
 }
 
-// warn records an Event for a state that needs a human.
+// warn records an Event for a state that needs a human. Callers emit only on a transition
+// into that state: an Event per resync would put one line per object per interval into the
+// namespace, and `kubectl describe` would show a page of the same sentence.
 func (e *Engine) warn(obj Object, reason, format string, args ...any) {
 	if e.Events == nil {
 		return

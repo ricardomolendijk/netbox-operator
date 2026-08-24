@@ -104,6 +104,17 @@ type outcome struct {
 
 	// event is the Event reason to emit, if any. Only for states a human has to resolve:
 	// an Event for a transient failure is noise at scale.
+	//
+	// This is the by-category half of that argument; stop()'s transition guard is the
+	// by-transition half. Both are kept, because neither subsumes the other and dropping
+	// either brings back a flood with a different shape. This one answers "is this state
+	// ever worth telling a human about" -- a wait is not, and every object in the cluster
+	// passes through one, so without it a single `kubectl apply` of a large manifest emits
+	// an Event per object that nobody can act on and that resolves itself. The guard
+	// answers "has what we would tell them changed since we last told them", which is the
+	// only question that can be asked once a state does deserve an Event. Folding them
+	// together would mean either eventing waits once each, or never eventing a permanent
+	// failure at all.
 	event string
 
 	// severe marks a state that needs a human, and so is logged at error rather than
