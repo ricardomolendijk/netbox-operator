@@ -1,14 +1,17 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-namespace: netbox-operator-system
-namePrefix: netbox-operator-
 
-labels:
-- includeSelectors: true
-  pairs:
-    app.kubernetes.io/name: netbox-operator
-
+# The deployable overlay: the operator (config/base) plus the deploy-time list of
+# namespaces it may read credential Secrets in.
+#
+# The component is what grants the operator any Secret access at all -- the generated
+# ClusterRole has no `secrets` rule -- so it supplies both halves of that grant: a
+# Role/RoleBinding per namespace, and the env var telling the manager which namespaces to
+# build informers for. Both are generated from
+# config/rbac/credential-namespaces/namespaces.txt by `make manifests`, so adding a
+# namespace is one line in that file.
 resources:
-- ../crd
-- ../rbac
-- ../manager
+- ../base
+
+components:
+- ../rbac/credential-namespaces

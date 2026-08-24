@@ -68,9 +68,46 @@ func tlsOpts(enableHTTP2 bool) []func(*tls.Config) {
 	}
 }
 
+// credentialNamespacesEnv names the namespaces the operator may read credential Secrets
+// in, comma-separated, or `*` for every namespace.
+//
+// An environment variable rather than a flag because the value is written by a kustomize
+// patch: env is a keyed list, so a component can add one entry without restating the
+// container's other settings, where a patch to `args` replaces the whole list and would
+// have to repeat --leader-elect and --health-probe-bind-address to add one flag.
+const credentialNamespacesEnv = "NETBOX_CREDENTIAL_NAMESPACES"
+
+// secretScope reads the deploy-time credential namespace list.
+//
+// Unset is fatal, not cluster-wide. The manager cannot read Secrets it has no Role for,
+// and the two ways that goes wrong are both bad: a cluster-scoped informer would fail its
+// LIST with a `Forbidden` that stalls startup with no explanation, and an operator who did
+// once hold a cluster-wide grant would silently keep using it. Refusing to start names the
+// problem at the only moment anybody is looking.
+func secretScope() (controller.SecretScope, error) {
+	value := os.Getenv(credentialNamespacesEnv)
+	scope, err := controller.ParseSecretScope(value)
+	if err != nil {
+		return controller.SecretScope{}, fmt.Errorf("reading %s=%q: %w; list the namespaces "+
+			"holding endpoint credential Secrets in "+
+			"config/rbac/credential-namespaces/namespaces.txt and run `make manifests`, or "+
+			"set it to %q to read Secrets cluster-wide -- which needs a cluster-wide Secret "+
+			"grant config/rbac no longer ships (see docs/operations/rbac.md)",
+			credentialNamespacesEnv, value, err, controller.AllNamespaces)
+	}
+	return scope, nil
+}
+
 func run() error {
 	opts, zapOpts := parseFlags()
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&zapOpts)))
+
+	secrets, err := secretScope()
+	if err != nil {
+		return err
+	}
+	ctrl.Log.Info("scoped secret access", "namespaces", secrets.String(),
+		"credentialLabel", controller.CredentialLabel)
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme: scheme,
@@ -82,9 +119,10 @@ func run() error {
 		HealthProbeBindAddress: opts.probeAddr,
 		LeaderElection:         opts.enableLeaderElection,
 		LeaderElectionID:       "netbox-operator.kubeforge.org",
-		// Secrets are the operator's only cluster-wide read, and an unscoped informer
-		// would cache every one of them.
-		Cache: cache.Options{ByObject: controller.SecretCacheOptions()},
+		// One informer per granted namespace, label-selected: an unscoped informer would
+		// cache every Secret in the cluster, and a cluster-scoped one would need a
+		// cluster-wide grant this deployment does not have.
+		Cache: cache.Options{ByObject: secrets.CacheOptions()},
 	})
 	if err != nil {
 		return fmt.Errorf("creating manager: %w", err)
@@ -98,6 +136,7 @@ func run() error {
 		Client:   mgr.GetClient(),
 		Cache:    clients,
 		Recorder: mgr.GetEventRecorderFor("netboxendpoint-controller"),
+		Secrets:  secrets,
 	}).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("setting up the NetBoxEndpoint controller: %w", err)
 	}

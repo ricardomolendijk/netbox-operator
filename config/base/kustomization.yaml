@@ -1,0 +1,22 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# The operator's own resources, namespaced and prefixed. These transformers live here
+# rather than in config/default because kustomize applies a kustomization's transformers to
+# everything it accumulates -- including a component's resources. With `namespace:` one
+# level up, the per-namespace credential Roles in config/rbac/credential-namespaces would
+# all be rewritten into the operator's namespace, which is exactly the grant they exist to
+# avoid. Moving them down one level leaves the component's Roles in the namespaces they
+# name. See docs/operations/rbac.md and NBO-072.
+namespace: netbox-operator-system
+namePrefix: netbox-operator-
+
+labels:
+- includeSelectors: true
+  pairs:
+    app.kubernetes.io/name: netbox-operator
+
+resources:
+- ../crd
+- ../rbac
+- ../manager

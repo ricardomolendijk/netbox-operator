@@ -75,9 +75,12 @@ func startManager(cfg *rest.Config) (func(), error) {
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme:  scheme,
 		Metrics: metricsserver.Options{BindAddress: "0"},
-		// The same scoping the shipped manager uses, so the tests exercise the label
-		// selector rather than a cache more permissive than production's.
-		Cache: cache.Options{ByObject: SecretCacheOptions()},
+		// The same label selector the shipped manager uses, so the tests exercise it
+		// rather than a cache more permissive than production's. Cluster-wide in
+		// namespaces, unlike the shipped deployment: every test makes a namespace of its
+		// own, which a deploy-time namespace list cannot know about. The namespace half of
+		// the scoping is exercised against real RBAC in secretcache_test.go instead.
+		Cache: cache.Options{ByObject: SecretScope{}.CacheOptions()},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("manager: %w", err)

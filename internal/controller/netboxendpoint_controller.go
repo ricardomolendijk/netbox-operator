@@ -41,17 +41,24 @@ type NetBoxEndpointReconciler struct {
 	// Optional: a nil recorder simply records nothing, so a test that does not care about
 	// Events does not have to wire one.
 	Recorder record.EventRecorder
+
+	// Secrets is the deploy-time namespace list the manager's Secret informer and RBAC
+	// were built from, so an endpoint in a namespace nobody granted gets a condition
+	// naming the namespace instead of the cache's or the API server's own words. The zero
+	// value is cluster-wide, which is every namespace and therefore never rejects.
+	Secrets SecretScope
 }
 
 // +kubebuilder:rbac:groups=netbox.kubeforge.org,resources=netboxendpoints,verbs=get;list;watch
 // +kubebuilder:rbac:groups=netbox.kubeforge.org,resources=netboxendpoints/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 
-// All three Secret verbs are load-bearing under the label-selected cache: a selected
-// informer still issues a LIST before it WATCHes, and `watch` is what makes a rotated
-// token take effect without a restart. RBAC cannot filter by label, so this grant stays
-// cluster-wide until per-namespace Roles land; see docs/operations/rbac.md and NBO-072.
-// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
+// There is deliberately no `secrets` marker here, and the generated ClusterRole therefore
+// grants no Secret access at all. Secrets are read under one namespaced Role per namespace
+// named in config/rbac/credential-namespaces/namespaces.txt, because a marker can only
+// generate a cluster-wide rule -- a namespace list is deploy-time configuration and does
+// not belong in Go source. Removing this comment and adding the marker back re-opens
+// NBO-072; see docs/operations/rbac.md.
 
 // Reconcile builds a client for one endpoint and records what it found.
 //
@@ -177,6 +184,13 @@ func (r *NetBoxEndpointReconciler) ready(ctx context.Context, e *netboxv1alpha1.
 // readToken fetches the API token and the Secret's resourceVersion, which is what makes
 // the client cache invalidate on rotation.
 func (r *NetBoxEndpointReconciler) readToken(ctx context.Context, e *netboxv1alpha1.NetBoxEndpoint) (string, string, error) {
+	// The only place this check is needed: both Secrets an endpoint can name live in the
+	// endpoint's own namespace, and the token is read first, so a namespace nobody granted
+	// fails here before buildConfig can reach for a CA bundle in the same namespace.
+	if err := r.Secrets.Check(e.Namespace); err != nil {
+		return "", "", err
+	}
+
 	secret := &corev1.Secret{}
 	name := types.NamespacedName{Namespace: e.Namespace, Name: e.Spec.TokenSecretRef.Name}
 	if err := r.Get(ctx, name, secret); err != nil {
@@ -199,7 +213,19 @@ var (
 // manager's Secret cache is label-selected: an unlabelled Secret is reported as NotFound
 // even though it is sitting in the API server, and a bare "not found" sends the user
 // looking for a typo in a name that is correct. The condition has to name the label.
+//
+// `Forbidden` gets its own wording for the same reason: it can only mean the namespace's
+// Role is missing, which is a deployment step, not a manifest to re-read.
 func unreadableSecret(what string, name types.NamespacedName, err error) error {
+	if apierrors.IsForbidden(err) {
+		// The namespace is in the manager's list -- SecretScope.Check passed -- but the
+		// cluster does not agree, so the Role the list promised is missing or names other
+		// verbs. Nothing the operator can fix, and worth saying plainly.
+		return fmt.Errorf("reading %s secret %s: %w; the operator's namespace list "+
+			"includes %s but the cluster grants it nothing there: apply the Role and "+
+			"RoleBinding from config/rbac/credential-namespaces (see docs/operations/rbac.md)",
+			what, name, err, name.Namespace)
+	}
 	if !apierrors.IsNotFound(err) {
 		return fmt.Errorf("reading %s secret %s: %w", what, name, err)
 	}
@@ -344,7 +370,11 @@ func reasonFor(err error) string {
 	switch {
 	case errors.Is(err, errTokenMissing):
 		return netboxv1alpha1.ReasonTokenMissing
-	case apierrors.IsNotFound(err):
+	// One reason for all three ways a Secret can be out of reach -- absent, unlabelled, or
+	// in a namespace the operator holds no Role for. They are one problem to the reader
+	// ("the operator cannot read that Secret") and the message says which; a reason per
+	// cause would be a new API constant for each, and status.conditions is API.
+	case apierrors.IsNotFound(err), apierrors.IsForbidden(err), errors.Is(err, errNamespaceNotGranted):
 		return netboxv1alpha1.ReasonSecretMissing
 	case errors.As(err, &authErr):
 		return netboxv1alpha1.ReasonAuthError
