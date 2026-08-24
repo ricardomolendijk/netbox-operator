@@ -284,6 +284,24 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              deferredPending:
+                description: |-
+                  DeferredPending are the CR spec fields the engine has declared deferred and has not
+                  yet written to NetBox: a `primary_ip4` whose address does not exist yet, or one that
+                  was stripped from the create and is waiting for its follow-up PATCH.
+
+                  A status field rather than only a condition message. The intermediate state is
+                  legitimate and can be long-lived -- a reference that never resolves stays here
+                  forever, on purpose -- so "what is this object still waiting to write" has to be
+                  answerable from `kubectl get -o yaml` and greppable across a namespace, which a
+                  sentence inside a condition is not (docs/concepts/object-lifecycle.md).
+
+                  Spec field names rather than NetBox column names, because it is the spelling the
+                  user wrote and the one the RefsResolved message already uses.
+                items:
+                  type: string
+                type: array
+                x-kubernetes-list-type: atomic
               deletionAttempts:
                 description: |-
                   DeletionAttempts counts the deletes NetBox refused because something still

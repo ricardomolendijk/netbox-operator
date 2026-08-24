@@ -164,6 +164,11 @@ func (in *NetBoxObjectStatus) DeepCopyInto(out *NetBoxObjectStatus) {
 			(*out)[key] = val
 		}
 	}
+	if in.DeferredPending != nil {
+		in, out := &in.DeferredPending, &out.DeferredPending
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	if in.LastSyncTime != nil {
 		in, out := &in.LastSyncTime, &out.LastSyncTime
 		*out = (*in).DeepCopy()

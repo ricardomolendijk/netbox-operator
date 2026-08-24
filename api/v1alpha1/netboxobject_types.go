@@ -74,6 +74,16 @@ const (
 	// ReasonWaitingForRef is on Ready: a reference in the spec has not resolved.
 	ReasonWaitingForRef = "WaitingForRef"
 
+	// ReasonDeferredFieldPending is on Ready: the object exists in NetBox and a deferred
+	// field has not been written to it yet.
+	//
+	// Distinct from ReasonWaitingForRef, which is the same omission for a different
+	// cause: WaitingForRef means the engine has nothing to write, this means it has the
+	// value and has not sent it. The two are fixed differently -- one waits on another
+	// object, the other on the next pass of this one -- and status.deferredPending names
+	// the fields either way (docs/concepts/object-lifecycle.md).
+	ReasonDeferredFieldPending = "DeferredFieldPending"
+
 	// ReasonConflict is on Ready: NetBox holds an object this CR cannot safely claim --
 	// several match its natural key, or one matches and adoption was not asked for.
 	ReasonConflict = "Conflict"
@@ -312,6 +322,22 @@ type NetBoxObjectStatus struct {
 	// differ; this is the record of what was actually sent.
 	// +optional
 	LastAppliedHash string `json:"lastAppliedHash,omitempty"`
+
+	// DeferredPending are the CR spec fields the engine has declared deferred and has not
+	// yet written to NetBox: a `primary_ip4` whose address does not exist yet, or one that
+	// was stripped from the create and is waiting for its follow-up PATCH.
+	//
+	// A status field rather than only a condition message. The intermediate state is
+	// legitimate and can be long-lived -- a reference that never resolves stays here
+	// forever, on purpose -- so "what is this object still waiting to write" has to be
+	// answerable from `kubectl get -o yaml` and greppable across a namespace, which a
+	// sentence inside a condition is not (docs/concepts/object-lifecycle.md).
+	//
+	// Spec field names rather than NetBox column names, because it is the spelling the
+	// user wrote and the one the RefsResolved message already uses.
+	// +listType=atomic
+	// +optional
+	DeferredPending []string `json:"deferredPending,omitempty"`
 
 	// LastSyncTime is when the engine last wrote to NetBox. Unset until it does, and
 	// untouched by a reconcile that found nothing to do -- otherwise every resync would

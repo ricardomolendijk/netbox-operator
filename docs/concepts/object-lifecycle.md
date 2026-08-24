@@ -20,7 +20,7 @@ label on shipped code is worse than no label at all.
 | Typed errors and retry policy | Built (NBO-002) | [errors and retries](errors-and-retries.md) |
 | Endpoint reconcile loop, conditions, requeue policy | Built (NBO-004) | [reconciliation](reconciliation.md) |
 | The shared `status` envelope | Built (NBO-006) | `api/v1alpha1/netboxobject_types.go` |
-| **The deferred-field second pass** | **Designed, not implemented** | below |
+| The deferred-field second pass | Built (NBO-015) | below |
 | Reference resolution: four modes, typed errors | Built (NBO-012) | [references](references.md) |
 | **Inline child materialisation** | **Designed, not implemented** | NBO-032 (#45) |
 
@@ -29,52 +29,126 @@ hook reads as implemented and is not.
 
 ## The deferred-field second pass
 
-> **Status: designed, not implemented.** [NBO-015
-> (#27)](https://github.com/ricardomolendijk/netbox-operator/issues/27). `payload.go`
-> explicitly does not filter deferred fields yet, and there is no `status.deferredPending`
-> on the envelope. The *declaration* side is built — see
+> **Status: built (NBO-015).** [#27](https://github.com/ricardomolendijk/netbox-operator/issues/27).
+> The *declaration* side landed with the Descriptor — see
 > [the Descriptor](descriptor.md#deferral-and-the-identity-guard) for `Deferred`, the two
-> modes, and the `ErrDeferredNaturalKey` guard that already runs at manager start. What
-> follows is the engine behaviour that consumes it.
+> modes, and the `ErrDeferredNaturalKey` guard that runs at manager start. This is the engine
+> behaviour that consumes it.
 
 Some NetBox references cannot exist at create time by construction rather than by ordering.
 A `dcim.Device`'s `primary_ip4` is a `OneToOneField` to an `ipam.IPAddress`
 (`docs/netbox-schema.md` → `dcim.Device`); that address needs a `dcim.Interface` to be
-assigned to; that interface needs the Device. No apply order resolves it, so the design
-creates the object first and PATCHes the field afterwards.
+assigned to; that interface needs the Device. The cycle is in NetBox's own model, so no apply
+order resolves it: the engine creates the object without the field and PATCHes it afterwards.
 
 ### The two passes
 
 | Pass | Payload |
 |---|---|
-| 1 | The create, with deferred fields stripped. `status.id` is recorded as normal — the object provably exists. |
-| 2 | A PATCH containing **only** the deferred keys whose references now resolve. Nothing else, so a deferred PATCH can never mask or re-send an ordinary field. |
+| 1 | The create, with `DeferAlways` columns stripped. `status.id` is recorded as normal — the object provably exists. |
+| 2 | An ordinary drift PATCH. NetBox lacks a column the spec declares, so the differ finds exactly that column and sends exactly that column. |
 
-Between them the object reports `Ready=False, Reason=DeferredFieldPending`, with a new
-`status.deferredPending` listing the spec fields still waiting. That field is worth adding
-rather than leaving the answer in a condition message: the intermediate state is legitimate
-and potentially long-lived, and "what is this waiting for" should be answerable from
-`kubectl get -o yaml`.
+The second pass is the differ rather than a separate deferred writer, and that is the whole
+of the design. The strip is applied to a **copy** of the payload, used only as the POST body;
+the desired state that every later pass diffs the live object against keeps the field. So one
+pass after the create, "NetBox does not hold a value the spec asks for" is a true statement,
+and correcting it is what the engine already does for every other field.
+
+The alternatives are both broken, and in opposite directions:
+
+- **Strip the request and keep the field in the diff, without applying it.** The diff is then
+  satisfied only by a PATCH the request never carries, so it re-fires on every pass: a write
+  per resync for the lifetime of the object. That is the hot loop
+  [drift detection](drift.md) opens by warning about.
+- **Strip the desired state too.** The field is then never written and never compared — the
+  silent omission [issue #132](https://github.com/ricardomolendijk/netbox-operator/issues/132)
+  exists to make impossible.
+
+Between the two passes the object reports `Ready=False, Reason=DeferredFieldPending`, and
+`status.deferredPending` lists the **CR spec fields** still waiting. The requeue after the
+create is five seconds rather than the endpoint's resync: nothing failed, the id is in hand,
+and making `primary_ip4` land ten minutes after the machine it names would be a latency bug
+dressed as a retry policy.
+
+Five seconds is right exactly once, though, and every later pending pass falls back to the
+resync. That fallback is a guard rather than a default: a PATCH NetBox accepts and silently
+ignores — which is what it does with a read-only column a descriptor failed to declare
+(`docs/netbox-schema.md`, preamble) — leaves the field pending forever, and a five-second
+interval would turn that from a slow PATCH loop into a fast one.
+
+`status.deferredPending` is a status field rather than only a condition message because the
+state is legitimate and can be permanent, so "what is this object still waiting to write" has
+to be answerable from `kubectl get -o yaml` and greppable across a namespace:
+
+```console
+$ kubectl get netboxvirtualmachine web-01 -o jsonpath='{.status.deferredPending}'
+["primaryIP4Ref"]
+```
+
+### The two modes are not cosmetic
+
+`DeferAlways` is stripped from the create whenever it resolves. `DeferIfUnresolved` never is:
+an unresolved reference is already left out of the payload, so "defer only when it does not
+resolve" is satisfied by doing nothing, and "include it when it does" by not stripping it.
+
+That difference is why only `DeferIfUnresolved` may name a field a natural key matches on,
+enforced at boot by `ErrDeferredNaturalKey`. Stripping a resolved `parent` from an MPTT
+create would change the object's identity from `(parent, name)` to `(name)` — so the lookup
+that decided to create would have asked a different question from the create it decided on,
+and the follow-up PATCH would reparent whatever a name-only lookup adopted. The guard is
+exercised against the registered descriptors, not against a fixture
+(`internal/registry/deferred_test.go`).
 
 ### Three commitments that keep it honest
 
-**A pending field is excluded from the diff, not compared against absent.** Otherwise every
-reconcile of a pending object finds drift and PATCHes nothing — the hot-loop shape that
-[drift detection](drift.md) exists to prevent. The strip step returns the excluded key list
-precisely so the differ can be told.
+**Exactly two writes per converged object.** One POST and one PATCH, and then nothing however
+many times the object is reconciled. A third write means either the differ is comparing a
+field the create never sent or the second pass is re-sending a value NetBox already holds;
+both are regressions, and `TestDeferAlwaysIsStrippedThenPatched` reconciles ten more times
+and counts.
 
-**Exactly two writes per converged object, ever.** One POST and one PATCH. A third write
-means either the differ is comparing a pending field or the second pass is re-sending an
-already-applied one. Both are regressions with a test each.
+**A pending field is decided by the differ, not by a second opinion.** Whether a deferral has
+landed is answered with `netbox.Drift` against the live object, the same comparison the PATCH
+is built from. A reference reads back as a nested object and is written as an id, so an
+independent equality check would either report an applied field as pending forever or a
+pending one as done.
 
 **An unresolvable deferred field leaves the object `Ready=False` forever, on purpose.**
-`kubectl wait --for=condition=Ready` failing is the correct outcome. The operator must not
-claim success for an object missing a field the user asked for.
+`kubectl wait --for=condition=Ready` failing is the correct outcome; the operator must not
+claim success for an object missing a field the user asked for. It waits at the resolver's own
+interval rather than spinning, and `status.deferredPending` keeps naming the field.
 
-Once applied, a deferred field is an ordinary managed field: it enters the desired payload
-and drift correction fixes a UI change to it like any other. Under `mode: DryRun` neither
-pass runs, the object reports `DryRunPending`, and `status.deferredPending` is still
-populated, since it is computed from references rather than from writes.
+### Which reason, and when
+
+| State | `Ready` reason | `status.deferredPending` |
+|---|---|---|
+| Reference has not resolved | `WaitingForRef` | lists the field |
+| Resolved, stripped from the create, PATCH still to come | `DeferredFieldPending` | lists the field |
+| Applied | `Synced` | empty |
+| Endpoint in `DryRun`, or `driftMode: Report` | `DryRunPending` / `ReportPending` | lists the field |
+
+`WaitingForRef` wins over `DeferredFieldPending` because it is the more specific answer to
+"why": the engine has nothing to write, rather than something it has not sent yet, and the two
+are fixed in different places. Both populate `deferredPending`, so the field list is there
+either way. Under `DryRun` neither pass runs and the list is still populated, since it is
+computed from what the spec asks for and NetBox lacks rather than from what was written.
+
+Once applied, a deferred field is an ordinary managed field: it is in the desired payload, and
+drift correction fixes a UI change to it like any other.
+
+### What is deliberately not promised
+
+The second pass is the ordinary differ, so on an object that was created and then edited in
+the same window the PATCH carries the deferred column *and* whatever else drifted. An earlier
+draft of this page promised a deferred-only PATCH; that would mean two writes where one
+suffices, and a second place where the engine decides what to send. One differ, one decision.
+
+No shipped kind declares a deferral yet — `primary_ip4` arrives with
+`virtualization.VirtualMachine` and `dcim.Device`. The engine's behaviour is proven against
+the fake kind, which is where engine behaviour is always proven
+(`internal/reconciler/deferred_test.go`); the identity guard is proven against the real
+descriptors.
+
 
 ## Proposal: generate the descriptors, not the types
 

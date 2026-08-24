@@ -59,10 +59,16 @@ func specOf(obj Object) (specFields, error) {
 
 // desired renders the spec into the payload to send, and reports what it could not render.
 //
-// Read-only columns and deferred fields need no filtering here: a spec field may not map
-// onto a read-only column and a deferred field must be written by a reference, both
-// enforced by registry.Descriptor.Validate at boot. So the only thing left out is a
-// reference, and that is returned rather than dropped.
+// Read-only columns need no filtering here: a spec field may not map onto one, enforced by
+// registry.Descriptor.Validate at boot. So the only thing left out is a reference, and that
+// is returned rather than dropped.
+//
+// Deferred fields are deliberately *not* filtered here either, and that is the load-bearing
+// half of NBO-015. What this returns is the desired state, which is what every later pass
+// diffs the live object against; only the create payload has a deferral stripped from it, by
+// deferral.createPayload. Filtering here instead would leave the field never compared and so
+// never written -- and filtering here while leaving it in the diff is a PATCH that can never
+// satisfy its own diff, which is the hot loop docs/concepts/drift.md opens by warning about.
 func (s specFields) desired(d registry.Descriptor) (netbox.Object, registry.SpecState, []string, error) {
 	desired := make(netbox.Object, len(s))
 	state := registry.SpecState{}
