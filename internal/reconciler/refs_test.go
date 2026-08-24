@@ -75,6 +75,68 @@ func resolvedTo(field string, id int64) resolver.Resolution {
 	}}
 }
 
+// clearedDescriptor declares its reference on a nullable column, the way a descriptor does
+// for a spec field typed v1alpha1.OptionalRef.
+func clearedDescriptor() registry.Descriptor {
+	d := fakeDescriptor()
+	for i := range d.Fields {
+		if d.Fields[i].Spec == "parentRef" {
+			d.Fields[i].EmptyIsNull = true
+		}
+	}
+
+	return d
+}
+
+// TestEmptyRefIsWrittenAsNull is the write half of #185.
+//
+// `parentRef: {}` on a nullable column means "explicitly no parent", and the difference
+// between that and an omitted `parentRef` is the entire ticket: an omission means "do not
+// manage the column" and leaves NetBox's value alone, while an empty reference is an
+// instruction and has to arrive as null. A payload that merely *lacks* `parent` would read as
+// success and leave the old parent in place -- the same silent no-op #170 fixed for a nullable
+// scalar and #121 for a claimed field.
+//
+// The zero Result is what the resolver answers with for one (resolver.Resolve, and the case
+// in resolver_test.go that pins it), so that is what this test hands the engine.
+func TestEmptyRefIsWrittenAsNull(t *testing.T) {
+	obj := fakeObject()
+	obj.Spec.ParentRef = &fakeRef{}
+
+	nb := &fakeClient{created: liveTag(7)}
+	resolution := resolver.Resolution{ByField: map[string]resolver.FieldRefs{"parentRef": {{}}}}
+	engine := engineWith(t, clearedDescriptor(), nb, &fakeRefs{resolution: resolution})
+
+	if _, err := engine.Reconcile(context.Background(), obj); err != nil {
+		t.Fatalf("Reconcile() = %v", err)
+	}
+
+	payload := nb.lastPayload()
+
+	got, sent := payload["parent"]
+	if !sent {
+		t.Fatalf("payload = %v, want a `parent` key: an empty reference clears the column, and "+
+			"leaving the key out means do not manage it", payload)
+	}
+
+	if got != nil {
+		t.Errorf("payload[parent] = %v, want null", got)
+	}
+
+	// True, not False: the reference resolved. It resolved to no object, which is an answer
+	// rather than a wait, and reporting it as unresolved would keep the object out of Ready
+	// forever over a value that is already correct.
+	resolved := conditionOf(obj, netboxv1alpha1.ConditionRefsResolved)
+	if resolved.Status != metav1.ConditionTrue || resolved.Reason != netboxv1alpha1.ReasonAllResolved {
+		t.Errorf("RefsResolved = %s/%s, want True/%s",
+			resolved.Status, resolved.Reason, netboxv1alpha1.ReasonAllResolved)
+	}
+
+	if ready := conditionOf(obj, netboxv1alpha1.ConditionReady); ready.Status != metav1.ConditionTrue {
+		t.Errorf("Ready = %s/%s, want True", ready.Status, ready.Reason)
+	}
+}
+
 // TestUnresolvedRefKeepsTheObjectFromReadiness is issue #132, and the test is the deliverable.
 //
 // On a kind whose identity does not include the reference, the object *is* created -- spec

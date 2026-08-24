@@ -509,7 +509,22 @@ func (p *passReader) read(
 }
 
 // Resolve resolves one reference to an (id, object type) pair.
+//
+// An empty reference on a column the descriptor declares nullable is the zero Result and no
+// error: the field was written and selects nothing, so the column is cleared. That is the same
+// answer an empty union gets (genericfk.go) and the same instruction an emptied EmptyIsNull
+// scalar carries -- a value being written, not an omission. It is distinct from a field the
+// spec never set, which never reaches here at all, because spec omission means "do not manage"
+// and conflating the two would clear a foreign key somebody else owns.
+//
+// Nothing is looked up for it, not even the target Kind: clearing a column asks no question
+// about the Kind it used to point at, and a NetBox call for a reference that selects nothing
+// would be a call whose answer is discarded.
 func (r *Resolver) Resolve(ctx context.Context, req Request) (Result, error) {
+	if modeOf(req.Ref) == "" && req.Field.EmptyIsNull && !req.Field.Class.ToMany() {
+		return Result{}, nil
+	}
+
 	target, ok := r.kinds().Get(req.Field.Target)
 	if !ok {
 		return Result{}, req.blocked(ErrRefKindUnavailable, req.unavailableDetail())
@@ -526,9 +541,11 @@ func (r *Resolver) Resolve(ctx context.Context, req Request) (Result, error) {
 		return r.byID(ctx, req, target)
 	}
 
-	// Unreachable through the API server: ObjectRef's CEL rules require exactly one mode.
-	// Kept because a stored object predating a CEL rule, or a caller building a Request by
-	// hand, must not resolve to "no reference at all" and have the field silently dropped.
+	// Unreachable through the API server: ObjectRef's CEL rules require exactly one mode,
+	// and the one type that permits none of them -- v1alpha1.OptionalRef -- is only declared
+	// on a field whose descriptor entry carries EmptyIsNull, which returned above. Kept
+	// because a stored object predating a CEL rule, or a caller building a Request by hand,
+	// must not resolve to "no reference at all" and have the field silently dropped.
 	return Result{}, req.blocked(ErrRefMalformed, "")
 }
 
