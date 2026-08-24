@@ -61,6 +61,16 @@ const (
 	// ResultDryRun is drift found on a DryRun endpoint, deliberately not corrected.
 	ResultDryRun = "dryrun"
 
+	// ResultReported is drift found on a `driftMode: Report` endpoint, deliberately not
+	// corrected.
+	//
+	// Its own bucket rather than folded into dryrun: the two are configured in different
+	// fields and mean different things about intent -- DryRun is "this whole endpoint is
+	// a rehearsal", Report is "this endpoint is live but drift is somebody else's to
+	// fix" -- and a dashboard that cannot tell them apart cannot answer which one to
+	// switch off (docs/decisions/0005-gitops-coexistence.md).
+	ResultReported = "reported"
+
 	// ResultWaiting is a reconcile that could not proceed and is not a failure: the
 	// endpoint is not Ready yet, no natural key is usable yet, or onConflict is
 	// AdoptOnly and there is nothing to adopt. Normal during a rollout.
@@ -86,7 +96,7 @@ var factory = promauto.With(ctrlmetrics.Registry)
 
 // ReconcileTotal counts object reconciles by kind and outcome.
 //
-// Cardinality: kind (~120) x result (8) = ~960 series worst case. Bounded by the code:
+// Cardinality: kind (~120) x result (9) = ~1080 series worst case. Bounded by the code:
 // both label sets are compile-time constants.
 var ReconcileTotal = factory.NewCounterVec(prometheus.CounterOpts{
 	Name: "netbox_operator_reconcile_total",
@@ -120,7 +130,7 @@ var DriftDetected = factory.NewCounterVec(prometheus.CounterOpts{
 // DriftCorrected counts fields actually written back to NetBox.
 //
 // Separate from DriftDetected rather than a label on it, because the gap between the two
-// is the whole signal in `drift.mode: Report` and on a DryRun endpoint: drift is found
+// is the whole signal in `driftMode: Report` and on a DryRun endpoint: drift is found
 // and deliberately left alone (docs/decisions/0005-gitops-coexistence.md). One counter
 // with a `corrected` label would make "reporting as configured" and "failing to write"
 // the same shape on a dashboard.

@@ -43,6 +43,40 @@ const (
 	EndpointModeDryRun EndpointMode = "DryRun"
 )
 
+// DriftMode selects what the operator does about a NetBox object that no longer matches
+// the spec of the CR that owns it.
+//
+// There is deliberately no value in which NetBox wins and the difference is promoted back
+// into a CR's spec. That would make the operator a second writer to desired state, which
+// is the fight docs/decisions/0005-gitops-coexistence.md exists to prevent. Turning
+// NetBox's current contents into manifests is `nbctl export`'s job (NBO-040): it writes
+// files for a human to commit, rather than a controller writing specs.
+//
+// +kubebuilder:validation:Enum=Correct;Report;Off
+type DriftMode string
+
+const (
+	// DriftCorrect detects drift and fixes it. The default and the intended steady
+	// state: Git is authoritative, so a NetBox-side edit is simply wrong.
+	DriftCorrect DriftMode = "Correct"
+
+	// DriftReport detects drift, reports it on conditions, Events and metrics, and sends
+	// nothing at all.
+	//
+	// For the first week of an adoption, and for running alongside a team that still
+	// edits NetBox by hand. It is migration time rather than a supported operating mode,
+	// which is why it is not the default and why there is nothing it can write.
+	DriftReport DriftMode = "Report"
+
+	// DriftOff disables the periodic resync, so the operator acts only when a CR
+	// changes. Writes are still permitted: a spec edit is applied, a UI edit is not
+	// noticed until something touches that object again.
+	//
+	// For a very large NetBox where the resync cost is real, at the price of a UI edit
+	// persisting until the next CR change.
+	DriftOff DriftMode = "Off"
+)
+
 // SecretKeyRef points at one key of a Secret in this namespace. Every use site requires
 // the netbox.populator.io/endpoint-credential label, because the manager's Secret cache
 // selects on it rather than holding every Secret in the cluster.
@@ -117,7 +151,14 @@ type NetBoxEndpointSpec struct {
 	// +optional
 	Mode EndpointMode `json:"mode,omitempty"`
 
-	// ResyncPeriod re-checks NetBox for drift even when no CR changed.
+	// DriftMode is what to do about a NetBox object that no longer matches its CR:
+	// Correct, Report or Off.
+	// +kubebuilder:default=Correct
+	// +optional
+	DriftMode DriftMode `json:"driftMode,omitempty"`
+
+	// ResyncPeriod re-checks NetBox for drift even when no CR changed. Ignored when
+	// driftMode is Off, which is what "no periodic resync" means.
 	// +kubebuilder:default="10m"
 	// +optional
 	ResyncPeriod metav1.Duration `json:"resyncPeriod,omitempty"`
@@ -160,6 +201,7 @@ type NetBoxEndpointStatus struct {
 // +kubebuilder:resource:scope=Namespaced,shortName=nbep;nbendpoint
 // +kubebuilder:printcolumn:name="URL",type=string,JSONPath=`.spec.url`
 // +kubebuilder:printcolumn:name="Mode",type=string,JSONPath=`.spec.mode`
+// +kubebuilder:printcolumn:name="Drift",type=string,JSONPath=`.spec.driftMode`
 // +kubebuilder:printcolumn:name="Version",type=string,JSONPath=`.status.netboxVersion`
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`

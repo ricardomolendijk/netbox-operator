@@ -25,6 +25,10 @@ spec:
     name: netbox-token
     key: token
   mode: Apply
+  # Correct is the intended steady state: a NetBox-side edit is drift, and Git wins. Report
+  # detects drift and writes nothing at all; Off drops the periodic re-check. See
+  # docs/operations/gitops.md.
+  driftMode: Correct
   timeout: 30s
   resyncPeriod: 10m
   rateLimit:

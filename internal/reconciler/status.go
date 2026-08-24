@@ -23,16 +23,18 @@ func (p *pass) ready(ctx context.Context) (ctrl.Result, error) {
 	p.condition(netboxv1alpha1.ConditionReady, true, netboxv1alpha1.ReasonSynced,
 		fmt.Sprintf("netbox %s/%d matches the spec", p.desc.Endpoint, p.obj.NetBoxStatus().ID))
 
-	return p.finish(ctx, p.resync())
+	return p.finish(ctx, p.driftResync())
 }
 
-// pending records a reconcile that deliberately did not finish the job, which today means
-// DryRun: the object is not Ready and saying otherwise would make `kubectl wait` lie about
-// a write that never happened.
+// pending records a reconcile that deliberately did not finish the job: an endpoint in
+// DryRun, or one whose driftMode is Report. The object is not Ready, and saying otherwise
+// would make `kubectl wait` lie about a write that never happened -- which is the whole
+// reason Report reports Ready=False rather than treating "reported as configured" as
+// success.
 func (p *pass) pending(ctx context.Context, reason, message string) (ctrl.Result, error) {
 	p.condition(netboxv1alpha1.ConditionReady, false, reason, message)
 
-	return p.finish(ctx, p.resync())
+	return p.finish(ctx, p.driftResync())
 }
 
 // stop records why this reconcile could not proceed and when to try again.
@@ -122,6 +124,22 @@ func (p *pass) resync() time.Duration {
 	}
 
 	return DefaultResync
+}
+
+// driftResync is the requeue for a pass that settled, and so the interval at which a
+// NetBox-side edit that nothing in Kubernetes touched gets noticed.
+//
+// Zero under driftMode: Off, which is the whole of what "no periodic resync" means -- a CR
+// event still reconciles, because a watch is not a requeue. Deliberately not used by
+// stop(): an object waiting for its endpoint, or refused a NetBox object it conflicts
+// with, has not settled, and turning off drift re-checks must not also turn off the retry
+// that is the only thing that will ever get such an object unstuck.
+func (p *pass) driftResync() time.Duration {
+	if p.endpoint.DriftMode == netboxv1alpha1.DriftOff {
+		return 0
+	}
+
+	return p.resync()
 }
 
 // jitter spreads a requeue by up to a tenth either way, so that objects created together

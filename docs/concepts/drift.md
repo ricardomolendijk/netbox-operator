@@ -81,6 +81,32 @@ record what it last applied and short-circuit when nothing has changed — rathe
 teaching `Drift` every rewrite NetBox might do. Numeric strings and numbers hash
 identically, matching how they compare.
 
+## What happens to the drift once it is found
+
+`Drift` says what differs. What the operator *does* about it is
+`NetBoxEndpoint.spec.driftMode`, and it is a property of the endpoint rather than of this
+function — which is why `Drift` stays a pure comparison and `nbctl plan` can reuse it
+unchanged.
+
+| Mode | Detects | Corrects | Periodic re-check |
+|---|---|---|---|
+| `Correct` | yes | yes | yes |
+| `Report` | yes | no | yes |
+| `Off` | only on a CR change | yes | no |
+
+`Correct` is the default and the intended steady state: Git is authoritative, so a
+NetBox-side edit is simply wrong. A UI edit is never promoted back into a CR's `spec` — there
+is no mode for that, and [ADR-0005](../decisions/0005-gitops-coexistence.md) is why.
+
+Whatever the mode, the two counters are separate: `drift_detected_total` moves for every
+field that differs, `drift_corrected_total` only for the fields NetBox accepted. The gap
+between them is the whole signal in `Report` and on a `DryRun` endpoint, where drift is found
+and deliberately left alone. One counter with a `corrected` label would make "reporting as
+configured" and "failing to write" the same shape on a dashboard.
+
+See [coexisting with Flux and Argo CD](../operations/gitops.md) for the operational side of
+each mode.
+
 ## Purity
 
 `Drift` takes plain data and returns plain data. It never touches a client. That is

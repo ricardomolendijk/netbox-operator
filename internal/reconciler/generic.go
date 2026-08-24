@@ -81,6 +81,17 @@ type Endpoint struct {
 	// Resync is how often to re-check for drift with no CR change. Zero means
 	// DefaultResync.
 	Resync time.Duration
+
+	// DriftMode is what this endpoint does about drift. The empty value means
+	// DriftCorrect, so an endpoint stored before the field existed behaves as the CRD
+	// default says it should.
+	//
+	// The engine reads it to decide what to *say* and when to come back, never to decide
+	// whether it may write: Report mode is enforced by handing the engine a client that
+	// physically cannot mutate NetBox, because a mode that is one forgotten `if` away
+	// from writing is not a mode anyone can trust
+	// (docs/decisions/0005-gitops-coexistence.md).
+	DriftMode netboxv1alpha1.DriftMode
 }
 
 // Endpoints hands out the client for one NetBoxEndpoint by namespace and name. A miss
@@ -419,6 +430,7 @@ func (p *pass) update(ctx context.Context, live netbox.Object) (ctrl.Result, err
 			"netboxID", p.obj.NetBoxStatus().ID, "action", "none")
 		p.condition(netboxv1alpha1.ConditionSynced, true,
 			netboxv1alpha1.ReasonNoDrift, "netbox matches the spec")
+		p.driftCondition(false, netboxv1alpha1.ReasonNoDrift, "netbox matches the spec")
 		p.result = metrics.ResultUnchanged
 
 		return p.ready(ctx)
@@ -469,18 +481,20 @@ func (p *pass) applyWrite(ctx context.Context, written netbox.Object, event, act
 	log := logf.FromContext(ctx).WithValues("action", action, "changes", detail)
 
 	if netbox.Suppressed(written) {
-		// Debug, not info: a DryRun endpoint finds the same drift on every resync and
-		// writes nothing, so at info this is one identical line per object per resync
-		// forever. What changed is nothing; drift_detected_total and the
-		// Synced=False/DriftDetectedDryRun condition are the signals that scale.
-		log.V(1).Info("dry run: netbox was not written")
-		p.engine.event(p.obj, event, "dry run: would have written %s (%s)", p.desc.Endpoint, detail)
-		p.condition(netboxv1alpha1.ConditionSynced, false,
-			netboxv1alpha1.ReasonDriftDetectedDryRun, "the endpoint is in DryRun, so nothing was sent")
-		p.result = metrics.ResultDryRun
+		out := p.suppression(event)
 
-		return p.pending(ctx, netboxv1alpha1.ReasonDryRunPending,
-			fmt.Sprintf("dry run: netbox was not written (%s)", detail))
+		// Debug, not info: a non-writing endpoint finds the same drift on every resync
+		// and writes nothing, so at info this is one identical line per object per resync
+		// forever. What changed is nothing; drift_detected_total and the DriftDetected
+		// condition are the signals that scale.
+		log.V(1).Info(out.what + ": netbox was not written")
+		p.engine.event(p.obj, out.event, "%s: would have written %s (%s)", out.what, p.desc.Endpoint, detail)
+		p.condition(netboxv1alpha1.ConditionSynced, false, out.synced, out.why)
+		p.driftCondition(true, netboxv1alpha1.ReasonDriftDetected, p.uncorrected(detail))
+		p.result = out.result
+
+		return p.pending(ctx, out.ready,
+			fmt.Sprintf("%s: netbox was not written (%s)", out.what, detail))
 	}
 
 	status := p.obj.NetBoxStatus()
@@ -511,6 +525,7 @@ func (p *pass) applyWrite(ctx context.Context, written netbox.Object, event, act
 	p.engine.event(p.obj, event, "netbox %s/%d: %s", p.desc.Endpoint, status.ID, detail)
 	p.condition(netboxv1alpha1.ConditionSynced, true,
 		netboxv1alpha1.ReasonDriftCorrected, detail)
+	p.driftCondition(false, netboxv1alpha1.ReasonDriftCorrected, detail)
 	if result, ok := writeResults[action]; ok {
 		p.result = result
 	}
@@ -525,6 +540,75 @@ var writeResults = map[string]string{
 	"create":   metrics.ResultCreated,
 	"update":   metrics.ResultUpdated,
 	"recreate": metrics.ResultRecreated,
+}
+
+// suppression is how a write that was never sent gets reported.
+//
+// Two shapes rather than one, because `mode: DryRun` and `driftMode: Report` are set in
+// different fields and fixed in different ways: a reason naming DryRun on an endpoint
+// whose mode is Apply sends whoever reads it looking at the wrong field, and a dashboard
+// that cannot tell "this endpoint is a rehearsal" from "this endpoint is live and drift is
+// somebody else's to fix" cannot answer which one to switch off.
+type suppression struct {
+	// what names the reason nothing was sent, in the log line, the Event and the Ready
+	// message -- so all three agree without three copies of the phrasing.
+	what string
+
+	// event is the Event reason. A DryRun keeps the write's own reason, because the
+	// endpoint is rehearsing that write; Report replaces it, since "updated" and "would
+	// have updated" must not read alike in `kubectl describe`.
+	event string
+
+	synced string
+	ready  string
+	result string
+
+	// why is the Synced message: which field made this endpoint refuse the write.
+	why string
+}
+
+// suppression returns how to report a suppressed write, given the Event reason the write
+// would have carried.
+func (p *pass) suppression(writeEvent string) suppression {
+	if p.endpoint.DriftMode == netboxv1alpha1.DriftReport {
+		return suppression{
+			what:   "report only",
+			event:  netboxv1alpha1.EventDriftDetected,
+			synced: netboxv1alpha1.ReasonDriftReported,
+			ready:  netboxv1alpha1.ReasonReportPending,
+			result: metrics.ResultReported,
+			why:    "the endpoint's driftMode is Report, so nothing was sent",
+		}
+	}
+
+	return suppression{
+		what:   "dry run",
+		event:  writeEvent,
+		synced: netboxv1alpha1.ReasonDriftDetectedDryRun,
+		ready:  netboxv1alpha1.ReasonDryRunPending,
+		result: metrics.ResultDryRun,
+		why:    "the endpoint is in DryRun, so nothing was sent",
+	}
+}
+
+// uncorrected renders the drift left standing by a suppressed write.
+//
+// A suppressed create leaves status.id at zero, and that is the one case where the drift is
+// not a field list: NetBox does not hold the object at all, so "created" -- the detail an
+// applied create would report -- describes something that did not happen.
+func (p *pass) uncorrected(detail string) string {
+	if p.obj.NetBoxStatus().ID == 0 {
+		return "netbox holds no such object; the whole payload is uncorrected drift"
+	}
+
+	return detail
+}
+
+// driftCondition records whether NetBox currently differs from the spec with nothing done
+// about it. False after a correction as well as after a pass that found nothing, so the
+// condition is a stable statement about NetBox rather than one that flaps on every write.
+func (p *pass) driftCondition(detected bool, reason, message string) {
+	p.condition(netboxv1alpha1.ConditionDriftDetected, detected, reason, message)
 }
 
 // driftDetected counts every field that differs, whether or not it gets corrected.

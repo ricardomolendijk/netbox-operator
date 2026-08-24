@@ -116,8 +116,12 @@ type objectController struct {
 }
 
 // newObjectController assembles one kind's controller and the engine behind it.
+//
+// Every route from this controller to the API server goes through specGuard, the Get
+// included: one wrapper rather than one per writer, so a future collaborator wired from
+// mgr.GetClient() directly is the visible odd one out.
 func newObjectController(mgr ctrl.Manager, endpoints reconciler.Endpoints, kind namedKind) *objectController {
-	writer := mgr.GetClient()
+	writer := specGuard{mgr.GetClient()}
 
 	return &objectController{
 		Client: writer,

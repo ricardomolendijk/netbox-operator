@@ -71,6 +71,9 @@ Longer form, one page each:
   two silent failures that come from getting it wrong.
 - [Errors and retries](docs/concepts/errors-and-retries.md) — every NetBox failure as a
   typed error, what gets retried, and why an ambiguous lookup is never a silent choice.
+- [Coexisting with Flux and Argo CD](docs/operations/gitops.md) — why the operator never
+  writes a `spec`, how that is enforced rather than intended, and what the three
+  `driftMode` values each do.
 
 Full index: [`docs/README.md`](docs/README.md). Decisions and their rationale:
 [`docs/decisions/README.md`](docs/decisions/README.md). Running it, including what the

@@ -44,7 +44,7 @@ behind it is a series budget spent on noise.
 |---|---|
 | Type | Counter |
 | Labels | `kind`, `result` |
-| Cardinality | ~120 kinds × 8 results = **960** worst case |
+| Cardinality | ~120 kinds × 9 results = **1080** worst case |
 
 Exactly one increment per object reconcile, so `sum(netbox_operator_reconcile_total)` is a
 count of reconciles and anything can be divided by it.
@@ -57,6 +57,7 @@ count of reconciles and anything can be divided by it.
 | `unchanged` | NetBox already matched the spec; nothing was sent. **Should dominate.** |
 | `deleted` | The CR went away and the NetBox object with it. |
 | `dryrun` | Drift found on a `DryRun` endpoint, deliberately not corrected. |
+| `reported` | Drift found on a `driftMode: Report` endpoint, deliberately not corrected. Separate from `dryrun` because the two are set in different fields and mean different things about intent: `DryRun` is "this whole endpoint is a rehearsal", `Report` is "this endpoint is live and drift is somebody else's to fix". |
 | `waiting` | Endpoint not `Ready`, no usable natural key yet, or `AdoptOnly` with nothing to adopt. Normal during a rollout. |
 | `error` | NetBox rejected the payload, was unreachable, or holds an object this CR may not claim. |
 
@@ -72,7 +73,9 @@ sum(rate(netbox_operator_reconcile_total{result="error"}[15m]))
 ```
 
 **Graph:** stacked `rate()` by `result`. A healthy cluster is a wall of `unchanged` with
-occasional `created`/`updated`. `waiting` that never drains is a stuck graph.
+occasional `created`/`updated`. `waiting` that never drains is a stuck graph, and a steady
+band of `reported` or `dryrun` is an endpoint that is not converging by configuration — see
+[gitops](gitops.md).
 
 ### `netbox_operator_reconcile_duration_seconds`
 
@@ -105,10 +108,10 @@ NetBox schema, because it can only come from a
 [Descriptor](../concepts/descriptor.md)'s field map.
 
 Two counters rather than one with a `corrected` label, because the **gap between them is
-the signal**. On a `DryRun` endpoint, and under `drift.mode: Report`
-([ADR-0005](../decisions/0005-gitops-coexistence.md)), drift is found and deliberately
-left alone. One counter would make "reporting exactly as configured" and "failing to
-write" the same shape on a dashboard.
+the signal**. On a `DryRun` endpoint, and under `driftMode: Report`
+([ADR-0005](../decisions/0005-gitops-coexistence.md), [gitops](gitops.md)), drift is found
+and deliberately left alone. One counter would make "reporting exactly as configured" and
+"failing to write" the same shape on a dashboard.
 
 **Alert on:** a single field correcting over and over. That is either a human fighting the
 operator, or a missing normalisation in
@@ -321,11 +324,15 @@ Emitted by the engine when it writes, or when it refuses to.
 | `Recreated` | Normal | The object was deleted and POSTed again because its identity is not PATCHable. |
 | `Conflict` | Warning | NetBox holds an object this CR cannot safely claim: more than one natural-key match, an unadoptable match, or a protected relation. |
 | `Invalid` | Warning | NetBox rejected the payload, or the spec cannot be rendered into one. |
+| `DriftDetected` | Normal | Drift was found on a `driftMode: Report` endpoint and deliberately left alone. The message is the same `field: old → new` diff, prefixed `report only: would have written …`. |
 
-On a `DryRun` endpoint the same reason is used with a `dry run: would have written …`
-message, so a `Report`-mode namespace shows what *would* have changed. Kubernetes
-aggregates repeats of an identical Event into a count (`Updated (x27)`) rather than a new
-line each resync.
+On a `DryRun` endpoint the write's own reason is kept with a `dry run: would have written …`
+message, because the endpoint is rehearsing that write. `driftMode: Report` replaces it with
+`DriftDetected` instead: "updated" and "would have updated" must not read alike in
+`kubectl describe`. Normal rather than Warning in both cases — nothing has malfunctioned, and
+a Warning per object per resync would make the mode unusable in the adoption week it exists
+for. Kubernetes aggregates repeats of an identical Event into a count
+(`DriftDetected (x27)`) rather than a new line each resync.
 
 There is deliberately **no** Event for a transient failure. A 500 or a timeout resolves on
 its own, and an Event for each one is noise at cluster scale — those show up in
@@ -352,7 +359,7 @@ log. Two consequences to know about:
   are `debug`, and the standing state lives in the condition.
 - A `DryRun` endpoint finds the same drift every resync and writes nothing, so
   `dry run: netbox was not written` is `debug`. In `Report` mode the signals that scale are
-  `drift_detected_total` and the `Synced=False/DriftDetectedDryRun` condition, not the log.
+  `drift_detected_total` and the `DriftDetected` condition, not the log.
 
 `--zap-log-level` selects the level. `debug` enables everything above:
 

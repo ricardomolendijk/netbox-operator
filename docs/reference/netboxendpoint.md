@@ -85,7 +85,8 @@ spec:
       key: ca.crt                          # default
   timeout: 30s                             # default
   mode: Apply                              # default; the other value is DryRun
-  resyncPeriod: 10m                        # default
+  driftMode: Correct                       # default; also Report or Off
+  resyncPeriod: 10m                        # default; ignored when driftMode is Off
   rateLimit:
     qps: 10
     burst: 20                              # ignored unless qps > 0
@@ -269,6 +270,54 @@ fail anything — the endpoint still reaches `Ready=True`, and dependent objects
 without correcting it. If objects are stuck reporting drift that never clears, check this
 field first.
 
+### `spec.driftMode`
+
+| | |
+|---|---|
+| Type | `string` (`DriftMode`) |
+| Required | no |
+| Default | `Correct` (`+kubebuilder:default=Correct`) |
+| Validation | `+kubebuilder:validation:Enum=Correct;Report;Off` |
+
+Permitted values, verbatim: `Correct`, `Report`, `Off`.
+
+What the operator does when NetBox stops matching a CR that points at this endpoint.
+
+| Value | Detects drift | Corrects it | Periodic resync |
+|---|---|---|---|
+| `Correct` | yes | yes | yes |
+| `Report` | yes | no | yes |
+| `Off` | only on a CR change | yes | no |
+
+`Correct` is the default and the intended steady state: Git is authoritative, so a
+NetBox-side edit is simply wrong ([ADR-0005](../decisions/0005-gitops-coexistence.md)).
+
+`Report` detects drift and sends **nothing at all** — no `POST`, `PATCH` or `DELETE`,
+including the finalizer's delete. It sets `DriftDetected=True` with the field list, emits a
+`DriftDetected` Event, and moves `netbox_operator_drift_detected_total` without moving
+`netbox_operator_drift_corrected_total`. It is enforced by giving the endpoint a client that
+cannot mutate, so it does not depend on every write path checking a flag: a half-mutating
+dry run teaches people to distrust the mode. Objects sit at
+`Ready=False, Reason=ReportPending` for as long as it is on, which is honest rather than a
+bug — nothing converges in `Report`, and it is migration time rather than an operating mode.
+
+`Off` disables the periodic drift re-check, so the operator acts only when a CR changes. It
+does **not** disable the retries that unblock an object waiting for its endpoint or refused a
+conflicting object, and it does not affect this endpoint's own re-probe, which is about the
+token and the version rather than about drift.
+
+There is deliberately no value in which NetBox wins and the difference is promoted back into
+a `spec`: that would make the operator a second writer to desired state. `nbctl export`
+(NBO-040) is the supported way to turn NetBox's contents into manifests.
+
+**If it is wrong.** Any other value is rejected at admission by the enum. An endpoint stored
+before this field existed carries the empty string, which behaves as `Correct` — the CRD
+default cannot retrofit itself onto a stored object, and an upgrade that silently stopped
+correcting drift would be worse than a schema error. `Report` and `Off` do not fail anything:
+the endpoint still reaches `Ready=True`, and the symptom is on the objects. See the
+troubleshooting table below for telling `Report` apart from `mode: DryRun`, which looks
+identical until you read the `Reason`.
+
 ### `spec.resyncPeriod`
 
 | | |
@@ -279,7 +328,12 @@ field first.
 | Validation | none |
 
 How often a `Ready` endpoint re-probes NetBox even when nothing changed. This is the
-requeue interval on the success path.
+requeue interval on the success path, for this endpoint and for every object that points at
+it.
+
+Ignored for objects when `spec.driftMode` is `Off`, which is the whole of what "no periodic
+resync" means. The endpoint's own re-probe continues either way: that checks the token, the
+version and reachability, none of which is drift.
 
 **If it is wrong.** Zero or negative falls back to 10 minutes. A very short period
 multiplies request volume against NetBox by every endpoint in the cluster; pair it with
@@ -472,10 +526,11 @@ Object controllers read the cache by `(namespace, name)`; a miss means the endpo
 
 ```
 $ kubectl get netboxendpoints -n homelab
-NAME      URL                          MODE     VERSION   READY   AGE
-homelab   https://netbox.home.arpa     Apply    4.6.8     True    3d
-lab       https://netbox.lab.internal  DryRun   4.6.8     True    3d
-staging   https://netbox.stg.internal  Apply              False   11m
+NAME      URL                          MODE     DRIFT     VERSION   READY   AGE
+homelab   https://netbox.home.arpa     Apply    Correct   4.6.8     True    3d
+lab       https://netbox.lab.internal  DryRun   Correct   4.6.8     True    3d
+legacy    https://netbox.legacy.dc     Apply    Report    4.6.8     True    2d
+staging   https://netbox.stg.internal  Apply    Correct             False   11m
 ```
 
 | Column | Type | Source |
@@ -483,6 +538,7 @@ staging   https://netbox.stg.internal  Apply              False   11m
 | `NAME` | string | `metadata.name` |
 | `URL` | string | `.spec.url` |
 | `MODE` | string | `.spec.mode` |
+| `DRIFT` | string | `.spec.driftMode` |
 | `VERSION` | string | `.status.netboxVersion` |
 | `READY` | string | `.status.conditions[?(@.type=="Ready")].status` |
 | `AGE` | date | `.metadata.creationTimestamp` |
@@ -506,7 +562,10 @@ works too.
 | `READY=False`, `VERSION` populated | `VersionSupported=False, Reason=VersionUnsupported` | NetBox is older than 4.2 or 5.0+ | Upgrade NetBox to 4.2+. This is intentional — see the version gate above |
 | `READY=False`, `VERSION` holds something that is not a version | `VersionSupported=False, Reason=VersionUnparseable` | `GET /api/status/` returned a version string the parser could not read, or a proxy replaced the body. The raw string is in `status.netboxVersion` and in the message | Confirm `curl -H "Authorization: Token …" $URL/api/status/` returns JSON with `netbox-version` |
 | `READY=False`, no condition changes at all, nothing in status | none | the object failed to decode — usually an unparseable `timeout` or `resyncPeriod` | Fix the duration string (`30s`, not `30 seconds`); check the manager log |
-| Objects report drift that never clears | `Ready=True` on the endpoint | `spec.mode: DryRun` — reads happen, writes are suppressed | Set `mode: Apply` |
+| `kubectl apply` rejected, "Unsupported value" on `driftMode` | none; admission refused the object | `spec.driftMode` is not `Correct`, `Report` or `Off` | Use one of the three, exactly as spelled. `Off` needs quoting in YAML if your tooling folds it to a boolean |
+| Objects report drift that never clears | `Ready=True` on the endpoint; objects at `Ready=False, Reason=DryRunPending` | `spec.mode: DryRun` — reads happen, writes are suppressed | Set `mode: Apply` |
+| Objects report drift that never clears | `Ready=True` on the endpoint; objects at `Ready=False, Reason=ReportPending` | `spec.driftMode: Report` — a different field with the same symptom. The `Reason` is what tells them apart | Set `driftMode: Correct` |
+| A NetBox UI edit is never noticed | `Ready=True` on the endpoint; objects at `Ready=True, DriftDetected=False` | `spec.driftMode: Off` — nothing re-checks on a timer | Set `driftMode: Correct`, or touch the CR |
 | Objects stuck `WaitingForEndpoint` | endpoint is `Ready=False` for any reason | no client is handed out while `Ready` is false | Fix the endpoint; the objects converge on their own |
 | Conditions look wrong for the spec you just applied | `status.observedGeneration` < `metadata.generation` | the reconcile for the new spec has not completed | Wait one reconcile; if it persists, check the manager log |
 | `Authenticated=Unknown` and `VersionSupported=Unknown` | `Ready=False, Reason=ProbeFailed` or `InvalidConfig` | the probe never ran, so neither question was answered this reconcile. `Unknown` is the honest answer, not a bug | Fix the cause named in the `Ready` message |
@@ -531,3 +590,6 @@ knowing before you install it in a shared cluster.
   becomes a typed error, and why `AuthError` fails the endpoint rather than every object.
 - [ADR-0002](../decisions/0002-crd-scoping.md) — why this kind is namespaced, and what
   per-namespace endpoints cost.
+- [Coexisting with Flux and Argo CD](../operations/gitops.md) — the three drift modes in
+  operational terms, the Argo CD and Flux snippets that make this quiet, and the
+  recommended NetBox permission model.
