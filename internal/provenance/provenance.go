@@ -265,6 +265,11 @@ func mergeTags(fromSpec, fromLive any, id int) []any {
 
 // mergeCustomFields overlays the operator's fields onto whatever the spec set.
 //
+// The spec's values are copied as they are, nil included: a nil is the user asking for that
+// custom field's value to be removed (#196), and the stamp has no opinion about a key that
+// is not one of its own. Where the spec and the stamp name the same key the stamp wins,
+// because those keys are the operator's own record of what wrote this object.
+//
 // The result is a map[string]any rather than a map[string]string, and that is not
 // cosmetic: netbox.Drift compares `custom_fields` by casting the desired value to
 // map[string]any, and a map[string]string falls through to a whole-value string

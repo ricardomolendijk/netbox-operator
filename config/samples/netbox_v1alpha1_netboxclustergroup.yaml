@@ -1,0 +1,14 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxClusterGroup
+metadata:
+  name: production
+  namespace: default
+spec:
+  endpointRef: homelab
+
+  # Setting a cluster's `groupRef` is what makes that cluster's lookup unambiguous:
+  # `(group, name)` is the first of virtualization.Cluster's two unique constraints.
+  name: Production
+  slug: production
+
+  description: Clusters carrying production workloads

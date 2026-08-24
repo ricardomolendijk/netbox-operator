@@ -1,0 +1,38 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxCluster
+metadata:
+  name: proxmox-ams
+  namespace: default
+spec:
+  endpointRef: homelab
+
+  # `name` is not globally unique. virtualization.Cluster is unique on (group, name) and,
+  # separately, on (_site, name) -- so two clusters called `proxmox-ams` in two different
+  # sites are legal, and a lookup that matches both is a Conflict rather than a guess.
+  name: proxmox-ams
+
+  # Required: NetBox's `type` column is REQ and PROTECTed. Deleting the NetBoxClusterType
+  # while this cluster uses it reports Deleting/Protected and deletes nothing.
+  typeRef:
+    name: proxmox
+
+  # Optional, and part of the identity: with it set the lookup is `group_id&name`, without
+  # it `name&group_id__isnull=true`.
+  groupRef:
+    name: production
+
+  # The scope, and the only way to attach a cluster to anything. There is deliberately no
+  # `siteRef` field: since NetBox 4.2 there is no `site` column on this model, and NetBox
+  # discards the key rather than rejecting it -- so writing it would report success and
+  # leave the cluster unscoped. Exactly one member, or none for an unscoped cluster.
+  scope:
+    siteRef:
+      name: home
+
+  tenantRef:
+    name: donkerslootstraat
+
+  status: active              # planned | staging | active | decommissioning | offline
+
+  description: Three-node Proxmox cluster in the Amsterdam rack
+  comments: Managed by netbox-operator.

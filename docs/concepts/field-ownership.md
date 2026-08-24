@@ -56,29 +56,101 @@ A field with no such sentence is one where the distinction does not arise — be
 required, because it carries a default so it is never absent, or because its validation
 rejects the empty value.
 
-## The one exception: `custom_fields` has two states
+## The exception that keeps its own rules: `customFields`
 
-Every optional field above has three states. NetBox's `custom_fields` container has two:
-**absent or empty** means "manage nothing", and **set** means "manage these keys". There is
-no third state, so an empty map does not clear anything, and a custom-field value the
-operator previously wrote cannot be removed through this API.
+`spec.customFields` has three states like everything above, and it reaches them by a
+different mechanism: **per key, inside the map**, rather than per field through
+`managedFields`.
 
-That is deliberate rather than an oversight. NetBox returns *every* custom field defined for
-an object type, including ones this operator knows nothing about, and it **merges a partial
-`custom_fields` PATCH** rather than replacing the container. So the operator compares only
-the keys it sets (`customFieldsEqual`, `internal/netbox/drift.go`). Treating the map as
-exhaustive would make it null out every custom field some other writer on that NetBox owns,
-on every reconcile — which is the same fight ADR-0005 exists to avoid, in a container where
-the other writer is often a human.
+| State | You write | The operator does |
+|---|---|---|
+| **container absent** | no `customFields` at all | manages no custom field |
+| **container empty** | `customFields: {}` | manages no custom field |
+| **key set** | `audit_ticket: NET-42` | writes that value and corrects it |
+| **key emptied** | `audit_ticket: ""` | writes the empty string |
+| **key removed** | `audit_ticket: null` | removes that custom field's value |
 
-The consequence is worth stating plainly because it is the one place this page's promise does
-not hold: **an emptied custom-field map clears nothing, and no condition disagrees**
-([issue #171](https://github.com/ricardomolendijk/netbox-operator/issues/171)). Today the
-only writer of `custom_fields` is the provenance stamp, whose keys are reported in
-`status.provenance.customFields`.
+`null` and `""` are different requests and both are expressible, which is the whole point of
+the map's values being nullable in the CRD schema:
 
-Whether removing a single previously-set key should be expressible at all — an explicit null
-value for one key, say — is undecided and out of scope for the note above.
+```yaml
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxSite
+metadata:
+  name: home
+spec:
+  endpointRef: homelab
+  name: Home
+  slug: home
+  customFields:
+    owner_team: ""       # set this custom field to the empty string
+    audit_ticket: null   # remove this custom field's value
+    # rack_position is not here at all, so whatever NetBox holds for it stays
+```
+
+### Why the container is not exhaustive
+
+`customFields` names the keys to manage rather than the container's whole contents, and the
+two rows that look like they should clear everything deliberately do not.
+
+NetBox returns *every* custom field defined for an object type, including ones this operator
+knows nothing about, and it **merges a partial `custom_fields` PATCH** rather than replacing
+the container. So the operator compares only the keys it sets (`customFieldsEqual`,
+`internal/netbox/drift.go`). Treating the map as exhaustive would make it null out every
+custom field some other writer on that NetBox owns, on every reconcile — which is the same
+fight [ADR-0005](../decisions/0005-gitops-coexistence.md) exists to avoid, in a container
+where the other writer is often a human.
+
+That is why removal is said *inside* the map. A per-key null keeps one field describing one
+NetBox column and leaves every other key alone, where a second `removeCustomFields` list
+would be two declarations of one thing that can disagree
+([issue #196](https://github.com/ricardomolendijk/netbox-operator/issues/196)).
+
+### What `null` does to NetBox
+
+NetBox merges the container key by key on write and stores the null as the custom field's
+absent value: `CustomFieldsDataField.to_internal_value` overlays the submitted map on the
+stored one, and `CustomField.validate` returns immediately for `None`. It is not defaulted
+back either — `save()` re-applies a custom field's default only for a key that is *missing*
+from the container, and this one is present holding null. On read,
+`CustomFieldsDataField.to_representation` answers every defined custom field as
+`cf.deserialize(...)`, which passes `None` straight through.
+
+So a removed value reads back as an explicit `null`, indistinguishable from a custom field
+that was never set — which is what "removed" means at this API. The comparison then finds the
+null it asked for, so the removal drifts exactly once and settles rather than PATCHing
+forever (`TestCustomFieldRemovalSettles`, `internal/netbox/drift_test.go`;
+`TestServerSideApplyCanRemoveACustomField`, `internal/controller/fieldownership_test.go`).
+
+`""` is a different stored value that reads back as `""`, so asking for one when NetBox holds
+the other is drift. Collapsing the two would make one of them unsayable.
+
+### Emptying the container is not clearing it
+
+`customFields: {}` manages nothing. It has to: field ownership restores a claimed-and-emptied
+map as `{}`, and reading that as "clear everything" would be exactly the fight above. An
+empty container sends no `custom_fields` at all.
+
+One wrinkle, and it is Kubernetes' rather than this operator's: **server-side apply cannot
+turn an owned non-empty map into `{}`.** The merge yields `null` for the emptied map and the
+API server rejects it — `spec.customFields in body must be of type object: "null"`. It
+applies to any `map[string]…` spec field, not only this one, so the table near the top of
+this page is optimistic about `{}` in that one transition. To stop managing custom fields you
+have already set, delete the `customFields` key from the manifest: that is the **absent**
+state, it is what the three-state rule is for, and NetBox keeps whatever it holds.
+
+### It is on every Kind at once
+
+`customFields` lives on the shared envelope (`NetBoxObjectSpec`), like `endpointRef`, not in
+any kind's field map — NetBox's `custom_fields` is not a per-kind column but the same
+container under the same name on every model that has it. So `kubectl explain` shows
+`spec.customFields` on every object kind the moment it exists, including the ones whose NetBox
+model has no such column. `NetBoxTag` is the case: `extras.Tag` mixes in no
+`CustomFieldsMixin`, so setting `customFields` on one is refused with `Ready=False`,
+`Reason=Invalid` rather than silently dropped.
+
+Nothing else writes this container. The provenance stamp's own keys are overlaid on top of
+whatever the spec set, and are reported in `status.provenance.customFields`.
 
 ## How the operator knows
 

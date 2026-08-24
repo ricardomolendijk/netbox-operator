@@ -22,6 +22,9 @@ rules:
 - apiGroups:
   - netbox.kubeforge.org
   resources:
+  - netboxclustergroups
+  - netboxclusters
+  - netboxclustertypes
   - netboxdeviceroles
   - netboxdevicetypes
   - netboxlocations
@@ -35,6 +38,8 @@ rules:
   - netboxtags
   - netboxtenantgroups
   - netboxtenants
+  - netboxvlangroups
+  - netboxvlans
   - netboxvrfs
   verbs:
   - get
@@ -45,6 +50,9 @@ rules:
 - apiGroups:
   - netbox.kubeforge.org
   resources:
+  - netboxclustergroups/finalizers
+  - netboxclusters/finalizers
+  - netboxclustertypes/finalizers
   - netboxdeviceroles/finalizers
   - netboxdevicetypes/finalizers
   - netboxlocations/finalizers
@@ -58,12 +66,17 @@ rules:
   - netboxtags/finalizers
   - netboxtenantgroups/finalizers
   - netboxtenants/finalizers
+  - netboxvlangroups/finalizers
+  - netboxvlans/finalizers
   - netboxvrfs/finalizers
   verbs:
   - update
 - apiGroups:
   - netbox.kubeforge.org
   resources:
+  - netboxclustergroups/status
+  - netboxclusters/status
+  - netboxclustertypes/status
   - netboxdeviceroles/status
   - netboxdevicetypes/status
   - netboxendpoints/status
@@ -78,6 +91,8 @@ rules:
   - netboxtags/status
   - netboxtenantgroups/status
   - netboxtenants/status
+  - netboxvlangroups/status
+  - netboxvlans/status
   - netboxvrfs/status
   verbs:
   - get

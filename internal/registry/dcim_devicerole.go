@@ -57,6 +57,13 @@ func dcimDeviceRoleDescriptor() Descriptor {
 			{
 				Spec: "parentRef", API: "parent", Class: ClassRefOne,
 				Target: netboxv1alpha1.DeviceRoleRef{}.TargetGVK(),
+				// The self-reference is on_delete=CASCADE (docs/netbox-schema.md), so it is a
+				// legal containment parent: deleting a parent takes its children with it
+				// server-side, and without the owner reference a child CR would outlive its
+				// row and the create-if-absent step would recreate what NetBox deleted.
+				// NBO-193 makes an undeclared cascade a boot failure rather than a
+				// convention, which is what caught this.
+				CascadeOnDelete: true,
 			},
 		},
 

@@ -167,13 +167,25 @@ func fakeDescriptor() registry.Descriptor {
 			// The map shape for the three-state table (NBO-079). A map is compared as a value,
 			// so it is ClassValue; only its clearability is what NBO-079 added.
 			{Spec: "localContextData", API: "local_context_data"},
-			{Spec: "parentRef", API: "parent", Class: registry.ClassRefOne},
+			// CascadeOnDelete, so this field can stand in for a containment parent: a
+			// descriptor naming a non-cascading ref fails registry validation
+			// (docs/decisions/0003-ownership-and-references.md rule 4).
+			{Spec: "parentRef", API: "parent", Class: registry.ClassRefOne, CascadeOnDelete: true},
 			{Spec: "asnRefs", API: "asns", Class: registry.ClassRefMany},
 		},
 		NaturalKeys:    []registry.NaturalKey{{Fields: []registry.KeyField{{Filter: "slug", Spec: "slug"}}}},
 		UpdateStrategy: registry.UpdatePatch,
 		ReadOnly:       []string{"created", "last_updated", "url", "display"},
 	}
+}
+
+// customFieldableDescriptor is a kind whose NetBox model mixes in CustomFieldsMixin, which
+// fakeDescriptor's extras.Tag deliberately does not.
+func customFieldableDescriptor() registry.Descriptor {
+	d := fakeDescriptor()
+	d.CustomFieldable = true
+
+	return d
 }
 
 // parentedDescriptor keys on its parent, like dcim.Region: with the parent declared and

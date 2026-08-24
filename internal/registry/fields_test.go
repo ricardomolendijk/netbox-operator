@@ -143,10 +143,34 @@ func TestDescriptorValidateFieldMap(t *testing.T) {
 				d.GenericFKs = []GenericFKSpec{{
 					TypeField: "scope_type", IDField: "scope_id",
 					AllowedTypes: []string{"dcim.site"}, Spec: "scopeRef",
-					Members: []GenericFKMember{{Spec: "siteRef", Target: testGVK("NetBoxSite")}},
+					Members:         []GenericFKMember{{Spec: "siteRef", Target: testGVK("NetBoxSite")}},
+					CascadeOnDelete: true,
 				}}
 				d.ContainmentRef = "scopeRef"
 			},
+		},
+		{
+			// The check that makes the cascade rule of ADR-0003 rule 4 a boot failure rather
+			// than a modelling opinion. A `PROTECT`-ed FK named as the containment parent
+			// promises a cluster-side cascade NetBox refuses to perform: garbage collection
+			// deletes the CR, its finalizer's DELETE is rejected, and the row outlives the
+			// object that described it.
+			name: "containment ref names a foreign key that does not cascade",
+			mutate: func(d *Descriptor) {
+				d.Fields = append(d.Fields, Field{Spec: "vrfRef", API: "vrf", Class: ClassRefOne})
+				d.ContainmentRef = "vrfRef"
+			},
+			wantErr: ErrContainmentNotCascade,
+		},
+		{
+			// `on_delete` is a property of a foreign key, so on a scalar the flag is data
+			// nothing reads -- the same silently-ignored declaration ErrTargetNotRef catches.
+			name: "non-reference field declaring CascadeOnDelete",
+			mutate: func(d *Descriptor) {
+				d.Fields = append(d.Fields,
+					Field{Spec: "comments", API: "comments", CascadeOnDelete: true})
+			},
+			wantErr: ErrCascadeNotRef,
 		},
 		{
 			name: "deferred field no reference writes",
@@ -235,8 +259,9 @@ func TestDescriptorValidateFieldMap(t *testing.T) {
 			// (docs/decisions/0003-ownership-and-references.md rule 4).
 			name: "containment ref is a to-many reference",
 			mutate: func(d *Descriptor) {
-				d.Fields = append(d.Fields,
-					Field{Spec: "parentRefs", API: "parents", Class: ClassRefMany})
+				d.Fields = append(d.Fields, Field{
+					Spec: "parentRefs", API: "parents", Class: ClassRefMany, CascadeOnDelete: true,
+				})
 				d.ContainmentRef = "parentRefs"
 			},
 			wantErr: ErrContainmentToMany,

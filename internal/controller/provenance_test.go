@@ -22,8 +22,9 @@ import (
 var stampedObjectTypes = []string{
 	"dcim.devicerole", "dcim.devicetype", "dcim.location", "dcim.manufacturer",
 	"dcim.platform", "dcim.region", "dcim.site", "dcim.sitegroup",
-	"ipam.prefix", "ipam.routetarget", "ipam.vrf",
+	"ipam.prefix", "ipam.routetarget", "ipam.vlan", "ipam.vlangroup", "ipam.vrf",
 	"tenancy.tenant", "tenancy.tenantgroup",
+	"virtualization.cluster", "virtualization.clustergroup", "virtualization.clustertype",
 }
 
 // objectTypesAsAny is the set the bootstrap will compute, in the []any shape a JSON payload
