@@ -10,10 +10,13 @@ ever sees it.
 > yet: **watches**
 > ([#25](https://github.com/ricardomolendijk/netbox-operator/issues/25)) — until they land,
 > a reference that is waiting is retried on the endpoint's resync rather than woken by an
-> event, and that includes waiting for a grant; **deferred application**
-> ([#27](https://github.com/ricardomolendijk/netbox-operator/issues/27)); and **cycle
-> detection over a graph** ([#28](https://github.com/ricardomolendijk/netbox-operator/issues/28))
-> — only a reference to the referring object itself is caught today.
+> event, and that includes waiting for a grant; and **deferred application**
+> ([#27](https://github.com/ricardomolendijk/netbox-operator/issues/27)).
+>
+> **Grants** ([#26](https://github.com/ricardomolendijk/netbox-operator/issues/26)) and
+> **cycle detection over the whole graph** (NBO-016) are both built — see
+> [Crossing a namespace](#crossing-a-namespace) and [Cycles](#cycles). What is still missing on the cycle side is the
+> engine's half: a `RefCycle` Event, and a `refs_unresolved` metric to alert on.
 
 ## What a reference is
 
@@ -170,7 +173,7 @@ for any reference that stops resolving.
 
 ## What happens when it does not resolve
 
-Every failure is one of six causes. Each maps to exactly one `RefsResolved` reason and one
+Every failure is one of seven causes. Each maps to exactly one `RefsResolved` reason and one
 retry interval; `Ready` reports `WaitingForRef` for all of them, because that is the
 question a `kubectl wait` is asking.
 
@@ -180,7 +183,8 @@ question a `kubectl wait` is asking.
 | Target exists, has no id yet | `RefNotReady` | On the resync (an event, once #25 lands) | The target's own reconcile is what changes this. |
 | Several NetBox objects match | `RefAmbiguous` | **10 min** | Only a human can say which one was meant. |
 | Cross-namespace, no grant | `RefDenied` | On the resync (a grant event, once #25 lands) | Writing the grant is the fix. |
-| The reference points at itself | `RefCycle` | Only on a spec change | No order of reconciles resolves it. |
+| The references depend on each other | `RefCycle` | Only on a spec change | No order of reconciles resolves it. See [Cycles](#cycles). |
+| The graph is too deep, or too wide, to walk | `RefDepthExceeded` | Only on a spec change | A 33-hop chain is a mistake, and the walk will not guess past its cap. |
 | Target Kind has no descriptor, or its CRD is not installed | `RefKindUnavailable` | **10 min** | The manifest is correct; the fix is an operator upgrade. |
 
 Two more reasons appear on `RefsResolved` and are not resolution failures at all:
@@ -265,6 +269,141 @@ you wrote and the object it pointed at. From there:
   them, or with the `id`.
 - `RefKindUnavailable` → the operator has no descriptor for that Kind, or the CRD is not
   installed. Your manifest is fine.
+- `RefCycle` → the message names the ring. Edit any one object in it; see
+  [Cycles](#cycles).
+- `RefDepthExceeded` → the chain of blocking references from this object is longer than 32,
+  or the graph around it is wider than 256 objects. Flatten it.
+
+## Cycles
+
+`a.parentRef -> b` and `b.parentRef -> a`. Neither can resolve, because each is waiting for
+the other to become `Ready` first, and no order of reconciles gets there. Two ordinary
+manifests reach it: `dcim.Region`, `dcim.SiteGroup`, `dcim.Location` and
+`tenancy.TenantGroup` are all self-referential trees in NetBox (`docs/netbox-schema.md`,
+`ForeignKey -> self`), so a `parentRef` pointing the wrong way is a typo away.
+
+Without detection the symptom is two objects sitting on `RefNotReady` forever, each
+truthfully reporting that it is waiting for the other, and nothing anywhere saying they are
+waiting for *each other*.
+
+### What is detected
+
+Before it resolves anything, and before it makes any NetBox request at all, the operator
+walks the reference graph away from the object it is reconciling. If the walk comes back to
+that object, the ring is reported:
+
+```console
+$ kubectl get netboxregion a -o jsonpath='{.status.conditions[?(@.type=="RefsResolved")]}'
+{"type":"RefsResolved","status":"False","reason":"RefCycle",
+ "message":"parentRef -> netboxregion/team-a/b: reference cycle
+            (netboxregion/team-a/a -> netboxregion/team-a/b -> netboxregion/team-a/a)"}
+```
+
+Three properties of that report are the feature, rather than details of it:
+
+- **The message names the ring, in order.** "A cycle was detected" would leave the reader to
+  find it by hand, which is all of the work.
+- **It starts and ends at the object you are looking at.** The path is rendered from that
+  object's own perspective, so you never have to work out whether your object is even in it.
+- **Every member reports it.** A ring of three reports on all three, each naming the same
+  ring from its own starting point. Reporting it on whichever object reconciled first would
+  leave everybody else on a plain wait, and a reader looking at one of those would conclude
+  their object was fine and somebody else's was broken.
+
+Nothing coordinates that last one. Each participant walks the graph itself, and every member
+of a ring is on it, so each one finds it independently — from the cache, without a NetBox
+call, and without writing anything anywhere.
+
+A one-hop cycle — `parentRef` naming the object it is written on — reads
+`netboxregion/team-a/a -> itself`. It is the mistake people actually make, and nothing in the
+CRD schema can prevent it: `dcim.Region.parent` is a foreign key to its own table.
+
+A cycle is never retried on a timer. Only an edit to one of the participants can break it,
+and an edit arrives as a watch event; coming back every minute would re-derive the same
+verdict for as long as the manifest stands.
+
+### Why only `name` references can cycle
+
+A `slug`, a `lookup` or an `id` resolves against NetBox, where there is no CR to be waiting
+for: it either answers now or does not. Only a `name` names a Kubernetes object whose own
+reconcile has to happen first, so only a `name` can be one edge of a deadlock. That bounds
+the whole problem to the CR graph — the walk stops dead at the first NetBox-side reference,
+and at any reference to a Kind whose CRD is not installed.
+
+An object that is simply **missing** stops the walk too. If `a -> b -> c` and `c` does not
+exist, that is `RefNotFound` on `b`, not a cycle on `a`: nothing is waiting on `c`, because
+`c` is not there to wait for. Reporting a cycle would send you hunting for one that is not in
+your manifests.
+
+### Which references are followed
+
+Not all of them, and this is the part that has to be right. NetBox's own foreign-key graph
+contains cycles that are *supposed* to be there — `Device -> primary_ip4 -> IPAddress ->
+assigned_object -> Interface -> device -> Device` — and the two-pass PATCH
+([#27](https://github.com/ricardomolendijk/netbox-operator/issues/27)) exists precisely to
+resolve them. A detector that reported those would make the deferred design unusable.
+
+The rule is one sentence: **follow a reference if and only if the referring object cannot be
+created until it resolves.**
+
+| Reference | Followed? | Why |
+|---|---|---|
+| An ordinary one — `regionRef`, `siteRef`, `tenantRef` | yes | Nothing is written until it resolves, and a target that is not `Ready` never resolves. |
+| A `DeferAlways` field — `primary_ip4`, `nat_inside` | **no** | It cannot be resolvable at create time by construction; the second PATCH breaks the ring by design. |
+| A `DeferIfUnresolved` field no natural key matches on — `lag` | **no** | The object is created without it and the field is PATCHed in afterwards. Nothing waits. |
+| A `DeferIfUnresolved` field a natural key **does** match on — `parent` | **yes** | With it unresolved no candidate is applicable, so the engine refuses to create the object at all ([lookups](lookups.md)). It genuinely blocks. |
+| `slug`, `lookup`, `id` | no | Resolves in NetBox; no CR is waiting. |
+| A Kind with no descriptor, or no CRD installed | no | Outside the CR graph, and it costs no read. |
+
+### The depth limit
+
+The walk follows at most **32** references away from one object. A chain exactly that long is
+walked to its end and converges; the 33rd reference is not followed, and the object reports
+`RefsResolved=False, Reason=RefDepthExceeded` instead:
+
+```
+parentRef -> netboxregion/team-a/r1: reference chain too deep
+  (the chain of blocking references from netboxregion/team-a/r0 is more than 32 deep
+   (netboxregion/team-a/r0 -> ... -> netboxregion/team-a/r33))
+```
+
+32 is an order of magnitude above anything the schema produces — the nested trees are the
+only structures that nest at all, and a hierarchy 32 levels deep is a mistake rather than a
+model — while the alternative to a cap is an unbounded walk over a graph a manifest author
+controls.
+
+It is deliberately **not** reported as a cycle. Telling the author of a 40-deep region tree
+that they have a cycle sends them hunting for something that does not exist, and the fix here
+is a different one: flatten the hierarchy.
+
+The same reason covers the other cap. Depth bounds the length of a path and says nothing
+about the breadth of a graph, so the walk also stops after reading **256** objects and
+reports what it did rather than claiming there is no cycle:
+
+```
+the blocking references reachable from netboxregion/team-a/a span more than 256 objects,
+so the search for a cycle was stopped at netboxregion/team-a/n257
+```
+
+### What it costs
+
+One cache read per object in the blocking-reference closure, per reconcile, and no NetBox
+request at any point — so the check cannot be rate-limited and cannot fail because NetBox is
+down. The reads are capped at 256, and a resolution pass reads each object once whether the
+walk wanted it or the resolution did, so detection does not double the reads a reconcile was
+already making. In the shape a manifest usually has, the closure is the object's parent chain:
+one or two reads.
+
+The walk reads the informer cache, so it can miss a cycle that was created a moment ago. The
+next reconcile of any participant catches it, and nothing is remembered between reconciles: a
+stale verdict of "no cycle" would be far worse than recomputing a walk that is bounded by
+construction.
+
+### Fixing one
+
+Edit any single object in the ring — point its reference somewhere else, or remove it. That
+is one `kubectl apply`, the watch delivers it, and every participant clears on its next
+reconcile. There is nothing to restart and no requeue to wait out.
 
 ## What the API server rejects
 

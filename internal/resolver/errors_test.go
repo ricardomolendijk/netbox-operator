@@ -71,6 +71,14 @@ func TestClassify(t *testing.T) {
 			wantReason: netboxv1alpha1.ReasonRefCycle,
 		},
 		{
+			// Its own reason rather than RefCycle: a 40-deep hierarchy told "you have a cycle"
+			// sends its author looking for one that is not there. No timer either -- the graph
+			// is the size it is until somebody edits it.
+			name:       "a graph too deep to walk waits for a spec change",
+			err:        blocked(ErrRefDepthExceeded, ModeName),
+			wantReason: netboxv1alpha1.ReasonRefDepthExceeded,
+		},
+		{
 			name:        "an unavailable kind waits for an upgrade",
 			err:         blocked(ErrRefKindUnavailable, ModeName),
 			wantReason:  netboxv1alpha1.ReasonRefKindUnavailable,
@@ -153,6 +161,24 @@ func TestErrorRenders(t *testing.T) {
 				Ref: idRef(12),
 			},
 			want: "regionRef -> netboxregion id=12: not found",
+		},
+		{
+			// A cycle renders the ring rather than the fact of one: the path, in order, from
+			// the object reporting it back to itself. "A cycle was detected" would leave a
+			// user to find the ring by hand, which is the whole of the work.
+			name: "a cycle names the ring it found",
+			err: &Error{
+				Cause: ErrRefCycle, Field: "parentRef", Mode: ModeName, TargetGVK: regionGVK,
+				Ref: objectRef("b"), Target: namespacedName("team-a", "b"),
+				Path: RefPath{
+					{GVK: regionGVK, Key: namespacedName("team-a", "a")},
+					{GVK: regionGVK, Key: namespacedName("team-a", "b")},
+					{GVK: regionGVK, Key: namespacedName("team-a", "a")},
+				},
+				Detail: "netboxregion/team-a/a -> netboxregion/team-a/b -> netboxregion/team-a/a",
+			},
+			want: "parentRef -> netboxregion/team-a/b: reference cycle " +
+				"(netboxregion/team-a/a -> netboxregion/team-a/b -> netboxregion/team-a/a)",
 		},
 		{
 			// A descriptor that declares a reference without saying what it points at. The

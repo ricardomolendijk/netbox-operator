@@ -50,12 +50,23 @@ var (
 	// was a call site rather than a new vocabulary.
 	ErrRefDenied = errors.New("denied")
 
-	// ErrRefCycle is a reference that cannot resolve because it depends on itself.
+	// ErrRefCycle is a set of references that cannot resolve because they depend on each
+	// other: `a.parentRef -> b`, `b.parentRef -> a`, and any longer ring.
 	//
-	// Only the one-hop case is detected here -- a reference to the referring object -- which
-	// is what a single resolution can see. Detection over a graph is NBO-016, and it composes
-	// over the Resolution this package returns rather than replacing anything in it.
+	// The one state in this list that never clears itself. Everything else here is either a
+	// wait an event ends or a fix a human makes to one object; a cycle is a fix a human makes
+	// to one object *in it*, and until then every participant waits for the next. So it is
+	// never retried on a timer, and Check reports it on every member rather than on whichever
+	// reconciled first -- see cycle.go.
 	ErrRefCycle = errors.New("reference cycle")
+
+	// ErrRefDepthExceeded is a reference graph the cycle check would not walk to the end:
+	// more than MaxRefDepth references deep, or more than maxRefVisits objects wide.
+	//
+	// Distinct from ErrRefCycle on purpose. Reusing "you have a cycle" for a 40-deep Region
+	// tree would send a user hunting for something that does not exist, and the two have
+	// different fixes -- break the ring, versus flatten the hierarchy.
+	ErrRefDepthExceeded = errors.New("reference chain too deep")
 
 	// ErrRefKindUnavailable is a target Kind this operator cannot resolve against: no
 	// Descriptor registered for it, or its CRD is not installed.
@@ -121,6 +132,15 @@ type Error struct {
 
 	// Detail is what to say beyond the classification.
 	Detail string
+
+	// Path is the walk through the reference graph behind an ErrRefCycle or an
+	// ErrRefDepthExceeded, starting at the object being reconciled -- and, for a cycle,
+	// ending there too. Empty for every other cause.
+	//
+	// Structured as well as rendered into Detail, because the path is what a caller acts on
+	// rather than merely prints: NBO-044's admission webhook rejects on it, and an Event
+	// naming the ring is the only record left once a participant is deleted.
+	Path RefPath
 }
 
 // Error renders the reference, its target and why it did not resolve.
@@ -195,7 +215,12 @@ func Classify(err error) Outcome {
 	case errors.Is(err, ErrRefDenied):
 		return Outcome{Reason: netboxv1alpha1.ReasonRefDenied}
 	case errors.Is(err, ErrRefCycle):
+		// No timer. Only an edit to one of the participants can break a cycle, and an edit
+		// arrives as a watch event; backing off on a permanent condition burns the workqueue
+		// to re-derive the same verdict.
 		return Outcome{Reason: netboxv1alpha1.ReasonRefCycle}
+	case errors.Is(err, ErrRefDepthExceeded):
+		return Outcome{Reason: netboxv1alpha1.ReasonRefDepthExceeded}
 	case errors.Is(err, ErrRefKindUnavailable):
 		return Outcome{Reason: netboxv1alpha1.ReasonRefKindUnavailable, Requeue: humanRetry}
 	default:

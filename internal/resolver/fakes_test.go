@@ -76,6 +76,10 @@ type target struct {
 	reason      string
 	message     string
 	terminating bool
+
+	// spec is the object's own spec, for the tests that read it: the cycle walk follows a
+	// target's references, so a target in those tests is a referrer too.
+	spec map[string]any
 }
 
 // object renders the target as the API server would hand it back.
@@ -85,6 +89,10 @@ func (t target) object() *unstructured.Unstructured {
 		"status":   map[string]any{},
 	}}
 	obj.SetGroupVersionKind(t.gvk)
+
+	if t.spec != nil {
+		obj.Object["spec"] = t.spec
+	}
 
 	if t.id != 0 {
 		if err := unstructured.SetNestedField(obj.Object, t.id, "status", "id"); err != nil {
