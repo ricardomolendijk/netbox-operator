@@ -791,7 +791,7 @@ type refElement struct {
 // by ResolveGenericFK. Keeping them out of here is also what keeps them out of the cycle walk
 // -- see genericfk.go on why no union that ships today can be a blocking edge.
 func refsOf(obj client.Object, d registry.Descriptor) ([]fieldRefs, error) {
-	spec, err := specMapOf(obj)
+	spec, err := SpecMap(obj)
 	if err != nil {
 		return nil, err
 	}
@@ -815,12 +815,17 @@ func refsOf(obj client.Object, d registry.Descriptor) ([]fieldRefs, error) {
 	return refs, nil
 }
 
-// specMapOf returns obj's spec as JSON names to undecoded values.
+// SpecMap returns obj's spec as JSON names to undecoded values.
 //
 // One encode shared by the ordinary references and the polymorphic ones, so a pass that has
 // both does not serialise the object twice -- and so both read the object through exactly the
 // same representation the API server stores.
-func specMapOf(obj client.Object) (map[string]json.RawMessage, error) {
+//
+// Exported for the admission webhook (NBO-044), which compares two objects' natural-key
+// values byte for byte. That comparison is only sound while both sides are read through one
+// encoder: the same value reached as an int64 and as a float64 marshals identically here and
+// would not survive two hand-rolled decodings.
+func SpecMap(obj client.Object) (map[string]json.RawMessage, error) {
 	encoded, err := json.Marshal(obj)
 	if err != nil {
 		return nil, fmt.Errorf("encoding %s/%s: %w", obj.GetNamespace(), obj.GetName(), err)

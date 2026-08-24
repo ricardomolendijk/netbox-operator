@@ -367,3 +367,33 @@ var SweepRuns = factory.NewCounterVec(prometheus.CounterOpts{
 	Name: "netbox_operator_sweep_runs_total",
 	Help: "NetBoxSweep runs by the condition reason they settled on.",
 }, []string{"result"})
+
+// webhookBuckets are latency buckets for one admission review.
+//
+// An order of magnitude finer than requestBuckets at the fast end, because the budget being
+// measured is an order of magnitude smaller: NBO-044 asks for p99 under 10ms for an object
+// with ten references, so buckets that start at 5ms could not tell a pass from a failure. The
+// top bucket is the webhook configuration's own `timeoutSeconds: 5`, so a review the API
+// server gave up on is still containable.
+var webhookBuckets = []float64{0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 1, 5}
+
+// WebhookDuration measures one admission review, end to end.
+//
+// Labelled by kind and operation and *not* by webhook name: there is one webhook serving the
+// whole API group (internal/webhook/admission.Path), so a `webhook` label would be a constant
+// and the interesting axis is which Kind is slow. Operation matters because an UPDATE carries
+// an old object and a CREATE does not, so the two do not do the same work.
+//
+// Cardinality: kind (~120) x operation (2) x (11 buckets + +Inf + sum + count) = ~3360 series
+// worst case. Both labels come from the AdmissionRequest's own TypeMeta and verb, neither of
+// which is free-form user input.
+var WebhookDuration = factory.NewHistogramVec(prometheus.HistogramOpts{
+	Name:    "netbox_operator_webhook_duration_seconds",
+	Help:    "Duration of one admission review, by kind and operation.",
+	Buckets: webhookBuckets,
+}, []string{"kind", "operation"})
+
+// ObserveWebhook records one admission review.
+func ObserveWebhook(kind, operation string, took time.Duration) {
+	WebhookDuration.WithLabelValues(kind, operation).Observe(took.Seconds())
+}

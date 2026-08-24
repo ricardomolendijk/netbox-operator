@@ -46,10 +46,11 @@ manifests: controller-gen ## Generate CRDs and RBAC into config/.
 	@# controller-gen fails hard on a path pattern that matches no package, and git does
 	@# not track empty directories, so a fresh checkout has no ./internal/... until the
 	@# first controller lands. Found by CI on exactly that clean checkout.
-	$(CONTROLLER_GEN) rbac:roleName=manager-role crd \
+	$(CONTROLLER_GEN) rbac:roleName=manager-role crd webhook \
 		paths="./..." \
 		output:crd:artifacts:config=config/crd/bases \
-		output:rbac:artifacts:config=config/rbac
+		output:rbac:artifacts:config=config/rbac \
+		output:webhook:artifacts:config=config/webhook
 	@# The Secret grant controller-gen cannot express: a marker only ever produces a
 	@# cluster-wide rule, and the namespaces holding endpoint credentials are deploy-time
 	@# configuration. Generated from config/rbac/credential-namespaces/namespaces.txt into
@@ -125,7 +126,8 @@ test-e2e: ## Run e2e tests against a kind cluster and a live NetBox.
 # Paths whose contents are produced by controller-gen. Listed explicitly so that a dirty
 # working tree does not read as stale codegen: the two failures have different fixes, and
 # conflating them makes the target useless locally.
-GENERATED_PATHS ?= config/crd config/rbac api/v1alpha1/zz_generated.deepcopy.go \
+GENERATED_PATHS ?= config/crd config/rbac config/webhook/manifests.yaml \
+                  api/v1alpha1/zz_generated.deepcopy.go \
                   charts/netbox-operator/crds charts/netbox-operator/templates/clusterrole.yaml
 
 .PHONY: verify

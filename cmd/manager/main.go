@@ -16,10 +16,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
+	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	netboxv1alpha1 "github.com/ricardomolendijk/netbox-operator/api/v1alpha1"
 	"github.com/ricardomolendijk/netbox-operator/internal/controller"
 	"github.com/ricardomolendijk/netbox-operator/internal/reconciler"
+	webhookadmission "github.com/ricardomolendijk/netbox-operator/internal/webhook/admission"
 )
 
 var scheme = runtime.NewScheme()
@@ -37,6 +39,9 @@ type options struct {
 	enableLeaderElection bool
 	secureMetrics        bool
 	enableHTTP2          bool
+	webhookPort          int
+	webhookCertDir       string
+	enableWebhooks       bool
 }
 
 func parseFlags() (options, zap.Options) {
@@ -51,6 +56,17 @@ func parseFlags() (options, zap.Options) {
 		"Serve metrics over HTTPS with authn/authz.")
 	flag.BoolVar(&opts.enableHTTP2, "enable-http2", false,
 		"Enable HTTP/2 on the metrics and webhook servers.")
+	flag.IntVar(&opts.webhookPort, "webhook-port", 9443,
+		"Port the admission webhook server binds to.")
+	flag.StringVar(&opts.webhookCertDir, "webhook-cert-dir", "/tmp/k8s-webhook-server/serving-certs",
+		"Directory holding the webhook serving certificate, as tls.crt and tls.key.")
+	// On by default, because a webhook configuration installed with no server behind it is
+	// the failure mode failurePolicy: Ignore quietly absorbs -- every apply admitted
+	// unchecked, with nothing in any log to say so. The flag exists so that a deployment
+	// that has not installed the configuration can turn the server off rather than serve on
+	// a port nothing calls.
+	flag.BoolVar(&opts.enableWebhooks, "enable-webhooks", true,
+		"Serve the validating admission webhook.")
 
 	zapOpts := zap.Options{Development: false}
 	zapOpts.BindFlags(flag.CommandLine)
@@ -119,8 +135,16 @@ func run() error {
 			TLSOpts:       tlsOpts(opts.enableHTTP2),
 		},
 		HealthProbeBindAddress: opts.probeAddr,
-		LeaderElection:         opts.enableLeaderElection,
-		LeaderElectionID:       "netbox-operator.kubeforge.org",
+		// Both replicas serve the webhook, and it is deliberately outside the leader-election
+		// gate below: a webhook served only by the leader is served by one pod, so half the
+		// admission requests reach a replica that answers 404. See internal/webhook/admission.
+		WebhookServer: webhook.NewServer(webhook.Options{
+			Port:    opts.webhookPort,
+			CertDir: opts.webhookCertDir,
+			TLSOpts: tlsOpts(opts.enableHTTP2),
+		}),
+		LeaderElection:   opts.enableLeaderElection,
+		LeaderElectionID: "netbox-operator.kubeforge.org",
 		// One informer per granted namespace, label-selected: an unscoped informer would
 		// cache every Secret in the cluster, and a cluster-scoped one would need a
 		// cluster-wide grant this deployment does not have.
@@ -170,6 +194,18 @@ func run() error {
 		Recorder: mgr.GetEventRecorderFor("netboxsweep-controller"),
 	}).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("setting up the NetBoxSweep controller: %w", err)
+	}
+
+	if opts.enableWebhooks {
+		webhookadmission.Setup(mgr)
+
+		// Readiness gated on the webhook server having started, which it cannot do until the
+		// serving certificate is on disk. Without it a replica joins the Service before it can
+		// answer a TLS handshake, and with failurePolicy: Ignore that is not an error anybody
+		// sees -- it is a window in which a fraction of applies go unchecked.
+		if err := mgr.AddReadyzCheck("webhook", mgr.GetWebhookServer().StartedChecker()); err != nil {
+			return fmt.Errorf("adding the webhook readiness check: %w", err)
+		}
 	}
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {

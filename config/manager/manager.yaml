@@ -18,7 +18,11 @@ spec:
   selector:
     matchLabels:
       control-plane: controller-manager
-  replicas: 1
+  # Two, because failurePolicy: Ignore trades a fail-closed webhook for availability and
+  # then has to actually supply it: a single replica means every rollout, eviction and node
+  # drain is a window in which applies go unchecked. Both replicas serve the webhook; leader
+  # election below keeps only one of them reconciling.
+  replicas: 2
   template:
     metadata:
       annotations:
@@ -38,6 +42,10 @@ spec:
         args:
         - --leader-elect
         - --health-probe-bind-address=:8081
+        ports:
+        - name: webhook
+          containerPort: 9443
+          protocol: TCP
         securityContext:
           allowPrivilegeEscalation: false
           readOnlyRootFilesystem: true
@@ -63,5 +71,33 @@ spec:
           requests:
             cpu: 10m
             memory: 64Mi
+        volumeMounts:
+        - name: webhook-certs
+          mountPath: /tmp/k8s-webhook-server/serving-certs
+          readOnly: true
+      volumes:
+      # Issued by config/certmanager. Not optional: with it missing the webhook server never
+      # starts, the readyz check gated on it fails, and the replica stays out of the Service
+      # -- which is the visible failure. Mounting it optionally would instead put a replica
+      # behind the Service that cannot complete a TLS handshake, and with failurePolicy:
+      # Ignore that is a silent bypass. A cluster without cert-manager runs the operator with
+      # --enable-webhooks=false instead.
+      - name: webhook-certs
+        secret:
+          secretName: webhook-server-cert
       serviceAccountName: controller-manager
       terminationGracePeriodSeconds: 10
+---
+# minAvailable: 1 so that a voluntary disruption cannot take both webhook servers away at
+# once. It is the other half of choosing Ignore over Fail: the answer to "a bypassed webhook
+# admits a bad manifest" is to not be down, rather than to make being down an outage.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: controller-manager
+  namespace: system
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      control-plane: controller-manager
