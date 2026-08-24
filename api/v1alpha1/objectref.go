@@ -277,21 +277,34 @@ type (
 	// different for that -- the id is resolved by the same four modes and the same grant
 	// check -- which is the point of resolving a pool through an ordinary reference.
 	PrefixRef ObjectRef
+	// VirtualMachineRef points at a NetBoxVirtualMachine (virtualization.VirtualMachine,
+	// virtualization/virtual-machines).
+	VirtualMachineRef ObjectRef
+
+	// DeviceRef points at a NetBoxDevice (dcim.Device, dcim/devices). The Kind lands with
+	// NBO-030; the alias is what `virtualization.VirtualMachine.device` points at.
+	DeviceRef ObjectRef
+
 	// DeviceRoleRef points at a NetBoxDeviceRole (dcim.DeviceRole, dcim/device-roles).
 	//
-	// dcim.DeviceRole and not ipam.Role: two separate models with two separate endpoints,
-	// and this is the one a device and a virtual machine carry.
+	// dcim.DeviceRole and not ipam.Role, and not a virtualization-specific role either:
+	// `virtualization.VirtualMachine.role` is a foreign key to the DCIM model
+	// (docs/netbox-schema.md -> virtualization.VirtualMachine), which is why
+	// `DeviceRole.vm_role` exists and defaults to true. Kind lands with NBO-027.
 	DeviceRoleRef ObjectRef
+
+	// PlatformRef points at a NetBoxPlatform (dcim.Platform, dcim/platforms). Kind lands
+	// with NBO-027.
+	PlatformRef ObjectRef
 
 	// DeviceTypeRef points at a NetBoxDeviceType (dcim.DeviceType, dcim/device-types).
 	DeviceTypeRef ObjectRef
 
-	// ManufacturerRef points at a NetBoxManufacturer (dcim.Manufacturer,
-	// dcim/manufacturers).
+	// ManufacturerRef points at a NetBoxManufacturer (dcim.Manufacturer, dcim/manufacturers).
 	ManufacturerRef ObjectRef
 
-	// PlatformRef points at a NetBoxPlatform (dcim.Platform, dcim/platforms).
-	PlatformRef ObjectRef
+	// IPAddressRef points at a NetBoxIPAddress (ipam.IPAddress, ipam/ip-addresses).
+	//
 )
 
 // TargetGVK reports the Kind this reference resolves against.
@@ -429,6 +442,38 @@ func (r ClusterTypeRef) TargetGVK() schema.GroupVersionKind {
 func (r ClusterTypeRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
 
 // TargetGVK reports the Kind this reference resolves against.
+func (r VirtualMachineRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxVirtualMachine")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r VirtualMachineRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r DeviceRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxDevice")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r DeviceRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r DeviceRoleRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxDeviceRole")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r DeviceRoleRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r PlatformRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxPlatform")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r PlatformRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
 func (r IPAddressRef) TargetGVK() schema.GroupVersionKind {
 	return GroupVersion.WithKind("NetBoxIPAddress")
 }
@@ -443,38 +488,6 @@ func (r PrefixRef) TargetGVK() schema.GroupVersionKind {
 
 // AsObjectRef returns the underlying reference.
 func (r PrefixRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
-
-// TargetGVK reports the Kind this reference resolves against.
-func (r DeviceRoleRef) TargetGVK() schema.GroupVersionKind {
-	return GroupVersion.WithKind("NetBoxDeviceRole")
-}
-
-// AsObjectRef returns the underlying reference.
-func (r DeviceRoleRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
-
-// TargetGVK reports the Kind this reference resolves against.
-func (r DeviceTypeRef) TargetGVK() schema.GroupVersionKind {
-	return GroupVersion.WithKind("NetBoxDeviceType")
-}
-
-// AsObjectRef returns the underlying reference.
-func (r DeviceTypeRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
-
-// TargetGVK reports the Kind this reference resolves against.
-func (r ManufacturerRef) TargetGVK() schema.GroupVersionKind {
-	return GroupVersion.WithKind("NetBoxManufacturer")
-}
-
-// AsObjectRef returns the underlying reference.
-func (r ManufacturerRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
-
-// TargetGVK reports the Kind this reference resolves against.
-func (r PlatformRef) TargetGVK() schema.GroupVersionKind {
-	return GroupVersion.WithKind("NetBoxPlatform")
-}
-
-// AsObjectRef returns the underlying reference.
-func (r PlatformRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
 
 // Compile-time proof that every alias satisfies RefTarget. An alias that forgets its
 // methods fails the build here rather than at the first reconcile that needs it.
@@ -500,8 +513,27 @@ var (
 	_ RefTarget = VRFRef{}
 	_ RefTarget = IPAddressRef{}
 	_ RefTarget = PrefixRef{}
+	_ RefTarget = VirtualMachineRef{}
+	_ RefTarget = DeviceRef{}
 	_ RefTarget = DeviceRoleRef{}
+	_ RefTarget = PlatformRef{}
+	_ RefTarget = IPAddressRef{}
 	_ RefTarget = DeviceTypeRef{}
 	_ RefTarget = ManufacturerRef{}
-	_ RefTarget = PlatformRef{}
 )
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r DeviceTypeRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxDeviceType")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r DeviceTypeRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r ManufacturerRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxManufacturer")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r ManufacturerRef) AsObjectRef() ObjectRef { return ObjectRef(r) }

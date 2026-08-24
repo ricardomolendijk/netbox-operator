@@ -29,6 +29,8 @@ var stampedObjectTypes = []string{
 	"ipam.vrf",
 	"tenancy.tenant", "tenancy.tenantgroup",
 	"virtualization.cluster", "virtualization.clustergroup", "virtualization.clustertype",
+	"virtualization.virtualdisk", "virtualization.virtualmachine",
+	"virtualization.vminterface",
 }
 
 // objectTypesAsAny is the set the bootstrap will compute, in the []any shape a JSON payload

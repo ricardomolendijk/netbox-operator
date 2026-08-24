@@ -40,8 +40,11 @@ rules:
   - netboxtags
   - netboxtenantgroups
   - netboxtenants
+  - netboxvirtualdisks
+  - netboxvirtualmachines
   - netboxvlangroups
   - netboxvlans
+  - netboxvminterfaces
   - netboxvrfs
   verbs:
   - get
@@ -70,8 +73,11 @@ rules:
   - netboxtags/finalizers
   - netboxtenantgroups/finalizers
   - netboxtenants/finalizers
+  - netboxvirtualdisks/finalizers
+  - netboxvirtualmachines/finalizers
   - netboxvlangroups/finalizers
   - netboxvlans/finalizers
+  - netboxvminterfaces/finalizers
   - netboxvrfs/finalizers
   verbs:
   - update
@@ -97,8 +103,11 @@ rules:
   - netboxtags/status
   - netboxtenantgroups/status
   - netboxtenants/status
+  - netboxvirtualdisks/status
+  - netboxvirtualmachines/status
   - netboxvlangroups/status
   - netboxvlans/status
+  - netboxvminterfaces/status
   - netboxvrfs/status
   verbs:
   - get

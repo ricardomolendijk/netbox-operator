@@ -1,0 +1,49 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxVMInterface
+metadata:
+  name: dns-eth0
+  namespace: default
+spec:
+  endpointRef: homelab
+
+  # Required, and half the identity: `(virtual_machine, name)` is unique per VM rather
+  # than globally, so the lookup always carries virtual_machine_id and never looks `eth0`
+  # up across every VM in NetBox.
+  virtualMachineRef:
+    name: dns
+
+  # Required. Case-sensitive, unlike a VM's name: ComponentModel's constraint carries no
+  # Lower(), so `Eth0` and `eth0` are two interfaces on one VM.
+  name: eth0
+
+  # A pointer in the API: omit it to leave NetBox's value alone, `false` to disable.
+  enabled: true
+  mtu: 1500
+
+  # access, tagged, tagged-all or q-in-q. Not defaulted -- an unset mode is a real state.
+  mode: access
+
+  # ipam.VLAN, and NBO-023's Kind, so a name-mode ref reports RefKindUnavailable today.
+  # untaggedVLANRef:
+  #   lookup:
+  #     vid: "20"
+
+  # A to-many reference: omitting it leaves NetBox's list alone, `[]` clears it, a list
+  # replaces it. Order is not data. Bounded at 256 refs.
+  # taggedVLANs:
+  #   - lookup:
+  #       vid: "30"
+
+  # Two self-references, both deferred when they do not resolve: a sub-interface and a
+  # bridge member are frequently applied alongside the interface they name.
+  # parentRef:
+  #   name: dns-eth0
+  # bridgeRef:
+  #   name: dns-eth1
+
+  # Declared on VMInterface itself rather than on BaseInterface -- dcim.Interface has no
+  # `vrf` of its own.
+  # vrfRef:
+  #   name: vrf-home
+
+  description: Primary interface
