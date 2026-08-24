@@ -389,6 +389,19 @@ asked for; comparing an M2M order-sensitively PATCHes forever, because NetBox do
 preserve M2M order. The comparison rules are rules 3, 5 and 8 in
 [drift detection](drift.md).
 
+### A `RefMany` field's CRD needs `MaxItems`
+
+A `RefMany` field is a `[]ObjectRef` in the CRD, and `ObjectRef` carries five CEL rules that
+the API server costs at the list's **maximum** length. A list with no maximum is costed as
+unbounded and the CRD is refused at install — the whole CRD, not the field — while
+controller-gen, `kustomize build` and `make verify` all stay green. So every `RefMany` field
+carries `+kubebuilder:validation:MaxItems`, the standard bound is **256**, and
+`TestEveryValidatedListIsBounded` (`api/v1alpha1/reflistbounds_test.go`) fails the build when
+one does not. The measured ceiling and the reasoning are in
+[references](references.md#a-list-needs-a-bound); the generator
+([NBO-042 (#66)](https://github.com/ricardomolendijk/netbox-operator/issues/66)) must emit the
+marker with every `RefMany` field.
+
 ### A to-many reference resolves whole or not at all
 
 Resolution is keyed by field, and a field appears in the result **only when every element
