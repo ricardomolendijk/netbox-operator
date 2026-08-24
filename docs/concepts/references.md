@@ -938,10 +938,13 @@ and the resolver reads it from the *type* rather than from a switch on the field
 | `LocationRef` | `NetBoxLocation` | `dcim.Location` | `dcim/locations` |
 | `TenantRef` | `NetBoxTenant` | `tenancy.Tenant` | `tenancy/tenants` |
 | `TenantGroupRef` | `NetBoxTenantGroup` | `tenancy.TenantGroup` | `tenancy/tenant-groups` |
+| `DeviceRef` | `NetBoxDevice` | `dcim.Device` | `dcim/devices` |
+| `InterfaceRef` | `NetBoxInterface` | `dcim.Interface` | `dcim/interfaces` |
 
 Model and endpoint spellings are from `docs/netbox-schema.md` and its endpoint map.
-`NetBoxTag`, `NetBoxSite`, `NetBoxRegion`, `NetBoxSiteGroup`, `NetBoxLocation`, `NetBoxTenant`
-and `NetBoxTenantGroup` exist as Kinds so far; the remaining aliases are declared ahead of
+`NetBoxTag`, `NetBoxSite`, `NetBoxRegion`, `NetBoxSiteGroup`, `NetBoxLocation`, `NetBoxTenant`,
+`NetBoxTenantGroup`, `NetBoxClusterType`, `NetBoxClusterGroup`, `NetBoxCluster`, `NetBoxDevice`
+and `NetBoxInterface` exist as Kinds so far; the remaining aliases are declared ahead of
 their Kinds because a reference is declarable before its target is implemented, and the
 remaining ~40 arrive with the generator
 ([NBO-042 (#66)](https://github.com/ricardomolendijk/netbox-operator/issues/66)).

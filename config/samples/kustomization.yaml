@@ -27,3 +27,5 @@ resources:
 - netbox_v1alpha1_netboxdevicerole.yaml
 - netbox_v1alpha1_netboxdevicetype.yaml
 - netbox_v1alpha1_netboxplatform.yaml
+- netbox_v1alpha1_netboxdevice.yaml
+- netbox_v1alpha1_netboxinterface.yaml

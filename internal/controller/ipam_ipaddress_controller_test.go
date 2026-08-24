@@ -282,10 +282,14 @@ func TestIPAddressAssignmentIsWrittenAsAPairOrNotAtAll(t *testing.T) {
 		t.Errorf("Ready message = %q, want it to name the field that is waiting", ready.Message)
 	}
 
+	// RefNotFound, not RefKindUnavailable: NBO-030 registers dcim.interface, so the union's
+	// `interfaceRef` member now has a Descriptor and the Kind exists. What is missing is the
+	// named interface itself. The property under test is unchanged -- an unresolved member
+	// writes neither column of the pair.
 	refs := ipCondition(ns, "on-eth0", netboxv1alpha1.ConditionRefsResolved)
-	if refs.Reason != netboxv1alpha1.ReasonRefKindUnavailable {
-		t.Errorf("RefsResolved reason = %q, want %q -- NetBoxInterface has no descriptor yet",
-			refs.Reason, netboxv1alpha1.ReasonRefKindUnavailable)
+	if refs.Reason != netboxv1alpha1.ReasonRefNotFound {
+		t.Errorf("RefsResolved reason = %q, want %q",
+			refs.Reason, netboxv1alpha1.ReasonRefNotFound)
 	}
 
 	// Nothing is written for it. This test asserted the opposite until NBO-195 (answered C):
