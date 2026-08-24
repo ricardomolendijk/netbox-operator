@@ -7,6 +7,7 @@ import (
 
 	"github.com/ricardomolendijk/netbox-operator/internal/metrics"
 	"github.com/ricardomolendijk/netbox-operator/internal/netbox"
+	"github.com/ricardomolendijk/netbox-operator/internal/provenance"
 )
 
 // clientKey identifies a cached client.
@@ -23,15 +24,28 @@ type clientKey struct {
 	secretVersion string
 }
 
+// cached is everything the endpoint controller proved about one endpoint and object
+// controllers need back: the client, and the provenance stamp its bootstrap resolved.
+//
+// The stamp travels with the client rather than being looked up per pass because its tag id
+// can only come from NetBox: resolving it here means two extra requests per endpoint per
+// resync instead of two per object per reconcile. It is also the invalidation the stamp
+// needs for free -- put evicts the whole entry, so an edit to spec.managedBy replaces the
+// stamp at the same moment it replaces the client.
+type cached struct {
+	client *netbox.Client
+	stamp  provenance.Stamp
+}
+
 // ClientCache hands out one client per (endpoint, spec generation, Secret version).
 type ClientCache struct {
 	mu      sync.RWMutex
-	clients map[clientKey]*netbox.Client
+	clients map[clientKey]cached
 }
 
 // NewClientCache returns an empty cache.
 func NewClientCache() *ClientCache {
-	return &ClientCache{clients: map[clientKey]*netbox.Client{}}
+	return &ClientCache{clients: map[clientKey]cached{}}
 }
 
 // put stores client under key and drops any other entry for the same endpoint, so a
@@ -40,30 +54,31 @@ func NewClientCache() *ClientCache {
 // The evicted client's idle connections are released. Without that, every reconcile --
 // including every resync tick -- would leave behind a transport holding an idle
 // keep-alive pool, so connection pools would accumulate for the lifetime of the process.
-func (c *ClientCache) put(key clientKey, client *netbox.Client) {
+func (c *ClientCache) put(key clientKey, client *netbox.Client, stamp provenance.Stamp) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for existing, previous := range c.clients {
 		if existing.namespace == key.namespace && existing.name == key.name {
-			previous.CloseIdleConnections()
+			previous.client.CloseIdleConnections()
 			delete(c.clients, existing)
 		}
 	}
-	c.clients[key] = client
+	c.clients[key] = cached{client: client, stamp: stamp}
 	metrics.ClientCacheSize.Set(float64(len(c.clients)))
 }
 
-// Lookup returns the client for an endpoint by namespace and name, if one has been built.
-// Object controllers use this; a miss means the endpoint is not Ready yet.
-func (c *ClientCache) Lookup(namespace, name string) (*netbox.Client, bool) {
+// Lookup returns the client for an endpoint by namespace and name, together with the
+// provenance stamp its bootstrap resolved. Object controllers use this; a miss means the
+// endpoint is not Ready yet.
+func (c *ClientCache) Lookup(namespace, name string) (*netbox.Client, provenance.Stamp, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	for key, client := range c.clients {
+	for key, entry := range c.clients {
 		if key.namespace == namespace && key.name == name {
-			return client, true
+			return entry.client, entry.stamp, true
 		}
 	}
-	return nil, false
+	return nil, provenance.Stamp{}, false
 }
 
 // Forget drops every client for an endpoint, used when it is deleted or stops being
@@ -72,9 +87,9 @@ func (c *ClientCache) Lookup(namespace, name string) (*netbox.Client, bool) {
 func (c *ClientCache) Forget(namespace, name string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	for key, client := range c.clients {
+	for key, entry := range c.clients {
 		if key.namespace == namespace && key.name == name {
-			client.CloseIdleConnections()
+			entry.client.CloseIdleConnections()
 			delete(c.clients, key)
 		}
 	}

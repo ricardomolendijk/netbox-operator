@@ -33,6 +33,12 @@ func dcimSiteDescriptor() Descriptor {
 		ObjectType: "dcim.site",
 		Scope:      apiextensionsv1.NamespaceScoped,
 
+		// dcim.Site is a PrimaryModel (docs/netbox-schema.md -> dcim.Site, bases), which
+		// mixes in both TagsMixin and CustomFieldsMixin, so it carries the whole provenance
+		// stamp.
+		Taggable:        true,
+		CustomFieldable: true,
+
 		// CR spec names on the left, NetBox API names on the right.
 		// `physicalAddress` -> `physical_address` and `shippingAddress` ->
 		// `shipping_address` are the entries that earn the table: NetBox ignores a field

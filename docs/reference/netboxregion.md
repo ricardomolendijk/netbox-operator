@@ -121,8 +121,13 @@ top-level region would adopt an unrelated nested one. See
 ## `status`
 
 Identical to every other kind — `id`, `url`, `naturalKey`, `adopted`, `lastAppliedHash`,
-`lastSyncTime`, `deletionAttempts`, `observedGeneration`, `conditions`. See
+`lastSyncTime`, `deletionAttempts`, `provenance`, `observedGeneration`, `conditions`. See
 [`NetBoxTag`](netboxtag.md#status) for what each field means and when it is cleared.
+
+`status.provenance` behaves as it does on `NetBoxSite` rather than as on `NetBoxTag`:
+`dcim.Region` is a `NestedGroupModel`, so it carries both `tags` and `custom_fields` and is
+stamped in full when the endpoint's [`spec.managedBy`](netboxendpoint.md#specmanagedby) is
+set. See [provenance](../operations/provenance.md).
 
 `status.naturalKey` is worth reading on this kind in particular: it records which of the two
 candidates ran, filter by filter, so `{"parent_id__isnull": "true", "name": "Europe"}`

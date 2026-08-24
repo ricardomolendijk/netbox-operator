@@ -44,7 +44,7 @@ type endpointProvider struct {
 // kind. It also carries the logger, which is the only reason the read failure below is
 // reportable at all (CONTRIBUTING.md, "Logging": take the logger from the context).
 func (p *endpointProvider) Endpoint(ctx context.Context, namespace, name string) (reconciler.Endpoint, bool) {
-	nbClient, ok := p.clients.Lookup(namespace, name)
+	nbClient, stamp, ok := p.clients.Lookup(namespace, name)
 	if !ok {
 		return reconciler.Endpoint{}, false
 	}
@@ -54,7 +54,11 @@ func (p *endpointProvider) Endpoint(ctx context.Context, namespace, name string)
 	// of the mode that an adapter could forget to set. See NBO-076. driftMode below is
 	// carried for the opposite reason -- it decides what the engine *says* and when it
 	// comes back, neither of which is readable off a write that never happened.
-	endpoint := reconciler.Endpoint{Client: nbClient}
+	// The stamp comes from the cache rather than from the CR below, and that is deliberate:
+	// it is what the endpoint controller *proved* exists in NetBox, whereas spec.managedBy
+	// is only what was asked for. Reading it off the spec would let an edit start stamping a
+	// tag whose definition has not been created yet -- a 400 per object of every kind.
+	endpoint := reconciler.Endpoint{Client: nbClient, Provenance: stamp}
 
 	cr := &netboxv1alpha1.NetBoxEndpoint{}
 	if err := p.reader.Get(ctx,

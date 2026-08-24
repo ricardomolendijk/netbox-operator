@@ -11,6 +11,7 @@ import (
 
 	netboxv1alpha1 "github.com/ricardomolendijk/netbox-operator/api/v1alpha1"
 	"github.com/ricardomolendijk/netbox-operator/internal/netbox"
+	"github.com/ricardomolendijk/netbox-operator/internal/provenance"
 	"github.com/ricardomolendijk/netbox-operator/internal/registry"
 )
 
@@ -158,8 +159,22 @@ func isGenericFK(d registry.Descriptor, spec string) bool {
 // needs. It is the whole of the engine's knowledge about how a field is compared, and it
 // is data every time.
 func fieldRules(d registry.Descriptor) netbox.FieldRules {
+	m2m := set(d.M2M)
+
+	// `tags` is not in any descriptor's M2M list because no spec field maps onto it: it is
+	// the engine's own column, written by the provenance stamp (NBO-075). It still needs the
+	// M2M rule, and getting that wrong is the loud kind of wrong -- NetBox returns tags as
+	// nested objects and takes them as bare ids, so compared as scalars they never match and
+	// the operator PATCHes the same list forever.
+	if d.Taggable {
+		if m2m == nil {
+			m2m = map[string]bool{}
+		}
+		m2m[provenance.TagsField] = true
+	}
+
 	rules := netbox.FieldRules{
-		M2M:             set(d.M2M),
+		M2M:             m2m,
 		ObjectTypeLists: set(d.ObjectTypeLists),
 		Arrays:          set(d.Arrays),
 		GenericFKs:      make([]netbox.GenericFK, 0, len(d.GenericFKs)),

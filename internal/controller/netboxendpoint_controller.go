@@ -127,12 +127,22 @@ func (r *NetBoxEndpointReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 				version, netbox.MinVersion, netbox.MaxVersion))
 	}
 
+	// After the version gate and before the client is cached, so that an endpoint whose
+	// provenance cannot be written is never handed to an object controller (NBO-075).
+	stamp, err := r.provision(ctx, endpoint, nbClient)
+	if err != nil {
+		reason := provenanceReason(err)
+		r.provisionCondition(endpoint, metav1.ConditionFalse, reason, err.Error())
+
+		return r.fail(ctx, endpoint, before, reason, err)
+	}
+
 	r.Cache.put(clientKey{
 		namespace:     endpoint.Namespace,
 		name:          endpoint.Name,
 		generation:    endpoint.Generation,
 		secretVersion: secretVersion,
-	}, nbClient)
+	}, nbClient, stamp)
 
 	return r.ready(ctx, endpoint, before, cfg, status)
 }
@@ -330,6 +340,15 @@ func (r *NetBoxEndpointReconciler) fail(ctx context.Context, e *netboxv1alpha1.N
 		setCondition(e, netboxv1alpha1.ConditionAuthenticated, metav1.ConditionTrue,
 			netboxv1alpha1.ReasonReady, "token accepted")
 		setCondition(e, netboxv1alpha1.ConditionVersionSupported, metav1.ConditionFalse, reason, cause.Error())
+	case netboxv1alpha1.ReasonBootstrapDisabled, netboxv1alpha1.ReasonBootstrapFailed:
+		// The provenance bootstrap runs after both gates, so reaching it means both were
+		// passed. Writing Unknown here would retract two answers this reconcile did
+		// establish, and send whoever reads it to the token or the version -- neither of
+		// which is what is wrong.
+		setCondition(e, netboxv1alpha1.ConditionAuthenticated, metav1.ConditionTrue,
+			netboxv1alpha1.ReasonReady, "token accepted")
+		setCondition(e, netboxv1alpha1.ConditionVersionSupported, metav1.ConditionTrue,
+			netboxv1alpha1.ReasonReady, "version checked before the provenance bootstrap ran")
 	default:
 		// ProbeFailed, InvalidConfig, CABundleMissing: the token itself may be perfectly
 		// good, so claiming Authenticated=False would point the reader at the wrong
@@ -356,7 +375,15 @@ func failureBackoff(reason string) time.Duration {
 	switch reason {
 	case netboxv1alpha1.ReasonVersionUnsupported, netboxv1alpha1.ReasonVersionUnparseable:
 		return 10 * time.Minute
-	case netboxv1alpha1.ReasonAuthError, netboxv1alpha1.ReasonInvalidConfig:
+	// A definition somebody has to create by hand, in the same tier as a version mismatch
+	// for the same reason: nothing the operator does will produce one.
+	case netboxv1alpha1.ReasonBootstrapDisabled:
+		return 10 * time.Minute
+	case netboxv1alpha1.ReasonAuthError, netboxv1alpha1.ReasonInvalidConfig,
+		// A refused bootstrap is usually a token without extras.add_customfield, so it
+		// belongs with AuthError: a permission grant, and a couple of minutes is soon
+		// enough to notice it landing.
+		netboxv1alpha1.ReasonBootstrapFailed:
 		return 2 * time.Minute
 	default:
 		return 30 * time.Second

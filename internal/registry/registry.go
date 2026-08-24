@@ -222,6 +222,28 @@ type Descriptor struct {
 	// GenericFKs are the polymorphic foreign keys on this kind.
 	GenericFKs []GenericFKSpec
 
+	// Taggable reports that this kind's NetBox model mixes in TagsMixin, so `tags` is a
+	// writable column on it.
+	//
+	// It exists so the engine can stamp a provenance tag (NBO-075) without knowing what
+	// kind it is holding. Not derivable and not defaultable: extras.Tag inherits
+	// django-taggit's TagBase and *is* the tag, so it carries no `tags` of its own
+	// (docs/netbox-schema.md -> extras.Tag, bases). NetBox ignores a column it does not
+	// know rather than rejecting it, so writing `tags` to such a kind would not fail --
+	// the value would vanish, the next read would find it absent, and the engine would
+	// PATCH it again on every resync forever.
+	Taggable bool
+
+	// CustomFieldable reports that this kind's NetBox model mixes in CustomFieldsMixin, so
+	// `custom_fields` is a writable column on it.
+	//
+	// Separate from Taggable because the two mixins are independent in NetBox, and
+	// load-bearing twice over: it gates the stamp exactly as Taggable does, and it is what
+	// the provenance bootstrap derives extras.CustomField's required `object_types` list
+	// from -- a CustomField declared for the wrong set of types makes every write to a type
+	// outside it a 400.
+	CustomFieldable bool
+
 	// ContainmentRef is the one spec field whose target gets a non-controller owner
 	// reference, so deleting the parent cascades. Exactly one, because Kubernetes garbage
 	// collection waits for every owner and two containment owners silently turn "delete

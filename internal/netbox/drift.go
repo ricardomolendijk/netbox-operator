@@ -239,12 +239,12 @@ func boolEqual(have, want any) (equal, decided bool) {
 // sameIDSet compares an M2M field: a list of nested objects on read against a list of
 // bare ids on write, order-independent because NetBox does not preserve the order.
 func sameIDSet(have, want any) bool {
-	return equalInts(sortedInts(nestedIDs(have)), sortedInts(idsOf(want)))
+	return equalInts(sortedInts(nestedIDs(have)), sortedInts(IDsOf(want)))
 }
 
 // sameStringSet compares an object-type list ("dcim.device"), order-independent.
 func sameStringSet(have, want any) bool {
-	haveList, wantList := sortedStrings(stringsOf(have)), sortedStrings(stringsOf(want))
+	haveList, wantList := sortedStrings(ObjectTypesOf(have)), sortedStrings(ObjectTypesOf(want))
 	if len(haveList) != len(wantList) {
 		return false
 	}
