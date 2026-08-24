@@ -33,6 +33,7 @@ rules:
   resources:
   - netboxendpoints/status
   - netboxlocations/status
+  - netboxprefixes/status
   - netboxregions/status
   - netboxroutetargets/status
   - netboxsitegroups/status
@@ -49,6 +50,7 @@ rules:
   - netbox.kubeforge.org
   resources:
   - netboxlocations
+  - netboxprefixes
   - netboxregions
   - netboxroutetargets
   - netboxsitegroups
@@ -67,6 +69,7 @@ rules:
   - netbox.kubeforge.org
   resources:
   - netboxlocations/finalizers
+  - netboxprefixes/finalizers
   - netboxregions/finalizers
   - netboxroutetargets/finalizers
   - netboxsitegroups/finalizers
