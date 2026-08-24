@@ -13,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	netboxv1alpha1 "github.com/ricardomolendijk/netbox-operator/api/v1alpha1"
+	"github.com/ricardomolendijk/netbox-operator/internal/metrics"
 	"github.com/ricardomolendijk/netbox-operator/internal/netbox"
 	"github.com/ricardomolendijk/netbox-operator/internal/provenance"
 	"github.com/ricardomolendijk/netbox-operator/internal/registry"
@@ -492,23 +493,71 @@ func TestClaimWaitsForItsEndpoint(t *testing.T) {
 	}
 }
 
-// TestDeletingAClaimReportsWhatItLeavesBehind is the garbage-collection reporting path.
+// TestDeletingAClaimFreesItsAddress is the behaviour #225 reversed #182 to get.
 //
-// A claim always retains its NetBox object, so the interesting question is not what is
-// deleted -- nothing is -- but whether the operator says what it has stopped tracking. This is
-// the last moment it holds the identity, the id and the address together, and after the CR is
-// gone there is no status left to read them from.
-//
-// It also makes no NetBox call, which is why this finalizer cannot make a namespace
-// undeletable however unreachable NetBox is.
-func TestDeletingAClaimReportsWhatItLeavesBehind(t *testing.T) {
+// A claim's CR is the only record that its allocation exists, so a claim that goes away
+// without freeing its address leaves litter nothing in the cluster can name. The DELETE has to
+// be for the id in status and no other: an id is the only thing the operator can prove it
+// allocated, and a natural-key or identity search at deletion time would be a DELETE aimed at
+// whatever happened to match.
+func TestDeletingAClaimFreesItsAddress(t *testing.T) {
 	claim, engine, nb := newClaimFixture(t)
+	retained := watch(t, metrics.AllocationsRetained, []string{"NetBoxIPAddressClaim"})
+
+	if _, err := engine.Reconcile(context.Background(), claim); err != nil {
+		t.Fatal(err)
+	}
+
+	claim.DeletionTimestamp = &metav1.Time{Time: metav1.Now().Time}
+
+	if _, err := engine.Reconcile(context.Background(), claim); err != nil {
+		t.Fatal(err)
+	}
+
+	if nb.deletes != 1 {
+		t.Errorf("%d deletes reached netbox, want exactly 1 (%v)", nb.deletes, nb.methods())
+	}
+
+	deleted := lastCall(nb, "DELETE")
+	if deleted.endpoint != claimEndpoint || deleted.id != 412 {
+		t.Errorf("deleted %s/%d, want %s/412 -- the id recorded in status and no other",
+			deleted.endpoint, deleted.id, claimEndpoint)
+	}
+
+	if len(claim.Finalizers) != 0 {
+		t.Errorf("finalizers = %v, want none: the address is freed, so nothing is left to wait for",
+			claim.Finalizers)
+	}
+
+	events, _ := engine.Events.(*fakeRecorder)
+	if !hasEvent(events, "Normal/"+netboxv1alpha1.EventDeleted) {
+		t.Errorf("events = %v, want a %s naming the address that was freed",
+			events.events, netboxv1alpha1.EventDeleted)
+	}
+
+	if got := retained.delta("NetBoxIPAddressClaim"); got != 0 {
+		t.Errorf("allocations_retained moved by %v, want 0: nothing was left behind", got)
+	}
+}
+
+// TestDeletingARetainingClaimCallsNetBoxNotAtAll is #182's answer surviving as an opt-in.
+//
+// Retain is what a claim is set to when something outside Kubernetes depends on the address
+// and cannot be told it has moved. Its whole contract is that the operator does not call
+// NetBox and does say what it has stopped tracking -- this is the last moment it holds the
+// identity, the id and the address together, and after the CR is gone there is no status left
+// to read them from. The counter is here because the Event ages out of its namespace within
+// the hour and "how many has this cluster left behind" has to stay answerable.
+func TestDeletingARetainingClaimCallsNetBoxNotAtAll(t *testing.T) {
+	claim, engine, nb := newClaimFixture(t)
+	retained := watch(t, metrics.AllocationsRetained, []string{"NetBoxIPAddressClaim"})
 
 	if _, err := engine.Reconcile(context.Background(), claim); err != nil {
 		t.Fatal(err)
 	}
 
 	before := len(nb.calls)
+	claim.Spec.DeletionPolicy = netboxv1alpha1.DeletionRetain
 	claim.DeletionTimestamp = &metav1.Time{Time: metav1.Now().Time}
 
 	if _, err := engine.Reconcile(context.Background(), claim); err != nil {
@@ -516,7 +565,8 @@ func TestDeletingAClaimReportsWhatItLeavesBehind(t *testing.T) {
 	}
 
 	if len(nb.calls) != before {
-		t.Errorf("deletion made netbox requests (%v); a retained object needs none", nb.methods())
+		t.Errorf("deletion made netbox requests (%v); a retained allocation needs none",
+			nb.methods())
 	}
 
 	events, _ := engine.Events.(*fakeRecorder)
@@ -525,25 +575,287 @@ func TestDeletingAClaimReportsWhatItLeavesBehind(t *testing.T) {
 			events.events, netboxv1alpha1.EventAddressRetained)
 	}
 
+	if got := retained.delta("NetBoxIPAddressClaim"); got != 1 {
+		t.Errorf("allocations_retained moved by %v, want 1", got)
+	}
+
 	if len(claim.Finalizers) != 0 {
 		t.Errorf("finalizers = %v, want none: nothing is left to wait for", claim.Finalizers)
 	}
 }
 
-// TestDeletingAClaimThatNeverAllocatedReportsNothing keeps the reporting path from crying wolf.
-func TestDeletingAClaimThatNeverAllocatedReportsNothing(t *testing.T) {
-	claim, engine, _ := newClaimFixture(t)
-	claim.Finalizers = []string{netboxv1alpha1.Finalizer}
+// TestADeleteThatCannotSucceedStillReleasesTheClaim is the property #225 had to buy back.
+//
+// #213 shipped a deletion pass that made zero NetBox calls, and said why: "this finalizer
+// cannot wedge a namespace". A Delete policy puts a DELETE on that path, so the guarantee is
+// no longer free and has to be earned -- which is what claimDeleteAttempts does. Every case
+// below is a delete that will never succeed however long it is retried, and in every one the
+// CR ends up finalizable rather than stuck, with the leak reported through #182's Event and
+// counter. That degradation is exactly the outcome #213 already shipped, which is why it is an
+// acceptable floor; a namespace that will not delete would be a new failure mode.
+func TestADeleteThatCannotSucceedStillReleasesTheClaim(t *testing.T) {
+	cases := map[string]func(*claimClient, *ClaimEngine){
+		// NetBox refusing the delete: a NAT relation or another PROTECT pointing at the
+		// address. Retrying cannot clear it, because nothing else is going to be deleted.
+		"refused": func(nb *claimClient, _ *ClaimEngine) {
+			nb.deleteErr = &netbox.ProtectedError{Status: 409, Body: "protected foreign key"}
+		},
+		// NetBox unreachable, or answering 500. The claim cannot tell a five-minute restart
+		// from a decommissioned server, so the bound is what distinguishes them.
+		"unreachable": func(nb *claimClient, _ *ClaimEngine) {
+			nb.deleteErr = errors.New("dial tcp: connection refused")
+		},
+		// The NetBoxEndpoint has stopped being Ready -- its token was rotated, its CR was
+		// deleted -- so there is no client to delete through at all.
+		"endpointNotReady": func(_ *claimClient, engine *ClaimEngine) {
+			engine.Endpoints = fakeEndpoints{ready: false}
+		},
+	}
+
+	for name, breakIt := range cases {
+		t.Run(name, func(t *testing.T) {
+			claim, engine, nb := newClaimFixture(t)
+			retained := watch(t, metrics.AllocationsRetained, []string{"NetBoxIPAddressClaim"})
+
+			if _, err := engine.Reconcile(context.Background(), claim); err != nil {
+				t.Fatal(err)
+			}
+
+			breakIt(nb, engine)
+			claim.DeletionTimestamp = &metav1.Time{Time: metav1.Now().Time}
+
+			// One more pass than the bound, so a bound that is not enforced shows up as a
+			// finalizer still present rather than as a hang.
+			for pass := range claimDeleteAttempts + 1 {
+				result, err := engine.Reconcile(context.Background(), claim)
+				if err != nil {
+					t.Fatalf("pass %d returned an error; a delete that cannot succeed is the"+
+						" claim's state, not a controller failure: %v", pass, err)
+				}
+
+				if len(claim.Finalizers) == 0 {
+					break
+				}
+
+				if result.RequeueAfter <= 0 {
+					t.Fatalf("pass %d kept the finalizer and asked for no requeue, so nothing"+
+						" will ever try again", pass)
+				}
+			}
+
+			if len(claim.Finalizers) != 0 {
+				t.Fatalf("finalizers = %v after %d passes: the claim is unfinalizable and its"+
+					" namespace cannot be deleted", claim.Finalizers, claimDeleteAttempts+1)
+			}
+
+			events, _ := engine.Events.(*fakeRecorder)
+			if !hasEvent(events, "Warning/"+netboxv1alpha1.EventAddressRetained) {
+				t.Errorf("events = %v, want a Warning/%s: giving up leaves the address"+
+					" allocated and that is not a routine outcome",
+					events.events, netboxv1alpha1.EventAddressRetained)
+			}
+
+			if got := retained.delta("NetBoxIPAddressClaim"); got != 1 {
+				t.Errorf("allocations_retained moved by %v, want 1: a leak nobody counted is"+
+					" a leak nobody can find", got)
+			}
+		})
+	}
+}
+
+// TestARefusedDeleteIsReportedBeforeItIsGivenUpOn checks the middle of that sequence, not just
+// its end. A block that is only visible once the operator has stopped trying is a block nobody
+// could have intervened in.
+func TestARefusedDeleteIsReportedBeforeItIsGivenUpOn(t *testing.T) {
+	claim, engine, nb := newClaimFixture(t)
+
+	if _, err := engine.Reconcile(context.Background(), claim); err != nil {
+		t.Fatal(err)
+	}
+
+	nb.deleteErr = &netbox.ProtectedError{Status: 409, Body: "protected foreign key"}
+	claim.DeletionTimestamp = &metav1.Time{Time: metav1.Now().Time}
+
+	for range protectedEventAfter {
+		if _, err := engine.Reconcile(context.Background(), claim); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if len(claim.Finalizers) == 0 {
+		t.Fatalf("the finalizer came off after %d refusals, well before the bound of %d",
+			protectedEventAfter, claimDeleteAttempts)
+	}
+
+	if got := conditionOfClaim(claim, netboxv1alpha1.ConditionDeleting); got.Reason !=
+		netboxv1alpha1.ReasonProtected || got.Status != metav1.ConditionFalse {
+		t.Errorf("Deleting = %s/%s, want False/%s", got.Status, got.Reason,
+			netboxv1alpha1.ReasonProtected)
+	}
+
+	if claim.Status.DeletionAttempts != protectedEventAfter {
+		t.Errorf("status.deletionAttempts = %d, want %d: the backoff and the bound are both"+
+			" computed from it, so a count that does not survive a requeue is neither",
+			claim.Status.DeletionAttempts, protectedEventAfter)
+	}
+
+	events, _ := engine.Events.(*fakeRecorder)
+	if !hasEvent(events, "Warning/"+netboxv1alpha1.EventDeleteBlocked) {
+		t.Errorf("events = %v, want a Warning/%s carrying netbox's own reason",
+			events.events, netboxv1alpha1.EventDeleteBlocked)
+	}
+}
+
+// TestANonWritingEndpointFreesNothing is driftMode Report and mode DryRun on the deletion path.
+//
+// Both reach the engine as a client that physically cannot mutate NetBox, so what is asserted
+// here is that the claim reads the suppressed answer rather than believing the call. A DryRun
+// that reported "freed" would be worse than useless: it would say an address is available when
+// it is not.
+func TestANonWritingEndpointFreesNothing(t *testing.T) {
+	claim, engine, nb := newClaimFixture(t)
+	retained := watch(t, metrics.AllocationsRetained, []string{"NetBoxIPAddressClaim"})
+
+	if _, err := engine.Reconcile(context.Background(), claim); err != nil {
+		t.Fatal(err)
+	}
+
+	// The real client in DryRun, so suppression comes from the code that produces it.
+	reporting, err := netbox.New(netbox.Config{URL: testURL, Token: "t", Mode: netbox.ModeDryRun})
+	if err != nil {
+		t.Fatalf("building a non-writing client: %v", err)
+	}
+	nb.dryRun = reporting
+
 	claim.DeletionTimestamp = &metav1.Time{Time: metav1.Now().Time}
 
 	if _, err := engine.Reconcile(context.Background(), claim); err != nil {
 		t.Fatal(err)
 	}
 
+	if nb.deletes != 0 {
+		t.Errorf("%d deletes were counted as sent; a non-writing endpoint sends none", nb.deletes)
+	}
+
 	events, _ := engine.Events.(*fakeRecorder)
-	if hasEvent(events, "Normal/"+netboxv1alpha1.EventAddressRetained) {
+	if hasEvent(events, "Normal/"+netboxv1alpha1.EventDeleted) {
+		t.Errorf("events = %v, want no %s: nothing was deleted",
+			events.events, netboxv1alpha1.EventDeleted)
+	}
+
+	if !hasEvent(events, "Warning/"+netboxv1alpha1.EventAddressRetained) {
+		t.Errorf("events = %v, want a Warning/%s saying the address is still allocated",
+			events.events, netboxv1alpha1.EventAddressRetained)
+	}
+
+	if got := retained.delta("NetBoxIPAddressClaim"); got != 1 {
+		t.Errorf("allocations_retained moved by %v, want 1", got)
+	}
+
+	if len(claim.Finalizers) != 0 {
+		t.Errorf("finalizers = %v, want none: a reporting endpoint must not wedge deletion",
+			claim.Finalizers)
+	}
+}
+
+// TestDeletingAClaimWhoseAddressIsAlreadyGoneReleases: already-freed is the end state the claim
+// asked for, reached by somebody else. Treating a 404 as a failure would keep the finalizer on
+// forever waiting for a delete that can never succeed, because there is nothing left to delete.
+func TestDeletingAClaimWhoseAddressIsAlreadyGoneReleases(t *testing.T) {
+	claim, engine, nb := newClaimFixture(t)
+
+	if _, err := engine.Reconcile(context.Background(), claim); err != nil {
+		t.Fatal(err)
+	}
+
+	nb.deleteErr = &netbox.NotFoundError{Endpoint: claimEndpoint, ID: 412}
+	claim.DeletionTimestamp = &metav1.Time{Time: metav1.Now().Time}
+
+	if _, err := engine.Reconcile(context.Background(), claim); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(claim.Finalizers) != 0 {
+		t.Errorf("finalizers = %v, want none", claim.Finalizers)
+	}
+
+	events, _ := engine.Events.(*fakeRecorder)
+	if !hasEvent(events, "Normal/"+netboxv1alpha1.EventDeleted) {
+		t.Errorf("events = %v, want a Normal/%s", events.events, netboxv1alpha1.EventDeleted)
+	}
+}
+
+// TestTheSkipFinalizerAnnotationWorksOnAClaimToo: the break-glass is the same annotation on
+// both engines, because a human who has decided to accept an orphan should not have to know
+// which engine owns the CR. It overrides the delete rather than being considered after it.
+func TestTheSkipFinalizerAnnotationWorksOnAClaimToo(t *testing.T) {
+	claim, engine, nb := newClaimFixture(t)
+
+	if _, err := engine.Reconcile(context.Background(), claim); err != nil {
+		t.Fatal(err)
+	}
+
+	before := len(nb.calls)
+	claim.Annotations = map[string]string{netboxv1alpha1.SkipFinalizerAnnotation: "true"}
+	claim.DeletionTimestamp = &metav1.Time{Time: metav1.Now().Time}
+
+	if _, err := engine.Reconcile(context.Background(), claim); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(nb.calls) != before {
+		t.Errorf("the annotation still let netbox be called (%v)", nb.methods())
+	}
+
+	events, _ := engine.Events.(*fakeRecorder)
+	if !hasEvent(events, "Warning/"+netboxv1alpha1.EventFinalizerSkipped) {
+		t.Errorf("events = %v, want a Warning/%s",
+			events.events, netboxv1alpha1.EventFinalizerSkipped)
+	}
+
+	if len(claim.Finalizers) != 0 {
+		t.Errorf("finalizers = %v, want none", claim.Finalizers)
+	}
+}
+
+// TestDeletingAClaimThatNeverAllocatedNeedsNothing keeps the reporting path from crying wolf,
+// and keeps the commonest deletion of all -- a claim removed while its pool was still
+// unresolved -- from needing an endpoint it never used.
+func TestDeletingAClaimThatNeverAllocatedNeedsNothing(t *testing.T) {
+	claim, engine, nb := newClaimFixture(t)
+	claim.Finalizers = []string{netboxv1alpha1.Finalizer}
+	claim.DeletionTimestamp = &metav1.Time{Time: metav1.Now().Time}
+	engine.Endpoints = fakeEndpoints{ready: false}
+
+	if _, err := engine.Reconcile(context.Background(), claim); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(nb.calls) != 0 {
+		t.Errorf("requests = %v, want none", nb.methods())
+	}
+
+	events, _ := engine.Events.(*fakeRecorder)
+	if hasEvent(events, "Normal/"+netboxv1alpha1.EventAddressRetained) ||
+		hasEvent(events, "Warning/"+netboxv1alpha1.EventAddressRetained) {
 		t.Errorf("events = %v, want no retention Event: nothing was ever allocated", events.events)
 	}
+
+	if len(claim.Finalizers) != 0 {
+		t.Errorf("finalizers = %v, want none", claim.Finalizers)
+	}
+}
+
+// lastCall returns the most recent call of one method, or the zero value.
+func lastCall(nb *claimClient, method string) call {
+	var out call
+	for _, made := range nb.calls {
+		if made.method == method {
+			out = made
+		}
+	}
+
+	return out
 }
 
 // TestClaimNeverPerformsADeclarativeWrite is a structural assertion rather than a behavioural
@@ -676,6 +988,11 @@ type claimClient struct {
 
 	url    string
 	dryRun *netbox.Client
+
+	// deleteErr is what the DELETE that frees an allocation answers with. Nil is a clean
+	// 204, which is what NetBox sends and why the answer is a nil Object.
+	deleteErr error
+	deletes   int
 }
 
 func (c *claimClient) URL() string { return c.url }
@@ -731,10 +1048,24 @@ func (c *claimClient) Patch(_ context.Context, endpoint string, id int, payload 
 	return nil, errors.New("the allocation path must not patch")
 }
 
-func (c *claimClient) Delete(_ context.Context, endpoint string, id int) (netbox.Object, error) {
+// Delete is the one declarative method the allocation path is allowed to use, since #225 made
+// a claim free its allocation. It goes through the real client when dryRun is set, so the
+// suppressed shape the engine has to recognise comes from the code that produces it rather
+// than from a copy of its marker.
+func (c *claimClient) Delete(ctx context.Context, endpoint string, id int) (netbox.Object, error) {
 	c.calls = append(c.calls, call{method: "DELETE", endpoint: endpoint, id: id})
 
-	return nil, errors.New("the allocation path must not delete")
+	if c.dryRun != nil {
+		return c.dryRun.Delete(ctx, endpoint, id)
+	}
+
+	if c.deleteErr != nil {
+		return nil, c.deleteErr
+	}
+
+	c.deletes++
+
+	return nil, nil
 }
 
 func (c *claimClient) methods() []string {

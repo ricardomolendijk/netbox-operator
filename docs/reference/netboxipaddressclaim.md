@@ -78,6 +78,10 @@ spec:
   # Optional, immutable once set. Omit it unless you are renaming a claim and want to keep
   # its address.
   allocationIdentity: f3fb013aa1d2ffc2
+
+  # Optional. Delete is the default: deleting this claim frees 10.0.20.37/24 for
+  # reallocation. Retain leaves it allocated and reports that it did.
+  deletionPolicy: Delete
 ```
 
 ## `spec`
@@ -163,6 +167,28 @@ simply match nothing, allocate a fresh address, and look like it worked. A well-
 naming an object outside the claim's pool is
 [`ReclaimedOutsidePool`](#reclaimedoutsidepool).
 
+### `spec.deletionPolicy`
+
+| | |
+|---|---|
+| Type | `string` |
+| Required | no |
+| Default | **`Delete`** |
+| Validation | `Enum=Delete;Retain` |
+
+What happens to the allocated NetBox object when this claim is deleted. See
+[`deletionPolicy` defaults to `Delete`](#deletionpolicy-defaults-to-delete-unlike-the-ipam-object-kinds)
+for the full table, the reasoning and what the default costs.
+
+Unlike every other kind's copy of this field, the default is a real CRD default, so
+`kubectl explain netboxipaddressclaim.spec.deletionPolicy` tells the truth. It can be: the
+field is declared on `NetBoxClaimSpec`, which only claim kinds embed and which all want
+`Delete`, rather than on the envelope ~120 kinds embed
+([#186](https://github.com/ricardomolendijk/netbox-operator/issues/186)).
+
+Read fresh on every pass rather than latched when deletion starts, so switching a terminating
+claim to `Retain` is the way out of a delete NetBox keeps refusing.
+
 ## `status`
 
 | Field | Type | Populated by | When |
@@ -178,6 +204,7 @@ naming an object outside the claim's pool is
 | `allocatedAt` | `metav1.Time` | when the address was allocated or reclaimed | with `address` |
 | `provenance` | `ProvenanceStatus` | the stamp the allocating POST carried | on allocation only — **not** on reclaim, because a reclaim writes nothing |
 | `observedGeneration` | `int64` | every pass | always, including every failure |
+| `deletionAttempts` | `int32` | deletes of the allocated object that did not succeed | only while the claim is terminating; both the backoff and the give-up bound are read from it |
 | `conditions` | `[]metav1.Condition` | every pass | always |
 
 **Nothing here is cleared on failure**, and `address` least of all. It is the one field that
@@ -307,21 +334,53 @@ The shared vocabulary, behaving exactly as it does for every other kind
 
 ## Kind-specific behaviour
 
-### There is no `deletionPolicy`
+### `deletionPolicy` defaults to `Delete`, unlike the IPAM object kinds
 
-A claim always retains its NetBox object
-([#182](https://github.com/ricardomolendijk/netbox-operator/issues/182)). A single-valued knob
-is not one, and a field that is accepted and ignored is worse than a field that is not there.
+The same two values and the same meanings as
+[everywhere else](../concepts/deletion.md), and the default is the asymmetry
+([#225](https://github.com/ricardomolendijk/netbox-operator/issues/225), reversing
+[#182](https://github.com/ricardomolendijk/netbox-operator/issues/182)):
 
-`Retain` is also the value that makes the deterministic identity worth having: delete the
-claim, re-apply the same manifest, get the same address back. What stops it from being a silent
-leak is that deleting a claim emits an `AddressRetained` Event naming the address, the NetBox
-id and the identity, and increments
-`netbox_operator_allocations_retained_total{kind}`. To free the address, delete the NetBox
-object.
+| Value | What `kubectl delete` on the claim does |
+|---|---|
+| `Delete` (default) | `DELETE /api/ipam/ip-addresses/<status.netboxID>/`, then the finalizer comes off. `Normal`/`Deleted`. |
+| `Retain` | The finalizer comes off, `Normal`/`AddressRetained` names the address, the id and the identity, `netbox_operator_allocations_retained_total{kind}` increments, and NetBox is not called at all. |
 
-The deletion pass makes no NetBox call at all, so this finalizer cannot make a namespace
-undeletable however unreachable NetBox is.
+A claim's CR is the only record that its allocation exists — "give me any free address out of
+`home-lan`" is not a statement about `10.0.20.37`, and nothing in Git names that address — so a
+retained address is litter nobody can attribute. A
+[`NetBoxIPAddress`](netboxipaddress.md) with an explicit `spec.address` is the opposite case and
+still defaults to `Retain`.
+
+**The cost, plainly: a freed address can be reallocated immediately, so an accidental
+`kubectl delete` is unrecoverable** where a leak was recoverable by hand. Re-applying the same
+manifest derives the same identity, but if something has taken the address meanwhile the claim
+gets a different one. Set `deletionPolicy: Retain` on a claim whose address something outside
+Kubernetes depends on and cannot be told about.
+
+The DELETE is always for `status.netboxID` and never for a searched-for match: an id is the
+only thing the operator can prove it allocated.
+
+#### It still cannot make a namespace undeletable
+
+| Answer | What the claim does |
+|---|---|
+| success | Release, `Normal`/`Deleted`. |
+| 404 | Release, `Normal`/`Deleted` — already gone is the end state that was asked for. |
+| 409 / a `PROTECT`ed relation | Keep the finalizer, `Deleting=False, Reason=Protected`, capped backoff from `protectedRetryBase` to `protectedRetryCap`. Never returned as an error. `Warning`/`DeleteBlocked` at the third attempt, carrying NetBox's own message. |
+| the endpoint is not `Ready`, NetBox unreachable, 5xx | Keep the finalizer, reason and interval from the [error table](../concepts/errors-and-retries.md). |
+| any of the above, **8 attempts in** | **Release anyway**, `Warning`/`AddressRetained`, and count it in `netbox_operator_allocations_retained_total`. |
+| `driftMode: Report` or `mode: DryRun` | Nothing is sent — the endpoint's client physically cannot mutate NetBox. `Warning`/`AddressRetained`, then release. |
+| `netbox.kubeforge.org/skip-finalizer=true` | Release with no `DELETE` at all, `Warning`/`FinalizerSkipped`. |
+
+The count is `status.deletionAttempts`, which is where the backoff and the bound are both read
+from — a count that did not survive a requeue would be neither.
+
+The last-but-two row is the one that matters. The declarative engine keeps its finalizer
+forever on a delete NetBox will not accept; a claim gives up, into exactly the outcome that
+shipped before `Delete` was the default. Leaking an address the operator has reported is no
+worse than the behaviour this change reversed; a namespace that will not delete would be a new
+failure mode.
 
 ### There is no `onConflict`
 
@@ -396,7 +455,7 @@ side by side. `nbipclaim` and `nbipc` both resolve.
 | `ADDRESS` empty, message names an address outside the prefix | `Ready=False, Reason=ReclaimedOutsidePool` | the claim was repointed, or its name reused | delete the stale NetBox object, or set `spec.allocationIdentity` |
 | `kubectl apply` rejected: "prefixRef is immutable" | — | a claim allocates once | write a new claim; delete the old one when the address is no longer wanted |
 | a re-applied manifest got a **different** address | — | the previous NetBox object was deleted, or the claim was renamed | see [what reclaim can and cannot recover](../concepts/claims.md#what-reclaim-can-and-cannot-recover) |
-| an address in NetBox nobody claims | `AddressRetained` Event, `netbox_operator_allocations_retained_total` | a claim was deleted, or renamed | delete the NetBox object; search `cf_k8s_allocation_identity` to find it |
+| an address in NetBox nobody claims | `AddressRetained` Event, `netbox_operator_allocations_retained_total` | a `Retain` claim was deleted, a claim was renamed, or a `Delete` was given up on after 8 attempts | delete the NetBox object; search `cf_k8s_allocation_identity` to find it |
 
 ## Related
 

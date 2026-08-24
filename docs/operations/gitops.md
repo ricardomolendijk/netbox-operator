@@ -184,8 +184,13 @@ So a rebuild goes:
    never-allocate-again guard does not fire, and the claim is about to allocate.
 2. **It searches NetBox for its own identity first**, unconditionally:
    `GET /api/ipam/ip-addresses/?cf_k8s_allocation_identity=<identity>`.
-3. **The object from before is still there**, because a claim always retains its NetBox object
-   and because a torn-down cluster runs no finalizers either way.
+3. **The object from before is still there**, because a torn-down cluster runs no finalizers —
+   nothing ran the claim's deletion pass, so nothing freed the address. Note that this is the
+   *rebuild* case specifically. A claim deleted with `kubectl delete` on a live cluster
+   **does** free its address by default, and re-applying it then gets the same address only if
+   nothing has taken it since
+   ([#225](https://github.com/ricardomolendijk/netbox-operator/issues/225)); set
+   `deletionPolicy: Retain` on a claim whose address must survive a deliberate delete too.
 4. **So it is reclaimed rather than reallocated**: `status.address` comes back to the same
    value, `Allocated=True, Reason=ReclaimedByIdentity`, an `AllocationReclaimed` Event, and
    **zero** POSTs to `available-ips/`.

@@ -218,7 +218,7 @@ func (e *ClaimEngine) Reconcile(ctx context.Context, claim Claim) (ctrl.Result, 
 	defer func() { metrics.ObserveReconcile(desc.GVK.Kind, p.result, time.Since(started)) }()
 
 	if !claim.GetDeletionTimestamp().IsZero() {
-		return ctrl.Result{}, p.releasing(ctx)
+		return p.releasing(ctx)
 	}
 
 	// Before the guard below and before any NetBox call, so there is no ordering in which
@@ -911,65 +911,326 @@ func (p *claimPass) settled(ctx context.Context, value string) (ctrl.Result, err
 	return p.ready(ctx, fmt.Sprintf("%s is allocated", value))
 }
 
-// releasing is the deletion sequence, and it makes no NetBox call at all.
+// claimDeleteAttempts bounds the retry on a delete that will not go through, after which the
+// claim releases its finalizer anyway.
 //
-// A claim always retains its NetBox object
-// (https://github.com/ricardomolendijk/netbox-operator/issues/182), so there is nothing to
-// delete and nothing that can refuse -- which means this finalizer cannot make a namespace
-// undeletable, however unreachable NetBox is. What it does instead is *report*: the operator
-// is about to stop tracking an object it can still name, so it says so once, with everything
-// needed to find the object again, and increments a counter that outlives the Event.
+// Eight, with protectedBackoff's intervals, is a little over twenty minutes of trying. The
+// number is a judgement rather than a derivation: long enough that a NetBox restart, a
+// certificate rotation or a dependent object being deleted in the same sweep all resolve
+// inside it, short enough that a `kubectl delete namespace` is not indistinguishable from a
+// hang. Raising it trades namespaces that take longer to delete for fewer leaked addresses,
+// and lowering it the other way.
+const claimDeleteAttempts = 8
+
+// claimRetainsByDefault is what deletionPolicyOf falls back to for a claim with no
+// spec.deletionPolicy: Delete (#225, reversing #182).
 //
-// That report is the whole of the garbage-collection path, and it is deliberately a report.
-// The operator never deletes an object it cannot prove is unused, and by the time a claim has
-// handed out an address something outside Kubernetes is using it.
-// No requeue on any path, which is why it returns an error alone: a claim whose finalizer is
-// off is about to stop existing, and there is nothing left to come back to.
-func (p *claimPass) releasing(ctx context.Context) error {
+// A constant rather than a field on registry.ClaimDescriptor, where the object engine's
+// equivalent lives, and the difference is not laziness. RetainOnDelete is on Descriptor
+// because it genuinely varies -- #176 made the IPAM kinds retain and left the catalogue kinds
+// deleting. This does not vary: the reason a claim frees its allocation is that a claim's CR
+// is the only record the allocation exists, which is true of NBO-064's prefix and ip-range
+// claims for exactly the same reason it is true of this one. A per-kind knob no kind would
+// ever set differently is a knob.
+const claimRetainsByDefault = false
+
+// claimRelease is the finalizer coming off a claim, and what to say about it.
+type claimRelease struct {
+	// event is the Event reason recorded for it. Empty says nothing, which is the right
+	// amount to say about a claim that never allocated.
+	event string
+
+	// message is what the Event says.
+	message string
+
+	// warn marks a release that leaves an allocation behind in NetBox. A human has to see
+	// that; the rest is routine.
+	warn bool
+
+	// retained marks one that AllocationsRetained should also count, so that "how many has
+	// this cluster left behind" stays answerable long after the Event has aged out.
+	retained bool
+}
+
+// releasing is the deletion sequence: it frees the allocated object, or says why it did not.
+//
+// #213 shipped this pass making zero NetBox calls, and said why -- "this finalizer cannot
+// wedge a namespace", however unreachable NetBox is, because there was nothing to call and
+// nothing that could refuse. #225 spends that property: a Delete policy necessarily puts a
+// DELETE on the deletion path. So it is bought back deliberately rather than assumed, and
+// deleteBlocked is where.
+//
+// The order of the steps is the design, exactly as it is in finalizer.go: everything that
+// needs no NetBox call is answered first, so a Retain claim, a claim someone has written the
+// break-glass annotation on, and a claim that never got as far as allocating all complete
+// while NetBox is unreachable. An escape hatch that only works when it is not needed is not
+// an escape hatch.
+func (p *claimPass) releasing(ctx context.Context) (ctrl.Result, error) {
 	if !controllerutil.ContainsFinalizer(p.claim, netboxv1alpha1.Finalizer) {
 		logf.FromContext(ctx).V(1).Info("no finalizer of ours to release", "action", "none")
 
-		return nil
+		return ctrl.Result{}, nil
 	}
 
 	p.result = metrics.ResultDeleted
-	p.reportRetained(ctx)
 
+	if out, ok := p.releaseWithoutDeleting(); ok {
+		return p.release(ctx, out)
+	}
+
+	endpoint, ok := p.engine.Endpoints.Endpoint(ctx,
+		p.claim.GetNamespace(), p.claim.ClaimSpec().EndpointRef)
+	if !ok {
+		// Blocking rather than leaking, for as long as the bound allows. The allocated
+		// object is real, its id is known, and it will still be deletable when the endpoint
+		// comes back.
+		p.endpoint = Endpoint{}
+
+		return p.deleteBlocked(ctx, netboxv1alpha1.ReasonWaitingForEndpoint,
+			fmt.Errorf("%w: netboxendpoint %q in namespace %q", errEndpointNotReady,
+				p.claim.ClaimSpec().EndpointRef, p.claim.GetNamespace()))
+	}
+	p.endpoint = endpoint
+
+	return p.free(ctx, int(p.claim.ClaimStatus().NetBoxID))
+}
+
+// releaseWithoutDeleting reports the cases where a claim's finalizer comes off with no NetBox
+// call at all.
+func (p *claimPass) releaseWithoutDeleting() (claimRelease, bool) {
+	status := p.claim.ClaimStatus()
+
+	// First, and unconditionally: the break-glass overrides every other consideration,
+	// including a delete that would otherwise be attempted. The same annotation and the same
+	// Event as every other kind (finalizer.go) -- a human who has decided to accept an
+	// orphan should not have to know which of the two engines owns the CR.
+	if p.claim.GetAnnotations()[netboxv1alpha1.SkipFinalizerAnnotation] == "true" {
+		return claimRelease{
+			event: netboxv1alpha1.EventFinalizerSkipped,
+			message: fmt.Sprintf(
+				"%s=true: dropping the finalizer without calling netbox, so %s/%d is left behind",
+				netboxv1alpha1.SkipFinalizerAnnotation, p.desc.Endpoint, status.NetBoxID),
+			warn:     true,
+			retained: status.NetBoxID != 0,
+		}, true
+	}
+
+	if deletionPolicyOf(p.claim.ClaimSpec().DeletionPolicy, claimRetainsByDefault) ==
+		netboxv1alpha1.DeletionRetain {
+		return claimRelease{
+			event:    netboxv1alpha1.EventAddressRetained,
+			message:  p.retainedMessage("spec.deletionPolicy is Retain"),
+			retained: true,
+		}, true
+	}
+
+	// Nothing was ever allocated, so there is nothing to free, nothing to leave behind and no
+	// endpoint to wait for. This is the ordinary outcome for a claim deleted before it could
+	// allocate, or while its pool was still unresolved, and it must not need NetBox.
+	if status.NetBoxID == 0 && p.claim.Allocated() == "" {
+		return claimRelease{}, true
+	}
+
+	// An id the operator does not have is an id it will not go looking for. It could search
+	// by allocation identity -- that is exactly what the reclaim path does -- but doing it
+	// here would mean issuing a DELETE against whatever a search happened to return at
+	// deletion time, on the strength of a status write that is known to have failed. The
+	// allocated value in status is the lead a human needs; the identity is how they find it.
+	if status.NetBoxID == 0 {
+		return claimRelease{
+			event: netboxv1alpha1.EventAddressRetained,
+			message: fmt.Sprintf("no netbox object is recorded in status.netboxID, so %s was not freed;"+
+				" either the allocation never completed, or it did and the status write recording its"+
+				" id did not. An object carrying allocation identity %q may be left behind",
+				p.claim.Allocated(), status.AllocationIdentity),
+			warn:     true,
+			retained: true,
+		}, true
+	}
+
+	return claimRelease{}, false
+}
+
+// retainedMessage is what an Event says about an allocation left in NetBox.
+//
+// One wording for every reason an allocation is left behind -- a deliberate Retain, a
+// non-writing endpoint, a delete the operator gave up on -- because a human's next question is
+// the same in all three: which address, which id, which identity. The reason is the prefix.
+func (p *claimPass) retainedMessage(why string) string {
+	status := p.claim.ClaimStatus()
+
+	return fmt.Sprintf("%s: netbox %s/%d (%s) was left in place and not deleted; it still carries"+
+		" allocation identity %s, so re-applying this claim reclaims it -- to free it, delete the"+
+		" netbox object",
+		why, p.desc.Endpoint, status.NetBoxID, p.claim.Allocated(), status.AllocationIdentity)
+}
+
+// free issues the DELETE that gives the allocated object back to its pool.
+//
+// The same four answers as the declarative engine's deleteObject, in the same shape and for
+// the same reasons (finalizer.go): a clean delete and a 404 both release, a refusal and
+// everything else keep the finalizer and come back later. The one difference is that "later"
+// is bounded here -- see deleteBlocked.
+func (p *claimPass) free(ctx context.Context, id int) (ctrl.Result, error) {
+	deleted, err := p.endpoint.Client.Delete(ctx, p.desc.Endpoint, id)
+
+	var notFound *netbox.NotFoundError
+	var protected *netbox.ProtectedError
+
+	switch {
+	case err == nil:
+		return p.release(ctx, p.freed(id, deleted))
+	// Already gone is the end state the claim asked for, reached by somebody else. Calling it
+	// a failure would keep the finalizer on forever waiting for a delete that can never
+	// succeed, because there is nothing left to delete.
+	case errors.As(err, &notFound):
+		return p.release(ctx, claimRelease{
+			event: netboxv1alpha1.EventDeleted,
+			message: fmt.Sprintf("netbox %s/%d (%s) was already gone",
+				p.desc.Endpoint, id, p.claim.Allocated()),
+		})
+	case errors.As(err, &protected):
+		return p.deleteBlocked(ctx, netboxv1alpha1.ReasonProtected, err)
+	}
+
+	// Everything else is about NetBox's availability rather than about this object, so the
+	// existing table picks the reason and the finalizer stays on.
+	return p.deleteBlocked(ctx, classify(err, p.resync()).reason, err)
+}
+
+// freed describes a delete that came back clean.
+//
+// A suppressed answer is a client that sent nothing, and it is read off the answer rather than
+// from the endpoint's mode -- exactly as the declarative engine reads it, and this is what
+// makes driftMode Report and mode DryRun honour themselves here for free. Both reach the
+// engine as a client that physically cannot mutate NetBox (netboxendpoint_controller.go's
+// clientMode), so there is no `if` on this path to forget: the DELETE is the same call, it just
+// never leaves the process. Carrying the mode alongside would be a second source of truth for
+// one fact, and whichever of the two drifted would have the Event claim a deletion that never
+// happened.
+func (p *claimPass) freed(id int, out netbox.Object) claimRelease {
+	if netbox.Suppressed(out) {
+		return claimRelease{
+			event: netboxv1alpha1.EventAddressRetained,
+			message: p.retainedMessage(fmt.Sprintf(
+				"the endpoint sends no writes (driftMode Report or mode DryRun), so nothing was sent:"+
+					" would have deleted netbox %s/%d", p.desc.Endpoint, id)),
+			warn:     true,
+			retained: true,
+		}
+	}
+
+	return claimRelease{
+		event: netboxv1alpha1.EventDeleted,
+		message: fmt.Sprintf("freed netbox %s/%d (%s), which is available for reallocation again",
+			p.desc.Endpoint, id, p.claim.Allocated()),
+	}
+}
+
+// deleteBlocked is a delete that did not go through: when to try again, or the decision to
+// stop trying.
+//
+// Not an error return, for the reason finalizer.go's protected() gives: an error puts
+// controller-runtime's own backoff on top of the interval chosen here, and it reports a state
+// that needs a human -- or needs somebody else to delete something -- as a controller failure.
+//
+// The give-up is the whole reason a Delete default is safe to ship. The declarative engine
+// keeps the finalizer forever on a delete NetBox will not accept, and its escape hatch is a
+// human writing the skip annotation onto the CR; a claim cannot afford that, because #174's
+// inline claimFrom means the claims in a namespace are created by machinery rather than by
+// hand and a namespace full of them would have to be unwedged one CR at a time. So past
+// claimDeleteAttempts the claim releases anyway and reports the allocation as retained.
+//
+// That degradation is deliberately *the outcome #213 already shipped*: the address is left
+// allocated, the AddressRetained Event names it and the retained counter counts it. Trading a
+// better default for a leak the operator already knows how to report is a trade; trading it
+// for a namespace that will not delete is a new failure mode, and that is not a price this
+// change is allowed to charge.
+func (p *claimPass) deleteBlocked(ctx context.Context, reason string, cause error) (ctrl.Result, error) {
+	status := p.claim.ClaimStatus()
+	status.DeletionAttempts++
+	p.result = metrics.ResultWaiting
+
+	if status.DeletionAttempts >= claimDeleteAttempts {
+		return p.release(ctx, claimRelease{
+			event: netboxv1alpha1.EventAddressRetained,
+			message: p.retainedMessage(fmt.Sprintf(
+				"gave up trying to delete it after %d attempts, the last of which said: %v",
+				status.DeletionAttempts, cause)),
+			warn:     true,
+			retained: true,
+		})
+	}
+
+	wait := protectedBackoff(status.DeletionAttempts)
+
+	// Once, at the threshold. An Event per attempt is noise at cluster scale; none at all
+	// makes a stuck deletion silent, which is worse. NetBox's own words are carried through
+	// verbatim, because "cannot delete" without a reason is the worst possible operator
+	// experience.
+	if status.DeletionAttempts == protectedEventAfter {
+		p.engine.warnClaim(p.claim, netboxv1alpha1.EventDeleteBlocked,
+			"netbox %s/%d has not been deleted after %d attempts: %v. After %d it will be left"+
+				" allocated and the finalizer released",
+			p.desc.Endpoint, status.NetBoxID, status.DeletionAttempts, cause, claimDeleteAttempts)
+	}
+
+	logf.FromContext(ctx).Info("freeing the allocation is blocked",
+		"action", "delete", "reason", reason, "netboxID", status.NetBoxID,
+		"attempt", status.DeletionAttempts, "cause", cause.Error())
+
+	p.condition(netboxv1alpha1.ConditionDeleting, false, reason,
+		fmt.Sprintf("%v; attempt %d of %d, retrying in %s",
+			cause, status.DeletionAttempts, claimDeleteAttempts, wait))
+
+	return p.finish(ctx, wait)
+}
+
+// release removes the finalizer, which is what lets Kubernetes finish deleting the claim.
+//
+// The Event is emitted after the removal has been accepted, not before, exactly as the
+// declarative engine does it: an Event announcing a release that then failed to persist is a
+// record of something that did not happen. No status is written either -- the claim is about
+// to stop existing, so a status update races the delete and nothing would ever read it. The
+// Event is the record that outlives the CR, which is why the retained ones carry the address,
+// the id and the identity rather than a pointer to a status nobody can read any more.
+//
+// No requeue on any path: a claim whose finalizer is off is about to stop existing, and there
+// is nothing left to come back to.
+func (p *claimPass) release(ctx context.Context, out claimRelease) (ctrl.Result, error) {
 	controllerutil.RemoveFinalizer(p.claim, netboxv1alpha1.Finalizer)
 
 	if err := p.engine.Finalizers.UpdateFinalizers(ctx, p.claim); err != nil {
-		return fmt.Errorf("releasing the finalizer on %s/%s: %w",
+		controllerutil.AddFinalizer(p.claim, netboxv1alpha1.Finalizer)
+
+		return ctrl.Result{}, fmt.Errorf("releasing the finalizer on %s/%s: %w",
 			p.claim.GetNamespace(), p.claim.GetName(), err)
 	}
 
-	return nil
-}
-
-// reportRetained says what is being left behind in NetBox, once.
-func (p *claimPass) reportRetained(ctx context.Context) {
-	status := p.claim.ClaimStatus()
-	value := p.claim.Allocated()
-
-	if status.NetBoxID == 0 && value == "" {
-		// Nothing was ever allocated, so there is nothing to leave behind. Said at debug
-		// because it is the ordinary outcome for a claim deleted before it could allocate.
-		logf.FromContext(ctx).V(1).Info("nothing was allocated; nothing retained", "action", "release")
-
-		return
+	if out.retained {
+		metrics.AllocationsRetained.WithLabelValues(p.desc.GVK.Kind).Inc()
 	}
 
-	metrics.AllocationsRetained.WithLabelValues(p.desc.GVK.Kind).Inc()
+	if out.event == "" {
+		logf.FromContext(ctx).V(1).Info("nothing was allocated; nothing to free",
+			"action", "release")
 
-	// Info rather than debug, and an Event as well: this is the one moment the operator has
-	// the identity, the id and the value in one place, and after the CR is gone there is no
-	// status left to read them from.
-	logf.FromContext(ctx).Info("retained the allocated netbox object", "action", "release",
-		"netboxID", status.NetBoxID, "allocationIdentity", status.AllocationIdentity)
+		return ctrl.Result{}, nil
+	}
 
-	p.engine.event(p.claim, netboxv1alpha1.EventAddressRetained,
-		"netbox %s/%d (%s) was left in place and not deleted; it still carries allocation identity"+
-			" %s, so re-applying this claim reclaims it -- to free it, delete the netbox object",
-		p.desc.Endpoint, status.NetBoxID, value, status.AllocationIdentity)
+	logf.FromContext(ctx).Info("released the finalizer",
+		"action", "release", "reason", out.event, "detail", out.message,
+		"netboxID", p.claim.ClaimStatus().NetBoxID)
+
+	if out.warn {
+		p.engine.warnClaim(p.claim, out.event, "%s", out.message)
+
+		return ctrl.Result{}, nil
+	}
+
+	p.engine.event(p.claim, out.event, "%s", out.message)
+
+	return ctrl.Result{}, nil
 }
 
 // blockedOnPool reports a pool reference that did not resolve.

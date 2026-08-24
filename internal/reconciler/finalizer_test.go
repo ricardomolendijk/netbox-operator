@@ -493,14 +493,32 @@ func TestDeletionPolicyNeverReachesNetBox(t *testing.T) {
 //
 // The per-kind exception is the second half: decision #176 makes IPAM retain, declared as
 // registry.Descriptor.RetainOnDelete, because deleting an address frees it for reallocation.
+//
+// The last row is a claim, which reads its default off claimRetainsByDefault rather than off a
+// Descriptor and reaches the same function to do it (#225). It is asserted here rather than in
+// claim_test.go on purpose: the point of the row is that there is one rule, and a rule tested
+// once per caller is two rules with a shared name.
 func TestDeletionPolicyDefaultsToDelete(t *testing.T) {
-	if got := deletionPolicyOf(fakeObject(), registry.Descriptor{}); got != netboxv1alpha1.DeletionDelete {
-		t.Errorf("deletionPolicyOf(unset) = %q, want %q", got, netboxv1alpha1.DeletionDelete)
+	cases := []struct {
+		name            string
+		stated          netboxv1alpha1.DeletionPolicy
+		retainByDefault bool
+		want            netboxv1alpha1.DeletionPolicy
+	}{
+		{"unset on a deleting kind", "", false, netboxv1alpha1.DeletionDelete},
+		{"unset on a retaining kind", "", registry.Descriptor{RetainOnDelete: true}.RetainOnDelete,
+			netboxv1alpha1.DeletionRetain},
+		{"stated beats the default", netboxv1alpha1.DeletionDelete, true, netboxv1alpha1.DeletionDelete},
+		{"stated beats the default, the other way", netboxv1alpha1.DeletionRetain, false,
+			netboxv1alpha1.DeletionRetain},
+		{"unset on a claim", "", claimRetainsByDefault, netboxv1alpha1.DeletionDelete},
 	}
 
-	retaining := registry.Descriptor{RetainOnDelete: true}
-	if got := deletionPolicyOf(fakeObject(), retaining); got != netboxv1alpha1.DeletionRetain {
-		t.Errorf("deletionPolicyOf(unset, RetainOnDelete) = %q, want %q", got, netboxv1alpha1.DeletionRetain)
+	for _, tc := range cases {
+		if got := deletionPolicyOf(tc.stated, tc.retainByDefault); got != tc.want {
+			t.Errorf("%s: deletionPolicyOf(%q, %v) = %q, want %q",
+				tc.name, tc.stated, tc.retainByDefault, got, tc.want)
+		}
 	}
 }
 

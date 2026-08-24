@@ -227,31 +227,97 @@ client-side is how the two drift apart. A full `/32` is an ordinary `PoolExhaust
 
 ## Deleting a claim
 
-**A claim always retains its NetBox object.** There is no `deletionPolicy` field on a claim:
-a single-valued knob is not one, and `Retain` is the value that makes the deterministic
-identity worth having
-([#182](https://github.com/ricardomolendijk/netbox-operator/issues/182)).
-
-What stops that from being a silent leak is that the operator **reports** it. Deleting a
-claim emits
+**Deleting a claim frees its address.** `spec.deletionPolicy` defaults to `Delete`
+([#225](https://github.com/ricardomolendijk/netbox-operator/issues/225), which reverses
+[#182](https://github.com/ricardomolendijk/netbox-operator/issues/182)):
 
 ```
-AddressRetained  netbox ipam/ip-addresses/412 (10.0.20.37/24) was left in place and not
-                 deleted; it still carries allocation identity f3fb013aa1d2ffc2, so
-                 re-applying this claim reclaims it -- to free it, delete the netbox object
+Deleted  freed netbox ipam/ip-addresses/412 (10.0.20.37/24), which is available for
+         reallocation again
 ```
 
-and increments `netbox_operator_allocations_retained_total{kind}` — a counter, because the
+### Why the default is `Delete` here and `Retain` on `NetBoxIPAddress`
+
+A claim's CR **is the only record that the allocation exists.** "Give me any free address out
+of `home-lan`" is not a statement about `10.0.20.37` — the manifest names a prefix, and nothing
+in Git names the address. So when the claim goes, nothing anywhere refers to the address it was
+handed: it is not wrong in NetBox, it is unattributable, and that makes it invisible by
+construction rather than merely untidy.
+
+A [`NetBoxIPAddress`](../reference/netboxipaddress.md) with an explicit `spec.address` is the
+opposite. Somebody typed `10.0.0.9/24`, and something outside Kubernetes very likely agrees
+with them — a NIC's static configuration, a DNS record, a firewall rule. There, `Retain`
+protects real intent, and its default is unchanged
+([#176](https://github.com/ricardomolendijk/netbox-operator/issues/176)).
+
+The distinction is not who created the object. It is **whether anything still names the address
+once the CR is gone.** For a claim, nothing does.
+
+### What this costs, plainly
+
+**A freed address can be reallocated immediately, so an accidental `kubectl delete` on a claim
+is unrecoverable.** Re-applying the same manifest derives the same allocation identity, but if
+something else has taken the address meanwhile the claim gets a different one — and whatever
+was configured to use the old address is now pointed at somebody else's. Under the previous
+uniform `Retain` the same mistake was recoverable: re-apply and get the address back.
+
+That is a real regression in one direction. What it buys is the other direction: an inline
+`claimFrom` on a VM materialises a claim owned by that VM
+([#174](https://github.com/ricardomolendijk/netbox-operator/issues/174)), so uniform `Retain`
+leaked one address per VM deletion, and in a CI-driven cluster that eventually **exhausts the
+pool** — which is a [wait-forever state](#an-exhausted-pool-waits), so the
+leak did not degrade allocation, it stopped it.
+
+### `deletionPolicy: Retain`
+
+Set it on a claim whose address something outside Kubernetes depends on and cannot be told
+about. It calls NetBox not at all, and reports what it is leaving behind:
+
+```yaml
+spec:
+  deletionPolicy: Retain
+```
+
+```
+AddressRetained  spec.deletionPolicy is Retain: netbox ipam/ip-addresses/412 (10.0.20.37/24)
+                 was left in place and not deleted; it still carries allocation identity
+                 f3fb013aa1d2ffc2, so re-applying this claim reclaims it -- to free it,
+                 delete the netbox object
+```
+
+It also increments `netbox_operator_allocations_retained_total{kind}` — a counter, because the
 Event ages out of its namespace within the hour and "how many addresses has this cluster left
 behind" has to stay answerable. This is the only moment the operator holds the address, the
 NetBox id and the identity together; after the CR is gone there is no status left to read them
 from.
 
-The operator **never deletes** an object it cannot prove is unused, and it cannot prove that
-of an allocated address. To free one: delete the NetBox object, in NetBox.
+### The finalizer still cannot wedge a namespace
 
-The deletion pass makes **no NetBox call at all**, which is why this finalizer cannot make a
-namespace undeletable however unreachable NetBox is.
+The previous behaviour made **no NetBox call at all** on deletion, which made that guarantee
+free. A `Delete` policy spends it, so it is bought back deliberately:
+
+| What happens | What the claim does |
+|---|---|
+| `DELETE` succeeds | Release, `Normal`/`Deleted`. |
+| `DELETE` returns 404 | Release, `Normal`/`Deleted`. Already gone is the end state that was asked for, reached by somebody else. |
+| `DELETE` refused (409, a `PROTECT`ed relation such as a NAT pairing) | Keep the finalizer, `Deleting=False, Reason=Protected`, capped backoff. Never an error — that would put the workqueue's millisecond backoff on top of an interval chosen deliberately. |
+| The endpoint is not `Ready`, or NetBox is unreachable | Keep the finalizer, reason and interval from the [error table](errors-and-retries.md). |
+| Any of the above, **8 attempts in** (~20 minutes) | **Release anyway**, `Warning`/`AddressRetained`, and count it. |
+
+That last row is the whole of it. The declarative engine keeps its finalizer forever on a
+delete NetBox will not accept and relies on a human writing
+`netbox.kubeforge.org/skip-finalizer=true` onto the CR; a claim cannot afford that, because
+claims are created by machinery rather than by hand and a namespace full of them would have to
+be unwedged one CR at a time. So a claim gives up, and gives up **into the behaviour that
+shipped before this change**: the address is left allocated, the `AddressRetained` Event names
+it and the counter counts it. Leaking an address the operator has reported is no worse than the
+default being reversed here; a namespace that will not delete would be a new failure mode.
+
+The break-glass annotation works on a claim too, and skips the `DELETE` entirely.
+
+An endpoint whose `driftMode` is `Report`, or whose `mode` is `DryRun`, deletes **nothing** —
+it is handed a client that physically cannot mutate NetBox, so the `DELETE` is made and never
+leaves the process. The claim reports `AddressRetained` and releases.
 
 ## What reclaim can and cannot recover
 
@@ -260,7 +326,8 @@ The honest table, because "the identity is deterministic" is necessary and not s
 | What happened | The NetBox object | Re-applying the same manifest |
 |---|---|---|
 | Cluster torn down, namespace deleted, finalizers stripped | survives | **reclaims the same address** |
-| Claim deleted with `kubectl delete` | survives (claims always retain) | **reclaims the same address** |
+| Claim deleted with `kubectl delete`, `deletionPolicy: Retain` | survives | **reclaims the same address** |
+| Claim deleted with `kubectl delete`, default `deletionPolicy: Delete` | **freed, and may already be somebody else's** | allocates whatever is free now — the same address only if nothing took it |
 | Claim renamed, `spec.allocationIdentity` set to the old identity | survives | **reclaims the same address** |
 | Claim renamed, nothing set | survives, now orphaned and reported | allocates a **new** address; the old one stays until somebody deletes it |
 | The NetBox object deleted in NetBox | gone | allocates a new address — there is nothing left to reclaim |
