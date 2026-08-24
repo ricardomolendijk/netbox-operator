@@ -23,3 +23,7 @@ resources:
 - bases/netbox.kubeforge.org_netboxvirtualmachines.yaml
 - bases/netbox.kubeforge.org_netboxvminterfaces.yaml
 - bases/netbox.kubeforge.org_netboxvirtualdisks.yaml
+- bases/netbox.kubeforge.org_netboxmanufacturers.yaml
+- bases/netbox.kubeforge.org_netboxdeviceroles.yaml
+- bases/netbox.kubeforge.org_netboxdevicetypes.yaml
+- bases/netbox.kubeforge.org_netboxplatforms.yaml
