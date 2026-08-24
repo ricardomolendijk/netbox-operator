@@ -100,6 +100,17 @@ func TestDescriptorValidateFieldMap(t *testing.T) {
 			wantErr: ErrFieldReadOnly,
 		},
 		{
+			name: "non-reference field declaring a target kind",
+			// Almost always a forgotten `Ref: true`. Left alone, the resolver ignores the
+			// field and the engine writes the reference to NetBox verbatim.
+			mutate: func(d *Descriptor) {
+				d.Fields = append(d.Fields, Field{
+					Spec: "tenant", API: "tenant", Target: testGVK("NetBoxTenant"),
+				})
+			},
+			wantErr: ErrTargetNotRef,
+		},
+		{
 			name: "natural key matches on an undeclared spec field",
 			mutate: func(d *Descriptor) {
 				d.NaturalKeys = append(d.NaturalKeys, NaturalKey{Fields: []KeyField{{Filter: "rd", Spec: "rd"}}})

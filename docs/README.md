@@ -18,6 +18,7 @@ How the engine behaves, and why.
 | [Drift detection](concepts/drift.md) | Why what NetBox returns is not what you wrote, and the eight comparison rules that stop a reconcile loop from PATCHing forever |
 | [Errors and retries](concepts/errors-and-retries.md) | Which NetBox failure becomes which typed error, what gets retried and where, and why more than one lookup match is an error rather than a guess |
 | [Lookups](concepts/lookups.md) | How a natural key becomes a query string, why `?name__ie=` exists, and why a null filter is pinned rather than omitted |
+| [References](concepts/references.md) | How one object points at another, the four resolution modes, and what the API server rejects before a bad reference reaches the operator |
 
 ## Reference
 
