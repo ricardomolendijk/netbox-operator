@@ -183,6 +183,18 @@ func (p *pass) condition(condType string, ok bool, reason, message string) {
 // object in the cluster would take a status write every resync period, for no new
 // information.
 func (p *pass) finish(ctx context.Context, requeue time.Duration) (ctrl.Result, error) {
+	// Here rather than as a step in Reconcile, and that placement is the decision. This is
+	// the one exit every path shares, so a parent's children converge whether the pass
+	// created its NetBox object, corrected drift, found none, or stopped; it runs after
+	// applyWrite has established status.id, which is the guard materialisation depends on;
+	// and it runs *before* the comparison below, so status.children and ChildrenReady land in
+	// the same write as everything else this pass decided and a no-op materialisation still
+	// writes nothing at all. A step in Reconcile would have needed the call in four places,
+	// one of which somebody would eventually forget.
+	if wait := p.materialise(ctx); wait > 0 && (requeue == 0 || wait < requeue) {
+		requeue = wait
+	}
+
 	status := p.obj.NetBoxStatus()
 	status.ObservedGeneration = p.obj.GetGeneration()
 
