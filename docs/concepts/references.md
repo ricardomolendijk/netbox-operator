@@ -337,6 +337,44 @@ Revoking a grant likewise does not clear what was already written: the referrer 
 resolving the reference and reports it, and the live NetBox value is left alone, exactly as
 for any reference that stops resolving.
 
+## A namespace does not imply a tenant. An endpoint may supply a default.
+
+**Decided** on
+[#173](https://github.com/ricardomolendijk/netbox-operator/issues/173), and not built yet.
+
+`tenant` is a foreign key on almost every IPAM model (`ipam.Prefix`, `ipam.IPAddress`,
+`ipam.VLAN`, `ipam.VRF`, `ipam.IPRange`, `ipam.ASN` — `docs/netbox-schema.md`), and a
+multi-tenant cluster usually already spells the tenant out in its namespace names
+(`team-blue`, `customer-acme`). So the question is whether the namespace *is* the tenant.
+
+It is not. `tenantRef` stays an ordinary optional reference, and the namespace name is never
+read as a tenant slug — a cluster whose namespaces are not named after tenants must not become
+one the operator is hostile to. What is added instead is an **opt-in default on the endpoint**:
+
+```yaml
+kind: NetBoxEndpoint
+spec:
+  defaultTenantRef: {name: acme}   # optional; applied to objects that omit tenantRef
+```
+
+- It applies **only when the object omits `tenantRef`** ([field ownership](field-ownership.md)
+  is what tells an omitted field from a deliberately empty one). An object that sets
+  `tenantRef` overrides the default; an object that sets it *empty* has no tenant.
+- Nothing is implicit unless a cluster admin asked for it, per endpoint — which is the
+  Kubernetes-normal shape for a default, rather than a convention nobody opted into.
+- **`status` records the tenant that was applied.** That is what keeps "the spec says what
+  happens" true when the spec is silent: the applied value is visible on the object rather than
+  inferable only from the endpoint.
+- **A default that does not resolve blocks visibly.** If `defaultTenantRef` names a tenant that
+  is missing, not ready or not granted, the object waits with `RefsResolved=False` exactly as an
+  explicit ref would — same reasons, same intervals, below. A default that silently did nothing
+  would be worse than one that blocks, because the object would go `Ready` filed under no
+  tenant at all.
+
+The cost, accepted: an object's effective tenant is no longer readable from its own manifest
+alone. That is the price of not making every object in every namespace restate the same
+`tenantRef`, and `status` is what pays it back.
+
 ## What happens when it does not resolve
 
 Every failure is one of eight causes. Each maps to exactly one `RefsResolved` reason and one
@@ -726,11 +764,13 @@ and the resolver reads it from the *type* rather than from a switch on the field
 | `SiteGroupRef` | `NetBoxSiteGroup` | `dcim.SiteGroup` | `dcim/site-groups` |
 | `LocationRef` | `NetBoxLocation` | `dcim.Location` | `dcim/locations` |
 | `TenantRef` | `NetBoxTenant` | `tenancy.Tenant` | `tenancy/tenants` |
+| `TenantGroupRef` | `NetBoxTenantGroup` | `tenancy.TenantGroup` | `tenancy/tenant-groups` |
 
-Model and endpoint spellings are from `docs/netbox-schema.md` and its endpoint map. Every
-alias in the table above has a Kind except `TenantRef` (NBO-021), which is declared ahead of
-its Kind because a reference is declarable before its target is implemented; the remaining
-~40 arrive with the generator
+Model and endpoint spellings are from `docs/netbox-schema.md` and its endpoint map.
+`NetBoxTag`, `NetBoxSite`, `NetBoxRegion`, `NetBoxSiteGroup`, `NetBoxLocation`, `NetBoxTenant`
+and `NetBoxTenantGroup` exist as Kinds so far; the remaining aliases are declared ahead of
+their Kinds because a reference is declarable before its target is implemented, and the
+remaining ~40 arrive with the generator
 ([NBO-042 (#66)](https://github.com/ricardomolendijk/netbox-operator/issues/66)).
 
 Each alias implements `RefTarget`:

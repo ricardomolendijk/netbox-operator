@@ -160,11 +160,10 @@ func TestEndpointAdoptsDefinitionsMadeByHand(t *testing.T) {
 
 	stub.seedExtras("extras/tags", netbox.Object{"name": "k8s-managed", "slug": "k8s-managed"})
 
-	// The seeded object_types come from the registry rather than from a list written here.
-	// A hand-written pair was correct until the next custom-fieldable kind landed, at which
-	// point the bootstrap widened the definitions -- correctly -- and this test read the
-	// resulting PATCH as a duplicate. provenance.ObjectTypes' own comment says exactly that
-	// about hand-maintained lists; a test is not an exception to it.
+	// The seeded object_types come from the registry rather than from a literal list. The
+	// bootstrap widens a definition that covers fewer types than the build has stampable
+	// kinds, so a hardcoded pair would turn every new kind into a PATCH this test reports as
+	// a bug -- and adding a kind is meant to touch no shared code at all.
 	types := make([]any, 0, len(registry.List()))
 	for _, objectType := range provenance.ObjectTypes(registry.List()) {
 		types = append(types, objectType)

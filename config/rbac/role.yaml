@@ -37,6 +37,8 @@ rules:
   - netboxsitegroups/status
   - netboxsites/status
   - netboxtags/status
+  - netboxtenantgroups/status
+  - netboxtenants/status
   verbs:
   - get
   - patch
@@ -49,6 +51,8 @@ rules:
   - netboxsitegroups
   - netboxsites
   - netboxtags
+  - netboxtenantgroups
+  - netboxtenants
   verbs:
   - get
   - list
@@ -63,5 +67,7 @@ rules:
   - netboxsitegroups/finalizers
   - netboxsites/finalizers
   - netboxtags/finalizers
+  - netboxtenantgroups/finalizers
+  - netboxtenants/finalizers
   verbs:
   - update

@@ -120,6 +120,10 @@ type (
 	// TenantRef points at a NetBoxTenant (tenancy.Tenant, tenancy/tenants).
 	TenantRef ObjectRef
 
+	// TenantGroupRef points at a NetBoxTenantGroup (tenancy.TenantGroup,
+	// tenancy/tenant-groups).
+	TenantGroupRef ObjectRef
+
 	// InterfaceRef points at a NetBoxInterface (dcim.Interface, dcim/interfaces).
 	//
 	// A member of IPAssignment (genericref.go). Declared before the Kind exists, which is
@@ -181,6 +185,14 @@ func (r TenantRef) TargetGVK() schema.GroupVersionKind {
 func (r TenantRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
 
 // TargetGVK reports the Kind this reference resolves against.
+func (r TenantGroupRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxTenantGroup")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r TenantGroupRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
 func (r InterfaceRef) TargetGVK() schema.GroupVersionKind {
 	return GroupVersion.WithKind("NetBoxInterface")
 }
@@ -213,6 +225,7 @@ var (
 	_ RefTarget = SiteGroupRef{}
 	_ RefTarget = LocationRef{}
 	_ RefTarget = TenantRef{}
+	_ RefTarget = TenantGroupRef{}
 	_ RefTarget = InterfaceRef{}
 	_ RefTarget = VMInterfaceRef{}
 	_ RefTarget = FHRPGroupRef{}
