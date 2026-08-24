@@ -11,16 +11,18 @@ Implemented in `internal/reconciler/finalizer.go`.
 
 ## The two policies
 
-`spec.deletionPolicy` is `Delete` or `Retain`, and defaults to `Delete`.
+`spec.deletionPolicy` is `Delete` or `Retain`. Which one it defaults to
+[depends on the Kind](#the-default-depends-on-the-kind).
 
 | Value | What happens when the CR is deleted |
 |---|---|
-| `Delete` (default) | `DELETE /api/<endpoint>/<id>/`, then the finalizer comes off. |
+| `Delete` | `DELETE /api/<endpoint>/<id>/`, then the finalizer comes off. |
 | `Retain` | The finalizer comes off, a `Retained` Event is recorded, and NetBox is not called at all. |
 
-`Delete` is the default because a CR that creates an object and then walks away from it is a
-leak nobody asked for. `Retain` is for the two cases where the NetBox object outliving the CR
-is the *point*: migrating off the operator, and an object that is shared with something else.
+`Delete` is the usual default because a CR that creates an object and then walks away from it
+is a leak nobody asked for. `Retain` is for the cases where the NetBox object outliving the CR
+is the *point*: migrating off the operator, an object that is shared with something else, and
+the IPAM kinds below.
 
 ```yaml
 spec:
@@ -43,6 +45,44 @@ every envelope field from every payload by reflecting over that struct rather th
 a list (`internal/reconciler/payload.go`, `envelopeFields`). This matters more than it looks:
 NetBox *ignores* a column it does not know rather than rejecting it, so a leaked envelope
 field would not fail — it would just quietly travel over the wire forever.
+
+## The default depends on the Kind
+
+**Decided** on
+[#176](https://github.com/ricardomolendijk/netbox-operator/issues/176): the IPAM kinds default
+to `Retain`, everything else defaults to `Delete`.
+
+| Kind | Default `deletionPolicy` |
+|---|---|
+| `NetBoxPrefix` | `Retain` |
+| `NetBoxIPAddress` | `Retain` |
+| `NetBoxIPRange` | `Retain` |
+| `NetBoxVLAN` | `Retain` |
+| `NetBoxVRF` | `Retain` |
+| every other kind (`NetBoxTag`, `NetBoxSite`, the catalogue kinds, …) | `Delete` |
+
+The asymmetry is deliberate, and the reason it is honest rather than inconsistent is that the
+two groups hold different sorts of thing: **an address a claim allocated is *state*; a tag is
+*configuration*.** Configuration is cheap to delete and recreate. State is not — deleting an
+`ipam.IPAddress` frees it for reallocation to somebody else, and deleting an `ipam.Prefix`
+destroys the record of who the range belonged to and recomputes its parents' hierarchy columns,
+none of which a recreate restores. `Delete` therefore stays where it is expected, and `Retain`
+sits where deletion is destructive and irreversible.
+
+Two things make the split liveable rather than confusing:
+
+- **Almost every IPAM foreign key is `on_delete=PROTECT`** (`tenant`, `vrf`, `vlan`, `role` —
+  `docs/netbox-schema.md`), so NetBox refuses many of these deletions anyway and the operator
+  can only [report the refusal](#what-protect-looks-like). `Retain` is closer to what actually
+  happens than `Delete` was.
+- **Each affected Kind states its own default in its field description**, so
+  `kubectl explain netboxprefix.spec.deletionPolicy` says `Retain` and says why. The table
+  lives here, once, rather than as prose repeated across five Kind pages.
+
+The cost, accepted: the default is now something a user has to *learn* rather than infer, and
+`kubectl delete -f .` no longer undoes `kubectl apply -f .` for the IPAM kinds. The alternative
+— a uniform `Delete` — puts a production IP range one `kubectl delete namespace` away from
+being handed to somebody else.
 
 ## The finalizer, and why the order is that way round
 

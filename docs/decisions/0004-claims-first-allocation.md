@@ -1,6 +1,10 @@
 # 0004 — Allocation is a claim, not a mode
 
 **Status:** Accepted · 2026-08-21
+**Amended:** 2026-08-24 — the inline form is sugar over a real claim CR, not a second
+allocation path ([#174](https://github.com/ricardomolendijk/netbox-operator/issues/174)), and
+[exhaustion](#exhaustion) waits rather than failing terminally
+([#178](https://github.com/ricardomolendijk/netbox-operator/issues/178)).
 
 ## Decision
 
@@ -51,9 +55,48 @@ status:
 4. **CEL mutual exclusion is a worse contract than two types.** Two kinds document
    themselves; a one-of does not.
 
-Inline sugar keeps working: an inline address on a `NetBoxVirtualMachine` that says
-`fromPrefixRef` materialises a **claim** child rather than an address child, so there
-is exactly one allocation code path.
+## The inline form is sugar over this, not a second path
+
+**Decided** on
+[#174](https://github.com/ricardomolendijk/netbox-operator/issues/174): a VM or an interface
+gets its address inline, *and* the inline form materialises a real claim.
+
+```yaml
+kind: NetBoxVirtualMachine
+spec:
+  name: web-01
+  interfaces:
+    - name: eth0
+      addresses:
+        - fromPrefixRef: {name: mgmt-net}   # allocate one -> materialises a claim
+        - address: 10.0.0.9/24              # or state one  -> materialises an address
+```
+
+One CR describes the whole VM, which is the ergonomics that were asked for. What makes it safe
+is that it is *sugar over* the claim above rather than a second implementation:
+
+1. **One allocation engine.** An inline entry that names a prefix instead of an address
+   materialises an actual `NetBoxIPAddressClaim` child — the same kind, the same controller,
+   the same advisory-locked POST. There is no second code path that could diverge from this
+   one.
+2. **The claim is a real CR either way.** `kubectl get netboxipaddressclaims` shows it,
+   `status.address` is where the allocated value lives, and it carries the controller owner
+   reference of [ADR-0003 rule 3](0003-ownership-and-references.md), so deleting the VM prunes
+   it. Nothing hides.
+3. **It stays droppable in `v1beta1`.** Because the inline field is optional and the child is
+   identified by its marker rather than by its parent's spec, removing the sugar at a version
+   boundary breaks nobody — the property [ADR-0003 rule 5](0003-ownership-and-references.md)
+   requires of any inline field ([#17](https://github.com/ricardomolendijk/netbox-operator/issues/17)).
+
+**The inline form does not have to express everything, and deliberately does not.** A claim
+that needs a specific VRF, a role, a DNS name, or a non-default `deletionPolicy` is still
+written as its own `NetBoxIPAddressClaim`. Inline covers the common case; the standalone claim
+stays the complete one, which is what keeps the sugar from growing into a mirror of the claim
+spec.
+
+The inline key keeps the `fromPrefixRef` spelling
+[ADR-0003 rule 5](0003-ownership-and-references.md) already uses; #174 raised `claimFrom` as an
+alternative and it was not chosen.
 
 ## Correctness under concurrency
 
@@ -109,5 +152,35 @@ condition on a claim.
 
 ## Exhaustion
 
-`Ready=False, Reason=PoolExhausted`, an Event, and a long backoff. Not an error that
-retrying fast can fix, and the operator must not spin on it.
+The pool is full and NetBox's `available-ips` returns nothing. That is neither transient
+(retrying the same request cannot help) nor permanent (somebody freeing one address makes it
+succeed), so it gets its own arm.
+
+**Decided** on
+[#178](https://github.com/ricardomolendijk/netbox-operator/issues/178): **the claim waits, and
+it also watches its prefix.**
+
+- `Ready=False, Reason=PoolExhausted`, an Event, and a requeue at a **fixed 10 minutes** — the
+  same tier as a [`TruncatedError`](../concepts/errors-and-retries.md#runaway-lists), reused
+  for the same reason: nothing clears it but a human, so a fast retry only burns API budget.
+  Not terminal, because the claim is not misconfigured — a terminal failure would sit there
+  after the fix landed, waiting for somebody to touch the object.
+- The claim **watches its `NetBoxPrefix`** as any reference does
+  ([references](../concepts/references.md#ordering-and-convergence)), so widening the prefix in
+  Git re-enqueues the claim immediately instead of up to ten minutes later. It is one line on
+  top of the timer, because the ref-watch edge already exists.
+
+**The watch covers one of the two fixes, and only one.** Widening the prefix is a change to the
+`NetBoxPrefix` CR, so the watch sees it. **Freeing an address inside NetBox is not** — no
+Kubernetes object changed, and nothing tells the operator. That case is caught by the
+10-minute timer and by nothing else, so the timer is not redundant with the watch; each covers
+a fix the other cannot see.
+
+Two details the condition has to get right:
+
+- **It names the pool and its utilisation**, not just "exhausted". A claim that cannot allocate
+  should say which prefix it tried and how full that prefix is, or the first thing every reader
+  does is go and look it up by hand.
+- **An exhausted claim holds no address it did not get.** `status.address` stays empty, and the
+  never-re-allocate rule above is *never re-allocate*, not *never allocate*: a claim that has
+  failed to allocate has allocated nothing, and its next pass is still its first allocation.
