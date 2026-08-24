@@ -100,8 +100,9 @@ NULL`, so a slug identifies a location no better than a name does, and a kind ge
 
 Two things follow from it, and neither is optional behaviour:
 
-- **It is in every natural key.** An unresolved `siteRef` leaves no applicable candidate, so
-  the object performs *zero* NetBox writes — see
+- **It is in every natural key.** So an unresolved `siteRef` leaves no applicable candidate
+  either, on top of the engine-wide rule that a declared reference is a precondition for the
+  write — two reasons for one outcome, *zero* NetBox writes. See
   [Kind-specific behaviour](#an-unresolved-siteref-writes-nothing-at-all).
 - **It is the containment reference.** The descriptor declares it as such, which under
   [ADR-0003](../decisions/0003-ownership-and-references.md) rule 4 makes the `NetBoxSite` this
@@ -196,10 +197,19 @@ Ready         False  WaitingForRef
 ```
 
 and **makes no NetBox request that writes anything**. That is stronger than "the reference is
-reported": `site_id` is in both candidates, so there is no identity to look up, and the engine
-refuses to create rather than guessing. It is asserted on recorded traffic in
+reported", and it is asserted on recorded traffic in
 `internal/controller/dcim_location_controller_test.go`, because a version that reported the
 reference and created the object anyway would look identical in the status.
+
+This kind is **not special in that**, and used to be. It is what every kind does with a
+declared reference that did not resolve
+([a declared reference is a precondition](../concepts/reconciliation.md#a-declared-reference-is-a-precondition-for-the-write),
+[#195](https://github.com/ricardomolendijk/netbox-operator/issues/195)). Before that decision,
+a kind whose identity did *not* include the reference — `ipam.Prefix` and its `scope` — created
+the object with the column omitted instead, and the difference between the two was an accident
+of natural-key membership rather than anything anyone chose. What this page can still claim as
+its own is that `siteRef` is *required*, so there is no shape of a `NetBoxLocation` that gets
+created without one.
 
 ### The site is the containment parent, and does not cascade yet
 

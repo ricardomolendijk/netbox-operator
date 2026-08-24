@@ -186,47 +186,63 @@ func TestPrefixIsScopedNeverSited(t *testing.T) {
 	assertNothingSited(t, stub)
 }
 
-// TestPrefixScopeTargetsResolveOrSayWhy walks all four members of the union.
+// TestPrefixScopeTargetsResolveOrSayWhy walks all four members of the union, and then the
+// case where the member names a target that is not there.
 //
-// Two of the four target Kinds do not exist in this build. That is not a gap being papered
-// over: a member naming an unbuilt Kind resolves to `RefKindUnavailable` and writes nothing,
-// which is the whole reason the union's members are declared before their Kinds are. A member
-// that was silently dropped instead would produce an unscoped prefix reporting success --
-// the failure this kind exists to prevent, arrived at from the other direction.
+// The last row is issue #195, and it is the row whose expectation was reversed. It used to
+// assert that such a prefix **is created**, with `scope_type`/`scope_id` left out and
+// `RefsResolved=False` naming the field -- an unscoped prefix in NetBox for as long as the
+// target was missing, because ipam.Prefix's identity is `prefix` and a candidate is
+// applicable without the scope. It now asserts that **nothing is written at all**: a
+// reference the spec declares is a precondition for the write, so a prefix that asks for a
+// scope waits for it.
+//
+// The assertion is on the recorded traffic and not on the conditions, deliberately. "Neither
+// column is in any payload" was the old check and it passes for free once no payload exists,
+// so it could not tell the two answers apart.
+//
+// Reachable reasons only. Every member of the union has a Descriptor in this build since
+// NBO-066, so `RefKindUnavailable` -- the reason that made #195 a question -- has no live
+// target here; internal/reconciler covers the reason plumbing over a descriptor a test
+// controls. What matters end to end is that the *rule* does not care which of the eight
+// reasons it was, and that the reason is still reported rather than flattened.
 func TestPrefixScopeTargetsResolveOrSayWhy(t *testing.T) {
 	for _, tc := range []struct {
-		name      string
-		scope     netboxv1alpha1.ScopeRef
-		wantType  string
-		wantReady bool
+		name     string
+		scope    netboxv1alpha1.ScopeRef
+		wantType string
+		wantRefs string
 	}{
 		{
-			name:      "region",
-			scope:     netboxv1alpha1.ScopeRef{RegionRef: &netboxv1alpha1.RegionRef{ID: idOf(11)}},
-			wantType:  "dcim.region",
-			wantReady: true,
+			name:     "region",
+			scope:    netboxv1alpha1.ScopeRef{RegionRef: &netboxv1alpha1.RegionRef{ID: idOf(11)}},
+			wantType: "dcim.region",
 		},
 		{
-			name:      "site",
-			scope:     netboxv1alpha1.ScopeRef{SiteRef: &netboxv1alpha1.SiteRef{ID: idOf(41)}},
-			wantType:  "dcim.site",
-			wantReady: true,
+			name:     "site",
+			scope:    netboxv1alpha1.ScopeRef{SiteRef: &netboxv1alpha1.SiteRef{ID: idOf(41)}},
+			wantType: "dcim.site",
 		},
 		// These two were the "no Descriptor, so no mode resolves" cases when this test was
 		// written. NBO-066 registered both Kinds, so they now resolve like any other member
 		// -- which is the whole point of that ticket, and is asserted here rather than in a
 		// separate test so that the four members stay one table.
 		{
-			name:      "site-group",
-			scope:     netboxv1alpha1.ScopeRef{SiteGroupRef: &netboxv1alpha1.SiteGroupRef{ID: idOf(21)}},
-			wantType:  "dcim.sitegroup",
-			wantReady: true,
+			name:     "site-group",
+			scope:    netboxv1alpha1.ScopeRef{SiteGroupRef: &netboxv1alpha1.SiteGroupRef{ID: idOf(21)}},
+			wantType: "dcim.sitegroup",
 		},
 		{
-			name:      "location",
-			scope:     netboxv1alpha1.ScopeRef{LocationRef: &netboxv1alpha1.LocationRef{ID: idOf(31)}},
-			wantType:  "dcim.location",
-			wantReady: true,
+			name:     "location",
+			scope:    netboxv1alpha1.ScopeRef{LocationRef: &netboxv1alpha1.LocationRef{ID: idOf(31)}},
+			wantType: "dcim.location",
+		},
+		{
+			// `name` mode, so the target is a CR rather than a NetBox row -- and there is no
+			// such CR. This is the row that used to expect a create.
+			name:     "a member whose target does not exist",
+			scope:    netboxv1alpha1.ScopeRef{SiteRef: &netboxv1alpha1.SiteRef{Name: "nowhere"}},
+			wantRefs: netboxv1alpha1.ReasonRefNotFound,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -237,30 +253,24 @@ func TestPrefixScopeTargetsResolveOrSayWhy(t *testing.T) {
 			scope := tc.scope
 			makePrefix(t, ns, "scoped", func(p *netboxv1alpha1.NetBoxPrefix) { p.Spec.Scope = &scope })
 
-			if !tc.wantReady {
+			if tc.wantRefs != "" {
 				eventually(t, "the prefix to report the unresolvable member", func() bool {
 					prefix := fetchPrefix(ns, "scoped")
 
-					return prefix != nil && prefixRefsReason(prefix) == netboxv1alpha1.ReasonRefKindUnavailable
+					return prefix != nil && prefixRefsReason(prefix) == tc.wantRefs
 				})
 
-				// The prefix is still created -- its identity is `prefix`, which needs no
-				// reference -- but the unresolvable member is *left out* rather than guessed
-				// at, and the object stays Ready=False naming the field. That is the loud
-				// version of an unscoped prefix, as opposed to the populator's silent one.
 				if prefixIsReady(ns, "scoped") {
 					t.Error("the prefix is Ready with a scope that was never written")
 				}
 
-				for _, write := range stub.recorded() {
-					for _, column := range []string{"scope_type", "scope_id"} {
-						if _, present := write.Payload[column]; present {
-							t.Errorf("%s carries %q for an unresolvable member: %v", write.Method, column, write.Payload)
-						}
-					}
+				if got := stub.recorded(); len(got) != 0 {
+					t.Errorf("netbox writes = %+v, want none: the spec declares a scope that did not resolve", got)
 				}
 
-				assertNothingSited(t, stub)
+				if id := fetchPrefix(ns, "scoped").Status.ID; id != 0 {
+					t.Errorf("status.id = %d, want 0: nothing was created", id)
+				}
 
 				return
 			}
@@ -275,6 +285,32 @@ func TestPrefixScopeTargetsResolveOrSayWhy(t *testing.T) {
 			assertNothingSited(t, stub)
 		})
 	}
+}
+
+// TestUnscopedPrefixIsCreatedImmediately is the half of #195 that keeps option C from
+// collapsing into option B: the precondition is a reference the spec *declares*, not every
+// reference the kind could carry.
+//
+// A prefix with no `scope` key is created on the first pass, Ready, with neither column in the
+// body. Without this, one unimplemented or unreachable target Kind would hold up every object
+// that merely *could* have referenced it, and an optional field would have become required.
+func TestUnscopedPrefixIsCreatedImmediately(t *testing.T) {
+	ns := newNamespace(t)
+	stub, target := newScopedNetBoxStub(t)
+	readyEndpoint(t, ns, target)
+
+	makePrefix(t, ns, "unscoped", nil)
+
+	eventually(t, "the prefix to be Ready", func() bool { return prefixIsReady(ns, "unscoped") })
+
+	live := stub.get(fetchPrefix(ns, "unscoped").Status.ID)
+	for _, column := range []string{"scope_type", "scope_id"} {
+		if value, present := live[column]; present && value != nil {
+			t.Errorf("%s = %v, want an absent scope left alone", column, value)
+		}
+	}
+
+	assertNothingSited(t, stub)
 }
 
 // idOf is the escape-hatch ref mode as a one-liner, so a table entry stays one line.

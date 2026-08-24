@@ -7,10 +7,12 @@ import (
 	"strings"
 	"time"
 
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	netboxv1alpha1 "github.com/ricardomolendijk/netbox-operator/api/v1alpha1"
+	"github.com/ricardomolendijk/netbox-operator/internal/metrics"
 	"github.com/ricardomolendijk/netbox-operator/internal/registry"
 	"github.com/ricardomolendijk/netbox-operator/internal/resolver"
 )
@@ -30,12 +32,12 @@ type RefResolver interface {
 	) (resolver.Resolution, error)
 }
 
-// refWait is what unresolved references do to the object: what to say, and when to decide
-// again.
+// refWait is what unresolved references do to the object: what to say, when to decide
+// again, and which spec fields are waiting.
 //
 // Carried on the pass rather than acted on where it is discovered, because the consequence
-// lands at the end of the reconcile: the object is still created, and it is Ready that has to
-// report the omission.
+// lands later in the reconcile: the write is withheld unless every unresolved reference is
+// one the descriptor defers, and it is Ready that has to say so either way.
 type refWait struct {
 	// message names every reference that did not resolve, and why. It goes into both the
 	// RefsResolved and the Ready condition, so a human reads the same sentence either way.
@@ -43,6 +45,13 @@ type refWait struct {
 
 	// requeue is the resolver's own interval, or zero when nothing improves on a timer.
 	requeue time.Duration
+
+	// unresolved names the declared references that did not become ids, in descriptor
+	// order. It is the input to the precondition rule of issue #195, and it is the set
+	// difference "declared minus resolved" rather than the resolver's blocker list: a
+	// reference the resolver never reported on at all is just as unresolved as one it
+	// refused, and writing without it would be the same silent omission.
+	unresolved []string
 }
 
 // wait is when to come back: the resolver's interval, or the endpoint's resync when that is
@@ -64,16 +73,21 @@ func (w refWait) wait(resync time.Duration) time.Duration {
 // resolveRefs turns the references the spec declares into ids, and reports the ones it could
 // not.
 //
-// An unresolved reference is left out of the payload and reported; it does not block the
-// write. That is a deliberate product decision (issue #132): the engine's convergence story
-// is that a graph applied in any order makes progress, and refusing to create an object over
-// an optional reference that may never resolve turns an optional field into a required one. A
-// reference that *is* part of the kind's identity blocks anyway, one step later and for a
-// better reason -- no natural-key candidate is applicable, so the engine waits rather than
-// adopting the wrong object.
+// Reported here, acted on by blockedRefs: a reference the spec declares is a precondition
+// for the write (issue #195), so an unresolved one withholds the create *and* the update
+// unless the descriptor defers that field. What makes it a precondition rather than an
+// omission is that the spec set the key -- if a user wrote a scope, a row without one is not
+// what they asked for, and ADR-0005 is about not writing what nobody asked for.
 //
-// What keeps that from being a silent omission is ready(): RefsResolved=False forces
-// Ready=False with ReasonWaitingForRef, so a dropped reference cannot pass a readiness check.
+// It used to depend on an accident. An unresolved reference was left out of the payload and
+// the object created anyway; a reference that happened to be part of the kind's natural key
+// blocked one step later, because no candidate was applicable. So dcim.Location wrote nothing
+// and ipam.Prefix wrote an unscoped row, for the same class of failure, and nobody designed
+// that (issue #195).
+//
+// What keeps a *deferred* field from being the same silent omission is ready(): its
+// RefsResolved=False forces Ready=False with ReasonWaitingForRef, so a reference applied by a
+// later PATCH still cannot pass a readiness check while it is missing.
 func (p *pass) resolveRefs(ctx context.Context, declared []string) error {
 	if len(declared) == 0 {
 		p.condition(netboxv1alpha1.ConditionRefsResolved, true,
@@ -95,7 +109,19 @@ func (p *pass) resolveRefs(ctx context.Context, declared []string) error {
 
 	resolved, notes := p.applyResolved(resolution)
 
-	if len(resolved) == len(declared) {
+	// The set difference, not a length comparison: the resolver reads the object's own JSON
+	// and the declared list comes from the spec map restoreEmpty has already touched, so the
+	// two are not guaranteed to be the same size and "same size" would be the wrong question
+	// even when they are.
+	unresolved := make([]string, 0, len(declared))
+
+	for _, spec := range declared {
+		if !slices.Contains(resolved, spec) {
+			unresolved = append(unresolved, spec)
+		}
+	}
+
+	if len(unresolved) == 0 {
 		logf.FromContext(ctx).V(1).Info("resolved every reference",
 			"action", "build", "refs", resolved, "unreadyTargets", notes)
 		p.condition(netboxv1alpha1.ConditionRefsResolved, true, netboxv1alpha1.ReasonAllResolved,
@@ -104,9 +130,74 @@ func (p *pass) resolveRefs(ctx context.Context, declared []string) error {
 		return nil
 	}
 
-	p.reportUnresolved(ctx, resolution, declared, resolved, notes)
+	p.reportUnresolved(ctx, resolution, unresolved, notes)
 
 	return nil
+}
+
+// blockedRefs are the declared references that must resolve before anything is written.
+//
+// The rule of issue #195, in one place and with no branch on Kind: a reference the spec
+// declares is a precondition for the write. Declared and resolved is written as it always
+// was; declared and unresolved withholds the create *and* the update; not declared is not
+// here at all, because resolveRefs only ever reports on the keys the spec set.
+//
+// A to-many field set to `[]` is declared and needs no resolution, so it is never in this
+// list: the resolver files an empty FieldRefs for it and applyResolved counts it resolved,
+// which is what keeps #161's partial-list rule and #169's "empty is an instruction" both
+// true. An explicitly-empty field is still an instruction the engine carries out; it is
+// only an *unresolvable target* that is a precondition.
+//
+// Deferred fields are the deliberate exception, and the only one. They exist so that an
+// object can be created before a reference resolves and PATCHed afterwards -- a Device's
+// `primary_ip4` needs an address that needs an interface that needs the Device, so no apply
+// order and therefore no precondition can ever be satisfied first (registry.DeferAlways).
+// Blocking on one would deadlock the two-pass write this engine has, which is a worse
+// outcome than the partial row the rule exists to prevent, and the descriptor saying
+// `Deferred` is the author stating exactly that trade for exactly that field.
+func (p *pass) blockedRefs() []string {
+	blocked := make([]string, 0, len(p.refs.unresolved))
+
+	for _, spec := range p.refs.unresolved {
+		if p.deferred.defers(spec) {
+			continue
+		}
+
+		blocked = append(blocked, spec)
+	}
+
+	return blocked
+}
+
+// waitForRefs is the exit for an object whose write is withheld: nothing is sent to NetBox,
+// and the object says which references it is waiting for.
+//
+// Not stop(): nothing failed. classify() would have to grow an arm for a state that is
+// already fully described -- RefsResolved carries the reason the resolver gave, one of
+// RefKindUnavailable, RefNotReady, RefNotFound or the five others, and reusing it here is
+// what keeps "you declared a ref whose Kind does not exist" from being flattened into "the
+// target is missing". Ready reports ReasonWaitingForRef, which is the question a
+// `kubectl wait` is asking, exactly as it does for a deferred reference in ready().
+//
+// resync() rather than driftResync(): an object that has not been written has not settled,
+// so driftMode: Off must not switch off the one retry that will ever write it. Same
+// argument ready() makes for an unresolved reference and stop() for an endpoint.
+//
+// No Event, and debug rather than info. This is the normal state of a graph applied in any
+// order -- a whole manifest applied at once puts every object with a forward reference
+// through it -- so an Event or an info line here is one per object per pass for as long as
+// the reference takes.
+func (p *pass) waitForRefs(ctx context.Context, blocked []string) (ctrl.Result, error) {
+	p.result = metrics.ResultWaiting
+
+	logf.FromContext(ctx).V(1).Info("withholding the write; a declared reference is unresolved",
+		"action", "wait", "refs", blocked)
+
+	p.condition(netboxv1alpha1.ConditionReady, false, netboxv1alpha1.ReasonWaitingForRef,
+		fmt.Sprintf("nothing was written: %s must resolve before netbox %s is created or updated; %s",
+			strings.Join(blocked, ", "), p.desc.Endpoint, p.refs.message))
+
+	return p.finish(ctx, p.refs.wait(p.resync()))
 }
 
 // unreadyTargets names the targets a resolved reference points at that are not Ready
@@ -288,17 +379,17 @@ func refValues(field registry.Field, refs resolver.FieldRefs) (payload, filterab
 // never saw is a reference this build cannot resolve at all -- a to-many reference, whose
 // cardinality no Descriptor states yet (NBO-041).
 func (p *pass) reportUnresolved(
-	ctx context.Context, resolution resolver.Resolution, declared, resolved, notes []string,
+	ctx context.Context, resolution resolver.Resolution, unresolved, notes []string,
 ) {
 	blocked := make([]string, 0, len(resolution.Blocked))
 	for _, blocker := range resolution.Blocked {
 		blocked = append(blocked, blocker.Field)
 	}
 
-	dropped := make([]string, 0, len(declared))
+	dropped := make([]string, 0, len(unresolved))
 
-	for _, spec := range declared {
-		if !slices.Contains(resolved, spec) && !slices.Contains(blocked, spec) {
+	for _, spec := range unresolved {
+		if !slices.Contains(blocked, spec) {
 			dropped = append(dropped, spec)
 		}
 	}
@@ -308,7 +399,7 @@ func (p *pass) reportUnresolved(
 		reason = netboxv1alpha1.ReasonNotImplemented
 	}
 
-	p.refs = refWait{message: message, requeue: resolution.Requeue()}
+	p.refs = refWait{message: message, requeue: resolution.Requeue(), unresolved: unresolved}
 
 	// Debug, not info: a reference waiting for its target is the normal state during a first
 	// apply, and one line per object per pass would drown the log at cluster scale. The

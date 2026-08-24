@@ -75,14 +75,19 @@ func resolvedTo(field string, id int64) resolver.Resolution {
 	}}
 }
 
-// TestUnresolvedRefKeepsTheObjectFromReadiness is issue #132, and the test is the deliverable.
+// TestUnresolvedDeclaredRefWithholdsTheWrite is issue #195, and the test is the deliverable.
 //
-// On a kind whose identity does not include the reference, the object *is* created -- spec
-// omission means "do not manage" and a graph applied in any order has to make progress -- so
-// the only thing standing between a dropped reference and a silent success is Ready. If this
-// test ever passes with Ready=True, `kubectl apply` reports success, `kubectl wait
-// --for=condition=Ready` passes, and NetBox never received the field.
-func TestUnresolvedRefKeepsTheObjectFromReadiness(t *testing.T) {
+// The descriptor here keys on `slug` alone, so `parentRef` is *outside* the natural key and
+// the engine could perfectly well create the object without it -- which is exactly what it
+// used to do (this test asserted `[GETONE POST]` and a payload with no `parent`). That was
+// never designed: on parentedDescriptor(), where the same reference happens to be part of the
+// key, the identical failure wrote nothing. #195 answered it one way for both: a reference the
+// spec declares is a precondition for the write.
+//
+// Issue #132's guarantee is still asserted below and is now free: an object nothing was
+// written for cannot reach Ready either. Whichever way the write goes, `kubectl wait
+// --for=condition=Ready` must not pass over a field NetBox never received.
+func TestUnresolvedDeclaredRefWithholdsTheWrite(t *testing.T) {
 	tests := []struct {
 		name        string
 		resolution  resolver.Resolution
@@ -130,13 +135,11 @@ func TestUnresolvedRefKeepsTheObjectFromReadiness(t *testing.T) {
 				t.Fatalf("Reconcile() = %v, want no error: an unresolved reference is a state", err)
 			}
 
-			// Created, and without the reference: that is the recorded product decision.
-			if got := nb.methods(); !slices.Equal(got, []string{"GETONE", "POST"}) {
-				t.Errorf("netbox calls = %v, want the object to be created anyway", got)
-			}
-
-			if payload := nb.lastPayload(); payload["parent"] != nil {
-				t.Errorf("payload = %v, want no parent: the reference did not resolve", payload)
+			// Not even a lookup: the decision is made before locate(), because the rule is
+			// about the update as much as the create. An unscoped row in NetBox for the
+			// length of an unimplemented Kind is the outcome #195 refused.
+			if len(nb.calls) != 0 {
+				t.Errorf("netbox calls = %v, want none: a declared reference did not resolve", nb.calls)
 			}
 
 			ready := conditionOf(obj, netboxv1alpha1.ConditionReady)
@@ -154,10 +157,10 @@ func TestUnresolvedRefKeepsTheObjectFromReadiness(t *testing.T) {
 				t.Errorf("RefsResolved = %s/%s, want False/%s", resolved.Status, resolved.Reason, tc.wantRefs)
 			}
 
-			// The reference is why the object is not Ready; the write itself succeeded, and
-			// saying otherwise would send the reader looking at NetBox.
-			if got := conditionOf(obj, netboxv1alpha1.ConditionSynced).Reason; got != netboxv1alpha1.ReasonDriftCorrected {
-				t.Errorf("Synced reason = %q, want %q", got, netboxv1alpha1.ReasonDriftCorrected)
+			// No Synced condition at all: nothing was compared and nothing was sent, so
+			// claiming either state would be a report of a write that did not happen.
+			if got := conditionOf(obj, netboxv1alpha1.ConditionSynced).Reason; got != "" {
+				t.Errorf("Synced reason = %q, want none: nothing was written", got)
 			}
 
 			assertRequeue(t, result.RequeueAfter, tc.wantRequeue)
@@ -199,11 +202,15 @@ func TestResolvedRefReachesTheObject(t *testing.T) {
 	}
 }
 
-// TestUnresolvedIdentityRefWritesNothing is the case #132 says was already correct, pinned so
-// it stays that way: when the reference is part of the natural key, no candidate is applicable,
-// so the engine cannot tell whether the object exists and must not write at all. Creating there
-// would duplicate the object, and falling through to a candidate that omits the parent would
-// adopt an unrelated one.
+// TestUnresolvedIdentityRefWritesNothing is the same failure on a kind that keys on the
+// reference, and it is here to pin the *uniformity* #195 asked for: the assertions below are
+// now identical to the ones above, where they used to differ in both the calls made and the
+// Ready reason.
+//
+// The reason moved with the rule -- WaitingForKey before #195, WaitingForRef now -- and that
+// is the point rather than a side effect. "No usable natural key" was the symptom of an
+// unresolved parent; the cause is the parent, and locate()'s errNoCandidate is no longer
+// reached because the write is refused before the lookup.
 func TestUnresolvedIdentityRefWritesNothing(t *testing.T) {
 	obj := fakeObject()
 	obj.Spec.ParentRef = &fakeRef{Name: "europe"}
@@ -221,12 +228,14 @@ func TestUnresolvedIdentityRefWritesNothing(t *testing.T) {
 	}
 
 	ready := conditionOf(obj, netboxv1alpha1.ConditionReady)
-	if ready.Status != metav1.ConditionFalse || ready.Reason != netboxv1alpha1.ReasonWaitingForKey {
-		t.Errorf("Ready = %s/%s, want False/%s", ready.Status, ready.Reason, netboxv1alpha1.ReasonWaitingForKey)
+	if ready.Status != metav1.ConditionFalse || ready.Reason != netboxv1alpha1.ReasonWaitingForRef {
+		t.Errorf("Ready = %s/%s, want False/%s", ready.Status, ready.Reason, netboxv1alpha1.ReasonWaitingForRef)
 	}
 
-	// The reference is still reported, because "no usable key" is the symptom and the
-	// unresolved parent is the cause.
+	// RefsResolved carries which of the eight causes it was, and Ready carries the one
+	// question a `kubectl wait` asks. Conflating them -- one reason for "the Kind has no
+	// descriptor", "the target is not ready" and "there is nothing to point at" -- is what
+	// #195 explicitly refused.
 	if got := conditionOf(obj, netboxv1alpha1.ConditionRefsResolved).Reason; got != netboxv1alpha1.ReasonRefNotReady {
 		t.Errorf("RefsResolved reason = %q, want %q", got, netboxv1alpha1.ReasonRefNotReady)
 	}

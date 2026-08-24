@@ -92,7 +92,7 @@ func (s specFields) desired(d registry.Descriptor) (netbox.Object, registry.Spec
 		field, mapped := d.FieldFor(name)
 
 		switch {
-		case mapped && field.Class.Ref(), !mapped && isGenericFK(d, name):
+		case mapped && resolvable(field, value), !mapped && isGenericFK(d, name):
 			refs = append(refs, name)
 		case mapped:
 			desired[field.API] = writeValue(field, value)
@@ -169,6 +169,37 @@ func filterValue(value any) (string, bool) {
 	default:
 		return "", false
 	}
+}
+
+// resolvable reports that a mapped field is a reference the resolver has to turn into an id,
+// as opposed to a value this pass can render on its own.
+//
+// Every reference but one: a to-many written `[]`. An empty list has nothing in it to resolve,
+// and both halves of treating it as an ordinary value matter.
+//
+// It reaches the payload as the empty list, which is what makes NBO-079's "an explicitly-empty
+// field is an instruction" true for a reference field too: `[]` says this object has no ASNs,
+// and NetBox's M2M write is a full replacement, so the empty list is exactly how the column is
+// cleared. Reported as a reference instead, it would be one the resolver never answers for --
+// the resolver reads the object's own JSON, where `omitempty` dropped the key that
+// restoreEmpty put back -- so the column would be silently omitted and RefsResolved would sit
+// at False for the lifetime of the object.
+//
+// And it must not be a precondition for the write (issue #195): a rule that blocked on a
+// declared reference nothing ever files a result for would deadlock every object that clears a
+// to-many field, which is an instruction to carry out rather than a state to wait in.
+func resolvable(field registry.Field, value any) bool {
+	if !field.Class.Ref() {
+		return false
+	}
+
+	if !field.Class.ToMany() {
+		return true
+	}
+
+	list, ok := value.([]any)
+
+	return !ok || len(list) > 0
 }
 
 func isGenericFK(d registry.Descriptor, spec string) bool {

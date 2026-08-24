@@ -3,10 +3,12 @@ package reconciler
 import (
 	"context"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 
 	netboxv1alpha1 "github.com/ricardomolendijk/netbox-operator/api/v1alpha1"
@@ -123,10 +125,12 @@ func TestToManyRefDriftsCleanly(t *testing.T) {
 
 // TestPartiallyResolvedToManyRefWritesNothing is NBO-088's central rule at the engine level.
 //
-// The resolver reports the field as blocked rather than partly resolved, so the engine leaves
-// the column out of the payload entirely and Ready reports the wait. Writing the elements that
-// did resolve would be a full-replacement write of a shorter list -- a deletion, reported as a
-// success.
+// The resolver reports the field as blocked rather than partly resolved, so the field is
+// unresolved, and since #195 an unresolved declared reference withholds the write entirely.
+// The rule NBO-088 exists for is still the one on trial: writing the elements that did resolve
+// would be a full-replacement write of a shorter list -- a deletion, reported as a success --
+// and the assertion on the calls is what keeps the payload check from passing vacuously
+// against a request that was never made.
 func TestPartiallyResolvedToManyRefWritesNothing(t *testing.T) {
 	obj := fakeObject()
 	obj.Spec.ASNRefs = []fakeRef{{Name: "as64500"}, {Name: "as64501"}}
@@ -142,6 +146,10 @@ func TestPartiallyResolvedToManyRefWritesNothing(t *testing.T) {
 	if _, sent := nb.lastPayload()["asns"]; sent {
 		t.Errorf("payload carries asns = %v; a partially resolvable list writes nothing",
 			nb.lastPayload()["asns"])
+	}
+
+	if len(nb.calls) != 0 {
+		t.Errorf("netbox calls = %v, want none: the spec declares asnRefs and they did not resolve", nb.calls)
 	}
 
 	ready := conditionOf(obj, netboxv1alpha1.ConditionReady)
@@ -208,5 +216,58 @@ func TestUnreadyTargetIsReportedRatherThanWaitedFor(t *testing.T) {
 		if !strings.Contains(resolved.Message, want) {
 			t.Errorf("RefsResolved message = %q, want it to contain %q", resolved.Message, want)
 		}
+	}
+}
+
+// TestEmptyToManyRefIsDeclaredAndDoesNotBlock is the corner where #169 and #195 meet.
+//
+// `asnRefs: []` *declares* the field -- that is exactly what field ownership exists to tell
+// apart from an absent one (NBO-079), and the empty list is an instruction: this object has no
+// ASNs, clear whatever NetBox holds. But there is nothing in it to resolve, so it cannot be a
+// precondition, and a rule that read "declared and not in ByField blocks" would deadlock every
+// object that clears a to-many field.
+//
+// The real resolver rather than a canned resolution, because that is where the guarantee has
+// to hold: ResolveAll files an empty FieldRefs for an empty list, and applyResolved counts a
+// present key as resolved regardless of its length. A canned resolution would be asserting the
+// fixture.
+func TestEmptyToManyRefIsDeclaredAndDoesNotBlock(t *testing.T) {
+	asnGVK := schema.GroupVersionKind{Group: "netbox.kubeforge.org", Version: "v1alpha1", Kind: "NetBoxASN"}
+
+	descriptor := fakeDescriptor()
+	descriptor.Fields = withTarget(descriptor.Fields, "asnRefs", asnGVK)
+
+	// `asnRefs: []` marshals to nothing at all -- every field of a real kind carries
+	// `omitempty` -- so the managed-fields entry is the only thing that says the user wrote
+	// it, exactly as NBO-079 describes. Setting the Go field to an empty slice would test the
+	// *absent* case by accident.
+	obj := fakeObject()
+	ownedBy(obj, "flux", "asnRefs")
+
+	nb := &fakeClient{created: liveTag(7)}
+	engine := engineWith(t, descriptor, nb, &resolver.Resolver{Objects: fakeCluster{}})
+
+	if _, err := engine.Reconcile(context.Background(), obj); err != nil {
+		t.Fatalf("Reconcile() = %v", err)
+	}
+
+	if got := nb.methods(); !slices.Equal(got, []string{"GETONE", "POST"}) {
+		t.Errorf("netbox calls = %v, want [GETONE POST]: an empty list needs no resolution", got)
+	}
+
+	// The instruction carried out, not the field omitted: an empty list is a value NetBox can
+	// be told, and omitting it would mean "do not manage this reference".
+	if got := nb.lastPayload()["asns"]; !reflect.DeepEqual(got, []any{}) {
+		t.Errorf("payload[asns] = %#v, want an empty list", got)
+	}
+
+	ready := conditionOf(obj, netboxv1alpha1.ConditionReady)
+	if ready.Status != metav1.ConditionTrue {
+		t.Errorf("Ready = %s/%s (%s), want True", ready.Status, ready.Reason, ready.Message)
+	}
+
+	resolved := conditionOf(obj, netboxv1alpha1.ConditionRefsResolved)
+	if resolved.Status != metav1.ConditionTrue {
+		t.Errorf("RefsResolved = %s/%s (%s), want True", resolved.Status, resolved.Reason, resolved.Message)
 	}
 }
