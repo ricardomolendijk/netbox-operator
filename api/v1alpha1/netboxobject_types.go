@@ -45,7 +45,7 @@ const (
 // It is added before the engine writes anything to NetBox, and removed only once the
 // NetBox side is settled -- see docs/concepts/deletion.md for why that order and not the
 // other one.
-const Finalizer = "netbox.populator.io/finalizer"
+const Finalizer = "netbox.kubeforge.org/finalizer"
 
 // SkipFinalizerAnnotation is the break-glass. Set to "true" and the engine drops the
 // finalizer without calling NetBox at all.
@@ -54,7 +54,7 @@ const Finalizer = "netbox.populator.io/finalizer"
 // undeletable forever, and no operator should be able to do that to a cluster. It
 // guarantees an object left behind in NetBox, which is sometimes the right trade and is
 // never the default.
-const SkipFinalizerAnnotation = "netbox.populator.io/skip-finalizer"
+const SkipFinalizerAnnotation = "netbox.kubeforge.org/skip-finalizer"
 
 // Condition reasons for an object CR. The vocabulary is deliberately small: a reason is
 // keyed on by tooling and by the docs, so a new one is a documented addition rather than

@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| API version | `netbox.populator.io/v1alpha1` |
+| API version | `netbox.kubeforge.org/v1alpha1` |
 | Kind | `NetBoxSite` |
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbsite` |
@@ -30,7 +30,7 @@ because it looks like it works.
 ## Minimal example
 
 ```yaml
-apiVersion: netbox.populator.io/v1alpha1
+apiVersion: netbox.kubeforge.org/v1alpha1
 kind: NetBoxSite
 metadata:
   name: home
@@ -46,7 +46,7 @@ Everything else is optional and, if omitted, is left exactly as NetBox has it.
 ## Full example
 
 ```yaml
-apiVersion: netbox.populator.io/v1alpha1
+apiVersion: netbox.kubeforge.org/v1alpha1
 kind: NetBoxSite
 metadata:
   name: home
@@ -306,7 +306,7 @@ office   office   planned  8    True    4m
 | `status.id` is `0` and `READY` is `True` | — | Should be impossible. `status.id` is only set once the object exists; file a bug |
 | Setting `description: ""` changes nothing | — | Expected, and [#121](https://github.com/ricardomolendijk/netbox-operator/issues/121). Empty and absent are currently indistinguishable |
 | A delete hangs, `Reason=Protected` | `kubectl describe netboxsite <name> -n <ns>` | Devices or prefixes still reference the site. The message names them; delete those first |
-| A delete hangs, `Reason=WaitingForEndpoint` | `kubectl get netboxendpoint -n <ns>` | The operator will not orphan a real NetBox object. Fix the endpoint, or annotate `netbox.populator.io/skip-finalizer=true` to force it through and accept the orphan |
+| A delete hangs, `Reason=WaitingForEndpoint` | `kubectl get netboxendpoint -n <ns>` | The operator will not orphan a real NetBox object. Fix the endpoint, or annotate `netbox.kubeforge.org/skip-finalizer=true` to force it through and accept the orphan |
 
 ## Related
 

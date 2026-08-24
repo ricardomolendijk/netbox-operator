@@ -7,9 +7,9 @@ import (
 // Neither create nor delete on netboxregions: the operator reads CRs and writes their
 // status and finalizers, and nothing else. Inline children (NBO-032) are the first thing
 // that will need create, and they can ask for it then.
-// +kubebuilder:rbac:groups=netbox.populator.io,resources=netboxregions,verbs=get;list;watch;update;patch
-// +kubebuilder:rbac:groups=netbox.populator.io,resources=netboxregions/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=netbox.populator.io,resources=netboxregions/finalizers,verbs=update
+// +kubebuilder:rbac:groups=netbox.kubeforge.org,resources=netboxregions,verbs=get;list;watch;update;patch
+// +kubebuilder:rbac:groups=netbox.kubeforge.org,resources=netboxregions/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=netbox.kubeforge.org,resources=netboxregions/finalizers,verbs=update
 
 // NetBoxRegion's controller is one line, like NetBoxTag's: dcim.Region's endpoint, its two
 // natural-key candidates, its field map and its read-only columns are all data on its

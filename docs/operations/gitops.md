@@ -83,13 +83,13 @@ spec:
                            # for selfHeal to fight
   ignoreDifferences:
     # status is the operator's output. Diffing it makes every reconcile an OutOfSync.
-    - group: netbox.populator.io
+    - group: netbox.kubeforge.org
       kind: "*"
       jsonPointers:
         - /status
     # The finalizer is added by the operator before its first NetBox write, and it is not
     # in the manifest. Without this, every object is permanently OutOfSync on metadata.
-    - group: netbox.populator.io
+    - group: netbox.kubeforge.org
       kind: "*"
       jsonPointers:
         - /metadata/finalizers
@@ -136,7 +136,7 @@ spec:
   # No patches and no ignore rules: Flux diffs against its own inventory of applied
   # fields, and the operator writes none of them.
   healthChecks:
-    - apiVersion: netbox.populator.io/v1alpha1
+    - apiVersion: netbox.kubeforge.org/v1alpha1
       kind: NetBoxSite
       name: dc1
       namespace: homelab
@@ -185,7 +185,7 @@ rebuild converges rather than re-rolling (ADR-0005 §3, NBO-036).
 | `Off` | only on a CR change | yes | **no** | A very large NetBox where the resync cost is real |
 
 ```yaml
-apiVersion: netbox.populator.io/v1alpha1
+apiVersion: netbox.kubeforge.org/v1alpha1
 kind: NetBoxEndpoint
 metadata:
   name: homelab

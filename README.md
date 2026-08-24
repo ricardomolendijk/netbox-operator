@@ -6,7 +6,7 @@ NetBox foreign key is a Kubernetes reference, and `kubectl apply` / `kubectl del
 are the only verbs you need.
 
 ```yaml
-apiVersion: netbox.populator.io/v1alpha1
+apiVersion: netbox.kubeforge.org/v1alpha1
 kind: NetBoxPrefix
 metadata:
   name: prefix-servers
@@ -21,7 +21,7 @@ spec:
   tenantRef: {name: acme}
   isPool: false
 ---
-apiVersion: netbox.populator.io/v1alpha1
+apiVersion: netbox.kubeforge.org/v1alpha1
 kind: NetBoxIPAddressClaim         # "give me a free address from that prefix"
 metadata:
   name: dns-eth0
@@ -116,7 +116,7 @@ This project is a **NetBox-wide provider**: the whole catalogue, with a real
 reference system between kinds. It borrows upstream's best idea — the `*Claim` split,
 where "allocate me one" is a separate kind with a separate lifecycle from "here is
 the address I want" — and deliberately uses a different API group
-(`netbox.populator.io`) so both CRD sets can be installed on one cluster.
+(`netbox.kubeforge.org`) so both CRD sets can be installed on one cluster.
 
 ## Contributing
 

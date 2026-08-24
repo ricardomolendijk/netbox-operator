@@ -74,7 +74,7 @@ An empty value is treated the same as an absent key — a Secret with
 "Invisible to the operator" is a real case, not a hedge: the manager reads Secrets through
 a label-scoped informer cache, so a Secret that `kubectl get secret` shows plainly is
 absent as far as the operator is concerned unless it carries
-`netbox.populator.io/endpoint-credential=true`. The condition message covers both causes,
+`netbox.kubeforge.org/endpoint-credential=true`. The condition message covers both causes,
 because distinguishing them would need an uncached read of the very Secret the scoping
 exists to avoid reading. See [RBAC](../operations/rbac.md).
 

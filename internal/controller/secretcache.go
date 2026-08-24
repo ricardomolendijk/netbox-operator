@@ -15,7 +15,7 @@ import (
 // `endpoint-credential` would collide with whatever else labels it. It names the role the
 // Secret plays rather than the operator's identity, so it stays correct when a second
 // kind starts reading endpoint credentials.
-const CredentialLabel = "netbox.populator.io/endpoint-credential"
+const CredentialLabel = "netbox.kubeforge.org/endpoint-credential"
 
 // CredentialLabelValue is the only value of CredentialLabel the operator's cache selects.
 const CredentialLabelValue = "true"

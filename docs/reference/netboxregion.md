@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| API version | `netbox.populator.io/v1alpha1` |
+| API version | `netbox.kubeforge.org/v1alpha1` |
 | Kind | `NetBoxRegion` |
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbregion` |
@@ -29,7 +29,7 @@ the reference machinery M2 is building.
 A top-level region. This works completely today.
 
 ```yaml
-apiVersion: netbox.populator.io/v1alpha1
+apiVersion: netbox.kubeforge.org/v1alpha1
 kind: NetBoxRegion
 metadata:
   name: europe
@@ -43,7 +43,7 @@ spec:
 ## Full example
 
 ```yaml
-apiVersion: netbox.populator.io/v1alpha1
+apiVersion: netbox.kubeforge.org/v1alpha1
 kind: NetBoxRegion
 metadata:
   name: eu-west

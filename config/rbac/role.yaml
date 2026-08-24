@@ -20,7 +20,7 @@ rules:
   - list
   - watch
 - apiGroups:
-  - netbox.populator.io
+  - netbox.kubeforge.org
   resources:
   - netboxendpoints
   verbs:
@@ -28,7 +28,7 @@ rules:
   - list
   - watch
 - apiGroups:
-  - netbox.populator.io
+  - netbox.kubeforge.org
   resources:
   - netboxendpoints/status
   - netboxregions/status
@@ -39,7 +39,7 @@ rules:
   - patch
   - update
 - apiGroups:
-  - netbox.populator.io
+  - netbox.kubeforge.org
   resources:
   - netboxregions
   - netboxsites
@@ -51,7 +51,7 @@ rules:
   - update
   - watch
 - apiGroups:
-  - netbox.populator.io
+  - netbox.kubeforge.org
   resources:
   - netboxregions/finalizers
   - netboxsites/finalizers

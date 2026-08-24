@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| API version | `netbox.populator.io/v1alpha1` |
+| API version | `netbox.kubeforge.org/v1alpha1` |
 | Kind | `NetBoxEndpoint` |
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbep`, `nbendpoint` |
@@ -31,7 +31,7 @@ type: Opaque
 stringData:
   token: "0123456789abcdef0123456789abcdef01234567"
 ---
-apiVersion: netbox.populator.io/v1alpha1
+apiVersion: netbox.kubeforge.org/v1alpha1
 kind: NetBoxEndpoint
 metadata:
   name: homelab
@@ -68,7 +68,7 @@ stringData:
     MIIBkTCB+wIJAJ...
     -----END CERTIFICATE-----
 ---
-apiVersion: netbox.populator.io/v1alpha1
+apiVersion: netbox.kubeforge.org/v1alpha1
 kind: NetBoxEndpoint
 metadata:
   name: homelab

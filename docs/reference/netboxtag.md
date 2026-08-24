@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| API version | `netbox.populator.io/v1alpha1` |
+| API version | `netbox.kubeforge.org/v1alpha1` |
 | Kind | `NetBoxTag` |
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbtag` |
@@ -26,7 +26,7 @@ ids — but naming a `NetBoxTag` from another CR needs the reference system (NBO
 The fewest fields that work. Everything else is defaulted.
 
 ```yaml
-apiVersion: netbox.populator.io/v1alpha1
+apiVersion: netbox.kubeforge.org/v1alpha1
 kind: NetBoxTag
 metadata:
   name: managed
@@ -46,7 +46,7 @@ tag reports `Ready=False, Reason=WaitingForEndpoint` and writes nothing.
 Every field set explicitly, with the defaults written out.
 
 ```yaml
-apiVersion: netbox.populator.io/v1alpha1
+apiVersion: netbox.kubeforge.org/v1alpha1
 kind: NetBoxTag
 metadata:
   name: managed
@@ -486,7 +486,7 @@ either it has not created one yet, or it refused to. `kubectl get nbtag` works t
 | A description set in NetBox is not removed by clearing `spec.description` | `Ready=True, Synced=True, Reason=NoDrift` | an empty string is indistinguishable from an absent field | See [`spec` omission is Go-level](#spec-omission-is-go-level-not-yaml-level) |
 | Two tags in NetBox where there should be one | `Ready=True` on both CRs | two `NetBoxTag`s with **different** slugs — `slug` is the natural key, `name` is not | Give them the same slug and delete one CR, or accept both |
 | `kubectl delete` hangs | `Deleting=False, Reason=Protected` | NetBox refuses the delete while something is still tagged with it. The message names what | Untag those objects. The retry backs off from 10s to 5m and unblocks itself |
-| `kubectl delete` hangs, endpoint down | `Deleting=False, Reason=WaitingForEndpoint` | the finalizer stays on rather than orphaning the tag | Bring the endpoint back; or accept the orphan with `netbox.populator.io/skip-finalizer=true` |
+| `kubectl delete` hangs, endpoint down | `Deleting=False, Reason=WaitingForEndpoint` | the finalizer stays on rather than orphaning the tag | Bring the endpoint back; or accept the orphan with `netbox.kubeforge.org/skip-finalizer=true` |
 | CR deleted, tag still in NetBox | none; the CR is gone | `deletionPolicy: Retain`, the skip-finalizer annotation, or a CR whose `status.id` was never recorded | Check the Events on the namespace: `Retained`, `FinalizerSkipped` or `NothingToDelete` says which |
 | Conditions do not match the spec you just applied | `status.observedGeneration` < `metadata.generation` | the reconcile for the new spec has not finished | Wait one pass; if it persists, read the manager log |
 

@@ -6,9 +6,9 @@ import (
 
 // Neither create nor delete on netboxsites: the operator reads CRs and writes their status
 // and finalizers, and nothing else.
-// +kubebuilder:rbac:groups=netbox.populator.io,resources=netboxsites,verbs=get;list;watch;update;patch
-// +kubebuilder:rbac:groups=netbox.populator.io,resources=netboxsites/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=netbox.populator.io,resources=netboxsites/finalizers,verbs=update
+// +kubebuilder:rbac:groups=netbox.kubeforge.org,resources=netboxsites,verbs=get;list;watch;update;patch
+// +kubebuilder:rbac:groups=netbox.kubeforge.org,resources=netboxsites/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=netbox.kubeforge.org,resources=netboxsites/finalizers,verbs=update
 
 // NetBoxSite's controller is one line, the same one NetBoxTag's is, and that is the whole
 // claim NBO-009 tests: dcim.Site's endpoint, natural key, field map and comparison rules

@@ -50,7 +50,7 @@ kubectl get netboxendpoint <name> -n <namespace> \
 |---|---|---|---|
 | `READY` is empty and `describe` shows no conditions at all | `kubectl logs -n <ns> deploy/<manager> \| grep netboxendpoint` | none — no reconcile has run | The controller is not running, not watching this namespace, or the manager is crash-looping. Check the pod, then check leader election if you run more than one replica. |
 | `Ready=False`, message names a Secret | `kubectl get secret <name> -n <ns>` | `Ready=False`, `Authenticated=False`, `VersionSupported=Unknown`, `Reason=SecretMissing` | A referenced Secret does not exist **in the endpoint's own namespace** — either `spec.tokenSecretRef.name` or `spec.tlsConfig.caBundleSecretRef.name`; the message says which. Cross-namespace refs are not supported by design. Retries every 30s. |
-| A Secret that plainly exists reports `SecretMissing` | `kubectl get secret <name> -n <ns> --show-labels` | `Ready=False`, `Authenticated=False`, `Reason=SecretMissing`, message says the Secret "may exist but be invisible to the operator" | **The Secret is not labelled.** The operator reads Secrets through a label-scoped cache, so an unlabelled Secret is genuinely invisible to it even though `kubectl` shows it. Fix: `kubectl label secret <name> -n <ns> netbox.populator.io/endpoint-credential=true`. The operator cannot tell "absent" from "unlabelled" without an uncached read of the very Secret it is trying not to read, which is why the message covers both. See [RBAC](rbac.md). |
+| A Secret that plainly exists reports `SecretMissing` | `kubectl get secret <name> -n <ns> --show-labels` | `Ready=False`, `Authenticated=False`, `Reason=SecretMissing`, message says the Secret "may exist but be invisible to the operator" | **The Secret is not labelled.** The operator reads Secrets through a label-scoped cache, so an unlabelled Secret is genuinely invisible to it even though `kubectl` shows it. Fix: `kubectl label secret <name> -n <ns> netbox.kubeforge.org/endpoint-credential=true`. The operator cannot tell "absent" from "unlabelled" without an uncached read of the very Secret it is trying not to read, which is why the message covers both. See [RBAC](rbac.md). |
 | `Ready=False`, message says `reading ca bundle secret` | `kubectl get secret <name> -n <ns>` | `Ready=False`, `Authenticated=Unknown`, `Reason=CABundleMissing` | The CA bundle Secret is absent. Distinct from `SecretMissing` on purpose: the token read fine, so `Authenticated` is `Unknown` rather than `False` and you are pointed at the right Secret. Retries every 30s. |
 | `Ready=False`, message says `has no key "token"` | `kubectl get secret <name> -n <ns> -o jsonpath='{.data}' \| jq 'keys'` | `Ready=False`, `Authenticated=False`, `VersionSupported=Unknown`, `Reason=TokenMissing` | The key is absent or its value is empty. Default key is `token`; set `spec.tokenSecretRef.key` if yours differs. An empty value counts as missing. Retries every 30s. |
 | `Ready=False`, message mentions `401` or `403` | `kubectl describe netboxendpoint <name> -n <ns>` | `Ready=False`, `Authenticated=False`, `VersionSupported=Unknown`, `Reason=AuthError` | The token is wrong, revoked, expired, or disabled. A read-only token is *not* this symptom — `/api/status/` only needs an authenticated read, so a token with no write permission still probes `Ready=True` and fails later, on the first write. Rotate the Secret — the watch picks it up immediately, no restart. Retries every 2m. |
@@ -66,7 +66,7 @@ kubectl get netboxendpoint <name> -n <namespace> \
 | `Ready=True` but object controllers report the endpoint is not ready | — | n/a | No object Kinds exist yet (NBO-008 onward). If you see this, it is from a build not described by these docs. |
 | Endpoint deleted but NetBox traffic continues | `kubectl logs -n <ns> deploy/<manager> \| grep 'endpoint not ready\|endpoint ready'` | n/a | The cached client is dropped when the reconcile observes the deletion. If traffic persists, the reconcile has not run — check the manager is alive. |
 | `kubectl delete` hangs on an object | `kubectl get <kind> <name> -n <ns> -o jsonpath='{.status.conditions}' \| jq` | `Deleting=False`, `Reason=Protected` | NetBox refuses the delete because another object references it through a protected foreign key. The condition message names what blocks it. Delete the referencing object first; the retry backs off and will complete on its own. This is not an error to retry faster. |
-| `kubectl delete` hangs and NetBox is down | `kubectl get netboxendpoint -n <ns>` | `Deleting=False`, `Reason=WaitingForEndpoint` | The object is real and its id is known, so the finalizer holds rather than orphaning it in NetBox. It completes once the endpoint is `Ready`. To force it through and accept the orphan, annotate `netbox.populator.io/skip-finalizer=true` — the condition message names this. See [deletion](../concepts/deletion.md). |
+| `kubectl delete` hangs and NetBox is down | `kubectl get netboxendpoint -n <ns>` | `Deleting=False`, `Reason=WaitingForEndpoint` | The object is real and its id is known, so the finalizer holds rather than orphaning it in NetBox. It completes once the endpoint is `Ready`. To force it through and accept the orphan, annotate `netbox.kubeforge.org/skip-finalizer=true` — the condition message names this. See [deletion](../concepts/deletion.md). |
 
 ## Confirming which Secret is actually in use
 
@@ -93,7 +93,7 @@ edit is the standard way:
 
 ```
 kubectl annotate netboxendpoint <name> -n <namespace> \
-  netbox.populator.io/force-sync="$(date -u +%FT%TZ)" --overwrite
+  netbox.kubeforge.org/force-sync="$(date -u +%FT%TZ)" --overwrite
 ```
 
 Editing the referenced Secret has the same effect, via the Secret watch. Note that an
@@ -213,7 +213,7 @@ Two halves, and only one of them is fixed.
 
 **The informer cache is scoped.** Since NBO-072 the manager applies a label selector to
 both the LIST and the WATCH, so it caches only Secrets carrying
-`netbox.populator.io/endpoint-credential=true` (`SecretCacheOptions()` in
+`netbox.kubeforge.org/endpoint-credential=true` (`SecretCacheOptions()` in
 `internal/controller/secretcache.go`). Manager memory therefore scales with the number of
 credential Secrets, not with the cluster's total. That is why an unlabelled Secret is
 invisible — see the symptom row above, which is the most common consequence.

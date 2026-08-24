@@ -10,7 +10,7 @@ import (
 )
 
 func testGVK(kind string) schema.GroupVersionKind {
-	return schema.GroupVersionKind{Group: "netbox.populator.io", Version: "v1alpha1", Kind: kind}
+	return schema.GroupVersionKind{Group: "netbox.kubeforge.org", Version: "v1alpha1", Kind: kind}
 }
 
 // tagDescriptor is extras.Tag: the smallest real descriptor, and the one that exercises

@@ -1,4 +1,4 @@
-// Package v1alpha1 contains the netbox.populator.io/v1alpha1 API.
+// Package v1alpha1 contains the netbox.kubeforge.org/v1alpha1 API.
 //
 // Every NetBox object is represented by one Kind in this group, and every NetBox
 // foreign key by a reference to another object of this group. See
@@ -6,7 +6,7 @@
 // netbox.dev and why Kind names are prefixed NetBox.
 //
 // +kubebuilder:object:generate=true
-// +groupName=netbox.populator.io
+// +groupName=netbox.kubeforge.org
 package v1alpha1
 
 import (
@@ -17,7 +17,7 @@ import (
 // GroupName is the API group for every Kind in this package. It is deliberately
 // declared exactly once: changing it is a one-line change here and a migration
 // everywhere else.
-const GroupName = "netbox.populator.io"
+const GroupName = "netbox.kubeforge.org"
 
 var (
 	// GroupVersion is the group and version used to register these objects.

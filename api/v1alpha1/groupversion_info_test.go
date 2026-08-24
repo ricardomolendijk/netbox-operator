@@ -10,7 +10,7 @@ import (
 // user ever writes, so changing it is a breaking change and should require editing a
 // test that says so. See docs/decisions/0001-api-group-and-kind-naming.md.
 func TestGroupName(t *testing.T) {
-	const want = "netbox.populator.io"
+	const want = "netbox.kubeforge.org"
 	if GroupName != want {
 		t.Errorf("GroupName = %q, want %q -- this is a breaking API change", GroupName, want)
 	}

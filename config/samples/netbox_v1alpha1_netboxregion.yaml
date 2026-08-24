@@ -1,4 +1,4 @@
-apiVersion: netbox.populator.io/v1alpha1
+apiVersion: netbox.kubeforge.org/v1alpha1
 kind: NetBoxRegion
 metadata:
   name: europe
@@ -17,7 +17,7 @@ spec:
   # and separately on (name) where parent IS NULL, so the lookup pins `parent_id__isnull`
   # instead of omitting it. See docs/concepts/lookups.md.
 ---
-apiVersion: netbox.populator.io/v1alpha1
+apiVersion: netbox.kubeforge.org/v1alpha1
 kind: NetBoxRegion
 metadata:
   name: eu-west

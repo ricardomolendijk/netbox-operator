@@ -70,7 +70,7 @@ Dated records of decisions that are expensive to reverse. Index and status:
 
 | Page | Answers |
 |---|---|
-| [0001 — API group and kind naming](decisions/0001-api-group-and-kind-naming.md) | Why the group is `netbox.populator.io` and every kind is prefixed `NetBox` |
+| [0001 — API group and kind naming](decisions/0001-api-group-and-kind-naming.md) | Why the group is `netbox.kubeforge.org` and every kind is prefixed `NetBox` |
 | [0002 — CRD scoping](decisions/0002-crd-scoping.md) | Why every kind is namespaced in `v1alpha1`, what that costs, and what would have to change to revisit it |
 | [0003 — Ownership and references](decisions/0003-ownership-and-references.md) | How a NetBox foreign key differs from a Kubernetes owner reference, and where the operator adds each |
 | [0004 — Claims-first allocation](decisions/0004-claims-first-allocation.md) | Why "allocate me an address" is a separate kind rather than a mode of `NetBoxIPAddress` |
