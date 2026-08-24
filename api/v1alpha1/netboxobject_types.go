@@ -432,7 +432,13 @@ type NetBoxObjectSpec struct {
 	// Read fresh on every pass rather than latched when deletion starts, so switching it
 	// to Retain on an object whose delete NetBox keeps refusing is a way out of that
 	// state (docs/concepts/deletion.md).
-	// +kubebuilder:default=Delete
+	//
+	// Left unset it is Delete for most kinds and Retain for the IPAM ones, where deleting
+	// the NetBox object destroys state rather than configuration -- an address freed for
+	// reallocation, a range whose ownership record is gone (decision #176). The default is
+	// therefore *not* a CRD marker: this field is declared once for every kind, so a marker
+	// here could only give them all the same answer. Each kind declares its own on its
+	// Descriptor and docs/concepts/deletion.md lists them.
 	// +optional
 	DeletionPolicy DeletionPolicy `json:"deletionPolicy,omitempty"`
 

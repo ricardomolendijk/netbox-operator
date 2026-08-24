@@ -473,10 +473,27 @@ func stubPatchValue(field string, stored, sent any) any {
 // same `app_label.model` strings it accepts on write (docs/netbox-schema.md -> extras.Tag,
 // a ManyToManyField onto contenttypes.ContentType), so it reads back as it was written and
 // there is no normalisation to reproduce.
+//
+// `tags` very much is. It is written as bare ids and read back as nested objects, and the
+// differ relies on that asymmetry (internal/netbox, sameIDSet reads the live side with
+// nestedIDs). A stub that echoed the ids made every provenance-stamped object report drift on
+// its own tag list and PATCH it on every resync -- the hot loop docs/concepts/drift.md opens
+// by warning about, invisible until a kind was tested with spec.managedBy on and a resync
+// short enough to observe (NBO-025).
 func netboxShape(obj netbox.Object) netbox.Object {
 	out := netbox.Object{}
 	for k, v := range obj {
 		out[k] = v
+	}
+
+	if ids := netbox.IDsOf(out["tags"]); len(ids) > 0 {
+		nested := make([]any, 0, len(ids))
+		for _, id := range ids {
+			nested = append(nested, map[string]any{
+				"id": float64(id), "display": fmt.Sprintf("tag-%d", id),
+			})
+		}
+		out["tags"] = nested
 	}
 
 	if value, ok := out["status"].(string); ok {

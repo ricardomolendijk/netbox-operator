@@ -4,21 +4,21 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.19.0
-  name: netboxroutetargets.netbox.kubeforge.org
+  name: netboxclustertypes.netbox.kubeforge.org
 spec:
   group: netbox.kubeforge.org
   names:
-    kind: NetBoxRouteTarget
-    listKind: NetBoxRouteTargetList
-    plural: netboxroutetargets
+    kind: NetBoxClusterType
+    listKind: NetBoxClusterTypeList
+    plural: netboxclustertypes
     shortNames:
-    - nbrt
-    singular: netboxroutetarget
+    - nbctype
+    singular: netboxclustertype
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .spec.name
-      name: Target
+    - jsonPath: .spec.slug
+      name: Slug
       type: string
     - jsonPath: .status.id
       name: ID
@@ -33,11 +33,12 @@ spec:
     schema:
       openAPIV3Schema:
         description: |-
-          NetBoxRouteTarget is one ipam.RouteTarget in NetBox.
+          NetBoxClusterType is one virtualization.ClusterType in NetBox.
 
-          Namespaced like every kind in v1alpha1 (docs/decisions/0002-crd-scoping.md), which is what
-          makes a cross-namespace `name` collision possible: NetBox's uniqueness on the column is
-          global and a namespace boundary does not partition it.
+          Namespaced like every kind in v1alpha1 (docs/decisions/0002-crd-scoping.md). It reads like
+          a catalogue object that wants to be cluster-scoped, and ADR-0002's answer is the one it
+          gives for NetBoxLocation: a shared catalogue namespace plus a NetBoxRefGrant (NBO-014) is
+          how a team namespace points at it.
         properties:
           apiVersion:
             description: |-
@@ -58,34 +59,20 @@ spec:
             type: object
           spec:
             description: |-
-              NetBoxRouteTargetSpec describes one ipam.RouteTarget.
+              NetBoxClusterTypeSpec describes one virtualization.ClusterType.
 
-              NetBoxObjectSpec is inline, so endpointRef, onConflict and deletionPolicy are ordinary
-              spec fields that a user writes alongside the rest.
+              A pure OrganizationalModel: `docs/netbox-schema.md -> virtualization.ClusterType` records
+              `(no own columns -- every field is inherited from OrganizationalModel)`, so `name`
+              (`REQ UNIQUE len=100`), `slug` (`REQ UNIQUE len=100`) and `description` (`len=200`) are the
+              whole of it. Nothing here is derived from the REST documentation: a column that is neither
+              in the digest nor in the base class the digest documents does not get a field until NBO-041
+              confirms it from the OpenAPI schema.
 
-              There is no `importedByVRFs` field here, and that is the one thing worth knowing about
-              this Kind. `import_targets` and `export_targets` are declared on `ipam.VRF`
-              (docs/netbox-schema.md -> ipam.VRF), so the VRF<->RouteTarget relation is written from the
-              VRF side only: a route target has nothing to reconcile about its own membership, and two
-              VRFs importing one route target do not conflict. A reverse field here would be a second
-              writer of one relation, which is a PATCH war rather than a convenience.
-
-              `tenant` (docs/netbox-schema.md -> ipam.RouteTarget, `ForeignKey -> tenancy.Tenant
-              on_delete=PROTECT`) is deliberately absent: NetBoxTenant is NBO-021, in flight
-              concurrently, and a field that is accepted and does nothing is worse than a field that is
-              not there -- `kubectl apply` reports success and NetBox never sees the value.
+              `comments` is the one inherited column left out. OrganizationalModel declares it and
+              NetBox's ClusterTypeSerializer does accept it, but NBO-028's field table names three fields
+              and the group kinds that shipped before this one -- NetBoxSiteGroup, NetBoxRegion -- leave
+              it out too. Adding it later is additive; a field nobody asked for is not removable.
             properties:
-              comments:
-                description: |-
-                  Comments is the route target's long-form notes field.
-
-                  Also inherited from PrimaryModel, and a TextField rather than a CharField: it has no
-                  max_length, so there is no MaxLength marker to derive.
-
-                  Omit it to leave NetBox's own value alone; set it to `""` to clear the value in
-                  NetBox. The two are different intents and the operator can tell them apart
-                  (docs/concepts/field-ownership.md).
-                type: string
               customFields:
                 additionalProperties:
                   nullable: true
@@ -141,11 +128,7 @@ spec:
                 type: string
               description:
                 description: |-
-                  Description is free text shown next to the route target.
-
-                  Declared on PrimaryModel rather than on ipam.RouteTarget, so docs/netbox-schema.md
-                  lists it as `description (PrimaryModel)` -- as required and as writable as a declared
-                  column.
+                  Description is free text shown next to the cluster type.
 
                   Omit it to leave NetBox's own value alone; set it to `""` to clear the value in
                   NetBox. The two are different intents and the operator can tell them apart
@@ -161,19 +144,12 @@ spec:
                 type: string
               name:
                 description: |-
-                  Name is the route target itself, in `<asn>:<value>` form -- `65000:10`. It is also
-                  this kind's natural key.
+                  Name is the cluster type's label -- `VMware vSphere`, `Proxmox VE`, `Hyper-V`.
 
-                  NetBox enforces uniqueness on the column globally
-                  (docs/netbox-schema.md -> ipam.RouteTarget, `name CharField REQ UNIQUE len=21`) while
-                  this CRD is namespaced (docs/decisions/0002-crd-scoping.md), so two NetBoxRouteTargets
-                  in different namespaces claiming one name is one route target and a Conflict -- not
-                  two.
-
-                  The length cap is NetBox's `VRF_RD_MAX_LENGTH`, which is 21 in `ipam/constants.py`.
-                  The digest resolves it to a number, so a NetBox release that changes the constant
-                  shows up as a schema diff rather than as 400s at runtime.
-                maxLength: 21
+                  Column-unique (`name CharField REQ UNIQUE len=100`), so it identifies a type on its
+                  own. `slug` is the natural key anyway, for the reason every catalogue kind in this
+                  operator prefers it: a slug is the spelling a reference from another namespace uses.
+                maxLength: 100
                 minLength: 1
                 type: string
               onConflict:
@@ -185,9 +161,20 @@ spec:
                 - Adopt
                 - AdoptOnly
                 type: string
+              slug:
+                description: |-
+                  Slug is the cluster type's URL-safe identifier, and its natural key.
+
+                  Globally unique in NetBox over namespaced CRDs, exactly like a Site's: two namespaces
+                  cannot both own `proxmox`, and the loser gets a Conflict rather than a second object.
+                maxLength: 100
+                minLength: 1
+                pattern: ^[-a-zA-Z0-9_]+$
+                type: string
             required:
             - endpointRef
             - name
+            - slug
             type: object
           status:
             description: |-

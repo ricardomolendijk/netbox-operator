@@ -6,7 +6,8 @@ new one is added without touching the engine.
 > **Status.** The mechanism is built (NBO-019): the union pattern, CEL validation of the
 > one-of-N shape, resolution to an `(object type, id)` pair, paired drift detection, and
 > ref watches over every allowed target. Two unions ship, both through that one mechanism:
-> [`IPAssignment`](../reference/genericref.md), because `NetBoxIPAddress` needs it
+> [`IPAssignment`](../reference/genericref.md), now on a real CRD as
+> [`NetBoxIPAddress.spec.assignedObject`](../reference/netboxipaddress.md#assignedobject)
 > ([NBO-025](https://github.com/ricardomolendijk/netbox-operator/issues/37)), and
 > [`ScopeRef`](#the-scope-pair) — NetBox's `(scope_type, scope_id)`
 > ([NBO-018](https://github.com/ricardomolendijk/netbox-operator/issues/30)). Several of
@@ -102,10 +103,12 @@ an absent field is never evaluated, so an optional `== 1` union would be satisfi
 leaving it out.
 
 Both shapes are proved against a real API server by `TestUnionCELShapes`, over a test-only
-CRD in `internal/controller/testdata/crd/`. The fixture exists because `IPAssignment` is on
-no shipped CRD until `NetBoxIPAddress` lands, and a CEL rule no CRD carries is compiled by
-nothing; `TestUnionCELRuleMatchesTheAPIType` asserts the fixture's rule is byte-identical to
-the one on the Go type, so it cannot drift away from what it stands in for.
+CRD in `internal/controller/testdata/crd/`. The fixture came first, because a CEL rule no CRD
+carries is compiled by nothing and `IPAssignment` was on no shipped CRD until
+[`NetBoxIPAddress`](../reference/netboxipaddress.md) landed; it stays, because it is the only
+place the `== 1` shape is exercised at all -- no shipped Kind has a `REQ` pair yet.
+`TestUnionCELRuleMatchesTheAPIType` asserts the fixture's rule is byte-identical to the one on
+the Go type, so it cannot drift away from what it stands in for.
 
 ## The Descriptor side
 

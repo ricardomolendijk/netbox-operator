@@ -15,3 +15,7 @@ resources:
 - bases/netbox.kubeforge.org_netboxvrfs.yaml
 - bases/netbox.kubeforge.org_netboxvlangroups.yaml
 - bases/netbox.kubeforge.org_netboxvlans.yaml
+- bases/netbox.kubeforge.org_netboxclustertypes.yaml
+- bases/netbox.kubeforge.org_netboxclustergroups.yaml
+- bases/netbox.kubeforge.org_netboxclusters.yaml
+- bases/netbox.kubeforge.org_netboxipaddresses.yaml
