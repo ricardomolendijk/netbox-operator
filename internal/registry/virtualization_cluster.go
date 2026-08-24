@@ -109,7 +109,7 @@ func virtualizationClusterDescriptor() Descriptor {
 		// `LOCATION_SCOPE_TYPES`, the queryset its `scope_type` field is limited to -- the
 		// four CR spec fields that select them, and the cache list. So this kind cannot get
 		// the `dcim.sitegroup` spelling wrong or forget a cache column.
-		GenericFKs: []GenericFKSpec{ScopeFK("scope")},
+		GenericFKs: []GenericFKSpec{ScopeFK("scope", ScopeCascadesFromEvery())},
 
 		// The four columns every ChangeLoggedModel carries, plus the four scope caches, plus
 		// `site`.
@@ -131,21 +131,24 @@ func virtualizationClusterDescriptor() Descriptor {
 			"created", "last_updated", "url", "display", "site"),
 
 		// docs/decisions/0003-ownership-and-references.md rule 4: `scope` is the containment
-		// parent, matching NetBox's own `_site ForeignKey on_delete=CASCADE`, so deleting the
-		// NetBoxSite a cluster is scoped to takes the cluster with it. Exactly one, because
-		// Kubernetes garbage collection waits for *every* owner: adding `typeRef` or
-		// `groupRef` would turn "delete the site and the cluster goes" into "delete all
-		// three", and NetBox's PROTECT on both would refuse the delete anyway.
-		// No ContainmentRef, and the reason is the limitation NBO-193 recorded rather than an
-		// oversight: a generic FK's cascade is a fact about the *referring* model, and this
-		// union's members disagree. `clusters` is declared as a GenericRelation on dcim.Region
-		// and dcim.SiteGroup only -- not on dcim.Site or dcim.Location
-		// (docs/netbox-schema.md) -- so deleting a site does not take its clusters, while
-		// deleting a region does.
+		// parent, and every one of its four members cascades -- by two different mechanisms,
+		// which is the whole reason the cascade is stated per member (#214). `clusters` is a
+		// GenericRelation on dcim.Region and dcim.SiteGroup, and dcim.CachedScopeMixin's
+		// `_site` and `_location` are `on_delete=CASCADE`, so deleting the NetBoxSite or
+		// NetBoxLocation a cluster is scoped to takes the cluster with it through the cached
+		// column that has no GenericRelation (docs/netbox-schema.md).
 		//
-		// One flag cannot say both, and an owner reference correct for half the scopes is worse
-		// than none: a Site-scoped cluster would promise a cascade the server never performs.
-		// So this Kind gets no containment parent until the Descriptor can express cascade per
-		// union member.
+		// This Kind had no containment parent when it landed (#210), on the reading that the
+		// missing `clusters GenericRelation` on dcim.Site meant no cascade from a site. It
+		// meant the opposite: the GenericRelations exist on dcim.Region and dcim.SiteGroup
+		// *because* `_region` and `_site_group` are SET_NULL, and are not needed on the two
+		// targets whose cached column is CASCADE. Without the owner reference, deleting a site
+		// left the NetBoxCluster CR behind and the engine recreated in NetBox the cluster
+		// NetBox had just deleted.
+		//
+		// Exactly one, because Kubernetes garbage collection waits for *every* owner: adding
+		// `typeRef` or `groupRef` would turn "delete the site and the cluster goes" into
+		// "delete all three", and NetBox's PROTECT on both would refuse the delete anyway.
+		ContainmentRef: "scope",
 	}
 }

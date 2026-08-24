@@ -11,16 +11,19 @@ func init() { MustRegister(ipamPrefixDescriptor()) }
 
 // ipamPrefixDescriptor is ipam.Prefix as data.
 //
-// prefixScopeFK is the scope union as ipam.Prefix carries it: cascading, because all four
-// scope targets -- dcim.Region, dcim.SiteGroup, dcim.Site and dcim.Location -- declare a
-// `prefixes` GenericRelation, so deleting any of them deletes the prefixes scoped to it
-// (docs/netbox-schema.md). ScopeFK leaves the flag to the caller because that is not true of
-// every scoped kind: `clusters` and `wireless_lans` are declared on only two of the four.
+// prefixScopeFK is the scope union as ipam.Prefix carries it, cascading from every member --
+// stated per member, because that is where the fact lives and the mechanism behind it is not
+// the same for all four (#214).
+//
+// All four of dcim.Region, dcim.SiteGroup, dcim.Site and dcim.Location declare a `prefixes`
+// GenericRelation, so deleting any of them deletes the prefixes scoped to it; and this model
+// mixes in dcim.CachedScopeMixin, whose `_site` and `_location` are `on_delete=CASCADE`, so
+// the site and location halves cascade twice over (docs/netbox-schema.md). ScopeFK leaves the
+// table to the caller because it is a fact about ipam.Prefix rather than about the scope: a
+// referring model with no GenericRelation on dcim.Region cascades from a site through `_site`
+// and not from a region, since `_region` is SET_NULL.
 func prefixScopeFK() GenericFKSpec {
-	scope := ScopeFK("scope")
-	scope.CascadeOnDelete = true
-
-	return scope
+	return ScopeFK("scope", ScopeCascadesFromEvery())
 }
 
 // The first scoped kind, and the reason registry.ScopeFK exists: one line declares the

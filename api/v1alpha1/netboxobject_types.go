@@ -272,6 +272,12 @@ const (
 	//     immediately rather than never.
 	//   - The parent was written as a `slug`, a `lookup` or a raw `id`, so it names a NetBox
 	//     row and there is no CR for an owner reference to point at.
+	//   - The parent is a member of a polymorphic union that NetBox does not cascade from,
+	//     while a sibling member does: the cascade of a generic FK is declared per target
+	//     model, so a Kind can be deleted with one of its legal scopes and not with another
+	//     (#214). The owner reference is decided from the member the object actually
+	//     resolved through, so the same manifest with a different member of the same union
+	//     cascades.
 	ReasonCascadeUnavailable = "CascadeUnavailable"
 
 	// ReasonParentOwnershipDisabled is on ParentOwned: the object carries

@@ -237,13 +237,13 @@ func TestVLANGroupCarriesTheScopePairWithoutTheCaches(t *testing.T) {
 
 	// The union itself is not restated: the members and the four permitted object types still
 	// come from ScopeFK, so this asserts sameness rather than re-listing them.
-	shared := ScopeFK("scope")
+	// Stated for the same reason the descriptor states it, and per member for the same reason
+	// (#214): all four scope targets declare a `vlan_groups` GenericRelation, so the scope
+	// genuinely cascades from every one of them -- and here the GenericRelation is the whole
+	// of the cascade, since this model carries no cached scope columns. ScopeFK cannot default
+	// the table, because a union's cascade is a fact about the referring model.
+	shared := ScopeFK("scope", ScopeCascadesFromEvery())
 	shared.Cached = nil
-	// Set for the same reason the descriptor sets it: all four scope targets declare a
-	// `vlan_groups` GenericRelation, so the scope genuinely cascades. ScopeFK cannot default
-	// it, because a union's cascade is a fact about the referring model -- `clusters` exists
-	// on only two of the four targets.
-	shared.CascadeOnDelete = true
 
 	if !reflect.DeepEqual(pair, shared) {
 		t.Errorf("scope pair = %+v, want registry.ScopeFK(\"scope\") with Cached cleared: %+v", pair, shared)
