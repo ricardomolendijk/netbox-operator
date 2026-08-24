@@ -16,12 +16,12 @@
 package resolver
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -168,11 +168,39 @@ type Blocker struct {
 	Err error
 }
 
+// FieldRefs are the resolved references of one spec field, in the order the spec listed
+// them: exactly one for a to-one field, and one per element for a to-many.
+//
+// It is in Resolution.ByField only when *every* element resolved, and that is the whole of
+// NBO-088's partial-list rule made structural: there is no representation for three of five
+// tags, so no caller can write one. Writing three would look like success while being a
+// deletion -- NetBox's M2M write replaces the list rather than adding to it.
+type FieldRefs []Result
+
+// IDs are the NetBox ids to write, sorted and deduplicated.
+//
+// Sorted because NetBox does not preserve M2M order and netbox.Drift compares these as a
+// set (docs/concepts/drift.md rule 3), so the order the spec listed them in is not data.
+// Rendering it into the payload anyway would make two specs that mean the same thing
+// produce two different create bodies and two different log lines, and invite a reader to
+// believe an order the comparison then ignores. Deduplicated because two references to the
+// same object are one member of a set, which is what NetBox stores either way.
+func (f FieldRefs) IDs() []int64 {
+	ids := make([]int64, 0, len(f))
+	for _, result := range f {
+		ids = append(ids, result.ID)
+	}
+
+	slices.Sort(ids)
+
+	return slices.Compact(ids)
+}
+
 // Resolution is the outcome of resolving every reference on one object.
 type Resolution struct {
 	// ByField holds what resolved, keyed by CR spec field name -- the spelling the user
 	// wrote, not the NetBox column.
-	ByField map[string]Result
+	ByField map[string]FieldRefs
 
 	// Blocked holds what did not, in descriptor order, so the message a human reads is
 	// stable between passes.
@@ -236,7 +264,7 @@ func (r *Resolver) ResolveAll(ctx context.Context, nb LookupClient, obj client.O
 		return Resolution{}, err
 	}
 
-	resolution := Resolution{ByField: make(map[string]Result, len(refs))}
+	resolution := Resolution{ByField: make(map[string]FieldRefs, len(refs))}
 	referrer := types.NamespacedName{Namespace: obj.GetNamespace(), Name: obj.GetName()}
 
 	pass := r.forPass()
@@ -250,23 +278,62 @@ func (r *Resolver) ResolveAll(ctx context.Context, nb LookupClient, obj client.O
 	}
 
 	for _, declared := range refs {
-		result, err := pass.Resolve(ctx, Request{
-			NetBox: nb, Referrer: referrer, ReferrerGVK: d.GVK,
-			Field: declared.field, Ref: declared.ref,
+		resolved, blocked, err := pass.resolveField(ctx, nb, referrer, d.GVK, declared)
+		if err != nil {
+			return Resolution{}, err
+		}
+
+		if len(blocked) > 0 {
+			resolution.Blocked = append(resolution.Blocked, blocked...)
+
+			continue
+		}
+
+		resolution.ByField[declared.field.Spec] = resolved
+	}
+
+	return resolution, nil
+}
+
+// resolveField resolves every reference one spec field carries, and reports the field as
+// resolved only when all of them are.
+//
+// All or nothing, which is NBO-088's rule for a partially resolvable list: a `tags` field
+// where three of five resolve contributes nothing to the payload and names the two that did
+// not. Writing the three is worse than writing none, because NetBox's M2M write is a full
+// replacement -- a short list deletes whatever it leaves out -- and the object would then
+// report a successful write of a value nobody asked for.
+//
+// One Blocker per unresolved element rather than one per field. Each element has its own
+// mode, its own target and therefore its own retry policy -- a missing CR is woken by an
+// event and a missing NetBox slug by nothing but a timer -- and Resolution already folds a
+// set of blockers into one reason, one message naming all of them, and the soonest retry.
+func (r *Resolver) resolveField(
+	ctx context.Context, nb LookupClient, referrer types.NamespacedName,
+	referrerGVK schema.GroupVersionKind, declared fieldRefs,
+) (FieldRefs, []Blocker, error) {
+	resolved := make(FieldRefs, 0, len(declared.refs))
+
+	var blocked []Blocker
+
+	for _, element := range declared.elements() {
+		result, err := r.Resolve(ctx, Request{
+			NetBox: nb, Referrer: referrer, ReferrerGVK: referrerGVK,
+			Field: element.field, Ref: element.ref,
 		})
 
 		var refErr *Error
 		switch {
 		case err == nil:
-			resolution.ByField[declared.field.Spec] = result
+			resolved = append(resolved, result)
 		case errors.As(err, &refErr):
-			resolution.Blocked = append(resolution.Blocked, blockerFor(refErr))
+			blocked = append(blocked, blockerFor(refErr))
 		default:
-			return Resolution{}, err
+			return nil, nil, err
 		}
 	}
 
-	return resolution, nil
+	return resolved, blocked, nil
 }
 
 // forPass is the resolver one resolution pass uses: this one, over one snapshot of the
@@ -541,8 +608,30 @@ func (registryLookup) Get(gvk schema.GroupVersionKind) (registry.Descriptor, boo
 	return registry.Get(gvk)
 }
 
-// declaredRef is one reference the descriptor declares and the object sets.
-type declaredRef struct {
+// fieldRefs are the references one spec field carries: exactly one for a to-one field, and
+// as many as the spec listed for a to-many.
+//
+// Grouped by field rather than flattened, because the field is the unit of the answer. A
+// to-many either resolves entirely or contributes nothing, so the thing that decides has to
+// see the whole field at once -- see resolveField.
+type fieldRefs struct {
+	field registry.Field
+	refs  []netboxv1alpha1.ObjectRef
+}
+
+// elements flattens one field's references into the pairs everything that works a single
+// reference at a time takes: resolution, and the cycle walk's edges.
+func (f fieldRefs) elements() []refElement {
+	out := make([]refElement, 0, len(f.refs))
+	for _, ref := range f.refs {
+		out = append(out, refElement{field: f.field, ref: ref})
+	}
+
+	return out
+}
+
+// refElement is one reference written under one field.
+type refElement struct {
 	field registry.Field
 	ref   netboxv1alpha1.ObjectRef
 }
@@ -557,7 +646,7 @@ type declaredRef struct {
 // Generic FKs are deliberately absent. One of those spec fields writes two columns and its
 // legal targets are a union rather than one Kind, which is NBO-019's dispatch and not this
 // one's.
-func refsOf(obj client.Object, d registry.Descriptor) ([]declaredRef, error) {
+func refsOf(obj client.Object, d registry.Descriptor) ([]fieldRefs, error) {
 	encoded, err := json.Marshal(obj)
 	if err != nil {
 		return nil, fmt.Errorf("encoding %s/%s: %w", obj.GetNamespace(), obj.GetName(), err)
@@ -570,41 +659,56 @@ func refsOf(obj client.Object, d registry.Descriptor) ([]declaredRef, error) {
 		return nil, fmt.Errorf("decoding the spec of %s/%s: %w", obj.GetNamespace(), obj.GetName(), err)
 	}
 
-	refs := make([]declaredRef, 0, len(d.Fields))
+	refs := make([]fieldRefs, 0, len(d.Fields))
 
 	for _, field := range d.Fields {
 		raw, set := decoded.Spec[field.Spec]
-		if !field.Ref || !set || string(raw) == "null" {
+		if !field.Class.Ref() || !set || string(raw) == "null" {
 			continue
 		}
 
-		// A to-many reference -- `tags`, ipam.VRF's `import_targets` -- is a list of
-		// references written as a list of ids, and neither ObjectRef nor Field says how many
-		// a field takes. Skipped rather than decoded as one reference and got wrong: the
-		// caller reports what it declared and did not get back, so the field is left out of
-		// the payload and said so, which is the honest answer until the M7 generator emits
-		// the cardinality (NBO-041).
-		if isList(raw) {
-			continue
-		}
-
-		var ref netboxv1alpha1.ObjectRef
-		if err := json.Unmarshal(raw, &ref); err != nil {
+		written, err := refsIn(field, raw)
+		if err != nil {
 			return nil, fmt.Errorf("decoding %s of %s/%s: %w", field.Spec, obj.GetNamespace(), obj.GetName(), err)
 		}
 
-		refs = append(refs, declaredRef{field: field, ref: ref})
+		refs = append(refs, fieldRefs{field: field, refs: written})
 	}
 
 	return refs, nil
 }
 
-// isList reports whether a spec value is a JSON array, which is how a to-many reference
-// arrives.
-func isList(raw json.RawMessage) bool {
-	trimmed := bytes.TrimSpace(raw)
+// refsIn decodes one field's value into the references it carries, in the shape its class
+// says the field takes.
+//
+// The class decides and the value is not sniffed for its shape. A to-many field holding an
+// object, or a to-one field holding a list, means the descriptor and the CRD disagree about
+// that field -- unreachable through the API server, which types the field from the same
+// declaration -- and it is refused rather than coerced. Coercion is what the previous
+// behaviour amounted to: a list was skipped, so a declared to-many reference was dropped
+// and reported NotImplemented, which is why no to-many reference in the catalogue could be
+// implemented at all (NBO-088).
+//
+// An empty list is not a missing value. `[]` resolves to no ids and is written as an empty
+// list, because it is a user saying this object has no route targets -- which is a different
+// statement from saying nothing about them, and that one is an absent field that never
+// reaches here.
+func refsIn(field registry.Field, raw json.RawMessage) ([]netboxv1alpha1.ObjectRef, error) {
+	if field.Class.ToMany() {
+		var list []netboxv1alpha1.ObjectRef
+		if err := json.Unmarshal(raw, &list); err != nil {
+			return nil, fmt.Errorf("as a list of references: %w", err)
+		}
 
-	return len(trimmed) > 0 && trimmed[0] == '['
+		return list, nil
+	}
+
+	var one netboxv1alpha1.ObjectRef
+	if err := json.Unmarshal(raw, &one); err != nil {
+		return nil, fmt.Errorf("as one reference: %w", err)
+	}
+
+	return []netboxv1alpha1.ObjectRef{one}, nil
 }
 
 // modeOf reports which of the four shapes a reference was written in, and the empty Mode

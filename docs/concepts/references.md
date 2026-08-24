@@ -101,6 +101,63 @@ different NetBox, and the operator does not currently compare the two. Until it 
 (`ErrRefEndpointMismatch`, which arrives with the endpoint work), point references at
 namespaces that use the same NetBox.
 
+## To-one and to-many
+
+A reference field holds either **one** object or a **list** of them, and which it is comes
+from its `Field.Class` in the kind's [`Descriptor`](descriptor.md#field-classes) — `RefOne`
+or `RefMany`. Cardinality is a per-kind fact, not something guessed from the value: a
+`RefOne` field holding a JSON array, or a `RefMany` field holding a single object, means the
+descriptor and the CRD disagree, and it is refused rather than coerced.
+
+```yaml
+spec:
+  tenantRef:                 # RefOne  -> tenant: 4
+    name: acme
+  importTargets:             # RefMany -> import_targets: [5, 7]
+    - name: rt-65000-5
+    - name: rt-65000-7
+```
+
+Each element resolves on its own, in any of the four modes, and each is authorised on its own
+if it crosses a namespace.
+
+### A list resolves whole, or not at all
+
+If three of five elements resolve, **nothing is written for that field**. `RefsResolved` goes
+to `False` and names each element that did not resolve.
+
+This is not conservatism. NetBox's many-to-many write is a **full replacement**, so sending
+the three that resolved deletes the two that did not — and reports a successful write while
+doing it. Writing three of five tags is not a smaller version of the right answer; it is a
+different, wrong answer that looks like success.
+
+Each failed element is reported as its own blocker, with its own reason and its own retry
+interval, because a missing CR and a missing NetBox slug are woken up by different things. The
+condition then carries the first blocker's reason, a message naming every one of them, and the
+soonest of their intervals — exactly as it does for several unresolved fields.
+
+```
+{"type":"RefsResolved","status":"False","reason":"RefNotReady",
+ "message":"importTargets -> netboxroutetarget/team-a/rt-65000-5: not ready (the target has no status.id yet); importTargets -> netboxroutetarget/team-a/rt-65000-9: not found (no such object in the cluster)"}
+```
+
+### An empty list is a value
+
+`importTargets: []` is a statement — this VRF has no route targets — and it is written as an
+empty list. Omitting the field entirely is a different statement: spec omission means "do not
+manage", so the column is left as NetBox has it. The two are deliberately distinct, the same
+way an absent reference and a present-but-empty one are.
+
+### Order is not data
+
+The ids are written **sorted and deduplicated**. NetBox does not preserve many-to-many order
+and [drift detection](drift.md) compares the field as a set, so the order the spec listed the
+elements in carries no information. Sending them in spec order would advertise an ordering
+nothing downstream honours, and make two specs that mean the same thing produce two different
+create bodies.
+
+Two references to the same object are one member of a set, which is what NetBox stores either
+way.
 ## Ordering and convergence
 
 **Apply order does not matter.** A manifest applied backwards converges as fast as one
@@ -286,10 +343,13 @@ question a `kubectl wait` is asking.
 Two more reasons appear on `RefsResolved` and are not resolution failures at all:
 `AllResolved`, and `NotImplemented` for a reference this build cannot dispatch on — a
 [generic foreign key](descriptor.md), whose target is a union of Kinds
-([NBO-019](https://github.com/ricardomolendijk/netbox-operator/issues/31)), or a **to-many**
-reference such as `tags`, since neither `ObjectRef` nor `Field` carries a cardinality. Both
-are left out of the payload and reported, which keeps the object off `Ready` rather than
-writing one id where a list belongs.
+([NBO-019](https://github.com/ricardomolendijk/netbox-operator/issues/31)). It is left out of
+the payload and reported, which keeps the object off `Ready` rather than writing a value the
+operator guessed at.
+
+A **to-many** reference is no longer among them. `tags`, `ipam.VRF.import_targets`,
+`dcim.Site.asns` and `dcim.Interface.wireless_lans` resolve element by element — see
+[to-one and to-many](#to-one-and-to-many).
 
 When several references are unresolved, the condition carries the **first** blocker's
 reason — a reason is a single value tooling keys on — and a message naming every one of
@@ -593,11 +653,18 @@ test — if the two disagree, that test fails.
 ## How the descriptor sees a reference
 
 Per-kind facts are data, so a reference is a `Field` in the kind's
-[`Descriptor`](descriptor.md) with `Ref: true` and a `Target`:
+[`Descriptor`](descriptor.md) with a reference `Class` and a `Target`:
 
 ```go
-{Spec: "parentRef", API: "parent", Ref: true, Target: v1alpha1.RegionRef{}.TargetGVK()},
+{Spec: "parentRef",     API: "parent",         Class: registry.ClassRefOne,  Target: v1alpha1.RegionRef{}.TargetGVK()},
+{Spec: "importTargets", API: "import_targets", Class: registry.ClassRefMany, Target: v1alpha1.RouteTargetRef{}.TargetGVK()},
 ```
+
+The class carries the cardinality, and it carries it *once*: the same declaration is what
+[drift detection](drift.md) reads to compare the field as an order-independent id set. Before
+[NBO-088](https://github.com/ricardomolendijk/netbox-operator/issues/141) those were two
+declarations — a `Ref: true` bool and an entry in a separate `M2M` list — which could disagree
+with each other, and did not add up to a cardinality the resolver could dispatch on.
 
 `Target` is written as the alias's own answer rather than as a fresh GVK literal, so the
 alias stays the single source of truth for what it points at.
@@ -607,11 +674,16 @@ emitted by the generator, printed in a diff or linted — and none is needed, be
 engine already reads a spec through its JSON representation rather than through per-kind
 accessors. The target Kind is the only per-kind fact a resolver needs.
 
-A `Target` on a field that is not a `Ref` is rejected at manager start
-(`ErrTargetNotRef`): it is almost always a forgotten `Ref: true`, and left alone it
-produces a field the resolver ignores and the engine writes to NetBox verbatim.
+A `Target` on a field whose class is not a reference is rejected at manager start
+(`ErrTargetNotRef`): it is almost always a class left at `Value`, and left alone it produces a
+field the resolver ignores and the engine writes to NetBox verbatim.
 
-The converse — a `Ref` with no `Target` — is still not rejected at start, because a typed
+A to-many reference in a natural key (`ErrToManyNaturalKey`) or as the `ContainmentRef`
+(`ErrContainmentToMany`) is rejected too. Both are places where exactly one object is
+required, and both fail *silently* if allowed through — a candidate reading a list is never
+applicable, so the object waits forever for an identity it cannot build.
+
+The converse — a reference with no `Target` — is still not rejected at start, because a typed
 alias exists for five Kinds and a descriptor may legitimately declare a reference to a Kind
 that has none yet. The resolver reports such a field as `RefKindUnavailable`, with a message
 that says the descriptor names no target rather than blaming the manifest, and the object

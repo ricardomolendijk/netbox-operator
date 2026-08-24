@@ -6,14 +6,18 @@ adding a kind is three new files and zero edits to shared code.
 
 ```go
 registry.MustRegister(registry.Descriptor{
-    GVK:             schema.GroupVersionKind{Group: "netbox.kubeforge.org", Version: "v1alpha1", Kind: "NetBoxTag"},
-    Endpoint:        "extras/tags",
-    ObjectType:      "extras.tag",
-    Scope:           apiextensionsv1.NamespaceScoped,
-    NaturalKeys:     []registry.NaturalKey{{Fields: []registry.KeyField{{Filter: "slug", Spec: "slug"}}}},
-    UpdateStrategy:  registry.UpdatePatch,
-    ReadOnly:        []string{"created", "last_updated", "url", "display"},
-    ObjectTypeLists: []string{"object_types"},
+    GVK:        schema.GroupVersionKind{Group: "netbox.kubeforge.org", Version: "v1alpha1", Kind: "NetBoxTag"},
+    Endpoint:   "extras/tags",
+    ObjectType: "extras.tag",
+    Scope:      apiextensionsv1.NamespaceScoped,
+    Fields: []registry.Field{
+        {Spec: "name", API: "name"},
+        {Spec: "slug", API: "slug"},
+        {Spec: "objectTypes", API: "object_types", Class: registry.ClassObjectTypeList},
+    },
+    NaturalKeys:    []registry.NaturalKey{{Fields: []registry.KeyField{{Filter: "slug", Spec: "slug"}}}},
+    UpdateStrategy: registry.UpdatePatch,
+    ReadOnly:       []string{"created", "last_updated", "url", "display"},
 })
 ```
 
@@ -50,8 +54,7 @@ golden output contains no `{{if eq .Model "…"}}`.
 | `RecreateOn` | `[]string` | API fields whose change forces delete-then-create. | `["a_terminations", "b_terminations"]` |
 | `Deferred` | `[]DeferredField` | Fields kept out of the create payload and applied by a follow-up PATCH. | `{APIField: "primary_ip4", Mode: "Always"}` |
 | `ReadOnly` | `[]string` | Fields the operator must never write. | `["_depth", "_children", "created", "last_updated", "url", "display"]` |
-| `M2M` | `[]string` | Many-to-many fields written as a list of NetBox object IDs. | `["import_targets", "export_targets"]` |
-| `ObjectTypeLists` | `[]string` | Many-to-many fields onto `contenttypes.ContentType`, written as `app_label.model` strings. | `["object_types"]` |
+| `Fields` | `[]Field` | The spec-to-API map, and the field classes. See [field classes](#field-classes). | `{Spec: "importTargets", API: "import_targets", Class: RefMany, Target: …}` |
 | `GenericFKs` | `[]GenericFKSpec` | The polymorphic `*_type` / `*_id` column pairs on this kind. | `{scope_type, scope_id, [dcim.region dcim.sitegroup dcim.site dcim.location]}` |
 | `ContainmentRef` | `string` | The one spec ref whose target gets a non-controller owner reference. Empty for catalogue kinds. | `siteRef` |
 
@@ -303,31 +306,69 @@ owner reference the CR outlives the object it described and the engine's create-
 step resurrects data NetBox deliberately deleted. The general rule is *server-side cascade
 implies an owner reference*.
 
-## `ObjectTypeLists` versus `M2M`
+## Field classes
 
-Both are many-to-many fields. They are separate field classes because their values are
-different kinds of thing.
+Every entry in `Fields` carries a **class**, and the class is the single declaration of two
+things that are really one fact: **how many** objects the field holds, and **how** its value
+is compared.
 
-| | `M2M` | `ObjectTypeLists` |
-|---|---|---|
-| Target | a NetBox model | `contenttypes.ContentType` |
-| Written as | a list of NetBox object IDs — `[1, 2]` | a list of `app_label.model` strings — `["dcim.device"]` |
-| Resolved from | refs to sibling CRs | nothing; the strings are the value |
-| Compared | as an ID set, order-independent | as a string set, order-independent |
+| `Class` | Spec shape | Written as | Resolved from | Compared |
+|---|---|---|---|---|
+| `Value` (zero) | a scalar | the value | — | scalar, with NetBox's normalisations |
+| `RefOne` | one `ObjectRef` | one NetBox id | the target CR or NetBox | scalar |
+| `RefMany` | a list of `ObjectRef` | a list of NetBox ids — `[1, 2]` | one resolution per element | ID set, order-independent |
+| `ObjectTypeList` | a list of strings | the same strings — `["dcim.device"]` | nothing; the strings *are* the value | string set, order-independent |
+| `Array` | a list of scalars | the same list — `[80, 443]` | — | order-**sensitive** |
 
-`extras.Tag.object_types` is the first `ObjectTypeList`: a `ManyToManyField` onto
-`contenttypes.ContentType` (`docs/netbox-schema.md` → `extras.Tag`) whose API values are
-`app_label.model` strings. `ipam.VRF.import_targets` and `export_targets` are ordinary
-`M2M`: `ManyToManyField` onto `ipam.RouteTarget` (`docs/netbox-schema.md` → `ipam.VRF`),
-written as route-target IDs.
+`Value` is the zero value, so a plain column stays a spec name and an API name.
 
-Without the distinction, a resolver told to resolve `object_types` goes looking for a CR
-named `dcim.device` — a CR that cannot exist, because a content type is not a NetBox object
-this operator manages. `NetBoxTag` would then be hand-written forever, and it is supposed to
-be the kind that validates the pattern for everything after it.
+The comparison sets `netbox.Drift` needs are **derived** from these classes —
+`Descriptor.M2MFields()`, `ObjectTypeListFields()`, `ArrayFields()` — rather than declared
+beside the field map. That is not tidying. Before
+[NBO-088](https://github.com/ricardomolendijk/netbox-operator/issues/141) a reference was a
+bool, `Ref: true`, which said *that* a field was a reference and nothing about how many; a
+separate `M2M` list said how the same field's *value* compared. So a to-many reference was
+described twice, by two declarations that could disagree, and nothing joined them. The
+resolver, having no cardinality to dispatch on, skipped every JSON array and the engine
+reported it `NotImplemented` — which meant no to-many reference in the catalogue was
+implementable at all, `tags` and `ipam.VRF.import_targets` included.
 
-`Validate` rejects a field declared in both lists. The comparison rules for each are rules 3
-and 5 in [drift detection](drift.md).
+One class per field makes that contradiction unrepresentable rather than merely checked.
+
+### `RefMany` versus `ObjectTypeList` versus `Array`
+
+All three arrive as JSON lists and none of them can share a class.
+
+`extras.Tag.object_types` is a `ManyToManyField` onto `contenttypes.ContentType`
+(`docs/netbox-schema.md` → `extras.Tag`), so its API values are `app_label.model` strings
+rather than object ids. A resolver told to resolve one goes looking for a CR named
+`dcim.device` — a CR that cannot exist, because a content type is not a NetBox object this
+operator manages.
+
+`ipam.VRF.import_targets` and `export_targets` are `RefMany`: `ManyToManyField` onto
+`ipam.RouteTarget` (`docs/netbox-schema.md` → `ipam.VRF`), written as route-target ids and
+resolved one element at a time.
+
+`ipam.VLANGroup.vid_ranges` and `ipam.Service.ports` are `Array`s — Postgres `ArrayField`s
+whose order is data. Comparing an array order-independently misses a reordering the user
+asked for; comparing an M2M order-sensitively PATCHes forever, because NetBox does not
+preserve M2M order. The comparison rules are rules 3, 5 and 8 in
+[drift detection](drift.md).
+
+### A to-many reference resolves whole or not at all
+
+Resolution is keyed by field, and a field appears in the result **only when every element
+resolved**. Three of five tags is not a smaller version of the right answer: NetBox's M2M
+write replaces the list rather than adding to it, so writing the three that resolved deletes
+the two that did not — and reports a successful write while doing it.
+
+So a partially resolvable list contributes nothing to the payload, and each element that
+failed is reported as its own blocker, with its own reason and its own retry interval. See
+[references](references.md#what-happens-when-it-does-not-resolve).
+
+The ids are written **sorted and deduplicated**. NetBox does not preserve M2M order and
+`Drift` compares the field as a set, so the order the spec listed them in is not data —
+carrying it into the payload would advertise an ordering that nothing downstream honours.
 
 ## Deferral, and the identity guard
 
@@ -378,10 +419,24 @@ by matching a message.
 | `ErrUnknownDeferMode` | a `Mode` other than `Always` or `IfUnresolved` |
 | `ErrUnknownUpdateStrategy` | an `UpdateStrategy` other than `Patch` or `Recreate`, the empty string included |
 | `ErrRecreateOnWithoutRecreate` | `RecreateOn` set on a kind whose strategy is `Patch` |
-| `ErrFieldClassConflict` | a field in both `M2M` and `ObjectTypeLists` |
-| `ErrEmptyField` | an empty string in `ReadOnly`, `M2M`, `ObjectTypeLists` or `RecreateOn`, or a `Deferred` entry with no `APIField` |
+| `ErrUnknownFieldClass` | a `Field.Class` other than `Value`, `RefOne`, `RefMany`, `ObjectTypeList` or `Array` |
+| `ErrTargetNotRef` | a `Target` on a field whose class is not `RefOne` or `RefMany` |
+| `ErrToManyNaturalKey` | a natural-key candidate that matches on, or pins to null, a `RefMany` field |
+| `ErrContainmentToMany` | a `ContainmentRef` naming a `RefMany` field |
+| `ErrEmptyField` | an empty string in `ReadOnly` or `RecreateOn`, or a `Deferred` entry with no `APIField` |
 | `ErrInvalidGenericFK` | a `GenericFKSpec` missing its `TypeField`, its `IDField`, or its `AllowedTypes` |
 | `ErrDuplicateGVK` | the same GVK registered twice; the first registration wins, and `Registry.Validate` reports the collision as well |
+
+There is no check that a field is to-many for resolution and scalar for comparison, because
+one class decides both — the two cannot disagree. What remains checkable is a to-many
+reference used somewhere exactly one object is required, and both of those fail *quietly*
+rather than loudly, which is why they are boot checks:
+
+- A natural-key filter carries one value. A to-many field renders none, so the candidate is
+  never applicable and the object waits forever for an identity that cannot be built.
+- A containment parent is one object, because Kubernetes garbage collection waits for every
+  owner reference ([ADR-0003](../decisions/0003-ownership-and-references.md) rule 4). A list
+  of parents turns "delete the site" into "delete any one of them".
 
 ### The one thing it deliberately permits
 

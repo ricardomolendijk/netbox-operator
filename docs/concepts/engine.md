@@ -101,18 +101,24 @@ question -- it is already ours.
 ## Spec field names and NetBox field names
 
 `KeyField.Spec` and `ContainmentRef` are **CR spec** names (`vrfRef`, `primaryIP4Ref`).
-`Deferred`, `ReadOnly`, `M2M`, `ObjectTypeLists` and `RecreateOn` are **NetBox API** names
-(`vrf`, `primary_ip4`). Something has to bridge them, and that something is
-`Descriptor.Fields`: an explicit `{Spec, API, Ref}` table per kind.
+`Deferred`, `ReadOnly` and `RecreateOn` are **NetBox API** names (`vrf`, `primary_ip4`).
+Something has to bridge them, and that something is `Descriptor.Fields`: an explicit
+`{Spec, API, Class}` table per kind.
 
 ```go
 Fields: []registry.Field{
     {Spec: "name", API: "name"},
-    {Spec: "objectTypes", API: "object_types"},
-    {Spec: "siteRef", API: "site", Ref: true},
-    {Spec: "primaryIP4Ref", API: "primary_ip4", Ref: true},
+    {Spec: "objectTypes", API: "object_types", Class: registry.ClassObjectTypeList},
+    {Spec: "siteRef", API: "site", Class: registry.ClassRefOne},
+    {Spec: "primaryIP4Ref", API: "primary_ip4", Class: registry.ClassRefOne},
+    {Spec: "importTargets", API: "import_targets", Class: registry.ClassRefMany},
 },
 ```
+
+`Class` is what the field *is* — a value, one reference, a list of references, a list of
+content types, or an ordered array — and it is the only declaration of both the field's
+cardinality and how its value is compared. The comparison sets `Drift` needs are derived
+from it; see [field classes](descriptor.md#field-classes).
 
 The alternative was a convention owned by the payload builder: strip `Ref`, then camelCase
 to snake_case. It is smaller, and it is wrong exactly where being wrong is expensive.
@@ -168,9 +174,10 @@ reach `Ready`; see [references](references.md).
 `netbox.Drift` and `netbox.Changes` do the comparing — see [drift](drift.md) for the eight
 shapes NetBox returns that naive comparison gets wrong. The engine's part is:
 
-- The `FieldRules` handed to `Drift` are built from the Descriptor's `M2M`,
-  `ObjectTypeLists`, `Arrays` and `GenericFKs`. A field class the Descriptor cannot express
-  is a comparison that never converges, which is a PATCH loop rather than an error.
+- The `FieldRules` handed to `Drift` are derived from the classes on `Descriptor.Fields`
+  (`M2MFields()`, `ObjectTypeListFields()`, `ArrayFields()`) plus `GenericFKs`. A field class
+  the Descriptor cannot express is a comparison that never converges, which is a PATCH loop
+  rather than an error.
 - The PATCH body and the `Updated` Event are built from the same change set, so they cannot
   disagree about which fields were sent. The Event renders `field: old → new`; a foreign key
   is shown as the id it points at and a choice field as its value, because an Event message

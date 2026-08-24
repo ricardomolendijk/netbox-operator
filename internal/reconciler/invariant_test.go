@@ -171,7 +171,7 @@ func fillSpec(t *testing.T, obj Object, d registry.Descriptor) {
 	}
 
 	for _, field := range d.Fields {
-		if field.Ref {
+		if field.Class.Ref() {
 			continue
 		}
 

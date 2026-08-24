@@ -33,24 +33,40 @@ var (
 	regionGVK = netboxv1alpha1.RegionRef{}.TargetGVK()
 	siteGVK   = netboxv1alpha1.SiteRef{}.TargetGVK()
 	tenantGVK = netboxv1alpha1.TenantRef{}.TargetGVK()
+
+	// routeTargetGVK is what the to-many reference points at. It has no typed alias, because
+	// ipam.RouteTarget is an M3 kind (NBO-022) -- which is also the ordinary shape for a
+	// reference declared before its target's alias exists.
+	routeTargetGVK = netboxv1alpha1.GroupVersion.WithKind("NetBoxRouteTarget")
 )
 
 // regionField is a reference to a NetBoxRegion, written the way a Descriptor writes one.
 func regionField() registry.Field {
-	return registry.Field{Spec: "regionRef", API: "region", Ref: true, Target: regionGVK}
+	return registry.Field{Spec: "regionRef", API: "region", Class: registry.ClassRefOne, Target: regionGVK}
 }
 
 // tenantField is a reference to a Kind that has no descriptor in these tests, which is the
 // shape of every ref declared before its target Kind exists.
 func tenantField() registry.Field {
-	return registry.Field{Spec: "tenantRef", API: "tenant", Ref: true, Target: tenantGVK}
+	return registry.Field{Spec: "tenantRef", API: "tenant", Class: registry.ClassRefOne, Target: tenantGVK}
 }
 
-// kinds is the descriptor source: the two Kinds the resolver can dispatch on.
+// importTargetsField is the to-many reference NBO-088 was filed for. ipam.VRF's
+// `import_targets` is a ManyToManyField onto ipam.RouteTarget (docs/netbox-schema.md ->
+// ipam.VRF), so it arrives as a JSON list and resolves to a list of ids.
+func importTargetsField() registry.Field {
+	return registry.Field{
+		Spec: "importTargets", API: "import_targets",
+		Class: registry.ClassRefMany, Target: routeTargetGVK,
+	}
+}
+
+// kinds is the descriptor source: the Kinds the resolver can dispatch on.
 func kinds() fakeDescriptors {
 	return fakeDescriptors{byGVK: map[schema.GroupVersionKind]registry.Descriptor{
-		regionGVK: {GVK: regionGVK, Endpoint: "dcim/regions", ObjectType: "dcim.region"},
-		siteGVK:   {GVK: siteGVK, Endpoint: "dcim/sites", ObjectType: "dcim.site"},
+		regionGVK:      {GVK: regionGVK, Endpoint: "dcim/regions", ObjectType: "dcim.region"},
+		siteGVK:        {GVK: siteGVK, Endpoint: "dcim/sites", ObjectType: "dcim.site"},
+		routeTargetGVK: {GVK: routeTargetGVK, Endpoint: "ipam/route-targets", ObjectType: "ipam.routetarget"},
 	}}
 }
 
@@ -225,8 +241,8 @@ func referrer(name string, refs map[string]any) *unstructured.Unstructured {
 	return obj
 }
 
-// siteDescriptor is a referrer's descriptor: two references, one of them to a Kind that does
-// not exist yet, plus a scalar that must be left alone.
+// siteDescriptor is a referrer's descriptor: a to-one reference, a to-one reference to a Kind
+// that does not exist yet, a to-many reference, plus a scalar that must be left alone.
 func siteDescriptor() registry.Descriptor {
 	return registry.Descriptor{
 		GVK: siteGVK, Endpoint: "dcim/sites", ObjectType: "dcim.site",
@@ -234,8 +250,27 @@ func siteDescriptor() registry.Descriptor {
 			{Spec: "name", API: "name"},
 			regionField(),
 			tenantField(),
+			importTargetsField(),
 		},
 	}
+}
+
+// routeTarget is one NetBoxRouteTarget the to-many reference can point at.
+func routeTarget(name string, id int64) target {
+	return target{
+		gvk: routeTargetGVK, namespace: "team-a", name: name, id: id,
+		ready: metav1.ConditionTrue, reason: netboxv1alpha1.ReasonSynced,
+	}
+}
+
+// refList renders a to-many reference the way a spec carries one: a JSON array of ObjectRefs.
+func refList(names ...string) []any {
+	out := make([]any, 0, len(names))
+	for _, name := range names {
+		out = append(out, map[string]any{"name": name})
+	}
+
+	return out
 }
 
 // The four shapes of a reference, so a table row reads as the one thing it is testing.

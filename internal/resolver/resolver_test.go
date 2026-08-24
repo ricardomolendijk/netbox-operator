@@ -154,7 +154,7 @@ func TestResolve(t *testing.T) {
 			// The one cycle a single resolution can see. Reporting it as "not ready" would
 			// leave the object waiting for itself forever; longer cycles are NBO-016.
 			name:        "a reference to the referring object is a cycle",
-			field:       registry.Field{Spec: "parentRef", API: "parent", Ref: true, Target: regionGVK},
+			field:       registry.Field{Spec: "parentRef", API: "parent", Class: registry.ClassRefOne, Target: regionGVK},
 			ref:         netboxv1alpha1.ObjectRef{Name: "emea"},
 			referrer:    types.NamespacedName{Namespace: "team-a", Name: "emea"},
 			referrerGVK: regionGVK,
@@ -184,7 +184,7 @@ func TestResolve(t *testing.T) {
 		},
 		{
 			name:        "a reference with no target kind is unavailable",
-			field:       registry.Field{Spec: "regionRef", API: "region", Ref: true},
+			field:       registry.Field{Spec: "regionRef", API: "region", Class: registry.ClassRefOne},
 			ref:         netboxv1alpha1.ObjectRef{Name: "emea"},
 			referrer:    types.NamespacedName{Namespace: "team-a", Name: "ams"},
 			wantCause:   ErrRefKindUnavailable,
@@ -416,10 +416,10 @@ func TestResolveAll(t *testing.T) {
 		t.Fatalf("ResolveAll() = %v, want no error: an unresolved reference is a state", err)
 	}
 
-	want := Result{
+	want := FieldRefs{{
 		ID: 12, ObjectType: "dcim.region", Mode: ModeName,
 		Target: types.NamespacedName{Namespace: "team-a", Name: "emea"},
-	}
+	}}
 	if got := resolution.ByField["regionRef"]; !reflect.DeepEqual(got, want) {
 		t.Errorf("ByField[regionRef] = %+v, want %+v", got, want)
 	}
@@ -452,13 +452,10 @@ func TestResolveAllSkipsWhatTheSpecDoesNotSet(t *testing.T) {
 		"no reference fields at all": {"name": "Amsterdam"},
 		"an explicit null":           {"name": "Amsterdam", "regionRef": nil},
 
-		// A to-many reference. Neither ObjectRef nor Field carries a cardinality, so this is
-		// left alone rather than decoded as one reference: the caller reports it as declared
-		// and not resolved, which keeps the object off Ready instead of writing one id where
-		// a list belongs.
-		"a list of references": {"regionRef": []any{
-			map[string]any{"name": "emea"}, map[string]any{"name": "apac"},
-		}},
+		// An absent to-many field, which is not the same as an empty one. `[]` says this
+		// object has no route targets and is resolved and written; saying nothing about them
+		// is "do not manage" and is not reported at all.
+		"an explicit null to-many": {"name": "Amsterdam", "importTargets": nil},
 	}
 
 	for name, spec := range tests {
@@ -507,7 +504,7 @@ func TestPresentButEmptyRefIsNotAbsent(t *testing.T) {
 func TestResolveAllReportsInDescriptorOrder(t *testing.T) {
 	d := siteDescriptor()
 	d.Fields = append(d.Fields,
-		registry.Field{Spec: "groupRef", API: "group", Ref: true, Target: siteGVK})
+		registry.Field{Spec: "groupRef", API: "group", Class: registry.ClassRefOne, Target: siteGVK})
 
 	obj := referrer("ams", map[string]any{
 		"groupRef":  map[string]any{"name": "west"},
@@ -604,11 +601,11 @@ func TestResolveAllUsesTheRegistryByDefault(t *testing.T) {
 		t.Fatalf("ResolveAll() = %v", err)
 	}
 
-	if got := resolution.ByField["parentRef"].ID; got != 12 {
-		t.Errorf("ByField[parentRef].ID = %d, want 12", got)
+	if got := resolution.ByField["parentRef"].IDs(); len(got) != 1 || got[0] != 12 {
+		t.Errorf("ByField[parentRef].IDs() = %v, want [12]", got)
 	}
 
-	if got := resolution.ByField["parentRef"].ObjectType; got != "dcim.region" {
-		t.Errorf("ByField[parentRef].ObjectType = %q, want dcim.region", got)
+	if got := resolution.ByField["parentRef"][0].ObjectType; got != "dcim.region" {
+		t.Errorf("ByField[parentRef][0].ObjectType = %q, want dcim.region", got)
 	}
 }

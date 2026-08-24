@@ -53,7 +53,14 @@ func extrasTagDescriptor() Descriptor {
 			{Spec: "color", API: "color"},
 			{Spec: "description", API: "description"},
 			{Spec: "weight", API: "weight"},
-			{Spec: "objectTypes", API: "object_types"},
+			// Not a reference of any cardinality. extras.Tag.object_types is a
+			// ManyToManyField onto contenttypes.ContentType (docs/netbox-schema.md ->
+			// extras.Tag), so its API values are `app_label.model` strings rather than
+			// NetBox object ids: a resolver told to resolve them would go looking for a CR
+			// named `dcim.device`, which cannot exist. The class also picks the comparison
+			// -- an order-independent string set, because NetBox does not preserve M2M
+			// order.
+			{Spec: "objectTypes", API: "object_types", Class: ClassObjectTypeList},
 		},
 
 		// One candidate is enough here, which is unusual. `slug` is column-unique on
@@ -69,13 +76,5 @@ func extrasTagDescriptor() Descriptor {
 		// silently no-ops, so the next reconcile finds the same difference and PATCHes
 		// again, forever.
 		ReadOnly: []string{"created", "last_updated", "url", "display"},
-
-		// Not M2M. extras.Tag.object_types is a ManyToManyField onto
-		// contenttypes.ContentType (docs/netbox-schema.md -> extras.Tag), so its API
-		// values are `app_label.model` strings rather than NetBox object ids: a resolver
-		// told to resolve them would go looking for a CR named `dcim.device`, which
-		// cannot exist. The class also picks the comparison -- an order-independent
-		// string set, because NetBox does not preserve M2M order.
-		ObjectTypeLists: []string{"object_types"},
 	}
 }

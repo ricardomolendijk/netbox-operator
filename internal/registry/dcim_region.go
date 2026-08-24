@@ -34,7 +34,7 @@ func dcimRegionDescriptor() Descriptor {
 			// A foreign key is written as `parent` and filtered as `parent_id`; the field
 			// map carries the write name, the natural keys below carry the filter name.
 			{
-				Spec: "parentRef", API: "parent", Ref: true,
+				Spec: "parentRef", API: "parent", Class: ClassRefOne,
 				Target: netboxv1alpha1.RegionRef{}.TargetGVK(),
 			},
 		},
