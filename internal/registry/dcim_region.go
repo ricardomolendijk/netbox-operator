@@ -63,6 +63,23 @@ func dcimRegionDescriptor() Descriptor {
 			},
 		},
 
+		// `parentRef` is the containment parent, so a sub-region gets a non-controller owner
+		// reference to its parent region and `kubectl delete` on the parent takes its
+		// children with it (ADR-0003 rule 4).
+		//
+		// Not a stylistic choice. `dcim.Region.parent` is a TreeForeignKey with
+		// `on_delete=CASCADE` (docs/netbox-schema.md -> dcim.Region), so deleting a region
+		// in NetBox deletes its descendants server-side. Without the owner reference the
+		// child CR outlives the row it described, finds nothing at status.id on the next
+		// reconcile, and the engine's create-if-absent step *recreates* the region NetBox
+		// deliberately deleted -- the same resurrection ADR-0003 describes for
+		// `assignedObject`, whose general rule is that a server-side cascade implies an
+		// owner reference.
+		//
+		// It is also the one FK this kind has, which satisfies "each kind nominates exactly
+		// one containment ref, and it is the required FK" without a choice to make.
+		ContainmentRef: "parentRef",
+
 		UpdateStrategy: UpdatePatch,
 
 		// The four columns every ChangeLoggedModel carries, plus MPTT's two denormalised

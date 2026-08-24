@@ -132,6 +132,11 @@ type target struct {
 	message     string
 	terminating bool
 
+	// uid is the object's uid, which a containment owner reference is built from
+	// (reconciler/owners.go). Empty on the targets whose tests are not about it, which is
+	// also the honest shape of an object that has not been through the API server.
+	uid string
+
 	// spec is the object's own spec, for the tests that read it: the cycle walk follows a
 	// target's references, so a target in those tests is a referrer too.
 	spec map[string]any
@@ -140,7 +145,7 @@ type target struct {
 // object renders the target as the API server would hand it back.
 func (t target) object() *unstructured.Unstructured {
 	obj := &unstructured.Unstructured{Object: map[string]any{
-		"metadata": map[string]any{"namespace": t.namespace, "name": t.name},
+		"metadata": map[string]any{"namespace": t.namespace, "name": t.name, "uid": t.uid},
 		"status":   map[string]any{},
 	}}
 	obj.SetGroupVersionKind(t.gvk)
@@ -177,7 +182,7 @@ func (t target) object() *unstructured.Unstructured {
 // one id every table row expects to come back.
 func readyTarget() target {
 	return target{
-		gvk: regionGVK, namespace: "team-a", name: "emea", id: 12,
+		gvk: regionGVK, namespace: "team-a", name: "emea", id: 12, uid: "region-emea-uid",
 		ready: metav1.ConditionTrue, reason: netboxv1alpha1.ReasonSynced,
 	}
 }

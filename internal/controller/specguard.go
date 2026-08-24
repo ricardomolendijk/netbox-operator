@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
@@ -97,17 +98,32 @@ func (g specGuard) check(obj client.Object, verb string) error {
 		verb, gvk.Kind, obj.GetNamespace(), obj.GetName())
 }
 
-// generated reports whether the operator materialised obj, which it can tell from an owner
-// reference to one of its own kinds -- the operator is the only thing that sets one.
+// generated reports whether the operator materialised obj, which it can tell from the
+// *controller* owner reference naming one of its own kinds.
+//
+// The controller reference specifically, and this is the distinction the whole guard rests
+// on. ADR-0003 has the operator set two kinds of owner reference in this group, and only one
+// of them means "the operator created this":
+//
+//   - rule 3, a controller reference, on a child the operator materialised. That object is
+//     the operator's own output and Git has no opinion about its spec.
+//   - rule 4, a *non-controller* reference, on an ordinary hand-written CR whose containment
+//     parent happens to be in the same namespace. That object is Git's, and its spec is
+//     Git's, and the operator writing it is the fight ADR-0005 §1 exists to prevent.
+//
+// Testing for any owner reference in the group would have made every prefix with a
+// same-namespace siteRef look operator-generated the moment rule 4 shipped, quietly
+// disabling this guard across most of a cluster. metav1.GetControllerOf is the one entry
+// with `controller: true`, of which an object has at most one.
 func generated(obj client.Object) bool {
-	for _, owner := range obj.GetOwnerReferences() {
-		group, err := schema.ParseGroupVersion(owner.APIVersion)
-		if err == nil && group.Group == netboxv1alpha1.GroupName {
-			return true
-		}
+	owner := metav1.GetControllerOf(obj)
+	if owner == nil {
+		return false
 	}
 
-	return false
+	group, err := schema.ParseGroupVersion(owner.APIVersion)
+
+	return err == nil && group.Group == netboxv1alpha1.GroupName
 }
 
 // metadataOnly reports whether patch changes nothing outside metadata.

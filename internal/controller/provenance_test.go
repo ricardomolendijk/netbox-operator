@@ -160,21 +160,18 @@ func TestEndpointAdoptsDefinitionsMadeByHand(t *testing.T) {
 
 	stub.seedExtras("extras/tags", netbox.Object{"name": "k8s-managed", "slug": "k8s-managed"})
 
-	// Every stampable kind's object type, because a definition that is missing one is a
-	// definition the bootstrap has to widen -- which is a write, and this test is about there
-	// being none. Read off the registry rather than listed, so a kind added tomorrow does not
-	// turn "nothing to do" into a failure here.
-	objectTypes := make([]any, 0, 4)
-
-	for _, d := range registry.List() {
-		if d.CustomFieldable {
-			objectTypes = append(objectTypes, d.ObjectType)
-		}
+	// The seeded object_types come from the registry rather than from a literal list. The
+	// bootstrap widens a definition that covers fewer types than the build has stampable
+	// kinds, so a hardcoded pair would turn every new kind into a PATCH this test reports as
+	// a bug -- and adding a kind is meant to touch no shared code at all.
+	types := make([]any, 0, len(registry.List()))
+	for _, objectType := range provenance.ObjectTypes(registry.List()) {
+		types = append(types, objectType)
 	}
 
 	for _, name := range []string{"k8s_uid", "k8s_cluster", "k8s_owner", "k8s_allocation_identity"} {
 		stub.seedExtras("extras/custom-fields", netbox.Object{
-			"name": name, "object_types": objectTypes,
+			"name": name, "object_types": types,
 		})
 	}
 

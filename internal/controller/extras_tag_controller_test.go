@@ -72,10 +72,12 @@ func readyEndpointNamed(
 
 	t.Cleanup(func() { _ = k8sClient.Delete(context.Background(), endpoint) })
 
-	eventually(t, "an endpoint client for "+ns+"/"+name, func() bool {
-		_, _, ok := clients.Lookup(ns, name)
-
-		return ok
+	// Ready=True rather than "the client cache has an entry": Cache.put runs before the
+	// status write, so this is the later of the two signals and a cache read taken after it
+	// cannot be racing a pass still in flight (#159, #164). Every caller of this helper
+	// inherits the gate, which is why the inline copies of the old idiom went with it.
+	eventually(t, "an endpoint reporting Ready=True at "+ns+"/"+name, func() bool {
+		return endpointIsReady(ns, name)
 	})
 }
 

@@ -28,6 +28,7 @@ import (
 	"github.com/ricardomolendijk/netbox-operator/internal/netbox"
 	"github.com/ricardomolendijk/netbox-operator/internal/provenance"
 	"github.com/ricardomolendijk/netbox-operator/internal/registry"
+	"github.com/ricardomolendijk/netbox-operator/internal/resolver"
 )
 
 // DefaultResync is the requeue interval used when an endpoint declares none. It matches
@@ -177,6 +178,11 @@ type Engine struct {
 	// been dealt with.
 	Finalizers FinalizerWriter
 
+	// Owners persists the containment owner reference of ADR-0003 rule 4. Nil is a wiring
+	// bug rather than a mode: a kind whose descriptor names a ContainmentRef then fails its
+	// reconcile loudly, instead of silently never cascading (owners.go).
+	Owners OwnerWriter
+
 	// Events records what changed in NetBox. Optional.
 	Events Recorder
 
@@ -229,6 +235,16 @@ func (e *Engine) Reconcile(ctx context.Context, obj Object) (ctrl.Result, error)
 
 	if err := p.build(ctx); err != nil {
 		return p.stop(ctx, err)
+	}
+
+	// After build, because the parent's namespace, Kind and uid come out of reference
+	// resolution; before the NetBox write, so that an object whose lifecycle depends on
+	// another is marked as such before anything exists for it to leak. A failure here is a
+	// returned error and stops the pass, exactly as a failed finalizer write does in claim():
+	// both are metadata the engine has to get onto the object before it goes further, and
+	// both are fixed by retrying rather than by a condition.
+	if err := p.ownParent(ctx); err != nil {
+		return ctrl.Result{}, err
 	}
 
 	found, err := p.locate(ctx)
@@ -295,6 +311,11 @@ type pass struct {
 	// refs is what the references that did not resolve mean for this object. Zero when
 	// every reference resolved, which is what ready() checks before reporting Ready=True.
 	refs refWait
+
+	// containment is the resolved containment reference -- the one spec field whose target
+	// gets an owner reference. Empty when the descriptor names none, or when the spec left
+	// it unset, or when it did not resolve; ownParent treats all three the same way.
+	containment resolver.FieldRefs
 
 	// deferred is what this pass does about the descriptor's deferred fields: which are
 	// kept out of the create payload, and which NetBox does not hold yet.

@@ -56,6 +56,30 @@ A field with no such sentence is one where the distinction does not arise — be
 required, because it carries a default so it is never absent, or because its validation
 rejects the empty value.
 
+## The one exception: `custom_fields` has two states
+
+Every optional field above has three states. NetBox's `custom_fields` container has two:
+**absent or empty** means "manage nothing", and **set** means "manage these keys". There is
+no third state, so an empty map does not clear anything, and a custom-field value the
+operator previously wrote cannot be removed through this API.
+
+That is deliberate rather than an oversight. NetBox returns *every* custom field defined for
+an object type, including ones this operator knows nothing about, and it **merges a partial
+`custom_fields` PATCH** rather than replacing the container. So the operator compares only
+the keys it sets (`customFieldsEqual`, `internal/netbox/drift.go`). Treating the map as
+exhaustive would make it null out every custom field some other writer on that NetBox owns,
+on every reconcile — which is the same fight ADR-0005 exists to avoid, in a container where
+the other writer is often a human.
+
+The consequence is worth stating plainly because it is the one place this page's promise does
+not hold: **an emptied custom-field map clears nothing, and no condition disagrees**
+([issue #171](https://github.com/ricardomolendijk/netbox-operator/issues/171)). Today the
+only writer of `custom_fields` is the provenance stamp, whose keys are reported in
+`status.provenance.customFields`.
+
+Whether removing a single previously-set key should be expressible at all — an explicit null
+value for one key, say — is undecided and out of scope for the note above.
+
 ## How the operator knows
 
 `metadata.managedFields` is Kubernetes' own record of who set what. It looks like this on a

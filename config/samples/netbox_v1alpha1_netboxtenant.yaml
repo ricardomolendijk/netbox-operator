@@ -1,0 +1,27 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxTenant
+metadata:
+  name: donkerslootstraat
+  namespace: default
+spec:
+  endpointRef: homelab
+
+  # The default, spelled out. `unique_group_slug` is a database constraint, so the second
+  # namespace to claim this slug in this group loses -- Fail says so instead of leaving two
+  # CRs to fight over one NetBox tenant, which is what Adopt would do here.
+  onConflict: Fail
+
+  # The default, spelled out. A tenant is not IPAM, so deleting the CR deletes the NetBox
+  # tenant -- which NetBox refuses while any prefix, VLAN, VRF or address still points at
+  # it (on_delete=PROTECT). That surfaces as Deleting=False, Reason=Protected.
+  deletionPolicy: Delete
+
+  name: Donkerslootstraat (RTM)
+  slug: donkerslootstraat
+  description: Donkerslootstraat 155B
+
+  # Files this tenant under the group above. Part of the identity, not just an attribute:
+  # with it set the lookup is `?group_id=<id>&slug=donkerslootstraat`, and without it
+  # `?group_id__isnull=true&slug=donkerslootstraat`. Those are two different objects.
+  groupRef:
+    name: houses

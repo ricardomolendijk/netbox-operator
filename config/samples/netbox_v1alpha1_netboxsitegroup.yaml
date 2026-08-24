@@ -1,0 +1,35 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxSiteGroup
+metadata:
+  name: retail
+  namespace: default
+spec:
+  # The NetBoxEndpoint to write through, in this namespace. There is no cluster-wide
+  # default endpoint; see config/samples/netbox_v1alpha1_netboxendpoint.yaml.
+  endpointRef: homelab
+
+  name: Retail
+  slug: retail
+  description: Functional grouping, independent of geography
+
+  # No parentRef, which makes this a top-level site group. That is a different natural key
+  # rather than the same key with a filter left out: NetBox is unique on (parent, name) and
+  # separately on (name) where parent IS NULL, so the lookup pins `parent_id__isnull`
+  # instead of omitting it. See docs/concepts/lookups.md.
+---
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxSiteGroup
+metadata:
+  name: retail-eu
+  namespace: default
+spec:
+  endpointRef: homelab
+
+  name: Retail EU
+  slug: retail-eu
+
+  # Nested under the group above, and identified by (parent, name). Applying the two in
+  # either order converges: until the parent holds an id this object reports
+  # RefsResolved=False and writes nothing, and the parent's arrival re-enqueues it.
+  parentRef:
+    name: retail

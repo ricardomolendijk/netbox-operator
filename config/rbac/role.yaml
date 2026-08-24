@@ -33,9 +33,13 @@ rules:
   resources:
   - netboxendpoints/status
   - netboxipaddresses/status
+  - netboxlocations/status
   - netboxregions/status
+  - netboxsitegroups/status
   - netboxsites/status
   - netboxtags/status
+  - netboxtenantgroups/status
+  - netboxtenants/status
   verbs:
   - get
   - patch
@@ -44,9 +48,13 @@ rules:
   - netbox.kubeforge.org
   resources:
   - netboxipaddresses
+  - netboxlocations
   - netboxregions
+  - netboxsitegroups
   - netboxsites
   - netboxtags
+  - netboxtenantgroups
+  - netboxtenants
   verbs:
   - get
   - list
@@ -57,8 +65,12 @@ rules:
   - netbox.kubeforge.org
   resources:
   - netboxipaddresses/finalizers
+  - netboxlocations/finalizers
   - netboxregions/finalizers
+  - netboxsitegroups/finalizers
   - netboxsites/finalizers
   - netboxtags/finalizers
+  - netboxtenantgroups/finalizers
+  - netboxtenants/finalizers
   verbs:
   - update

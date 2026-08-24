@@ -151,20 +151,32 @@ spec:
                   (internal/netbox/drift.go, scalarEqual), so `"51.9244"` and NetBox's `"51.924400"`
                   are the same value and produce no PATCH.
 
+                  Omit it to leave NetBox's own value alone; set it to `""` to clear the value in
+                  NetBox. The two are different intents and the operator can tell them apart
+                  (docs/concepts/field-ownership.md). A cleared coordinate is written as `null` rather
+                  than as an empty string, which is what NetBox's nullable DecimalField takes -- see
+                  registry.Field.EmptyIsNull.
+
                   The pattern caps the fraction at six digits and the integer part at two, both read
                   straight off docs/netbox-schema.md -> dcim.Site: `latitude DecimalField decimal(8,6)`,
                   so eight digits total with six after the point. (`longitude` is decimal(9,6), which is
-                  why its pattern allows three integer digits and this one does not.) The -90..90 range
-                  CEL enforces is the tighter constraint on top.
-                pattern: ^-?[0-9]{1,2}(\.[0-9]{1,6})?$
+                  why its pattern allows three integer digits and this one does not.) The `^$` alternative
+                  is the clear, and the CEL rule has to admit it too: `double("")` is an error, so a rule
+                  that did not short-circuit would reject at admission the one value clearing uses (#170).
+                  The -90..90 range is the tighter constraint on top.
+                pattern: ^$|^-?[0-9]{1,2}(\.[0-9]{1,6})?$
                 type: string
                 x-kubernetes-validations:
                 - message: latitude must be between -90 and 90 degrees
-                  rule: double(self) >= -90.0 && double(self) <= 90.0
+                  rule: self == "" || (double(self) >= -90.0 && double(self) <= 90.0)
               longitude:
                 description: |-
                   Longitude is the site's GPS longitude in decimal degrees, as a string. A string for
                   the same reason as Latitude.
+
+                  Omit it to leave NetBox's own value alone; set it to `""` to clear the value in
+                  NetBox. The two are different intents and the operator can tell them apart
+                  (docs/concepts/field-ownership.md). Cleared as `null`, for the reason Latitude gives.
 
                   Three integer digits, not two: longitude runs to +-180. NBO-009 states both columns
                   as `decimal(8,6)`, which would cap this at 99.999999 and reject every longitude east
@@ -173,11 +185,11 @@ spec:
                   digits here it says so, and the site reports Ready=False, Reason=Invalid carrying
                   NetBox's own message -- which is a great deal easier to diagnose than an admission
                   rejection of a correct value.
-                pattern: ^-?[0-9]{1,3}(\.[0-9]{1,6})?$
+                pattern: ^$|^-?[0-9]{1,3}(\.[0-9]{1,6})?$
                 type: string
                 x-kubernetes-validations:
                 - message: longitude must be between -180 and 180 degrees
-                  rule: double(self) >= -180.0 && double(self) <= 180.0
+                  rule: self == "" || (double(self) >= -180.0 && double(self) <= 180.0)
               name:
                 description: |-
                   Name is the site's label in the NetBox UI. Column-unique across NetBox
@@ -398,6 +410,14 @@ spec:
                     description: |-
                       CustomFields are the custom fields written, as NetBox names to the values sent.
                       Empty for a kind whose NetBox model has no `custom_fields` column.
+
+                      These keys are also the only ones compared: NetBox merges a partial `custom_fields`
+                      PATCH and returns every custom field defined for the object type, including ones the
+                      operator knows nothing about, so it compares the keys it sets and leaves the rest
+                      alone. `custom_fields` therefore has two states rather than the three every other
+                      optional field has -- absent or empty means "manage nothing", not "clear everything",
+                      and a value written here cannot be removed through this API
+                      (docs/concepts/field-ownership.md, #171).
                     type: object
                   tag:
                     description: |-

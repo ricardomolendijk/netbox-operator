@@ -3,6 +3,14 @@
 **Status:** Accepted · 2026-08-21
 **Amended:** 2026-08-24 — rule 5 added, settling whether inline child sugar belongs in
 `v1alpha1` at all ([#17](https://github.com/ricardomolendijk/netbox-operator/issues/17)).
+**Amended:** 2026-08-24 — rules 3 and 4 settled as the answer to *which* relationships get an
+owner reference, and what cross-namespace containment therefore gives up
+([#175](https://github.com/ricardomolendijk/netbox-operator/issues/175)). The
+[deletion policy](#deletion-policy) default is now per Kind
+([#176](https://github.com/ricardomolendijk/netbox-operator/issues/176)).
+**Amended:** 2026-08-24 — rule 4 built, and its mechanism recorded below: the condition it
+reports, and the parts of the prose that are deliberately not built
+([#175](https://github.com/ricardomolendijk/netbox-operator/issues/175)).
 
 ## The two different relationships
 
@@ -61,6 +69,19 @@ It is added **only when the reference is legal as an owner reference**. Since ev
 is namespaced ([ADR-0002](0002-crd-scoping.md)), that reduces to a single rule: **same
 namespace, or no owner reference.**
 
+That was chosen over the narrower rule — owner references *only* for children the operator
+itself created (rule 3), and none for containment at all — and the cost of choosing it is
+stated here rather than left to be discovered:
+
+**An owner reference is only legal within one namespace, and a NetBox foreign key is not.**
+A `NetBoxPrefix` in `team-blue` scoped to a `NetBoxSite` in `netbox-catalogue` gets no owner
+reference, ever, so deleting that site does not remove the prefix — the prefix keeps working
+and reports its parent gone. Move both objects into one namespace and the identical manifest
+cascades. **The same YAML therefore cascades or does not cascade depending on namespace
+layout**, which is a property of Kubernetes garbage collection and not something the operator
+can paper over. It is why rule 4 emits `CascadeUnavailable` instead of staying quiet: the only
+defence against that surprise is saying, on the object, that the cascade is not there.
+
 It is skipped, with a `CascadeUnavailable` condition explaining why, when:
 
 - the ref crosses namespaces (an owner reference may not), or
@@ -98,6 +119,39 @@ deliberately deleted. The owner reference is what makes the CR disappear with it
 parent instead. Any ref whose target's deletion cascades server-side belongs in this
 list for the same reason; the general rule is *server-side cascade implies an owner
 reference*, and the list is the enumeration of where that is true.
+
+### How rule 4 is implemented
+
+Built in `internal/reconciler/owners.go`
+([#175](https://github.com/ricardomolendijk/netbox-operator/issues/175)); the mechanism and
+its namespace rule are documented in [ownership](../concepts/ownership.md). Four things the
+prose above left open, settled here:
+
+- **`CascadeUnavailable` is a condition *reason*, not a condition type.** The condition is
+  `ParentOwned`: `True/ParentOwned` when the owner reference is set,
+  `False/CascadeUnavailable` when no legal one exists, `False/ParentOwnershipDisabled` when
+  the annotation declined it, and *absent* on a kind with no containment parent or a spec that
+  did not set one. Negative-polarity condition types are a poor fit for the standard
+  vocabulary, and a positive one also gives the cascade *working* somewhere to be said.
+  A condition rather than an Event because the state is standing: it does not change until an
+  object moves namespace or a reference is rewritten, and an Event ages out of the namespace
+  long before the deletion that would otherwise be how somebody discovered it.
+- **An unresolved containment reference produces no `ParentOwned` condition.** It is already
+  `RefsResolved=False` naming itself, and one fact under two conditions is two things free to
+  disagree.
+- **`blockOwnerDeletion` is not set on a containment owner reference**, only on a controller
+  one. It bites only under foreground deletion, where it would let a hand-written object hold
+  up `kubectl delete --cascade=foreground` on a shared parent, and setting it requires
+  `update` on the owner's `finalizers` subresource wherever
+  `OwnerReferencesPermissionEnforcement` is enabled. A controller reference earns the flag by
+  having created the child; a containment reference has not.
+- **`spec.parentOwnership` on the endpoint is not built.** The per-object annotation is, and it
+  covers the case; an endpoint-wide switch would be a third deletion knob beside
+  `deletionPolicy` and `onConflict` for a need nobody has stated. Revisit if one is.
+
+The dedupe rule is enforced by only ever *appending*: `controllerutil.SetOwnerReference`
+upserts, so it would strip `controller: true` off an entry naming the same parent, taking away
+the marker rule 5's pruning and [ADR-0005 §2](0005-gitops-coexistence.md) both read.
 
 **5. Inline child sugar is in `v1alpha1`, and every inline field is optional.**
 
@@ -179,9 +233,14 @@ recoverable, which is the property that decided it.
 ## Deletion policy
 
 Independently of ownership, each object carries
-`spec.deletionPolicy: Delete | Retain`. `Delete` (the default) removes the NetBox
+`spec.deletionPolicy: Delete | Retain`. `Delete` removes the NetBox
 object when the CR goes away. `Retain` drops the finalizer and leaves NetBox alone —
 for migrating off the operator, or for objects that are shared with something else.
+
+**The default depends on the Kind**: `Retain` for the IPAM kinds, `Delete` everywhere else
+([#176](https://github.com/ricardomolendijk/netbox-operator/issues/176)). The table of which
+is which, and the reasoning, live in
+[deletion — the default depends on the Kind](../concepts/deletion.md#the-default-depends-on-the-kind).
 
 A `PROTECT`-ed deletion is not an error to retry quickly: it becomes a
 `Deleting=False, Reason=Protected` condition naming the objects that block it, and a
