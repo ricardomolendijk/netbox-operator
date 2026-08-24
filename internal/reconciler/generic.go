@@ -286,6 +286,16 @@ type pass struct {
 	// every reference resolved, which is what ready() checks before reporting Ready=True.
 	refs refWait
 
+	// deferred is what this pass does about the descriptor's deferred fields: which are
+	// kept out of the create payload, and which NetBox does not hold yet.
+	deferred deferral
+
+	// live is the NetBox object this pass located, or nil when nothing was located --
+	// including a create, whose object did not exist when the pass began. Read by the
+	// deferred report, which has to distinguish "NetBox already holds this" from "NetBox
+	// holds nothing to hold it in".
+	live netbox.Object
+
 	// result is this pass's outcome, one of the metrics.Result* values. Written by
 	// whichever step decided, read once by the deferred observation in Reconcile.
 	result string
@@ -304,7 +314,15 @@ func (p *pass) build(ctx context.Context) error {
 	}
 	p.spec, p.desired, p.state = spec, desired, state
 
-	return p.resolveRefs(ctx, refs)
+	if err := p.resolveRefs(ctx, refs); err != nil {
+		return err
+	}
+
+	// After resolution, because whether a deferral applies depends on whether its
+	// reference became an id -- which is the whole of what DeferIfUnresolved means.
+	p.deferred = newDeferral(p.desc, p.state, p.desired)
+
+	return nil
 }
 
 // match is the live object the engine will act on, and how it was found.
@@ -435,7 +453,13 @@ func (p *pass) create(ctx context.Context) (ctrl.Result, error) {
 		return p.stop(ctx, errAdoptOnly)
 	}
 
-	created, err := p.endpoint.Client.Create(ctx, p.desc.Endpoint, p.desired)
+	payload, stripped := p.deferred.createPayload(p.desired)
+	if len(stripped) > 0 {
+		logf.FromContext(ctx).V(1).Info("deferring fields the create cannot carry",
+			"action", "create", "deferred", stripped)
+	}
+
+	created, err := p.endpoint.Client.Create(ctx, p.desc.Endpoint, payload)
 	if err != nil {
 		return p.stop(ctx, fmt.Errorf("creating netbox %s: %w", p.desc.Endpoint, err))
 	}
@@ -445,6 +469,8 @@ func (p *pass) create(ctx context.Context) (ctrl.Result, error) {
 
 // update PATCHes the difference, and nothing at all when there is none.
 func (p *pass) update(ctx context.Context, live netbox.Object) (ctrl.Result, error) {
+	p.live = live
+
 	changes := netbox.Changes(live, p.desired, fieldRules(p.desc))
 	if len(changes) == 0 {
 		logf.FromContext(ctx).V(1).Info("no drift",
@@ -454,7 +480,7 @@ func (p *pass) update(ctx context.Context, live netbox.Object) (ctrl.Result, err
 		p.driftCondition(false, netboxv1alpha1.ReasonNoDrift, "netbox matches the spec")
 		p.result = metrics.ResultUnchanged
 
-		return p.ready(ctx)
+		return p.settle(ctx, live)
 	}
 
 	p.driftDetected(changes)
@@ -484,7 +510,11 @@ func (p *pass) recreate(ctx context.Context, id int, changes []netbox.Change) (c
 		return p.stop(ctx, fmt.Errorf("deleting netbox %s/%d to recreate it: %w", p.desc.Endpoint, id, err))
 	}
 
-	created, err := p.endpoint.Client.Create(ctx, p.desc.Endpoint, p.desired)
+	// Stripped for the same reason a create is: the replacement is a create, and a
+	// DeferAlways reference still cannot point at an object that does not exist yet.
+	payload, _ := p.deferred.createPayload(p.desired)
+
+	created, err := p.endpoint.Client.Create(ctx, p.desc.Endpoint, payload)
 	if err != nil {
 		return p.stop(ctx, fmt.Errorf("recreating netbox %s: %w", p.desc.Endpoint, err))
 	}
@@ -530,6 +560,12 @@ func (p *pass) applyWrite(ctx context.Context, written netbox.Object, event, act
 		p.driftCondition(true, netboxv1alpha1.ReasonDriftDetected, drift)
 		p.result = out.result
 
+		// Against the located object rather than the suppressed response: a suppressed
+		// write carries the payload that was not sent, so reading it would report a
+		// deferred field as applied on an endpoint that wrote nothing. Nil on a create,
+		// where NetBox holds no such object at all.
+		p.recordDeferred(p.live)
+
 		return p.pending(ctx, out.ready,
 			fmt.Sprintf("%s: netbox was not written (%s)", out.what, detail))
 	}
@@ -567,7 +603,7 @@ func (p *pass) applyWrite(ctx context.Context, written netbox.Object, event, act
 		p.result = result
 	}
 
-	return p.ready(ctx)
+	return p.settle(ctx, written)
 }
 
 // writeResults maps a write action onto the metric result it counts as. Data next to

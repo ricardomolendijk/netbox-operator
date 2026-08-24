@@ -47,7 +47,13 @@ type fakeSpec struct {
 	Weight      *int64   `json:"weight,omitempty"`
 	ObjectTypes []string `json:"objectTypes,omitempty"`
 	ParentRef   *fakeRef `json:"parentRef,omitempty"`
-	Unmapped    string   `json:"unmapped,omitempty"`
+
+	// PrimaryIP4Ref is the deferred reference NBO-015 is about: dcim.Device's
+	// `primary_ip4` needs an address that needs an interface that needs the Device, so no
+	// apply order sets it at create time.
+	PrimaryIP4Ref *fakeRef `json:"primaryIP4Ref,omitempty"`
+
+	Unmapped string `json:"unmapped,omitempty"`
 }
 
 // fakeKind is a stand-in for a generated kind.
