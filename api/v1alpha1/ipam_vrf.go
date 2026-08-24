@@ -91,17 +91,20 @@ type NetBoxVRFSpec struct {
 	// (api/v1alpha1/objectref.go), and the API server costs a rule on a list item at the
 	// list's maximum length -- so an unbounded list of refs is rejected outright with
 	// "estimated rule cost exceeds budget". Every to-many reference field therefore needs a
-	// bound. 32 is comfortably above any real VRF's route-target count and well inside the
-	// budget with both lists present.
+	// bound, and the project standard is 256 (docs/concepts/references.md, "A list needs a
+	// bound"). This field shipped at 32, chosen because it cleared the budget -- which was
+	// measured afterwards at ~57 800 for one such list, so 32 was roughly 1800x too
+	// conservative and would have refused a cluster with 40 route targets on one VRF for no
+	// reason a user could act on.
 	// +optional
-	// +kubebuilder:validation:MaxItems=32
+	// +kubebuilder:validation:MaxItems=256
 	ImportTargets []RouteTargetRef `json:"importTargets,omitempty"`
 
 	// ExportTargets is the set of route targets exported from this VRF. It behaves exactly
 	// like ImportTargets, and it is a separate relation: the same route target may appear in
 	// both, and each resolves and is written independently.
 	// +optional
-	// +kubebuilder:validation:MaxItems=32
+	// +kubebuilder:validation:MaxItems=256
 	ExportTargets []RouteTargetRef `json:"exportTargets,omitempty"`
 
 	// Description is free text shown next to the VRF.
