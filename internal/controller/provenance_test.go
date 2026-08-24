@@ -15,6 +15,28 @@ import (
 	"github.com/ricardomolendijk/netbox-operator/internal/registry"
 )
 
+// stampedObjectTypes is every CustomFieldable kind's object type, sorted as
+// provenance.ObjectTypes sorts. The one hand-written copy of the set in this package:
+// adding a CustomFieldable kind adds a line here, and that is deliberate -- it is the only
+// assertion that can catch a kind being dropped from the provenance stamp.
+var stampedObjectTypes = []string{
+	"dcim.location", "dcim.region", "dcim.site", "dcim.sitegroup",
+	"ipam.prefix", "tenancy.tenant", "tenancy.tenantgroup",
+}
+
+// objectTypesAsAny is the set the bootstrap will compute, in the []any shape a JSON payload
+// decodes to, for seeding a NetBox that already has everything.
+func objectTypesAsAny() []any {
+	types := provenance.ObjectTypes(registry.List())
+	out := make([]any, 0, len(types))
+
+	for _, objectType := range types {
+		out = append(out, objectType)
+	}
+
+	return out
+}
+
 // managedBy is the spec block every test here sets, with an explicit cluster identifier
 // because there is deliberately no default for one.
 func managedBy(mutate func(*netboxv1alpha1.ManagedBy)) *netboxv1alpha1.ManagedBy {
@@ -107,8 +129,11 @@ func TestEndpointBootstrapsProvenance(t *testing.T) {
 		t.Errorf("cached client ok = %v, stamp applicable = %v; want both", ok, stamp.Applicable())
 	}
 
-	// object_types on every created definition, derived from the registry rather than
-	// listed. Both stampable kinds must be in it and extras.tag must not.
+	// object_types on every created definition. This is the *only* place the set is written
+	// out by hand, and it is an equality check rather than a subset one: a CustomFieldable
+	// kind silently dropped from the stamp set makes every write to that kind a 400, and a
+	// subset assertion cannot see an omission. extras.tag must stay out of it -- it carries
+	// no custom_fields column.
 	fields := 0
 
 	for _, write := range stub.recordedExtras() {
@@ -117,16 +142,9 @@ func TestEndpointBootstrapsProvenance(t *testing.T) {
 		}
 		fields++
 
-		types := netbox.ObjectTypesOf(write.Payload["object_types"])
-		for _, required := range []string{"dcim.site", "dcim.region"} {
-			if !slices.Contains(types, required) {
-				t.Errorf("custom field %v declares object_types %v, which omits %s",
-					write.Payload["name"], types, required)
-			}
-		}
-		if slices.Contains(types, "extras.tag") {
-			t.Errorf("custom field %v declares extras.tag, which carries no custom_fields column",
-				write.Payload["name"])
+		if types := netbox.ObjectTypesOf(write.Payload["object_types"]); !slices.Equal(types, stampedObjectTypes) {
+			t.Errorf("custom field %v declares object_types %v, want %v",
+				write.Payload["name"], types, stampedObjectTypes)
 		}
 	}
 
@@ -160,18 +178,19 @@ func TestEndpointAdoptsDefinitionsMadeByHand(t *testing.T) {
 
 	stub.seedExtras("extras/tags", netbox.Object{"name": "k8s-managed", "slug": "k8s-managed"})
 
-	// The seeded object_types come from the registry rather than from a literal list. The
-	// bootstrap widens a definition that covers fewer types than the build has stampable
-	// kinds, so a hardcoded pair would turn every new kind into a PATCH this test reports as
-	// a bug -- and adding a kind is meant to touch no shared code at all.
-	types := make([]any, 0, len(registry.List()))
-	for _, objectType := range provenance.ObjectTypes(registry.List()) {
-		types = append(types, objectType)
-	}
+	// The seeded object_types come from the registry rather than from a literal list (see
+	// objectTypesAsAny). The bootstrap widens a definition covering fewer types than the
+	// build has stampable kinds, so a hardcoded pair would turn every new kind into a PATCH
+	// this test reports as a bug -- and adding a kind is meant to touch no shared code.
 
 	for _, name := range []string{"k8s_uid", "k8s_cluster", "k8s_owner", "k8s_allocation_identity"} {
+		// Derived, not listed. This test's subject is adoption -- "NetBox already had
+		// everything, so write nothing" -- and a literal here would make every new kind edit
+		// this file. It cannot disagree with the bootstrap about the *contents* of the set,
+		// which is why TestEndpointBootstrapsProvenanceDefinitions asserts those against a
+		// hand-written literal instead.
 		stub.seedExtras("extras/custom-fields", netbox.Object{
-			"name": name, "object_types": types,
+			"name": name, "object_types": objectTypesAsAny(),
 		})
 	}
 

@@ -1,0 +1,52 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxPrefix
+metadata:
+  name: home-lan
+  namespace: default
+spec:
+  # The NetBoxEndpoint to write through, in this namespace. There is no cluster-wide
+  # default endpoint; see config/samples/netbox_v1alpha1_netboxendpoint.yaml.
+  endpointRef: homelab
+
+  # Set explicitly on every IPAM object. The envelope's default is Delete, and deleting a
+  # prefix destroys the record of who a range of addresses belonged to -- which is not
+  # recoverable by re-creating it.
+  deletionPolicy: Retain
+
+  # Required. IPv4 or IPv6, host bits clear: `10.0.20.5/24` is rejected at admission
+  # naming the network address, because NetBox would silently rewrite it.
+  prefix: 10.0.20.0/24
+
+  # NetBox's scope, not Kubernetes'. Since NetBox 4.2 ipam.Prefix has no `site` column:
+  # there is `scope_type` + `scope_id`, and writing `site` returns 201 and sets nothing.
+  # At most one member; omit the whole block for a global prefix.
+  scope:
+    siteRef:
+      name: home
+
+  # A choice field: container, active, reserved or deprecated. NetBox returns it as
+  # {"value","label"} and accepts the bare value.
+  status: active
+
+  # Part of this kind's identity. The same CIDR may exist once globally and once in every
+  # VRF, so the lookup pins `vrf_id` to null rather than omitting it when this is unset.
+  # vrfRef:
+  #   name: vrf-home
+
+  # Not identity, and not a containment parent: a prefix outliving its VLAN is normal.
+  # vlanRef:
+  #   lookup:
+  #     vid: "20"
+
+  # ipam.Role is an object, not a choice column -- unlike NetBoxIPAddress.role. The Kind
+  # itself is NBO-055, so a name-mode ref reports RefKindUnavailable today.
+  # roleRef:
+  #   slug: lan
+
+  # Both change NetBox's utilisation arithmetic rather than its data. Omit either to leave
+  # NetBox's own value alone; the operator manages it from the moment it is written.
+  isPool: false
+  markUtilized: false
+
+  description: Home LAN
+  comments: Managed by netbox-operator.
