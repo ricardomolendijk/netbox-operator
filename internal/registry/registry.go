@@ -896,7 +896,11 @@ func List() []Descriptor {
 	return defaultRegistry.List()
 }
 
-// Validate validates every registered descriptor.
+// Validate validates every registered descriptor and every registered claim descriptor.
+//
+// Both, from one call, so that a manager cannot boot having validated half of what it
+// drives: a malformed claim is exactly as unrecoverable at runtime as a malformed
+// Descriptor.
 func Validate() error {
-	return defaultRegistry.Validate()
+	return errors.Join(defaultRegistry.Validate(), defaultClaims.validate(defaultRegistry))
 }

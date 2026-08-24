@@ -20,6 +20,7 @@ var shippedManifests = []string{
 	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxendpoint.yaml"),
 	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxtag.yaml"),
 	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxrefgrant.yaml"),
+	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxipaddressclaim.yaml"),
 	filepath.Join("..", "..", "docs", "examples", "tag.yaml"),
 }
 
@@ -76,6 +77,22 @@ func decodeManifest(t *testing.T, path string, index int, doc string) (*unstruct
 // exists is the field's own description.
 const triStateNote = "Omit it to leave NetBox's own value alone"
 
+// noClearableFields are the kinds that legitimately carry no clearable field, by filename.
+//
+// A hand-written list rather than a rule, deliberately: adding a kind with an optional
+// `description` and no tri-state note has to fail the test, so the only way out is writing
+// down here why this kind is different. Same reason stampedObjectTypes is a literal.
+//
+// A claim's spec is three fields, and none of them is a pass-through to NetBox: two are
+// required and the third has two states rather than three, because absent and empty both mean
+// "derive the allocation identity" and nothing in NetBox is cleared by either
+// (docs/reference/netboxipaddressclaim.md). The fields a NetBox address actually has --
+// dnsName, role, description -- live on NetBoxIPAddress, which is the kind that can maintain
+// them (NBO-025).
+var noClearableFields = map[string]bool{
+	"netbox.kubeforge.org_netboxipaddressclaims.yaml": true,
+}
+
 // TestClearableFieldsDocumentBothStatesInTheSchema is NBO-079's third acceptance criterion:
 // absent and explicitly-empty are distinguishable in the CRD schema, so `kubectl explain`
 // tells the truth.
@@ -109,7 +126,7 @@ func TestClearableFieldsDocumentBothStatesInTheSchema(t *testing.T) {
 				}
 			}
 
-			if documented == 0 {
+			if documented == 0 && !noClearableFields[filepath.Base(path)] {
 				t.Errorf("no spec field documents the difference between omitted and emptied; "+
 					"every optional field a user can clear needs %q", triStateNote)
 			}

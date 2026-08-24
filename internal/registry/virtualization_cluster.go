@@ -97,8 +97,12 @@ func virtualizationClusterDescriptor() Descriptor {
 				},
 			},
 			{
-				Fields:     []KeyField{{Filter: "name", Spec: "name"}},
-				NullFields: []NullField{{Filter: "group_id", Spec: "groupRef"}},
+				Fields: []KeyField{{Filter: "name", Spec: "name"}},
+				NullFields: []NullField{
+					// A foreign key: NetBox registers only negation on an FK filter, so the pin
+					// is the sentinel value rather than a suffix (NBO-206).
+					{Filter: "group_id", Spec: "groupRef", Column: NullColumnRef},
+				},
 			},
 		},
 

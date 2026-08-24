@@ -279,9 +279,19 @@ spec:
 Nothing is hidden by this. The children are ordinary CRs — they appear in
 `kubectl get netboxvminterface` and `kubectl get netboxipaddress`, they carry the
 controller owner reference from rule 3, and `kubectl delete` on the parent cascades
-through them natively. An inline address that says `fromPrefixRef` rather than a literal
+through them natively. An inline address that says `claimFrom` rather than a literal
 materialises a **claim** child, so there is still exactly one allocation code path
-([ADR-0004](0004-claims-first-allocation.md)).
+([ADR-0004](0004-claims-first-allocation.md)):
+
+```yaml
+      addresses:
+        - claimFrom: {prefixRef: {name: mgmt-net}}   # -> a NetBoxIPAddressClaim child
+```
+
+`claimFrom` and not `fromPrefixRef`, which this rule used to say: it is nested so that
+allocating out of an ip-range is a member of one union rather than a second mutually-exclusive
+sibling key ([ADR-0004](0004-claims-first-allocation.md#the-inline-key-is-claimfrom-and-it-is-nested),
+[#183](https://github.com/ricardomolendijk/netbox-operator/issues/183)).
 
 Two constraints are what make this a decision that can be walked back rather than a
 permanent part of the API:

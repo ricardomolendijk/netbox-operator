@@ -118,6 +118,12 @@ func startManager(cfg *rest.Config) (func(), error) {
 		return nil, fmt.Errorf("object controllers: %w", err)
 	}
 
+	if err := SetupClaimControllers(mgr, clients); err != nil {
+		return nil, fmt.Errorf("claim controllers: %w", err)
+	}
+
+	// The sweep takes the manager's plain client: it reads NetBox and the CRs of every kind it
+	// is asked about, and writes to neither (NBO-046).
 	sweeps := &NetBoxSweepReconciler{
 		Client:   mgr.GetClient(),
 		Clients:  clients,

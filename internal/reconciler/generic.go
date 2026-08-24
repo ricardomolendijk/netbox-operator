@@ -97,6 +97,17 @@ type Endpoint struct {
 	// (docs/decisions/0005-gitops-coexistence.md).
 	DriftMode netboxv1alpha1.DriftMode
 
+	// Allocator is the advisory-locked allocation half of this endpoint's client.
+	//
+	// A field of its own rather than a method on Client, because adding a method to
+	// NetBoxClient would make every fake in every test implement an allocation call it has
+	// no business having -- and because an endpoint that cannot allocate is a state worth
+	// being able to represent. Nil for one; the allocation engine reports it as the wiring
+	// bug it is rather than dereferencing it (claim.go).
+	//
+	// The declarative engine never reads it. Allocation is not a mode of a create.
+	Allocator Allocator
+
 	// Provenance is the stamp this endpoint's bootstrap resolved: the tag id and the
 	// custom-field names that provably exist in NetBox (NBO-075). The zero value stamps
 	// nothing, which is what an endpoint with no spec.managedBy hands over.

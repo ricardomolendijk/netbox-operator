@@ -58,7 +58,11 @@ func (p *endpointProvider) Endpoint(ctx context.Context, namespace, name string)
 	// it is what the endpoint controller *proved* exists in NetBox, whereas spec.managedBy
 	// is only what was asked for. Reading it off the spec would let an edit start stamping a
 	// tag whose definition has not been created yet -- a 400 per object of every kind.
-	endpoint := reconciler.Endpoint{Client: nbClient, Provenance: stamp}
+	// Allocator is the same *netbox.Client, handed over a second time under the narrower
+	// interface the allocation engine holds. Not a type assertion inside that engine: an
+	// assertion that stops matching after a refactor fails as "this endpoint cannot
+	// allocate", at the one moment nobody is watching for it.
+	endpoint := reconciler.Endpoint{Client: nbClient, Allocator: nbClient, Provenance: stamp}
 
 	cr := &netboxv1alpha1.NetBoxEndpoint{}
 	if err := p.reader.Get(ctx,

@@ -153,6 +153,13 @@ func run() error {
 		return fmt.Errorf("setting up the object controllers: %w", err)
 	}
 
+	// And every claim kind, from the set its own init() functions registered. A second call
+	// rather than a wider first one because a claim is not an object the declarative engine
+	// drives -- see SetupClaimControllers.
+	if err := controller.SetupClaimControllers(mgr, clients); err != nil {
+		return fmt.Errorf("setting up the claim controllers: %w", err)
+	}
+
 	// The sweep reads NetBox and the CRs of every kind it is asked about, and writes
 	// nothing to either -- so it takes the manager's plain client rather than the
 	// field-owned one every writer above uses (NBO-046).
