@@ -78,8 +78,13 @@ The operator cannot widen its own RBAC: a `Role` the deployer did not create is 
 that does not exist, so no amount of watching `NetBoxEndpoint`s would let it read a Secret
 in a namespace nobody granted. The list is therefore configuration, and it is a plain text
 file rather than a chart value because the manifests here are what
-`kustomize build config/default` renders. NBO-061's Helm values will read from the same
-list.
+`kustomize build config/default` renders.
+
+The Helm chart takes the same list as `credentialNamespaces` and renders the same two halves
+from it — a `Role`/`RoleBinding` per namespace and `NETBOX_CREDENTIAL_NAMESPACES` — and
+refuses `*` in both its `values.schema.json` and its templates, for the reason
+`hack/credential-rbac.sh` refuses it here. See
+[installing](../install.md#the-secret-blast-radius).
 
 One structural consequence worth knowing before you move things around: the transformers
 that namespace and prefix the operator's own resources live in `config/base`, not in

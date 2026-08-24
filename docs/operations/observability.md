@@ -29,9 +29,16 @@ The manager binds nothing by default — `--metrics-bind-address` defaults to `0
 With `--metrics-secure` (the default) the server presents a self-signed certificate and
 does **not** apply an authn/authz filter, so a scraper needs `insecureSkipVerify: true`
 and the port must not be reachable outside the cluster. The shipped Deployment in
-`config/manager/` passes neither flag and there is no `Service` or `ServiceMonitor` yet;
-add the flag and the scrape target in your own overlay until the Helm chart lands
-(NBO-061).
+`config/manager/` passes neither flag, so a kustomize install needs the flag and the scrape
+target in an overlay of its own.
+
+The **Helm chart** passes them: `metrics.enabled` (on by default) adds
+`--metrics-bind-address` and a `ClusterIP` `Service`, and `metrics.serviceMonitor.enabled`
+adds a `ServiceMonitor` — gated on `monitoring.coreos.com/v1` existing, so asking for one on
+a cluster without the Prometheus Operator is a skipped resource and a line in `NOTES.txt`
+rather than a failed install. It sets `insecureSkipVerify` on the scrape when
+`metrics.secure` is on, because of the self-signed certificate above. See
+[installing](../install.md#values).
 
 ## Metrics
 
