@@ -12,6 +12,7 @@ import (
 	netboxv1alpha1 "github.com/ricardomolendijk/netbox-operator/api/v1alpha1"
 	"github.com/ricardomolendijk/netbox-operator/internal/netbox"
 	"github.com/ricardomolendijk/netbox-operator/internal/provenance"
+	"github.com/ricardomolendijk/netbox-operator/internal/registry"
 )
 
 // managedBy is the spec block every test here sets, with an explicit cluster identifier
@@ -158,9 +159,22 @@ func TestEndpointAdoptsDefinitionsMadeByHand(t *testing.T) {
 	stub.withProvenance()
 
 	stub.seedExtras("extras/tags", netbox.Object{"name": "k8s-managed", "slug": "k8s-managed"})
+
+	// Every stampable kind's object type, because a definition that is missing one is a
+	// definition the bootstrap has to widen -- which is a write, and this test is about there
+	// being none. Read off the registry rather than listed, so a kind added tomorrow does not
+	// turn "nothing to do" into a failure here.
+	objectTypes := make([]any, 0, 4)
+
+	for _, d := range registry.List() {
+		if d.CustomFieldable {
+			objectTypes = append(objectTypes, d.ObjectType)
+		}
+	}
+
 	for _, name := range []string{"k8s_uid", "k8s_cluster", "k8s_owner", "k8s_allocation_identity"} {
 		stub.seedExtras("extras/custom-fields", netbox.Object{
-			"name": name, "object_types": []any{"dcim.site", "dcim.region"},
+			"name": name, "object_types": objectTypes,
 		})
 	}
 

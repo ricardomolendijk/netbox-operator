@@ -12,6 +12,7 @@ import (
 
 	netboxv1alpha1 "github.com/ricardomolendijk/netbox-operator/api/v1alpha1"
 	"github.com/ricardomolendijk/netbox-operator/internal/netbox"
+	"github.com/ricardomolendijk/netbox-operator/internal/registry"
 )
 
 // protectedBody is what NetBox sends back when a foreign key declared PROTECT still points
@@ -485,12 +486,21 @@ func TestDeletionPolicyNeverReachesNetBox(t *testing.T) {
 	}
 }
 
-// TestDeletionPolicyDefaultsToDelete guards the stored-object case. The CRD default only
-// applies to objects written after the marker existed, so the engine defaults it too --
-// and defaulting it the other way would leave objects behind.
+// TestDeletionPolicyDefaultsToDelete guards the unset case, which is every object of every
+// kind that does not state a policy: there is no CRD default to lean on -- the field is
+// declared once on the shared envelope, so a marker there could only give ~120 kinds one
+// answer -- and defaulting it the other way would leave objects behind.
+//
+// The per-kind exception is the second half: decision #176 makes IPAM retain, declared as
+// registry.Descriptor.RetainOnDelete, because deleting an address frees it for reallocation.
 func TestDeletionPolicyDefaultsToDelete(t *testing.T) {
-	if got := deletionPolicyOf(fakeObject()); got != netboxv1alpha1.DeletionDelete {
+	if got := deletionPolicyOf(fakeObject(), registry.Descriptor{}); got != netboxv1alpha1.DeletionDelete {
 		t.Errorf("deletionPolicyOf(unset) = %q, want %q", got, netboxv1alpha1.DeletionDelete)
+	}
+
+	retaining := registry.Descriptor{RetainOnDelete: true}
+	if got := deletionPolicyOf(fakeObject(), retaining); got != netboxv1alpha1.DeletionRetain {
+		t.Errorf("deletionPolicyOf(unset, RetainOnDelete) = %q, want %q", got, netboxv1alpha1.DeletionRetain)
 	}
 }
 

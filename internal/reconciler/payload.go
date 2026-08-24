@@ -84,7 +84,11 @@ func (s specFields) desired(d registry.Descriptor) (netbox.Object, registry.Spec
 	// the reported references read; both are compared in tests and read by humans.
 	for _, name := range slices.Sorted(maps.Keys(s)) {
 		value := s[name]
-		if value == nil || envelopeFields[name] {
+		// Descriptor.DuplicateSpec is skipped with the envelope's own fields, and for the
+		// same reason: it configures the operator rather than describing a NetBox column.
+		// NetBox ignores a field it does not know rather than rejecting it, so sending it
+		// would be silent.
+		if value == nil || envelopeFields[name] || name == d.DuplicateSpec {
 			continue
 		}
 		state.Declared = append(state.Declared, name)
