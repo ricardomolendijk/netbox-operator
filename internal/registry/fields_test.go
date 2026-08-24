@@ -9,19 +9,22 @@ func TestDescriptorFieldFor(t *testing.T) {
 	device := deviceDescriptor()
 
 	tests := []struct {
-		name    string
-		spec    string
-		wantAPI string
-		wantRef bool
-		wantOK  bool
+		name      string
+		spec      string
+		wantAPI   string
+		wantClass FieldClass
+		wantOK    bool
 	}{
 		{name: "scalar", spec: "name", wantAPI: "name", wantOK: true},
-		{name: "reference drops the Ref suffix", spec: "siteRef", wantAPI: "site", wantRef: true, wantOK: true},
+		{
+			name: "reference drops the Ref suffix", spec: "siteRef",
+			wantAPI: "site", wantClass: ClassRefOne, wantOK: true,
+		},
 		{
 			// The case a camelCase-to-snake_case convention gets wrong, and the reason
 			// the mapping is a table.
 			name: "acronym in the middle of a name", spec: "primaryIP4Ref",
-			wantAPI: "primary_ip4", wantRef: true, wantOK: true,
+			wantAPI: "primary_ip4", wantClass: ClassRefOne, wantOK: true,
 		},
 		{name: "unmapped", spec: "comments"},
 	}
@@ -34,8 +37,8 @@ func TestDescriptorFieldFor(t *testing.T) {
 				t.Fatalf("FieldFor(%q) ok = %v, want %v", tc.spec, ok, tc.wantOK)
 			}
 
-			if field.API != tc.wantAPI || field.Ref != tc.wantRef {
-				t.Fatalf("FieldFor(%q) = %+v, want api %q ref %v", tc.spec, field, tc.wantAPI, tc.wantRef)
+			if field.API != tc.wantAPI || field.Class != tc.wantClass {
+				t.Fatalf("FieldFor(%q) = %+v, want api %q class %q", tc.spec, field, tc.wantAPI, tc.wantClass)
 			}
 		})
 	}
@@ -101,7 +104,7 @@ func TestDescriptorValidateFieldMap(t *testing.T) {
 		},
 		{
 			name: "non-reference field declaring a target kind",
-			// Almost always a forgotten `Ref: true`. Left alone, the resolver ignores the
+			// Almost always a class left at ClassValue. Left alone, the resolver ignores the
 			// field and the engine writes the reference to NetBox verbatim.
 			mutate: func(d *Descriptor) {
 				d.Fields = append(d.Fields, Field{
@@ -171,7 +174,7 @@ func TestDescriptorValidateFieldMap(t *testing.T) {
 		{
 			name: "generic FK spec field is also an ordinary field",
 			mutate: func(d *Descriptor) {
-				d.Fields = append(d.Fields, Field{Spec: "scopeRef", API: "scope", Ref: true})
+				d.Fields = append(d.Fields, Field{Spec: "scopeRef", API: "scope", Class: ClassRefOne})
 				d.GenericFKs = []GenericFKSpec{{
 					TypeField: "scope_type", IDField: "scope_id",
 					AllowedTypes: []string{"dcim.site"}, Spec: "scopeRef",
@@ -191,14 +194,52 @@ func TestDescriptorValidateFieldMap(t *testing.T) {
 			wantErr: ErrGenericFKNotSpecField,
 		},
 		{
-			name:    "array field that is also many-to-many",
-			mutate:  func(d *Descriptor) { d.Arrays, d.M2M = []string{"object_types"}, []string{"object_types"} },
-			wantErr: ErrFieldClassConflict,
+			// A field class the engine does not implement. It has to fail the boot rather
+			// than be treated as a scalar: an invented class on a to-many reference would
+			// leave the field unresolved and compared as one value, which is the pair of
+			// silent wrongnesses classes exist to prevent.
+			name: "unknown field class",
+			mutate: func(d *Descriptor) {
+				d.Fields = append(d.Fields, Field{Spec: "asns", API: "asns", Class: "RefSeveral"})
+			},
+			wantErr: ErrUnknownFieldClass,
 		},
 		{
-			name:    "empty array field name",
-			mutate:  func(d *Descriptor) { d.Arrays = []string{""} },
-			wantErr: ErrEmptyField,
+			// A to-many reference cannot be an identity. A filter carries one value, so the
+			// candidate is never applicable and the object waits for an identity that cannot
+			// be built -- silence rather than a failure, which is why this is a boot check.
+			name: "natural key matches on a to-many reference",
+			mutate: func(d *Descriptor) {
+				d.Fields = append(d.Fields,
+					Field{Spec: "objectTypeRefs", API: "object_type_refs", Class: ClassRefMany})
+				d.NaturalKeys = append(d.NaturalKeys, NaturalKey{
+					Fields: []KeyField{{Filter: "object_type_refs", Spec: "objectTypeRefs"}},
+				})
+			},
+			wantErr: ErrToManyNaturalKey,
+		},
+		{
+			name: "null pin reads a to-many reference",
+			mutate: func(d *Descriptor) {
+				d.Fields = append(d.Fields,
+					Field{Spec: "objectTypeRefs", API: "object_type_refs", Class: ClassRefMany})
+				d.NaturalKeys[0].NullFields = []NullField{
+					{Filter: "object_type_refs", Spec: "objectTypeRefs"},
+				}
+			},
+			wantErr: ErrToManyNaturalKey,
+		},
+		{
+			// Kubernetes garbage collection waits for every owner reference, so a list of
+			// containment parents turns "delete the site" into "delete any of them"
+			// (docs/decisions/0003-ownership-and-references.md rule 4).
+			name: "containment ref is a to-many reference",
+			mutate: func(d *Descriptor) {
+				d.Fields = append(d.Fields,
+					Field{Spec: "parentRefs", API: "parents", Class: ClassRefMany})
+				d.ContainmentRef = "parentRefs"
+			},
+			wantErr: ErrContainmentToMany,
 		},
 	}
 

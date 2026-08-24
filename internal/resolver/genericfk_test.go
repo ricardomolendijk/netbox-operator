@@ -246,8 +246,14 @@ func TestResolveAllReportsGenericFKUnderItsUnionField(t *testing.T) {
 		t.Fatalf("ByField = %v, want an entry under the union field", resolution.ByField)
 	}
 
-	if got.ObjectType != "dcim.region" || got.ID != 12 {
-		t.Errorf("(objectType, id) = (%q, %d), want (dcim.region, 12)", got.ObjectType, got.ID)
+	// One element, always: a union selects one target, so there is no list here and no
+	// partial-list rule for the engine to apply (NBO-088).
+	if len(got) != 1 {
+		t.Fatalf("ByField[scope] = %v, want exactly one result", got)
+	}
+
+	if got[0].ObjectType != "dcim.region" || got[0].ID != 12 {
+		t.Errorf("(objectType, id) = (%q, %d), want (dcim.region, 12)", got[0].ObjectType, got[0].ID)
 	}
 }
 

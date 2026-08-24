@@ -94,8 +94,10 @@ func (r *Resolver) resolveMember(
 ) (Result, error) {
 	result, err := r.Resolve(ctx, Request{
 		NetBox: req.NetBox, Referrer: req.Referrer, ReferrerGVK: req.ReferrerGVK,
-		Field: registry.Field{Spec: req.Pair.Spec + "." + member.Spec, Ref: true, Target: member.Target},
-		Ref:   req.Union[member.Spec],
+		Field: registry.Field{
+			Spec: req.Pair.Spec + "." + member.Spec, Class: registry.ClassRefOne, Target: member.Target,
+		},
+		Ref: req.Union[member.Spec],
 	})
 	if err != nil {
 		return Result{}, err
@@ -201,8 +203,8 @@ func decodeUnion(raw json.RawMessage) (map[string]netboxv1alpha1.ObjectRef, erro
 //
 // The spec field it reports is the union's own path -- `assignedObject.interfaceRef` -- which
 // is the spelling a condition names and the spelling `kubectl explain` accepts.
-func genericMemberRefs(generics []declaredGeneric) []declaredRef {
-	refs := make([]declaredRef, 0, len(generics))
+func genericMemberRefs(generics []declaredGeneric) []fieldRefs {
+	refs := make([]fieldRefs, 0, len(generics))
 
 	for _, generic := range generics {
 		for _, name := range slices.Sorted(maps.Keys(generic.union)) {
@@ -211,13 +213,16 @@ func genericMemberRefs(generics []declaredGeneric) []declaredRef {
 				continue
 			}
 
-			refs = append(refs, declaredRef{
+			// One reference under one field, always: a union selects one member, so
+			// ClassRefOne is the whole of its cardinality and FieldRefs.elements() yields
+			// exactly the single element the index keys on.
+			refs = append(refs, fieldRefs{
 				field: registry.Field{
 					Spec:   generic.pair.Spec + "." + member.Spec,
-					Ref:    true,
+					Class:  registry.ClassRefOne,
 					Target: member.Target,
 				},
-				ref: generic.union[name],
+				refs: []netboxv1alpha1.ObjectRef{generic.union[name]},
 			})
 		}
 	}

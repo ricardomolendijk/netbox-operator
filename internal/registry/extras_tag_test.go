@@ -91,7 +91,7 @@ func TestTagFieldMapRoundTrips(t *testing.T) {
 
 		// extras.Tag has no foreign keys at all, which is exactly why it is the kind the
 		// engine is proved against before internal/resolver lands (NBO-012).
-		if field.Ref {
+		if field.Class.Ref() {
 			t.Errorf("field %q is marked as a reference; extras.Tag has none", field.Spec)
 		}
 	}
@@ -112,11 +112,11 @@ func TestTagFieldMapRoundTrips(t *testing.T) {
 func TestTagObjectTypesIsNotAnM2M(t *testing.T) {
 	d := extrasTagDescriptor()
 
-	if !slices.Contains(d.ObjectTypeLists, "object_types") {
-		t.Errorf("ObjectTypeLists = %v, want it to contain object_types", d.ObjectTypeLists)
+	if !slices.Contains(d.ObjectTypeListFields(), "object_types") {
+		t.Errorf("ObjectTypeListFields() = %v, want it to contain object_types", d.ObjectTypeListFields())
 	}
 
-	if slices.Contains(d.M2M, "object_types") {
+	if slices.Contains(d.M2MFields(), "object_types") {
 		t.Error("object_types is declared as an M2M; its values are content-type strings, not ids")
 	}
 }
@@ -129,7 +129,7 @@ func TestTagObjectTypesIsNotAnM2M(t *testing.T) {
 // it selects -- and a test is where the two should be made to agree.
 func TestTagObjectTypesDiffOrderIndependently(t *testing.T) {
 	rules := netbox.FieldRules{ObjectTypeLists: map[string]bool{}}
-	for _, field := range extrasTagDescriptor().ObjectTypeLists {
+	for _, field := range extrasTagDescriptor().ObjectTypeListFields() {
 		rules.ObjectTypeLists[field] = true
 	}
 

@@ -13,8 +13,8 @@ const (
 	ConditionSynced = "Synced"
 
 	// ConditionRefsResolved is true when every reference in the spec resolved to a NetBox
-	// id. References are accepted and ignored until NBO-012, so in v1alpha1's first
-	// milestone this condition reports NotImplemented rather than lying.
+	// id. False names the field that has not resolved and why, and the object does not
+	// reach Ready while it is False.
 	ConditionRefsResolved = "RefsResolved"
 
 	// ConditionDriftDetected is true when NetBox differs from the spec and the operator
@@ -142,9 +142,14 @@ const (
 	ReasonAllResolved = "AllResolved"
 
 	// ReasonNotImplemented is on RefsResolved: the spec declares a reference this build
-	// cannot resolve at all -- a generic foreign key, whose target is a union of Kinds
-	// rather than one and whose dispatch is NBO-019. It is accepted, left out of the
-	// payload, and reported rather than silent.
+	// cannot resolve at all. It is accepted, left out of the payload, and reported rather
+	// than silent.
+	//
+	// Nothing is in that set any more. To-many references landed with NBO-088 and generic
+	// foreign keys with NBO-019, which were the two members. It stays as the guard rather
+	// than as a state: a declared reference the resolver neither resolved nor refused is a
+	// gap between the field map and the resolver, and it has to be reported on the object
+	// instead of dropped from the payload silently.
 	ReasonNotImplemented = "NotImplemented"
 
 	// The RefsResolved reasons for a reference that did not resolve. One per cause, each
@@ -162,6 +167,16 @@ const (
 	// quotes the target's own Ready reason when it has one, so a target that is *failing*
 	// does not read as a referrer that is broken.
 	ReasonRefNotReady = "RefNotReady"
+
+	// ReasonRefTargetFailed is on RefsResolved: the target CR holds a NetBox id and its own
+	// Ready reason says that id is for an object the target no longer describes -- a
+	// Conflict, an AdoptOnly that matched nothing, or a spec NetBox rejected.
+	//
+	// Distinct from ReasonRefNotReady, which is a wait an event ends. This one needs somebody
+	// to fix the *target*, so it carries no retry interval, and it exists because the
+	// alternative -- treating every Ready=False target as a wait -- made `driftMode: Report`
+	// block every object in its namespace indefinitely (NBO-089).
+	ReasonRefTargetFailed = "RefTargetFailed"
 
 	// ReasonRefAmbiguous is on RefsResolved: a slug or lookup matched several NetBox
 	// objects. The message names every id, because the next step is a human choosing

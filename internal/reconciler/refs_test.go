@@ -52,7 +52,7 @@ func blockedOnParent(cause error, requeue time.Duration) resolver.Resolution {
 	err := refError("parentRef", cause)
 
 	return resolver.Resolution{
-		ByField: map[string]resolver.Result{},
+		ByField: map[string]resolver.FieldRefs{},
 		Blocked: []resolver.Blocker{{
 			Field: "parentRef", Reason: resolver.Classify(err).Reason, Requeue: requeue, Err: err,
 		}},
@@ -70,8 +70,8 @@ func refError(field string, cause error) error {
 
 // resolvedTo is a resolution that turned one reference into an id.
 func resolvedTo(field string, id int64) resolver.Resolution {
-	return resolver.Resolution{ByField: map[string]resolver.Result{
-		field: {ID: id, ObjectType: "extras.tag", Mode: resolver.ModeName},
+	return resolver.Resolution{ByField: map[string]resolver.FieldRefs{
+		field: {{ID: id, ObjectType: "extras.tag", Mode: resolver.ModeName}},
 	}}
 }
 
@@ -481,8 +481,8 @@ func TestResolvedGenericFKWritesBothColumns(t *testing.T) {
 
 	nb := &fakeClient{created: liveTag(7)}
 	engine := engineWith(t, scopedDescriptor(), nb, &fakeRefs{resolution: resolver.Resolution{
-		ByField: map[string]resolver.Result{
-			"scope": {ID: 31, ObjectType: "dcim.site", Mode: resolver.ModeName},
+		ByField: map[string]resolver.FieldRefs{
+			"scope": {{ID: 31, ObjectType: "dcim.site", Mode: resolver.ModeName}},
 		},
 	}})
 
@@ -513,7 +513,7 @@ func TestEmptyGenericFKClearsBothColumns(t *testing.T) {
 
 	nb := &fakeClient{created: liveTag(7)}
 	engine := engineWith(t, scopedDescriptor(), nb, &fakeRefs{resolution: resolver.Resolution{
-		ByField: map[string]resolver.Result{"scope": {}},
+		ByField: map[string]resolver.FieldRefs{"scope": {{}}},
 	}})
 
 	if _, err := engine.Reconcile(context.Background(), obj); err != nil {
@@ -530,6 +530,62 @@ func TestEmptyGenericFKClearsBothColumns(t *testing.T) {
 	}
 }
 
+// TestClaimedButAbsentGenericFKWritesNeitherColumn is the guard against NBO-079 (#169)
+// turning a union nobody wrote into a union written empty.
+//
+// #169 gives optional fields three states by reading `metadata.managedFields`: a spec field
+// another manager has claimed but the spec no longer carries is restored to its Go **empty
+// value** before the payload is built, so `description: ""` can clear a NetBox description.
+// For a union the Go empty value is `{}` -- and an empty union is this file's instruction to
+// *clear both columns*. Composed naively the two rules read "somebody else once mentioned
+// scope, so detach the object", which nobody asked for and which no manifest states.
+//
+// It does not fire, and the reason is structural rather than lucky: #169 derives the empty
+// form by reflection over the spec struct and produces one only for a slice, a map or a
+// scalar. A struct and a pointer to one are deliberately excluded -- a nil pointer already
+// marshals to `null`, which is a state of its own -- and a union member field is exactly a
+// `*struct`. So there is no empty form to restore and the field stays absent.
+//
+// This test is what keeps that true, and it asserts both halves of "absent", because a
+// regression could land as either one. Neither column is written, and RefsResolved is
+// AllResolved: a union restored to `{}` would show up first as a *declared* reference this
+// pass has to account for, and only then as two nulls on the wire.
+func TestClaimedButAbsentGenericFKWritesNeitherColumn(t *testing.T) {
+	obj := fakeObject()
+	obj.Spec.Scope = nil
+
+	// A Flux/SSA-shaped claim on the union field, which is what #169 reads.
+	obj.ManagedFields = []metav1.ManagedFieldsEntry{{
+		Manager:    "kustomize-controller",
+		Operation:  metav1.ManagedFieldsOperationApply,
+		APIVersion: fakeGVK.GroupVersion().String(),
+		FieldsType: "FieldsV1",
+		FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:spec":{"f:scope":{}}}`)},
+	}}
+
+	nb := &fakeClient{created: liveTag(7)}
+	engine := engineWith(t, scopedDescriptor(), nb, &fakeRefs{resolution: resolver.Resolution{
+		ByField: map[string]resolver.FieldRefs{},
+	}})
+
+	if _, err := engine.Reconcile(context.Background(), obj); err != nil {
+		t.Fatalf("Reconcile() = %v", err)
+	}
+
+	payload := nb.lastPayload()
+	for _, column := range []string{"scope_type", "scope_id"} {
+		if value, written := payload[column]; written {
+			t.Errorf("payload[%s] = %v, want the column absent: an unwritten union is not an empty one",
+				column, value)
+		}
+	}
+
+	if got := conditionOf(obj, netboxv1alpha1.ConditionRefsResolved).Reason; got != netboxv1alpha1.ReasonAllResolved {
+		t.Errorf("RefsResolved reason = %q, want %q: the spec declares no union to resolve",
+			got, netboxv1alpha1.ReasonAllResolved)
+	}
+}
+
 // TestRefusedGenericFKIsTerminalAndWritesNothingToTheColumns pins the refusal path: an illegal
 // target is reported, both columns are left alone, and nothing comes back on a timer.
 func TestRefusedGenericFKIsTerminalAndWritesNothingToTheColumns(t *testing.T) {
@@ -543,7 +599,7 @@ func TestRefusedGenericFKIsTerminalAndWritesNothingToTheColumns(t *testing.T) {
 
 	nb := &fakeClient{created: liveTag(7)}
 	engine := engineWith(t, scopedDescriptor(), nb, &fakeRefs{resolution: resolver.Resolution{
-		ByField: map[string]resolver.Result{},
+		ByField: map[string]resolver.FieldRefs{},
 		Blocked: []resolver.Blocker{{
 			Field: "scope", Reason: resolver.Classify(err).Reason, Err: err,
 		}},

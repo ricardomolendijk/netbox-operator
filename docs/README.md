@@ -75,7 +75,7 @@ Dated records of decisions that are expensive to reverse. Index and status:
 |---|---|
 | [0001 — API group and kind naming](decisions/0001-api-group-and-kind-naming.md) | Why the group is `netbox.kubeforge.org` and every kind is prefixed `NetBox` |
 | [0002 — CRD scoping](decisions/0002-crd-scoping.md) | Why every kind is namespaced in `v1alpha1`, what that costs, and what would have to change to revisit it |
-| [0003 — Ownership and references](decisions/0003-ownership-and-references.md) | How a NetBox foreign key differs from a Kubernetes owner reference, and where the operator adds each |
+| [0003 — Ownership and references](decisions/0003-ownership-and-references.md) | How a NetBox foreign key differs from a Kubernetes owner reference, where the operator adds each, and why inline child sugar is in `v1alpha1` on terms that let `v1beta1` drop it |
 | [0004 — Claims-first allocation](decisions/0004-claims-first-allocation.md) | Why "allocate me an address" is a separate kind rather than a mode of `NetBoxIPAddress` |
 | [0005 — Coexisting with Flux and Argo CD](decisions/0005-gitops-coexistence.md) | Why Git is authoritative, why a NetBox UI edit is drift rather than a competing opinion, and why there is no write-back |
 
@@ -83,8 +83,8 @@ Dated records of decisions that are expensive to reverse. Index and status:
 
 | Page | Answers |
 |---|---|
-| [Coexisting with Flux and Argo CD](operations/gitops.md) | Why the operator never writes a `spec` and how that is enforced, the Argo CD `ignoreDifferences` and Flux `Kustomization` snippets that make it quiet, the three `driftMode` values, the cluster-rebuild walkthrough, and the NetBox permission model |
-| [Provenance](operations/provenance.md) | What `spec.managedBy` writes into every NetBox object the operator manages, how the tag and custom-field definitions get bootstrapped, why stamping is not mandatory, and what stops working when you turn it off |
+| [Coexisting with Flux and Argo CD](operations/gitops.md) | Why the operator never writes a `spec` and how that is enforced, the Argo CD `ignoreDifferences` and Flux `Kustomization` snippets that make it quiet, the three `driftMode` values, the cluster-rebuild and NetBox-restore walkthroughs, and the NetBox permission model |
+| [Provenance](operations/provenance.md) | What `spec.managedBy` writes into every NetBox object the operator manages, how the tag and custom-field definitions get bootstrapped, why stamping is not mandatory, what stops working when you turn it off, and why two clusters sharing one NetBox are never serialised |
 | [Observability](operations/observability.md) | Every metric with its labels, cardinality and what to alert on; which Events fire and when; the log levels and the stable key set, with `kubectl logs \| jq` recipes |
 | [Stuck references](operations/stuck-references.md) | Which condition says why an object is waiting for another one, what the reference metrics mean together, how to find an object's referrers by hand, and which references nothing will ever wake |
 | [NetBox schema reference](netbox-schema.md) | The authoritative field list every CRD is derived from: 159 models, 138 endpoints, machine-extracted from NetBox 4.6.8. Grep it; do not read it |

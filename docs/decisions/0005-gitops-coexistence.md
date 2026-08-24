@@ -1,6 +1,9 @@
 # 0005 — Coexisting with Flux and Argo CD
 
 **Status:** Accepted · 2026-08-21
+**Amended:** 2026-08-24 — §4 settled: no Git write-back, decided rather than deferred
+([#22](https://github.com/ricardomolendijk/netbox-operator/issues/22)). §4b gained a pointer
+to the restore runbook.
 
 ## The governing principle
 
@@ -126,7 +129,10 @@ order of weight:
    using `NetBoxIPAddress` with an explicit address, not a claim. The claim exists
    precisely to say "I don't want to know."
 
-Reconsidered only if §3 proves insufficient in practice. Tracked as an open decision.
+**Decided, not deferred.** This is not a feature waiting for demand: the operator holds no
+repository credentials and gains none. Anyone who wants an allocated value committed to Git
+has to build it outside this project, as a separate controller with its own credentials and
+its own RBAC — never in the operator binary.
 
 ### 4b. Disaster recovery, since §3 depends on NetBox
 
@@ -149,6 +155,10 @@ plainly because it is the question Git write-back is usually reaching for:
 So: back up NetBox. After a restore, the operator reconciles against whatever the restore
 contains and reclaims by identity; anything the backup predates is allocated again, and the
 claims that changed are visible in `status.address`.
+
+What an operator actually does — in which order, and what survives which failure — is the
+runbook in
+[restoring NetBox from backup](../operations/gitops.md#restoring-netbox-from-backup).
 
 ### 5. All of it is configurable, and the Helm chart is where
 
