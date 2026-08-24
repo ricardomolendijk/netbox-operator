@@ -1,0 +1,822 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.19.0
+  name: netboxvlans.netbox.kubeforge.org
+spec:
+  group: netbox.kubeforge.org
+  names:
+    kind: NetBoxVLAN
+    listKind: NetBoxVLANList
+    plural: netboxvlans
+    shortNames:
+    - nbvlan
+    singular: netboxvlan
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.vid
+      name: VID
+      type: integer
+    - jsonPath: .spec.name
+      name: Name
+      type: string
+    - jsonPath: .spec.siteRef.name
+      name: Site
+      type: string
+    - jsonPath: .spec.groupRef.name
+      name: Group
+      type: string
+    - jsonPath: .spec.status
+      name: Status
+      type: string
+    - jsonPath: .status.id
+      name: ID
+      type: integer
+    - jsonPath: .status.conditions[?(@.type=="Ready")].status
+      name: Ready
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          NetBoxVLAN is one ipam.VLAN in NetBox.
+
+          Namespaced like every kind in v1alpha1 (docs/decisions/0002-crd-scoping.md).
+
+          SITE and GROUP read the spec rather than the status, because both are visible intent and
+          both are worth seeing next to an empty ID while a reference is still resolving.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              NetBoxVLANSpec describes one ipam.VLAN.
+
+              **This is the one kind in M3 where writing `site` is correct**, and it sits immediately
+              next to the kind where it is wrong. `docs/netbox-schema.md -> ipam.VLAN` shows
+              `site ForeignKey -> dcim.Site on_delete=PROTECT` -- a genuine foreign key, on the model,
+              writable, and part of how the operator finds a VLAN again. `ipam.Prefix` shows no `site`
+              column at all, only `CachedScopeMixin` among its bases, so `NetBoxPrefix` has a `scope`
+              union instead and writing `site` to it returns 201 and sets nothing. The two are the most
+              confusable pair in this API; see docs/reference/netboxvlan.md and
+              docs/reference/netboxprefix.md, which cross-link for that reason.
+
+              A VLAN group *is* scoped, and `NetBoxVLANGroup` therefore has the `scope` union and no
+              `siteRef`. `siteRef` here, `scope` there, in the same API version, is deliberate.
+
+              `deletionPolicy` still defaults to `Delete` here, and per
+              docs/concepts/deletion.md#the-default-depends-on-the-kind `NetBoxVLAN` should default to
+              `Retain` -- deleting a VLAN destroys its change log, its journal entries and every
+              termination hanging off it, and a fresh VLAN with the same `vid` is a different object with
+              a different id. It is not implemented because it cannot be, per kind, in this API:
+              `deletionPolicy` is declared once on the embedded NetBoxObjectSpec, and redeclaring it here
+              makes controller-gen emit `allOf: [{default: Retain}, {default: Delete}]`, which the API
+              server rejects outright. Giving a kind its own default needs `Descriptor.RetainOnDelete`
+              and `deletionPolicyOf(obj, desc)` (#186, #199), neither of which has landed. Until they do,
+              every NetBoxVLAN manifest should say `deletionPolicy: Retain` explicitly.
+            properties:
+              comments:
+                description: |-
+                  Comments is the VLAN's long-form notes field. Also inherited from PrimaryModel, and a
+                  TextField rather than a CharField: it has no max_length, so there is no MaxLength
+                  marker to derive.
+
+                  Omit it to leave NetBox's own value alone; set it to `""` to clear the value in
+                  NetBox. The two are different intents and the operator can tell them apart
+                  (docs/concepts/field-ownership.md).
+                type: string
+              deletionPolicy:
+                default: Delete
+                description: |-
+                  DeletionPolicy is what happens to the NetBox object when this CR is deleted.
+
+                  Read fresh on every pass rather than latched when deletion starts, so switching it
+                  to Retain on an object whose delete NetBox keeps refusing is a way out of that
+                  state (docs/concepts/deletion.md).
+                enum:
+                - Delete
+                - Retain
+                type: string
+              description:
+                description: |-
+                  Description is free text shown next to the VLAN. Declared on PrimaryModel rather than
+                  on ipam.VLAN (docs/netbox-schema.md -> ipam.VLAN,
+                  `description (PrimaryModel) CharField len=200`); an inherited column is as writable as
+                  a declared one.
+
+                  Omit it to leave NetBox's own value alone; set it to `""` to clear the value in
+                  NetBox. The two are different intents and the operator can tell them apart
+                  (docs/concepts/field-ownership.md).
+                maxLength: 200
+                type: string
+              endpointRef:
+                description: |-
+                  EndpointRef names the NetBoxEndpoint to write through, in this object's own
+                  namespace. Required: there is no cluster-wide default endpoint, so an omitted
+                  reference cannot be resolved into one.
+                minLength: 1
+                type: string
+              groupRef:
+                description: |-
+                  GroupRef puts the VLAN in a VLAN group (docs/netbox-schema.md -> ipam.VLAN,
+                  `group ForeignKey -> ipam.VLANGroup on_delete=PROTECT`).
+
+                  The only identity of this kind that a database constraint actually backs:
+                  `unique_group_vid` (docs/netbox-schema.md -> ipam.VLAN, meta.constraints). With it set
+                  the lookup is `?group_id=<id>&vid=<vid>` and can match at most one VLAN. Without it,
+                  `group` is null, Postgres treats the NULLs as distinct and the constraint does not fire
+                  -- so nothing in NetBox stops two VLANs with `vid: 20` on one site, and more than one
+                  match is reported as a Conflict naming both candidates rather than resolved by taking
+                  the first.
+
+                  Not a containment reference: a VLAN outliving its group is a normal state.
+                properties:
+                  id:
+                    description: |-
+                      ID is a literal NetBox primary key: the escape hatch, and the only place in the API
+                      where a raw id is accepted.
+
+                      A pointer so that `id: 0` is distinguishable from unset. NetBox primary keys start
+                      at 1, so zero is never a real object and has to be rejected rather than silently
+                      treated as "no id".
+                    format: int64
+                    minimum: 1
+                    type: integer
+                  lookup:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      Lookup is a raw NetBox API filter, for an object no slug identifies -- a VLAN is
+                      `{vid: "20", site: "home"}` because its identity is a pair.
+
+                      `q` is rejected by the CEL rules along with the pagination and formatting
+                      parameters. It is NetBox's fuzzy search, and a fuzzy filter behind a reference that
+                      must identify exactly one object would make ambiguity the normal case rather than
+                      an error.
+                    maxProperties: 8
+                    type: object
+                  name:
+                    description: |-
+                      Name of a CR of the target Kind, resolved through that CR's `.status.id`.
+
+                      This is the mode to prefer: it is the only one that expresses a dependency the
+                      operator can wait on, which is what lets a graph applied in any order converge.
+                    maxLength: 253
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                    type: string
+                  namespace:
+                    description: |-
+                      Namespace of that CR. Defaults to the referring object's namespace.
+
+                      Load-bearing on the common path rather than an edge case: every Kind is namespaced
+                      in v1alpha1 (docs/decisions/0002-crd-scoping.md), so a team namespace pointing at a
+                      shared catalogue namespace is the normal shape. Crossing a namespace requires a
+                      NetBoxRefGrant in the target namespace (NBO-014).
+                    maxLength: 63
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                    type: string
+                  slug:
+                    description: |-
+                      Slug looks the object up in NetBox directly, for objects the operator does not
+                      manage. No CR needs to exist.
+
+                      Bounded at 100 characters because that is what NetBox's own column allows:
+                      `slug SlugField len=100` on every OrganizationalModel, NestedGroupModel and
+                      PrimaryModel (docs/netbox-schema.md -> dcim.Site, dcim.Region, extras.Tag).
+                    maxLength: 100
+                    pattern: ^[-a-zA-Z0-9_]+$
+                    type: string
+                type: object
+                x-kubernetes-validations:
+                - message: exactly one of name, slug, lookup or id must be set
+                  rule: '[has(self.name) && size(self.name) > 0, has(self.slug) &&
+                    size(self.slug) > 0, has(self.lookup) && size(self.lookup) > 0,
+                    has(self.id)].filter(x, x).size() == 1'
+                - message: namespace may only be set together with name
+                  rule: '!has(self.namespace) || (has(self.name) && size(self.name)
+                    > 0)'
+                - message: lookup keys must be lowercase NetBox filter names
+                  rule: '!has(self.lookup) || self.lookup.all(k, k.matches(''^[a-z][a-z0-9_]*$''))'
+                - message: lookup may not set pagination, formatting or fuzzy-search
+                    parameters
+                  rule: '!has(self.lookup) || self.lookup.all(k, !(k in [''limit'',''offset'',''format'',''brief'',''ordering'',''q'']))'
+                - message: lookup values are limited to 200 characters
+                  rule: '!has(self.lookup) || self.lookup.all(k, size(self.lookup[k])
+                    <= 200)'
+              name:
+                description: |-
+                  Name is the VLAN's name (docs/netbox-schema.md -> ipam.VLAN,
+                  `name CharField REQ len=64`).
+
+                  Free text, and the real inventory uses it that way: `MGMT (Default)` has a space and
+                  parentheses in it. That is a NetBox value, not a Kubernetes name -- the CR's
+                  `metadata.name` still has to be a DNS-1123 label (`vlan-1-mgmt-default`), and the two
+                  are unrelated strings.
+
+                  Not part of the identity the operator looks up by, even though `unique_group_name` is a
+                  real constraint: `vid` is the stable identifier a network engineer keys on and a rename
+                  should not orphan the object.
+                maxLength: 64
+                minLength: 1
+                type: string
+              onConflict:
+                default: Fail
+                description: OnConflict is what to do when NetBox already holds a
+                  matching object.
+                enum:
+                - Fail
+                - Adopt
+                - AdoptOnly
+                type: string
+              qinqRole:
+                description: |-
+                  QinQRole is which half of a Q-in-Q pair this VLAN is: `svlan` (outer, service) or
+                  `cvlan` (inner, customer).
+
+                  Undefaulted, unlike `status`. The column is nullable with no Django default and an
+                  ordinary VLAN is neither half of a Q-in-Q pair, so defaulting it would assert a topology
+                  nobody described.
+                enum:
+                - svlan
+                - cvlan
+                type: string
+              qinqSVLANRef:
+                description: |-
+                  QinQSVLANRef is the outer service VLAN of a Q-in-Q pair
+                  (docs/netbox-schema.md -> ipam.VLAN, `qinq_svlan ForeignKey -> ipam.VLAN
+                  on_delete=PROTECT`).
+
+                  A self-reference, and therefore **deferred**: it is left out of the create payload and
+                  applied by a follow-up PATCH, so a pair of VLANs that point at each other converges
+                  instead of deadlocking. In between the object reports
+                  `Ready=False, Reason=DeferredFieldPending` (docs/concepts/references.md, NBO-015).
+
+                  `(qinq_svlan, vid)` and `(qinq_svlan, name)` are real constraints on this model, but
+                  neither can be a natural key here: a deferred reference is by construction unresolved
+                  when the lookup runs.
+                properties:
+                  id:
+                    description: |-
+                      ID is a literal NetBox primary key: the escape hatch, and the only place in the API
+                      where a raw id is accepted.
+
+                      A pointer so that `id: 0` is distinguishable from unset. NetBox primary keys start
+                      at 1, so zero is never a real object and has to be rejected rather than silently
+                      treated as "no id".
+                    format: int64
+                    minimum: 1
+                    type: integer
+                  lookup:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      Lookup is a raw NetBox API filter, for an object no slug identifies -- a VLAN is
+                      `{vid: "20", site: "home"}` because its identity is a pair.
+
+                      `q` is rejected by the CEL rules along with the pagination and formatting
+                      parameters. It is NetBox's fuzzy search, and a fuzzy filter behind a reference that
+                      must identify exactly one object would make ambiguity the normal case rather than
+                      an error.
+                    maxProperties: 8
+                    type: object
+                  name:
+                    description: |-
+                      Name of a CR of the target Kind, resolved through that CR's `.status.id`.
+
+                      This is the mode to prefer: it is the only one that expresses a dependency the
+                      operator can wait on, which is what lets a graph applied in any order converge.
+                    maxLength: 253
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                    type: string
+                  namespace:
+                    description: |-
+                      Namespace of that CR. Defaults to the referring object's namespace.
+
+                      Load-bearing on the common path rather than an edge case: every Kind is namespaced
+                      in v1alpha1 (docs/decisions/0002-crd-scoping.md), so a team namespace pointing at a
+                      shared catalogue namespace is the normal shape. Crossing a namespace requires a
+                      NetBoxRefGrant in the target namespace (NBO-014).
+                    maxLength: 63
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                    type: string
+                  slug:
+                    description: |-
+                      Slug looks the object up in NetBox directly, for objects the operator does not
+                      manage. No CR needs to exist.
+
+                      Bounded at 100 characters because that is what NetBox's own column allows:
+                      `slug SlugField len=100` on every OrganizationalModel, NestedGroupModel and
+                      PrimaryModel (docs/netbox-schema.md -> dcim.Site, dcim.Region, extras.Tag).
+                    maxLength: 100
+                    pattern: ^[-a-zA-Z0-9_]+$
+                    type: string
+                type: object
+                x-kubernetes-validations:
+                - message: exactly one of name, slug, lookup or id must be set
+                  rule: '[has(self.name) && size(self.name) > 0, has(self.slug) &&
+                    size(self.slug) > 0, has(self.lookup) && size(self.lookup) > 0,
+                    has(self.id)].filter(x, x).size() == 1'
+                - message: namespace may only be set together with name
+                  rule: '!has(self.namespace) || (has(self.name) && size(self.name)
+                    > 0)'
+                - message: lookup keys must be lowercase NetBox filter names
+                  rule: '!has(self.lookup) || self.lookup.all(k, k.matches(''^[a-z][a-z0-9_]*$''))'
+                - message: lookup may not set pagination, formatting or fuzzy-search
+                    parameters
+                  rule: '!has(self.lookup) || self.lookup.all(k, !(k in [''limit'',''offset'',''format'',''brief'',''ordering'',''q'']))'
+                - message: lookup values are limited to 200 characters
+                  rule: '!has(self.lookup) || self.lookup.all(k, size(self.lookup[k])
+                    <= 200)'
+              roleRef:
+                description: |-
+                  RoleRef marks what the VLAN is for -- management, guest, IoT
+                  (docs/netbox-schema.md -> ipam.VLAN, `role ForeignKey -> ipam.Role
+                  on_delete=SET_NULL`).
+
+                  An object, not a string. `ipam.Role` is a real NetBox model with its own slug and
+                  weight, and it is the same model `NetBoxPrefix.roleRef` points at -- which is what
+                  distinguishes both from `NetBoxIPAddress.role`, a choice column of the same name.
+
+                  The Kind is not delivered until NBO-055, and the field is here anyway rather than
+                  omitted, because a field the API accepts and silently drops is worse than one that says
+                  why it cannot resolve. A `name`-mode ref -- the sibling-CR mode -- reports
+                  `RefsResolved=False, Reason=RefKindUnavailable` naming the field and `ipam.Role`;
+                  `slug`, `lookup` and `id` resolve against NetBox directly and work today.
+                properties:
+                  id:
+                    description: |-
+                      ID is a literal NetBox primary key: the escape hatch, and the only place in the API
+                      where a raw id is accepted.
+
+                      A pointer so that `id: 0` is distinguishable from unset. NetBox primary keys start
+                      at 1, so zero is never a real object and has to be rejected rather than silently
+                      treated as "no id".
+                    format: int64
+                    minimum: 1
+                    type: integer
+                  lookup:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      Lookup is a raw NetBox API filter, for an object no slug identifies -- a VLAN is
+                      `{vid: "20", site: "home"}` because its identity is a pair.
+
+                      `q` is rejected by the CEL rules along with the pagination and formatting
+                      parameters. It is NetBox's fuzzy search, and a fuzzy filter behind a reference that
+                      must identify exactly one object would make ambiguity the normal case rather than
+                      an error.
+                    maxProperties: 8
+                    type: object
+                  name:
+                    description: |-
+                      Name of a CR of the target Kind, resolved through that CR's `.status.id`.
+
+                      This is the mode to prefer: it is the only one that expresses a dependency the
+                      operator can wait on, which is what lets a graph applied in any order converge.
+                    maxLength: 253
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                    type: string
+                  namespace:
+                    description: |-
+                      Namespace of that CR. Defaults to the referring object's namespace.
+
+                      Load-bearing on the common path rather than an edge case: every Kind is namespaced
+                      in v1alpha1 (docs/decisions/0002-crd-scoping.md), so a team namespace pointing at a
+                      shared catalogue namespace is the normal shape. Crossing a namespace requires a
+                      NetBoxRefGrant in the target namespace (NBO-014).
+                    maxLength: 63
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                    type: string
+                  slug:
+                    description: |-
+                      Slug looks the object up in NetBox directly, for objects the operator does not
+                      manage. No CR needs to exist.
+
+                      Bounded at 100 characters because that is what NetBox's own column allows:
+                      `slug SlugField len=100` on every OrganizationalModel, NestedGroupModel and
+                      PrimaryModel (docs/netbox-schema.md -> dcim.Site, dcim.Region, extras.Tag).
+                    maxLength: 100
+                    pattern: ^[-a-zA-Z0-9_]+$
+                    type: string
+                type: object
+                x-kubernetes-validations:
+                - message: exactly one of name, slug, lookup or id must be set
+                  rule: '[has(self.name) && size(self.name) > 0, has(self.slug) &&
+                    size(self.slug) > 0, has(self.lookup) && size(self.lookup) > 0,
+                    has(self.id)].filter(x, x).size() == 1'
+                - message: namespace may only be set together with name
+                  rule: '!has(self.namespace) || (has(self.name) && size(self.name)
+                    > 0)'
+                - message: lookup keys must be lowercase NetBox filter names
+                  rule: '!has(self.lookup) || self.lookup.all(k, k.matches(''^[a-z][a-z0-9_]*$''))'
+                - message: lookup may not set pagination, formatting or fuzzy-search
+                    parameters
+                  rule: '!has(self.lookup) || self.lookup.all(k, !(k in [''limit'',''offset'',''format'',''brief'',''ordering'',''q'']))'
+                - message: lookup values are limited to 200 characters
+                  rule: '!has(self.lookup) || self.lookup.all(k, size(self.lookup[k])
+                    <= 200)'
+              siteRef:
+                description: |-
+                  SiteRef ties the VLAN to a site (docs/netbox-schema.md -> ipam.VLAN,
+                  `site ForeignKey -> dcim.Site on_delete=PROTECT`).
+
+                  **A real foreign key, not a scope.** It is written under the key `site` as an integer
+                  id, and no `scope_type` / `scope_id` appears in a request body for `ipam/vlans` -- the
+                  exact opposite of `NetBoxPrefix`. See the type comment.
+
+                  This kind's containment parent (docs/decisions/0003-ownership-and-references.md
+                  rule 4), so a NetBoxVLAN in the same namespace as its site acquires a non-controller
+                  owner reference on it and `kubectl delete netboxsite` takes the VLAN with it. Across
+                  namespaces an owner reference is illegal, so the reference still resolves and the object
+                  reports `CascadeUnavailable` naming `siteRef`.
+
+                  Part of the identity when `groupRef` is unset, which is the common case: the lookup then
+                  filters `?site_id=<id>&vid=<vid>`, and pins `site_id` to null rather than omitting it
+                  when there is no site (docs/concepts/lookups.md).
+                properties:
+                  id:
+                    description: |-
+                      ID is a literal NetBox primary key: the escape hatch, and the only place in the API
+                      where a raw id is accepted.
+
+                      A pointer so that `id: 0` is distinguishable from unset. NetBox primary keys start
+                      at 1, so zero is never a real object and has to be rejected rather than silently
+                      treated as "no id".
+                    format: int64
+                    minimum: 1
+                    type: integer
+                  lookup:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      Lookup is a raw NetBox API filter, for an object no slug identifies -- a VLAN is
+                      `{vid: "20", site: "home"}` because its identity is a pair.
+
+                      `q` is rejected by the CEL rules along with the pagination and formatting
+                      parameters. It is NetBox's fuzzy search, and a fuzzy filter behind a reference that
+                      must identify exactly one object would make ambiguity the normal case rather than
+                      an error.
+                    maxProperties: 8
+                    type: object
+                  name:
+                    description: |-
+                      Name of a CR of the target Kind, resolved through that CR's `.status.id`.
+
+                      This is the mode to prefer: it is the only one that expresses a dependency the
+                      operator can wait on, which is what lets a graph applied in any order converge.
+                    maxLength: 253
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                    type: string
+                  namespace:
+                    description: |-
+                      Namespace of that CR. Defaults to the referring object's namespace.
+
+                      Load-bearing on the common path rather than an edge case: every Kind is namespaced
+                      in v1alpha1 (docs/decisions/0002-crd-scoping.md), so a team namespace pointing at a
+                      shared catalogue namespace is the normal shape. Crossing a namespace requires a
+                      NetBoxRefGrant in the target namespace (NBO-014).
+                    maxLength: 63
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                    type: string
+                  slug:
+                    description: |-
+                      Slug looks the object up in NetBox directly, for objects the operator does not
+                      manage. No CR needs to exist.
+
+                      Bounded at 100 characters because that is what NetBox's own column allows:
+                      `slug SlugField len=100` on every OrganizationalModel, NestedGroupModel and
+                      PrimaryModel (docs/netbox-schema.md -> dcim.Site, dcim.Region, extras.Tag).
+                    maxLength: 100
+                    pattern: ^[-a-zA-Z0-9_]+$
+                    type: string
+                type: object
+                x-kubernetes-validations:
+                - message: exactly one of name, slug, lookup or id must be set
+                  rule: '[has(self.name) && size(self.name) > 0, has(self.slug) &&
+                    size(self.slug) > 0, has(self.lookup) && size(self.lookup) > 0,
+                    has(self.id)].filter(x, x).size() == 1'
+                - message: namespace may only be set together with name
+                  rule: '!has(self.namespace) || (has(self.name) && size(self.name)
+                    > 0)'
+                - message: lookup keys must be lowercase NetBox filter names
+                  rule: '!has(self.lookup) || self.lookup.all(k, k.matches(''^[a-z][a-z0-9_]*$''))'
+                - message: lookup may not set pagination, formatting or fuzzy-search
+                    parameters
+                  rule: '!has(self.lookup) || self.lookup.all(k, !(k in [''limit'',''offset'',''format'',''brief'',''ordering'',''q'']))'
+                - message: lookup values are limited to 200 characters
+                  rule: '!has(self.lookup) || self.lookup.all(k, size(self.lookup[k])
+                    <= 200)'
+              status:
+                default: active
+                description: |-
+                  Status is the VLAN's lifecycle state: active, reserved or deprecated.
+
+                  Defaulted to NetBox's own default so the operator manages the field from the first
+                  reconcile: a defaulted field that never reaches a payload is a field the operator can
+                  never correct. NetBox returns it as `{"value":"active","label":"Active"}` and accepts
+                  the bare value, and the differ compares the value (docs/concepts/drift.md).
+                enum:
+                - active
+                - reserved
+                - deprecated
+                type: string
+              tenantRef:
+                description: |-
+                  TenantRef assigns the VLAN to a tenant (docs/netbox-schema.md -> ipam.VLAN,
+                  `tenant ForeignKey -> tenancy.Tenant on_delete=PROTECT`).
+
+                  `PROTECT`, so a VLAN holding this reference blocks deletion of that tenant in NetBox and
+                  the refusal is reported as `Deleting=False, Reason=Protected` naming this object
+                  (docs/concepts/deletion.md). Not a containment reference and contributes no owner
+                  reference (docs/decisions/0003-ownership-and-references.md rule 4).
+                properties:
+                  id:
+                    description: |-
+                      ID is a literal NetBox primary key: the escape hatch, and the only place in the API
+                      where a raw id is accepted.
+
+                      A pointer so that `id: 0` is distinguishable from unset. NetBox primary keys start
+                      at 1, so zero is never a real object and has to be rejected rather than silently
+                      treated as "no id".
+                    format: int64
+                    minimum: 1
+                    type: integer
+                  lookup:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      Lookup is a raw NetBox API filter, for an object no slug identifies -- a VLAN is
+                      `{vid: "20", site: "home"}` because its identity is a pair.
+
+                      `q` is rejected by the CEL rules along with the pagination and formatting
+                      parameters. It is NetBox's fuzzy search, and a fuzzy filter behind a reference that
+                      must identify exactly one object would make ambiguity the normal case rather than
+                      an error.
+                    maxProperties: 8
+                    type: object
+                  name:
+                    description: |-
+                      Name of a CR of the target Kind, resolved through that CR's `.status.id`.
+
+                      This is the mode to prefer: it is the only one that expresses a dependency the
+                      operator can wait on, which is what lets a graph applied in any order converge.
+                    maxLength: 253
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                    type: string
+                  namespace:
+                    description: |-
+                      Namespace of that CR. Defaults to the referring object's namespace.
+
+                      Load-bearing on the common path rather than an edge case: every Kind is namespaced
+                      in v1alpha1 (docs/decisions/0002-crd-scoping.md), so a team namespace pointing at a
+                      shared catalogue namespace is the normal shape. Crossing a namespace requires a
+                      NetBoxRefGrant in the target namespace (NBO-014).
+                    maxLength: 63
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                    type: string
+                  slug:
+                    description: |-
+                      Slug looks the object up in NetBox directly, for objects the operator does not
+                      manage. No CR needs to exist.
+
+                      Bounded at 100 characters because that is what NetBox's own column allows:
+                      `slug SlugField len=100` on every OrganizationalModel, NestedGroupModel and
+                      PrimaryModel (docs/netbox-schema.md -> dcim.Site, dcim.Region, extras.Tag).
+                    maxLength: 100
+                    pattern: ^[-a-zA-Z0-9_]+$
+                    type: string
+                type: object
+                x-kubernetes-validations:
+                - message: exactly one of name, slug, lookup or id must be set
+                  rule: '[has(self.name) && size(self.name) > 0, has(self.slug) &&
+                    size(self.slug) > 0, has(self.lookup) && size(self.lookup) > 0,
+                    has(self.id)].filter(x, x).size() == 1'
+                - message: namespace may only be set together with name
+                  rule: '!has(self.namespace) || (has(self.name) && size(self.name)
+                    > 0)'
+                - message: lookup keys must be lowercase NetBox filter names
+                  rule: '!has(self.lookup) || self.lookup.all(k, k.matches(''^[a-z][a-z0-9_]*$''))'
+                - message: lookup may not set pagination, formatting or fuzzy-search
+                    parameters
+                  rule: '!has(self.lookup) || self.lookup.all(k, !(k in [''limit'',''offset'',''format'',''brief'',''ordering'',''q'']))'
+                - message: lookup values are limited to 200 characters
+                  rule: '!has(self.lookup) || self.lookup.all(k, size(self.lookup[k])
+                    <= 200)'
+              vid:
+                description: |-
+                  VID is the 802.1Q VLAN ID (docs/netbox-schema.md -> ipam.VLAN,
+                  `vid PositiveSmallIntegerField REQ`).
+
+                  1-4094. 0 and 4095 are reserved by the standard and rejected at admission rather than
+                  by NetBox on write, so the message names the field instead of arriving as a 400 three
+                  steps later.
+
+                  Part of every one of this kind's identities, and never enough on its own: `vid: 20`
+                  exists in every house in `../inventory.yaml`.
+                format: int32
+                maximum: 4094
+                minimum: 1
+                type: integer
+            required:
+            - endpointRef
+            - name
+            - vid
+            type: object
+          status:
+            description: |-
+              NetBoxObjectStatus is the part of every object CR's status that the engine owns. It is
+              the only thing the operator writes: the spec belongs to Git
+              (docs/decisions/0005-gitops-coexistence.md).
+            properties:
+              adopted:
+                description: Adopted reports that the engine took over an object it
+                  did not create.
+                type: boolean
+              conditions:
+                description: Conditions follow the standard Kubernetes vocabulary.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              deferredPending:
+                description: |-
+                  DeferredPending are the CR spec fields the engine has declared deferred and has not
+                  yet written to NetBox: a `primary_ip4` whose address does not exist yet, or one that
+                  was stripped from the create and is waiting for its follow-up PATCH.
+
+                  A status field rather than only a condition message. The intermediate state is
+                  legitimate and can be long-lived -- a reference that never resolves stays here
+                  forever, on purpose -- so "what is this object still waiting to write" has to be
+                  answerable from `kubectl get -o yaml` and greppable across a namespace, which a
+                  sentence inside a condition is not (docs/concepts/object-lifecycle.md).
+
+                  Spec field names rather than NetBox column names, because it is the spelling the
+                  user wrote and the one the RefsResolved message already uses.
+                items:
+                  type: string
+                type: array
+                x-kubernetes-list-type: atomic
+              deletionAttempts:
+                description: |-
+                  DeletionAttempts counts the deletes NetBox refused because something still
+                  references the object.
+
+                  It is a status field rather than in-memory state because a controller has no memory
+                  between passes: the exponential backoff on a protected delete has to be computed
+                  from a count that survives a requeue, a leader election and a restart. Non-zero
+                  only while a CR is terminating.
+                format: int32
+                type: integer
+              id:
+                description: |-
+                  ID is the NetBox primary key. Zero until the object provably exists server-side --
+                  a DryRun write is reported and never sent, so it leaves this empty rather than
+                  inventing an id that nothing would ever match.
+                format: int64
+                type: integer
+              lastAppliedHash:
+                description: |-
+                  LastAppliedHash is a digest of the last payload NetBox accepted. NetBox
+                  canonicalises some values on write, so the request and the response legitimately
+                  differ; this is the record of what was actually sent.
+                type: string
+              lastSyncTime:
+                description: |-
+                  LastSyncTime is when the engine last wrote to NetBox. Unset until it does, and
+                  untouched by a reconcile that found nothing to do -- otherwise every resync would
+                  bump the resourceVersion of every object in the cluster.
+                format: date-time
+                type: string
+              naturalKey:
+                additionalProperties:
+                  type: string
+                description: |-
+                  NaturalKey is the lookup that actually located the object, filter by filter. The
+                  first thing anyone needs when asking why an object was adopted, or was not.
+                type: object
+              observedGeneration:
+                description: |-
+                  ObservedGeneration is the spec generation this status refers to. Always set,
+                  because `kubectl wait` lies without it.
+                format: int64
+                type: integer
+              provenance:
+                description: |-
+                  Provenance is the stamp this object carries in NetBox: the tag and the custom fields
+                  the engine wrote, as it wrote them.
+
+                  Unset when the endpoint's spec.managedBy is unset, and unset for a kind whose NetBox
+                  model carries neither `tags` nor `custom_fields` -- extras.Tag is one, so a
+                  NetBoxTag is managed and unstamped by construction. That is the state NetBoxSweep
+                  (NBO-046) reports and never deletes; see docs/operations/provenance.md.
+                properties:
+                  clusterID:
+                    description: ClusterID is the cluster identifier written into
+                      the cluster custom field.
+                    type: string
+                  customFields:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      CustomFields are the custom fields written, as NetBox names to the values sent.
+                      Empty for a kind whose NetBox model has no `custom_fields` column.
+
+                      These keys are also the only ones compared: NetBox merges a partial `custom_fields`
+                      PATCH and returns every custom field defined for the object type, including ones the
+                      operator knows nothing about, so it compares the keys it sets and leaves the rest
+                      alone. `custom_fields` therefore has two states rather than the three every other
+                      optional field has -- absent or empty means "manage nothing", not "clear everything",
+                      and a value written here cannot be removed through this API
+                      (docs/concepts/field-ownership.md, #171).
+                    type: object
+                  tag:
+                    description: |-
+                      Tag is the tag's slug, written by id. Empty for a kind whose NetBox model has no
+                      `tags` column.
+                    type: string
+                type: object
+              url:
+                description: URL is the object's absolute NetBox URL, as returned
+                  by the API.
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

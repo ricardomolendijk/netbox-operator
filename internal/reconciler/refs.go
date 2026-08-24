@@ -213,15 +213,31 @@ func (p *pass) applyResolved(resolution resolver.Resolution) (resolved, notes []
 // them out. Leaving them out would mean "do not manage this reference", which is what an
 // *absent* field means -- an empty one is an instruction.
 //
-// Not written into p.spec, unlike applyRef: a natural key filtering on one of these needs two
-// filters, and there is no single value to offer. No descriptor names a generic FK in a
-// natural key yet -- not even the scoped kinds NBO-018 added, whose keys are all on scalars.
-// The first that will is ipam.VLANGroup, unique on (scope_type, scope_id, slug), and until it
-// arrives params() refuses such a candidate loudly rather than sending a lookup with half an
-// identity. See docs/concepts/generic-refs.md, "Natural keys".
+// Written into p.spec under the *two column names* rather than under the union's own spec
+// field, which is what lets a natural key filter on a polymorphic pair (#180). A pair has no
+// single value, so `{Filter: "scope_id", Spec: "scope"}` could never render -- but its two
+// halves are two ordinary scalars once resolved, and `{Filter: "scope_id", Spec: "scope_id"}`
+// renders exactly as `{Filter: "vrf_id", Spec: "vrfRef"}` does. ipam.VLANGroup is the kind
+// that needs it, unique on (scope_type, scope_id, slug); registry.declaresSpecField accepts
+// the two column names for the same reason. See docs/concepts/generic-refs.md, "Natural keys".
+//
+// The cleared pair writes nothing there and resolves neither column. A candidate matching on
+// `scope_type` is then inapplicable, which is correct: a globally-scoped group's identity is
+// the *null-pinned* candidate, and falling through to a value match on a column that holds
+// null would send `?scope_type=` and adopt every group sharing its slug.
 func (p *pass) applyGenericFK(pair registry.GenericFKSpec, refs resolver.FieldRefs) {
-	p.desired[pair.TypeField], p.desired[pair.IDField] = genericFKValues(refs)
+	objectType, id := genericFKValues(refs)
+	p.desired[pair.TypeField], p.desired[pair.IDField] = objectType, id
 	p.state.Resolved = append(p.state.Resolved, pair.Spec)
+
+	if objectType == nil {
+		return
+	}
+
+	// float64 for the id, because that is what every JSON number in a decoded spec is and
+	// what filterValue renders; an int64 there would be dropped as unfilterable.
+	p.spec[pair.TypeField], p.spec[pair.IDField] = objectType, float64(refs[0].ID)
+	p.state.Resolved = append(p.state.Resolved, pair.TypeField, pair.IDField)
 }
 
 // genericFKValues renders one resolved polymorphic reference as its two column values.

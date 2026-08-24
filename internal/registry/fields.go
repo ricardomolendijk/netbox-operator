@@ -314,15 +314,27 @@ func (d Descriptor) GenericFKFor(spec string) (GenericFKSpec, bool) {
 }
 
 // declaresSpecField reports whether spec is a CR spec field this descriptor knows, either
-// as an ordinary field or as the one behind a generic FK.
+// as an ordinary field, as the one behind a generic FK, or as one of that pair's two
+// columns.
+//
+// The third case is the one #180 is about. A natural key on a polymorphic pair needs two
+// filters and the union's own spec field has no single value to offer, so the pair's halves
+// are named by *column* -- `scope_type` and `scope_id`, matching what
+// reconciler.applyGenericFK writes into the decoded spec once the union resolves.
+// ipam.VLANGroup is unique on `(scope_type, scope_id, slug)` and could not state its own
+// identity otherwise.
 func (d Descriptor) declaresSpecField(spec string) bool {
 	if _, ok := d.FieldFor(spec); ok {
 		return true
 	}
 
-	_, ok := d.GenericFKFor(spec)
+	if _, ok := d.GenericFKFor(spec); ok {
+		return true
+	}
 
-	return ok
+	return slices.ContainsFunc(d.GenericFKs, func(pair GenericFKSpec) bool {
+		return pair.TypeField == spec || pair.IDField == spec
+	})
 }
 
 // isRefSpecField reports whether spec names a reference to another object.
