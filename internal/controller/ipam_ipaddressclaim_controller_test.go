@@ -5,8 +5,10 @@ import (
 	"strings"
 	"testing"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/retry"
 
 	netboxv1alpha1 "github.com/ricardomolendijk/netbox-operator/api/v1alpha1"
 )
@@ -26,14 +28,20 @@ import (
 // somewhere else while the old one stays allocated in NetBox forever.
 func TestClaimPoolSelectionIsImmutable(t *testing.T) {
 	ns := newNamespace(t)
-	claim := makeClaim(t, ns, "dns-eth0")
+	makeClaim(t, ns, "dns-eth0")
 
-	claim.Spec.PrefixRef = netboxv1alpha1.PrefixRef{Name: "other-lan"}
-
-	err := k8sClient.Update(context.Background(), claim)
+	err := updateClaim(t, ns, "dns-eth0", func(claim *netboxv1alpha1.NetBoxIPAddressClaim) {
+		claim.Spec.PrefixRef = netboxv1alpha1.PrefixRef{Name: "other-lan"}
+	})
 	if err == nil {
 		t.Fatal("the api server accepted a repointed prefixRef; a claim allocates once, so this" +
 			" has to be rejected at admission")
+	}
+
+	// Invalid rather than any error at all: a Conflict from the controller writing status
+	// underneath the test would otherwise pass this assertion while proving nothing.
+	if !apierrors.IsInvalid(err) {
+		t.Fatalf("rejection is %T (%v), want an admission rejection", err, err)
 	}
 
 	if !strings.Contains(err.Error(), "immutable") {
@@ -49,16 +57,19 @@ func TestClaimPoolSelectionIsImmutable(t *testing.T) {
 // claim pointed at somebody else's address.
 func TestClaimAllocationIdentityIsAddableAndNotChangeable(t *testing.T) {
 	ns := newNamespace(t)
-	claim := makeClaim(t, ns, "dns-eth0")
+	makeClaim(t, ns, "dns-eth0")
 
-	claim.Spec.AllocationIdentity = "9f2c41b7ae05d813"
-	if err := k8sClient.Update(context.Background(), claim); err != nil {
+	if err := updateClaim(t, ns, "dns-eth0", func(claim *netboxv1alpha1.NetBoxIPAddressClaim) {
+		claim.Spec.AllocationIdentity = "9f2c41b7ae05d813"
+	}); err != nil {
 		t.Fatalf("setting allocationIdentity on a claim that had none: %v", err)
 	}
 
-	claim.Spec.AllocationIdentity = "0000000000000000"
-	if err := k8sClient.Update(context.Background(), claim); err == nil {
-		t.Fatal("the api server accepted a changed allocationIdentity")
+	err := updateClaim(t, ns, "dns-eth0", func(claim *netboxv1alpha1.NetBoxIPAddressClaim) {
+		claim.Spec.AllocationIdentity = "0000000000000000"
+	})
+	if !apierrors.IsInvalid(err) {
+		t.Fatalf("changing allocationIdentity gave %v, want an admission rejection", err)
 	}
 }
 
@@ -150,9 +161,12 @@ func TestClaimWaitsForItsEndpointWithoutAllocating(t *testing.T) {
 	})
 }
 
-// makeClaim creates a claim and returns it as stored, so a test can edit the object the API
-// server actually has.
-func makeClaim(t *testing.T, ns, name string) *netboxv1alpha1.NetBoxIPAddressClaim {
+// makeClaim creates a claim and waits for it to be readable.
+//
+// It returns nothing on purpose: every caller that edits the claim goes through updateClaim,
+// which re-reads it. Handing back the object the Create was built from is how a test ends up
+// updating a stale copy and asserting against the Conflict that follows.
+func makeClaim(t *testing.T, ns, name string) {
 	t.Helper()
 
 	claim := &netboxv1alpha1.NetBoxIPAddressClaim{
@@ -166,6 +180,17 @@ func makeClaim(t *testing.T, ns, name string) *netboxv1alpha1.NetBoxIPAddressCla
 		t.Fatalf("creating the claim: %v", err)
 	}
 
+	// k8sClient reads through the manager's cache, and a Create goes straight to the API
+	// server, so the object is not visible to the next Get for a few milliseconds. Waiting
+	// here rather than in each caller: a NotFound read is indistinguishable from a rejection
+	// at the call site, which is exactly how an admission assertion passes while proving
+	// nothing.
+	eventually(t, "the claim is visible through the cache", func() bool {
+		return k8sClient.Get(context.Background(),
+			types.NamespacedName{Namespace: ns, Name: name},
+			&netboxv1alpha1.NetBoxIPAddressClaim{}) == nil
+	})
+
 	t.Cleanup(func() {
 		stored := &netboxv1alpha1.NetBoxIPAddressClaim{}
 		if err := k8sClient.Get(context.Background(), types.NamespacedName{Namespace: ns, Name: name}, stored); err != nil {
@@ -177,8 +202,29 @@ func makeClaim(t *testing.T, ns, name string) *netboxv1alpha1.NetBoxIPAddressCla
 		// no NetBox exists in this test.
 		_ = k8sClient.Delete(context.Background(), stored)
 	})
+}
 
-	return claim
+// updateClaim mutates the stored claim and returns what the API server said.
+//
+// It re-reads before every attempt and retries a Conflict, because the claim's own controller
+// is writing its status and its finalizer at the same time. Without that, a test asserting an
+// admission rejection can pass on a Conflict instead -- proving nothing, intermittently.
+func updateClaim(
+	t *testing.T, ns, name string, mutate func(*netboxv1alpha1.NetBoxIPAddressClaim),
+) error {
+	t.Helper()
+
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		claim := &netboxv1alpha1.NetBoxIPAddressClaim{}
+		if err := k8sClient.Get(context.Background(),
+			types.NamespacedName{Namespace: ns, Name: name}, claim); err != nil {
+			return err
+		}
+
+		mutate(claim)
+
+		return k8sClient.Update(context.Background(), claim)
+	})
 }
 
 func readyCondition(conditions []metav1.Condition) *metav1.Condition {
