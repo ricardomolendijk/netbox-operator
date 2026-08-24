@@ -300,6 +300,9 @@ type (
 	// DeviceTypeRef points at a NetBoxDeviceType (dcim.DeviceType, dcim/device-types).
 	DeviceTypeRef ObjectRef
 
+	// ManufacturerRef points at a NetBoxManufacturer (dcim.Manufacturer, dcim/manufacturers).
+	ManufacturerRef ObjectRef
+
 	// IPAddressRef points at a NetBoxIPAddress (ipam.IPAddress, ipam/ip-addresses).
 	//
 )
@@ -516,6 +519,7 @@ var (
 	_ RefTarget = PlatformRef{}
 	_ RefTarget = IPAddressRef{}
 	_ RefTarget = DeviceTypeRef{}
+	_ RefTarget = ManufacturerRef{}
 )
 
 // TargetGVK reports the Kind this reference resolves against.
@@ -525,3 +529,11 @@ func (r DeviceTypeRef) TargetGVK() schema.GroupVersionKind {
 
 // AsObjectRef returns the underlying reference.
 func (r DeviceTypeRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r ManufacturerRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxManufacturer")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r ManufacturerRef) AsObjectRef() ObjectRef { return ObjectRef(r) }

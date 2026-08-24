@@ -2,6 +2,7 @@ package reconciler
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -129,14 +130,22 @@ func TestScopeMoveIsOnePatch(t *testing.T) {
 	assertNoForbiddenKeys(t, payload)
 }
 
-// TestUnresolvedScopeWritesNoScopeAtAll is the first-apply state: the NetBoxSite exists in
-// the cluster and has no NetBox id yet.
+// TestUnresolvedDeclaredScopeWritesNothingAtAll is issue #195 on the shape that made it a
+// question: a kind whose identity is one scalar, so it is perfectly creatable without the
+// scope -- ipam.Prefix, unique on `prefix`.
 //
-// Neither column is written -- half a reference is worse than none -- and the object is kept
-// off Ready so that a dropped scope cannot pass `kubectl wait --for=condition=Ready`. Distinct
-// from TestRefusedGenericFKIsTerminalAndWritesNothingToTheColumns, which is the target that
-// will never become legal; this one clears itself on a watch event.
-func TestUnresolvedScopeWritesNoScopeAtAll(t *testing.T) {
+// It used to be creatable *and created*, with the pair omitted and RefsResolved=False naming
+// the field, which left an unscoped prefix in NetBox for as long as the target was missing.
+// #195 answered it: a reference the spec declares is a precondition for the write, so nothing
+// is sent at all.
+//
+// Asserted on the recorded traffic and not on the conditions. "Neither column is in the
+// payload" was the old assertion and it now passes vacuously against a nil payload, which
+// would let a regression that creates the object again slip straight through.
+//
+// Distinct from TestRefusedGenericFKIsTerminalAndWritesNothingToTheColumns, which is the
+// target that will never become legal; this one clears itself on a watch event.
+func TestUnresolvedDeclaredScopeWritesNothingAtAll(t *testing.T) {
 	obj := fakeObject()
 	obj.Spec.Scope = &netboxv1alpha1.ScopeRef{SiteRef: &netboxv1alpha1.SiteRef{Name: "hq"}}
 
@@ -153,15 +162,13 @@ func TestUnresolvedScopeWritesNoScopeAtAll(t *testing.T) {
 		t.Fatalf("Reconcile() = %v", err)
 	}
 
-	payload := nb.lastPayload()
-
-	for _, column := range []string{registry.ScopeTypeField, registry.ScopeIDField} {
-		if _, present := payload[column]; present {
-			t.Errorf("payload holds %s, want no half-written reference", column)
-		}
+	if len(nb.calls) != 0 {
+		t.Errorf("netbox calls = %v, want none: the spec declares a scope that did not resolve", nb.calls)
 	}
 
-	assertNoForbiddenKeys(t, payload)
+	if obj.Status.ID != 0 {
+		t.Errorf("status.id = %d, want 0: nothing was created", obj.Status.ID)
+	}
 
 	if got := conditionOf(obj, netboxv1alpha1.ConditionRefsResolved); got.Status != metav1.ConditionFalse ||
 		got.Reason != netboxv1alpha1.ReasonRefNotReady {
@@ -171,6 +178,45 @@ func TestUnresolvedScopeWritesNoScopeAtAll(t *testing.T) {
 	if got := conditionOf(obj, netboxv1alpha1.ConditionReady); got.Status != metav1.ConditionFalse ||
 		got.Reason != netboxv1alpha1.ReasonWaitingForRef {
 		t.Errorf("Ready = %s/%s, want False/%s", got.Status, got.Reason, netboxv1alpha1.ReasonWaitingForRef)
+	}
+}
+
+// TestUndeclaredScopeIsCreatedImmediately is the other half of #195, and the half that keeps
+// the rule from being "wait for every reference": *declared* is the precondition, not
+// *possible*.
+//
+// A prefix with no `scope` key at all is created on the first pass, with neither column in the
+// body and with no reference to wait for. Without this, option C would be indistinguishable
+// from option B -- one unimplemented Kind blocking every object that could have referenced it
+// -- and an optional field would have become a required one.
+func TestUndeclaredScopeIsCreatedImmediately(t *testing.T) {
+	obj := fakeObject()
+
+	nb := &fakeClient{created: liveTag(7)}
+	engine := engineWith(t, scopedDescriptor(), nb, &fakeRefs{})
+
+	if _, err := engine.Reconcile(context.Background(), obj); err != nil {
+		t.Fatalf("Reconcile() = %v", err)
+	}
+
+	if got := nb.methods(); !slices.Equal(got, []string{"GETONE", "POST"}) {
+		t.Errorf("netbox calls = %v, want [GETONE POST]: an absent reference is not a precondition", got)
+	}
+
+	payload := nb.lastPayload()
+
+	// Absent means "do not manage this reference", so neither column is written -- as
+	// opposed to a scope written empty, which clears both (docs/reference/genericref.md).
+	for _, column := range []string{registry.ScopeTypeField, registry.ScopeIDField} {
+		if _, present := payload[column]; present {
+			t.Errorf("payload holds %s, want an absent scope left alone", column)
+		}
+	}
+
+	assertNoForbiddenKeys(t, payload)
+
+	if got := conditionOf(obj, netboxv1alpha1.ConditionReady); got.Status != metav1.ConditionTrue {
+		t.Errorf("Ready = %s/%s, want True", got.Status, got.Reason)
 	}
 }
 

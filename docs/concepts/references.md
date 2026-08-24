@@ -543,12 +543,20 @@ question a `kubectl wait` is asking.
 | Target Kind has no descriptor, or its CRD is not installed | `RefKindUnavailable` | **10 min** | The manifest is correct; the fix is an operator upgrade. |
 | A [polymorphic reference](generic-refs.md) names a target its column will not take | `RefTypeNotAllowed` | Only on a spec change | No object appearing anywhere makes an illegal target legal. |
 
+**Whichever of them it is, nothing is written.** A reference the spec declares is a
+precondition for the create and for the update alike, on every kind — see
+[the rule](reconciliation.md#a-declared-reference-is-a-precondition-for-the-write)
+([#195](https://github.com/ricardomolendijk/netbox-operator/issues/195)). The eight causes are
+not flattened into one: the reason above is what says which, and `Ready` reports
+`WaitingForRef` because that is the question a `kubectl wait` is asking. The exception is a
+[deferred field](object-lifecycle.md), whose whole purpose is to let the object be created
+first and PATCHed afterwards.
+
 Two more reasons appear on `RefsResolved` and are not resolution failures at all:
 `AllResolved`, and `NotImplemented` for a reference this build cannot dispatch on. As of
 NBO-019 that set is **empty**, and the reason survives as the guard rather than as a state: a
-declared reference that comes back neither resolved nor blocked is left out of the payload and
-reported, which keeps the object off `Ready` rather than writing a value the operator guessed
-at.
+declared reference that comes back neither resolved nor blocked withholds the write and is
+reported, exactly as a refused one is, rather than the operator guessing at a value.
 
 Neither of the two references that used to be in it is any more. A **to-many** reference —
 `tags`, `ipam.VRF.import_targets`, `dcim.Site.asns`, `dcim.Interface.wireless_lans` — resolves
@@ -643,25 +651,34 @@ A reference that resolved against a target that is not `Ready` says so on the re
 Without the note, a `Ready=True` object would be pointing at something unfinished with nothing
 anywhere saying so.
 
-### An unresolved reference is created without, and reported
+### A declared reference that does not resolve writes nothing
 
-The object is **still created**, with the unresolvable reference left out of the payload,
-and it reports `Ready=False, Reason=WaitingForRef`
-([#132](https://github.com/ricardomolendijk/netbox-operator/issues/132)). The alternative —
-writing nothing at all — turns an optional field into a required one and stops a
-half-applied graph from making any progress.
+**Decided** on [#195](https://github.com/ricardomolendijk/netbox-operator/issues/195),
+option C, superseding [#132](https://github.com/ricardomolendijk/netbox-operator/issues/132)'s
+answer for the create.
 
-What makes that safe rather than silent is the `Ready` half. Without it, a reference that is
-not part of the kind's identity would be dropped while the object reported `Ready=True`:
-`kubectl apply` succeeds, `kubectl wait --for=condition=Ready` passes, and NetBox never
-receives the value. A unit test asserts exactly that combination cannot occur.
+Nothing is sent: no `POST`, no `PATCH`, and not even the natural-key lookup. The object reports
+`Ready=False, Reason=WaitingForRef` with the references it is waiting for, and `RefsResolved`
+carries which of the eight causes above it was. See
+[the rule](reconciliation.md#a-declared-reference-is-a-precondition-for-the-write) for the
+whole statement, including what "declared" means for an empty to-many and why deferred fields
+are the exception.
 
-Where the reference **is** part of the identity — `parentRef` on a `NetBoxRegion` — nothing
-is written at all, one step later and for a better reason: no natural-key candidate is
-applicable, so the engine cannot tell whether the object exists and reports
-`Ready=False, Reason=WaitingForKey` while `RefsResolved` names the reference behind it.
-Creating there would duplicate the region, and falling through to the top-level candidate
-would adopt an unrelated one ([lookups](lookups.md)).
+It used to depend on whether the reference happened to be part of the kind's natural key. Where
+it was — `parentRef` on a `NetBoxRegion` — no candidate was applicable, so the engine could not
+tell whether the object existed and wrote nothing, reporting `WaitingForKey`. Where it was not
+— `scope` on a `NetBoxPrefix` — the object was created with the column omitted. Both were
+defensible and neither was chosen; #195 chose, and the identity case now reports the cause
+(`WaitingForRef`) rather than the symptom.
+
+#132's guarantee is unchanged and is what still makes a deferred omission safe rather than
+silent: an object missing a value the spec asks for does not reach `Ready`. Without it a
+reference outside the identity could be dropped while `kubectl apply` succeeded and
+`kubectl wait --for=condition=Ready` passed. A unit test asserts that combination cannot occur.
+
+Falling through to a candidate that omits the reference remains forbidden for the same reason
+it always was: `name WHERE parent IS NULL` finds an unrelated top-level Region, and the
+follow-up PATCH would reparent somebody else's data ([lookups](lookups.md)).
 
 A reference that resolved yesterday and does not today does **not** clear the NetBox field.
 The object stops writing that column, reports `RefsResolved=False`, and leaves the live value

@@ -18,10 +18,8 @@ where `parent IS NULL`, so whether `parentRef` is set decides *which* natural ke
 rather than merely changing one filter's value. That makes it the smallest honest test of
 the reference machinery M2 is building.
 
-> **Today a child region does not reach `Ready`.** Reference resolution is
-> [NBO-012 (#24)](https://github.com/ricardomolendijk/netbox-operator/issues/24). A
-> top-level region works end to end; one with a `parentRef` reports
-> `WaitingForKey` and writes nothing. That is correct rather than broken — see
+> **A child region whose parent has not resolved does not reach `Ready`.** It reports
+> `WaitingForRef` and writes nothing. That is correct rather than broken — see
 > [Kind-specific behaviour](#a-child-region-waits-rather-than-guessing).
 
 ## Minimal example
@@ -163,24 +161,28 @@ common shape, so read that condition before relying on the cascade. See
 
 ### A child region waits rather than guessing
 
-Set `parentRef` today and the object reports two conditions that together explain
-themselves:
+Point `parentRef` at a region that has no `status.id` yet and the object reports two
+conditions that together explain themselves:
 
 ```
-RefsResolved  False  NotImplemented  references are not resolved yet and were
-                                     left out of the payload: [parentRef]
-Ready         False  WaitingForKey
+RefsResolved  False  RefNotReady   parentRef -> catalogue/emea: not ready
+                                   (the target has no status.id yet)
+Ready         False  WaitingForRef
 ```
 
-`WaitingForKey` means no natural-key candidate was applicable, and tracing why is
-instructive. Candidate 1 matches on `parentRef`, which requires it to be *resolved* — it is
-not. Candidate 2 asserts `parentRef` was never *declared* — it was. So neither applies, and
-the engine performs **zero writes**.
+and performs **zero writes**, because a reference the spec declares is a precondition for the
+write ([the rule](../concepts/reconciliation.md#a-declared-reference-is-a-precondition-for-the-write)).
 
-That is the designed outcome, not a gap. The alternative — falling through to candidate 2 —
-would look up a top-level region of that name, find somebody else's, adopt it, and then
-PATCH `parent` onto it, reparenting data the manifest never mentioned. The engine waits
-instead, which is the behaviour NBO-015 exists to protect.
+Two independent reasons land on the same outcome here, which is worth tracing. Candidate 1
+matches on `parentRef`, which requires it *resolved* — it is not. Candidate 2 asserts
+`parentRef` was never *declared* — it was. So no candidate applies either, and the engine could
+not tell create from adopt even if it were willing to write. Before
+[#195](https://github.com/ricardomolendijk/netbox-operator/issues/195) that second reason was
+the only one, and `Ready` reported `WaitingForKey` — the symptom rather than the cause.
+
+Falling through to candidate 2 would look up a top-level region of that name, find somebody
+else's, adopt it, and then PATCH `parent` onto it, reparenting data the manifest never
+mentioned.
 
 A top-level region is unaffected: `parentRef` is undeclared, candidate 2 applies, and it
 creates, adopts and drift-corrects normally.
@@ -222,13 +224,13 @@ eu-west  eu-west  europe        False   2m
 
 `PARENT` reads `.spec.parentRef.name`, so it shows the *intent* even while the reference is
 unresolved and `ID` is empty — which is exactly the pair you want side by side while
-diagnosing a `WaitingForKey`.
+diagnosing a `WaitingForRef`.
 
 ## Troubleshooting
 
 | Symptom | Cause |
 |---|---|
-| `Ready=False`, `Reason=WaitingForKey`, `parentRef` set | Expected in this build. Resolution is NBO-012. |
+| `Ready=False`, `Reason=WaitingForRef`, `parentRef` set | The parent CR does not exist, or holds no `status.id` yet. `RefsResolved` says which. |
 | `Ready=False`, `Reason=WaitingForKey`, no `parentRef` | Not expected — check `spec.name` is non-empty and the descriptor validated at boot. |
 | `Ready=False`, `Reason=Conflict` | More than one NetBox region matched. Two CRs claiming one region, or a name duplicated under the same parent. `status.naturalKey` shows what was searched. |
 | A second region appeared after an edit | `spec.name` was changed. See [Renaming changes identity](#renaming-changes-identity). |

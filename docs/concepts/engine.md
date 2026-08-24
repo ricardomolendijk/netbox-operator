@@ -15,6 +15,8 @@ result, err := engine.Reconcile(ctx, obj)   // obj is any kind embedding the sha
 1. Descriptor for the object's kind        no descriptor -> returned error (a wiring bug)
 2. Client for spec.endpointRef             not Ready     -> WaitingForEndpoint, requeue 30s
 3. Payload from the spec                   unmapped field -> Invalid, zero writes
+   Resolve every declared reference        any unresolved -> WaitingForRef, zero writes
+                                           (except a deferred field, which proceeds)
 4. Locate the live object
      a. status.id set -> GET by id         404 -> clear status.id, fall through to (b)
      b. natural-key candidates, in order   0 matches -> create
@@ -48,11 +50,15 @@ Two things about the order are load-bearing:
 - **A candidate that does not apply is skipped, not relaxed.** `ipam.VRF` keys on `rd` when
   set and on `name` otherwise; `dcim.Device` on `(name, site, tenant)` or on the
   tenant-is-null variant. Both are priority lists, not fallbacks.
-- **No applicable candidate at all means wait, and write nothing.** A `dcim.Region` whose
-  `parentRef` is declared but has not resolved must *not* fall through to
-  `name WHERE parent IS NULL`: that candidate finds an unrelated top-level Region, and the
-  follow-up PATCH reparents somebody else's data. `Ready=False, Reason=WaitingForKey`, zero
-  requests, and the next resync tries again.
+- **No applicable candidate at all means wait, and write nothing.** A candidate that omits a
+  declared-but-unresolved `parentRef` must *not* be fallen through to: `name WHERE parent IS
+  NULL` finds an unrelated top-level Region, and the follow-up PATCH reparents somebody else's
+  data. `Ready=False, Reason=WaitingForKey`, zero requests, and the next resync tries again.
+
+  Since [#195](https://github.com/ricardomolendijk/netbox-operator/issues/195) the lookup is
+  not reached at all in that particular case -- a declared reference that did not resolve
+  withholds the write before the lookup, and reports `WaitingForRef`. This guard stands behind
+  it, for a candidate made inapplicable by something that is not a reference.
 
 The lookup that actually ran is recorded in `status.naturalKey`, including when it matched
 nothing -- the first question about an object that was not adopted is what the engine looked
@@ -164,10 +170,17 @@ A value's shape then decides what can be done with it: a scalar is written and c
 filter, a list is written and cannot, and a `Ref` field is neither until `internal/resolver`
 has turned it into an id (NBO-012). One resolution per pass, and the id it yields goes both
 into the payload and into the spec the natural key filters on — so a key that matches on a
-reference becomes usable exactly when the reference resolves, and an object whose parent is
-declared but unresolved still waits rather than creating a duplicate. An unresolved
-reference is reported on `RefsResolved` and left out of the payload, and the object does not
-reach `Ready`; see [references](references.md).
+reference becomes usable exactly when the reference resolves.
+
+**A reference the spec declares is a precondition for the write.** Declared and unresolved
+means zero NetBox requests, on every kind and whether or not the reference is part of the
+identity, with `RefsResolved=False` carrying which of the eight causes it was and
+`Ready=False, Reason=WaitingForRef`. A reference the spec does *not* declare is not a
+precondition, and the object is created immediately without it. The one exception is a
+[deferred field](object-lifecycle.md), which exists precisely because its reference cannot
+resolve until the object does. See
+[the rule](reconciliation.md#a-declared-reference-is-a-precondition-for-the-write) and
+[references](references.md).
 
 ## Drift decides the PATCH
 

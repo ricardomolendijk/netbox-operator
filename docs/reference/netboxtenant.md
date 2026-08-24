@@ -144,7 +144,7 @@ back — against a group that no longer exists, so the reference stops resolving
 
 **If it is wrong.** A malformed ref is rejected at admission. A ref naming a CR that does not
 exist yet reports `RefsResolved=False, Reason=RefNotFound` **and** `Ready=False,
-Reason=WaitingForKey`, and performs zero writes — which is the designed outcome, not a gap.
+Reason=WaitingForRef`, and performs zero writes — which is the designed outcome, not a gap.
 See [A declared group that does not resolve waits](#a-declared-group-that-does-not-resolve-waits).
 
 ### `spec.description`
@@ -305,22 +305,26 @@ Set `groupRef` at a group that has no `status.id` yet and the object reports two
 that together explain themselves:
 
 ```
-RefsResolved  False  RefNotFound     references are not resolved yet and were left out of
-                                     the payload: [groupRef]
-Ready         False  WaitingForKey
+RefsResolved  False  RefNotFound   groupRef -> catalogue/internal: not ready
+                                   (the target has no status.id yet)
+Ready         False  WaitingForRef
 ```
 
-`WaitingForKey` means no natural-key candidate was applicable. Candidate 1 matches on
-`groupRef`, which requires it *resolved* — it is not. Candidate 2 asserts `groupRef` was
-never *declared* — it was. Neither applies, so the engine performs **zero writes**.
+and performs **zero writes**, because a reference the spec declares is a precondition for the
+write ([the rule](../concepts/reconciliation.md#a-declared-reference-is-a-precondition-for-the-write)).
 
-That is the designed outcome. Falling through to candidate 2 would look up a groupless tenant
-of that slug, find somebody else's, adopt it, and then PATCH `group` onto it — filing data
-the manifest never mentioned under a group it never mentioned either.
+Two independent reasons agree here. No natural-key candidate is applicable either: candidate 1
+matches on `groupRef`, which requires it *resolved* — it is not; candidate 2 asserts `groupRef`
+was never *declared* — it was. Falling through to candidate 2 would look up a groupless tenant
+of that slug, find somebody else's, adopt it, and then PATCH `group` onto it — filing data the
+manifest never mentioned under a group it never mentioned either. Before
+[#195](https://github.com/ricardomolendijk/netbox-operator/issues/195) that was the only reason
+and `Ready` reported `WaitingForKey`.
 
 Note the contrast with [`NetBoxTenantGroup`](netboxtenantgroup.md#a-parent-applied-in-the-same-batch-converges),
-whose `parentRef` *is* deferrable and whose child is created immediately. The difference is
-not the tree shape: it is whether the reference is part of the natural key.
+whose `parentRef` *is* deferrable and whose child is created immediately. That is the one
+exception to the rule, and the descriptor has to say so explicitly: `parent` is outside the
+natural key there, so creating early cannot adopt the wrong object.
 
 ### Two namespaces, one slug
 
@@ -386,13 +390,13 @@ acme                acme                         8    True    5m
 
 `GROUP` reads the *intent*, so it shows a name even while the reference is unresolved and
 `ID` is empty — which is exactly the pair you want side by side while diagnosing a
-`WaitingForKey`.
+`WaitingForRef`.
 
 ## Troubleshooting
 
 | Symptom | Condition | Cause | Fix |
 |---|---|---|---|
-| Nothing written, `groupRef` set | `Ready=False, Reason=WaitingForKey` + `RefsResolved=False, Reason=RefNotFound` | The group has no `status.id`, so neither candidate applies | Apply the [`NetBoxTenantGroup`](netboxtenantgroup.md), or drop `groupRef` if the tenant really is groupless. |
+| Nothing written, `groupRef` set | `Ready=False, Reason=WaitingForRef` + `RefsResolved=False, Reason=RefNotFound` | A declared reference did not resolve, so the write is withheld | Apply the [`NetBoxTenantGroup`](netboxtenantgroup.md), or drop `groupRef` if the tenant really is groupless. |
 | Nothing written, no `groupRef` | `Ready=False, Reason=WaitingForKey` | Not expected — check `spec.slug` is non-empty | — |
 | `Reason=RefDenied` on `groupRef` | `RefsResolved=False` | `groupRef.namespace` crosses a namespace with no grant | Add a [`NetBoxRefGrant`](netboxrefgrant.md) in the target namespace. |
 | `Reason=Conflict` | `Ready=False` | Another namespace's CR already holds this slug in this group, with `onConflict: Fail` | Decide who owns it; the message names the winner. |

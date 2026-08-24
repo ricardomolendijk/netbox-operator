@@ -102,6 +102,7 @@ spec:
                   NetBox -- a device type may declare one the device inherits -- so defaulting it would
                   make every adopted device drift towards a value nobody chose.
                 enum:
+                - ""
                 - front-to-rear
                 - rear-to-front
                 - left-to-right

@@ -39,16 +39,9 @@ const (
 	DeviceStatusDecommissioning DeviceStatus = "decommissioning"
 )
 
-// DeviceAirflow is one value of NetBox's DeviceAirflowChoices: which way air moves through
-// the chassis.
-//
-// docs/netbox-schema.md -> dcim.Device records the column as
-// `airflow CharField len=50 choices=DeviceAirflowChoices`, the class and no members. The ten
-// values are read from `netbox/dcim/choices.py` lines 214-223, `DeviceAirflowChoices`, in
-// the 4.6.8 tree the digest was taken from.
-//
-// +kubebuilder:validation:Enum=front-to-rear;rear-to-front;left-to-right;right-to-left;side-to-rear;rear-to-side;bottom-to-top;top-to-bottom;passive;mixed
-type DeviceAirflow string
+// DeviceAirflow is declared in dcim_devicetype.go, where NBO-027 landed it. NetBox declares
+// the column on both dcim.Device and dcim.DeviceType with the same choice set
+// (dcim/choices.py DeviceAirflowChoices), so one declaration shared by both kinds is the point.
 
 // NetBoxDeviceSpec describes one dcim.Device.
 //
