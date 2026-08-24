@@ -197,10 +197,19 @@ type Field struct {
 	// every write, and the field still unclearable (#170). A text column needs nothing
 	// here: `description: ""` is how NetBox spells an empty description.
 	//
-	// Only meaningful on ClassValue. A reference's empty form is a nil pointer, which
-	// never reaches internal/reconciler's payload as an empty string, so setting this on
-	// one does nothing rather than something surprising -- and Validate does not reject it
-	// yet.
+	// On a ClassRefOne field it means the same thing about the same column: the reference
+	// may be written empty, and an empty one is the foreign key cleared with null rather
+	// than a reference that failed to resolve (#185). The spec field is then typed
+	// v1alpha1.OptionalRef rather than a strict ref alias, so `{}` is admissible in the
+	// first place -- the flag and the type are two halves of one decision, and a field that
+	// sets only the flag simply never receives an empty reference to act on. The resolver
+	// answers such a reference with the zero Result, and internal/reconciler writes null
+	// for it (resolver.Resolve, reconciler.applyRef).
+	//
+	// Meaningless on ClassRefMany, ClassObjectTypeList and ClassArray, where the empty
+	// statement is already `[]` and an empty *element* selects nothing at all: the resolver
+	// refuses one as malformed rather than clearing the column. Validate does not reject
+	// the combination yet.
 	EmptyIsNull bool
 }
 
