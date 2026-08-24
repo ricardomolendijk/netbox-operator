@@ -169,24 +169,36 @@ func (c *Client) Mode() Mode { return c.mode }
 func (c *Client) DryRun() bool { return c.mode == ModeDryRun }
 
 // GetOne returns the single object matching params, or nil when nothing matches.
-// More than one match is an *AmbiguousError, never a silent choice.
+// More than one match is an *AmbiguousError naming every one of them, never a silent choice.
+//
+// Built on List rather than on a request of its own, so that a lookup which must identify
+// one object is the same request either way and "several matches is ambiguous" is decided
+// in exactly one place. Both callers that need the matched set -- the engine's natural-key
+// lookup and the resolver's -- read it off the error rather than counting for themselves,
+// which is what made this wrapper unusable by them before (NBO-074).
 func (c *Client) GetOne(ctx context.Context, endpoint string, params Params) (Object, error) {
-	target := c.endpointURL(endpoint)
-	if len(params) > 0 {
-		target += "?" + encodeParams(params)
-	}
-	page, err := c.do(ctx, http.MethodGet, target, endpoint, nil)
+	matches, err := c.List(ctx, endpoint, params)
 	if err != nil {
 		return nil, err
 	}
-	results := asList(page["results"])
-	switch len(results) {
+
+	return One(endpoint, params, matches)
+}
+
+// One reduces the matches for a lookup to the one object it has to identify: nil for none,
+// the object for one, and an *AmbiguousError naming every match for more.
+//
+// Exported so that a fake NetBox classifies ambiguity with this code rather than with a
+// copy of the rule. A fake that decides for itself when a lookup is ambiguous is a fake
+// that can disagree with the client about the one thing those tests are about.
+func One(endpoint string, params Params, matches []Object) (Object, error) {
+	switch len(matches) {
 	case 0:
 		return nil, nil
 	case 1:
-		return results[0], nil
+		return matches[0], nil
 	default:
-		return nil, &AmbiguousError{Endpoint: endpoint, Params: params, Matched: len(results)}
+		return nil, ambiguous(endpoint, params, matches)
 	}
 }
 

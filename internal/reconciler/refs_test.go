@@ -131,7 +131,7 @@ func TestUnresolvedRefKeepsTheObjectFromReadiness(t *testing.T) {
 			}
 
 			// Created, and without the reference: that is the recorded product decision.
-			if got := nb.methods(); !slices.Equal(got, []string{"LIST", "POST"}) {
+			if got := nb.methods(); !slices.Equal(got, []string{"GETONE", "POST"}) {
 				t.Errorf("netbox calls = %v, want the object to be created anyway", got)
 			}
 

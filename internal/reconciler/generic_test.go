@@ -20,11 +20,13 @@ import (
 const testResync = 5 * time.Minute
 
 // liveTag is the NetBox object that matches fakeObject() exactly, in the shape NetBox
-// returns it: a nested object-type list and a url the engine records.
+// returns it: a nested object-type list, a url the engine records, and the `display` every
+// NetBox serializer sends -- which is what a Conflict names alongside each ambiguous id.
 func liveTag(id int) netbox.Object {
 	return netbox.Object{
 		"id":           float64(id),
 		"url":          "https://netbox.invalid/api/extras/tags/1/",
+		"display":      "Managed",
 		"name":         "Managed",
 		"slug":         "managed",
 		"color":        "9e9e9e",
@@ -64,7 +66,7 @@ func TestEngineReconcile(t *testing.T) {
 			client: func(*testing.T) *fakeClient {
 				return &fakeClient{created: liveTag(7)}
 			},
-			wantMethods: []string{"LIST", "POST"},
+			wantMethods: []string{"GETONE", "POST"},
 			wantPayload: netbox.Object{"name": "Managed", "slug": "managed", "color": "9e9e9e"},
 			wantID:      7,
 			wantReady:   metav1.ConditionTrue,
@@ -86,7 +88,7 @@ func TestEngineReconcile(t *testing.T) {
 			client: func(*testing.T) *fakeClient {
 				return &fakeClient{list: []netbox.Object{liveTag(9)}}
 			},
-			wantMethods: []string{"LIST"},
+			wantMethods: []string{"GETONE"},
 			wantID:      9,
 			wantAdopted: true,
 			wantReady:   metav1.ConditionTrue,
@@ -102,7 +104,7 @@ func TestEngineReconcile(t *testing.T) {
 			client: func(*testing.T) *fakeClient {
 				return &fakeClient{list: []netbox.Object{liveTag(9)}}
 			},
-			wantMethods: []string{"LIST"},
+			wantMethods: []string{"GETONE"},
 			wantReady:   metav1.ConditionFalse,
 			wantReason:  netboxv1alpha1.ReasonConflict,
 			wantMessage: "netbox object 9 already matches",
@@ -119,7 +121,7 @@ func TestEngineReconcile(t *testing.T) {
 				return obj
 			},
 			client:      func(*testing.T) *fakeClient { return &fakeClient{} },
-			wantMethods: []string{"LIST"},
+			wantMethods: []string{"GETONE"},
 			wantReady:   metav1.ConditionFalse,
 			wantReason:  netboxv1alpha1.ReasonAdoptOnly,
 			wantRequeue: testResync,
@@ -167,15 +169,18 @@ func TestEngineReconcile(t *testing.T) {
 			wantWrites:  1,
 		},
 		{
+			// The user's next question is always "which two?", so the ids -- and the display
+			// each one carries, which is what a human recognises -- have to be in the
+			// message. A count would leave them to reproduce the query by hand (NBO-074).
 			name:   "more than one match is a conflict naming every id",
 			object: fakeObject,
 			client: func(*testing.T) *fakeClient {
 				return &fakeClient{list: []netbox.Object{liveTag(4), liveTag(9)}}
 			},
-			wantMethods: []string{"LIST"},
+			wantMethods: []string{"GETONE"},
 			wantReady:   metav1.ConditionFalse,
 			wantReason:  netboxv1alpha1.ReasonConflict,
-			wantMessage: "ids [4 9]",
+			wantMessage: "matched 2 netbox objects, id 4 (Managed), id 9 (Managed)",
 			wantEvents:  []string{"Warning/Conflict"},
 			wantRequeue: testResync,
 			wantWrites:  1,
@@ -206,7 +211,7 @@ func TestEngineReconcile(t *testing.T) {
 					Fields: map[string][]string{"slug": {"This field must be unique."}},
 				}}
 			},
-			wantMethods: []string{"LIST", "POST"},
+			wantMethods: []string{"GETONE", "POST"},
 			wantReady:   metav1.ConditionFalse,
 			wantReason:  netboxv1alpha1.ReasonInvalid,
 			wantMessage: "slug: This field must be unique.",
@@ -220,7 +225,7 @@ func TestEngineReconcile(t *testing.T) {
 			client: func(*testing.T) *fakeClient {
 				return &fakeClient{createErr: &netbox.ProtectedError{Status: 409, Body: "already exists"}}
 			},
-			wantMethods: []string{"LIST", "POST"},
+			wantMethods: []string{"GETONE", "POST"},
 			wantReady:   metav1.ConditionFalse,
 			wantReason:  netboxv1alpha1.ReasonConflict,
 			wantEvents:  []string{"Warning/Conflict"},
@@ -233,7 +238,7 @@ func TestEngineReconcile(t *testing.T) {
 			client: func(*testing.T) *fakeClient {
 				return &fakeClient{createErr: &netbox.TransientError{Status: 503}}
 			},
-			wantMethods: []string{"LIST", "POST"},
+			wantMethods: []string{"GETONE", "POST"},
 			wantReady:   metav1.ConditionFalse,
 			wantReason:  netboxv1alpha1.ReasonAPIError,
 			wantRequeue: transientRetry,
@@ -245,7 +250,7 @@ func TestEngineReconcile(t *testing.T) {
 			client: func(*testing.T) *fakeClient {
 				return &fakeClient{createErr: &netbox.RateLimitError{RetryAfter: 90 * time.Second}}
 			},
-			wantMethods: []string{"LIST", "POST"},
+			wantMethods: []string{"GETONE", "POST"},
 			wantReady:   metav1.ConditionFalse,
 			wantReason:  netboxv1alpha1.ReasonAPIError,
 			wantRequeue: 90 * time.Second,
@@ -257,7 +262,7 @@ func TestEngineReconcile(t *testing.T) {
 			client: func(t *testing.T) *fakeClient {
 				return &fakeClient{dryRun: dryRunClient(t)}
 			},
-			wantMethods: []string{"LIST", "POST"},
+			wantMethods: []string{"GETONE", "POST"},
 			wantID:      0,
 			wantReady:   metav1.ConditionFalse,
 			wantReason:  netboxv1alpha1.ReasonDryRunPending,
@@ -292,7 +297,7 @@ func TestEngineReconcile(t *testing.T) {
 					created: liveTag(11),
 				}
 			},
-			wantMethods: []string{"GET", "LIST", "POST"},
+			wantMethods: []string{"GET", "GETONE", "POST"},
 			wantID:      11,
 			wantReady:   metav1.ConditionTrue,
 			wantReason:  netboxv1alpha1.ReasonSynced,
@@ -359,7 +364,7 @@ func TestEngineReconcile(t *testing.T) {
 			client: func(*testing.T) *fakeClient {
 				return &fakeClient{created: liveTag(7)}
 			},
-			wantMethods: []string{"LIST", "POST"},
+			wantMethods: []string{"GETONE", "POST"},
 			wantPayload: netbox.Object{"name": "Managed", "slug": "managed", "color": "9e9e9e"},
 			wantID:      7,
 			wantReady:   metav1.ConditionFalse,

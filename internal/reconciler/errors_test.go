@@ -42,8 +42,11 @@ func TestClassify(t *testing.T) {
 			wantRequeue: resync,
 		},
 		{
-			name:        "several objects match one natural key",
-			err:         &ambiguousMatch{params: netbox.Params{"slug": "managed"}, ids: []int{4, 9}},
+			name: "several objects match one natural key",
+			err: &netbox.AmbiguousError{
+				Endpoint: "extras/tags", Params: netbox.Params{"slug": "managed"},
+				Matched: 2, IDs: []int{4, 9},
+			},
 			wantReason:  netboxv1alpha1.ReasonConflict,
 			wantRequeue: resync,
 			wantEvent:   netboxv1alpha1.EventConflict,

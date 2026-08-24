@@ -128,7 +128,7 @@ func TestDriftModes(t *testing.T) {
 			client: func(t *testing.T) *fakeClient {
 				return &fakeClient{dryRun: dryRunClient(t)}
 			},
-			wantMethods:  []string{"LIST", "POST"},
+			wantMethods:  []string{"GETONE", "POST"},
 			wantSynced:   netboxv1alpha1.ReasonDriftReported,
 			wantReady:    metav1.ConditionFalse,
 			wantReason:   netboxv1alpha1.ReasonReportPending,
@@ -164,7 +164,7 @@ func TestDriftModes(t *testing.T) {
 			client: func(*testing.T) *fakeClient {
 				return &fakeClient{list: []netbox.Object{liveTag(9)}}
 			},
-			wantMethods: []string{"LIST"},
+			wantMethods: []string{"GETONE"},
 			wantReady:   metav1.ConditionFalse,
 			wantReason:  netboxv1alpha1.ReasonConflict,
 			wantEvents:  []string{"Warning/Conflict"},

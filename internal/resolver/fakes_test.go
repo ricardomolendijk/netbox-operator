@@ -184,10 +184,17 @@ type fakeNetBox struct {
 	getErr  error
 }
 
-func (f *fakeNetBox) List(_ context.Context, endpoint string, params netbox.Params) ([]netbox.Object, error) {
-	f.calls = append(f.calls, call{method: "LIST", endpoint: endpoint, params: params})
+// GetOne answers out of the canned list, classifying it with netbox.One rather than with a
+// copy of the rule -- a fake that decides for itself when a lookup is ambiguous can
+// disagree with the client about the one thing the ambiguity cases assert.
+func (f *fakeNetBox) GetOne(_ context.Context, endpoint string, params netbox.Params) (netbox.Object, error) {
+	f.calls = append(f.calls, call{method: "GETONE", endpoint: endpoint, params: params})
 
-	return f.list, f.listErr
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+
+	return netbox.One(endpoint, params, f.list)
 }
 
 func (f *fakeNetBox) GetByID(_ context.Context, endpoint string, id int) (netbox.Object, error) {

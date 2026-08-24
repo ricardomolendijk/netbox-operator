@@ -73,10 +73,13 @@ type Reader interface {
 // guarantee than a resolver that merely does not -- "a blocked reconcile issues zero NetBox
 // mutations" is then structural rather than a property of this package's control flow.
 type LookupClient interface {
-	// List returns every object matching params. The resolver lists rather than asking for
-	// one, because an ambiguous reference has to name every id it matched: a count is not
-	// something a human can act on.
-	List(ctx context.Context, endpoint string, params netbox.Params) ([]netbox.Object, error)
+	// GetOne returns the one object matching params, nil when nothing matches, and a
+	// *netbox.AmbiguousError when several do.
+	//
+	// The resolver asks for one rather than listing and counting for itself: an ambiguous
+	// reference has to name every id it matched, a count is not something a human can act
+	// on, and since NBO-074 the client's error carries the ids and their display strings.
+	GetOne(ctx context.Context, endpoint string, params netbox.Params) (netbox.Object, error)
 
 	// GetByID fetches one object by its NetBox id, so a raw `id` reference is verified
 	// rather than trusted.
@@ -322,24 +325,29 @@ func (r *Resolver) byName(ctx context.Context, req Request, target registry.Desc
 func (r *Resolver) byQuery(
 	ctx context.Context, req Request, target registry.Descriptor, mode Mode, params netbox.Params,
 ) (Result, error) {
-	matches, err := req.NetBox.List(ctx, target.Endpoint, params)
+	live, err := req.NetBox.GetOne(ctx, target.Endpoint, params)
 	if err != nil {
+		var ambiguous *netbox.AmbiguousError
+		if errors.As(err, &ambiguous) {
+			// Naming the matches rather than counting them, for the reason the engine names
+			// them: the reader's next step is to look at those objects and decide which one
+			// the reference meant. Only the matches, because *Error's own rendering already
+			// carries the field, the target kind and the query.
+			return Result{}, req.blocked(ErrRefAmbiguous, fmt.Sprintf("%d netbox %s match %v: %s",
+				ambiguous.Matched, target.Endpoint, params, ambiguous.Matches()))
+		}
+
 		// NetBox being unavailable is not this reference's fault, so it stays an error and
 		// gets the client's classification and the engine's backoff.
 		return Result{}, fmt.Errorf("looking up netbox %s by %v: %w", target.Endpoint, params, err)
 	}
 
-	if len(matches) == 0 {
+	if live == nil {
 		return Result{}, req.blocked(ErrRefNotFound,
 			fmt.Sprintf("no netbox %s matches %v", target.Endpoint, params))
 	}
 
-	if len(matches) > 1 {
-		return Result{}, req.blocked(ErrRefAmbiguous,
-			fmt.Sprintf("%d netbox %s match %v: ids %v", len(matches), target.Endpoint, params, idsOf(matches)))
-	}
-
-	id, ok := matches[0].ID()
+	id, ok := live.ID()
 	if !ok {
 		return Result{}, fmt.Errorf("netbox %s matched %v with an object carrying no id", target.Endpoint, params)
 	}
@@ -539,17 +547,4 @@ func notReadyDetail(live *unstructured.Unstructured) (string, bool) {
 	}
 
 	return "", false
-}
-
-// idsOf reads the NetBox ids out of a set of matches, for an ambiguity that names them.
-func idsOf(matches []netbox.Object) []int {
-	ids := make([]int, 0, len(matches))
-
-	for _, match := range matches {
-		if id, ok := match.ID(); ok {
-			ids = append(ids, id)
-		}
-	}
-
-	return ids
 }

@@ -188,20 +188,23 @@ func TestResolve(t *testing.T) {
 			referrer:  types.NamespacedName{Namespace: "team-a", Name: "ams"},
 			netBox:    &fakeNetBox{list: []netbox.Object{{"id": float64(12)}}},
 			want:      Result{ID: 12, ObjectType: "dcim.region", Mode: ModeSlug},
-			wantCalls: []call{{method: "LIST", endpoint: "dcim/regions", params: netbox.Params{"slug": "emea"}}},
+			wantCalls: []call{{method: "GETONE", endpoint: "dcim/regions", params: netbox.Params{"slug": "emea"}}},
 		},
 		{
 			// `slug` is only globally unique on some models -- ipam.VLANGroup is unique on
 			// (scope_type, scope_id, slug) (docs/netbox-schema.md) -- so several matches is a
 			// real answer, and naming both ids is the only useful thing to say about it.
-			name:        "slug mode with two matches is ambiguous and names both",
-			field:       regionField(),
-			ref:         netboxv1alpha1.ObjectRef{Slug: "emea"},
-			referrer:    types.NamespacedName{Namespace: "team-a", Name: "ams"},
-			netBox:      &fakeNetBox{list: []netbox.Object{{"id": float64(12)}, {"id": float64(19)}}},
+			name:     "slug mode with two matches is ambiguous and names both",
+			field:    regionField(),
+			ref:      netboxv1alpha1.ObjectRef{Slug: "emea"},
+			referrer: types.NamespacedName{Namespace: "team-a", Name: "ams"},
+			netBox: &fakeNetBox{list: []netbox.Object{
+				{"id": float64(12), "display": "EMEA"},
+				{"id": float64(19), "display": "Emea"},
+			}},
 			wantCause:   ErrRefAmbiguous,
-			wantMessage: "ids [12 19]",
-			wantCalls:   []call{{method: "LIST", endpoint: "dcim/regions", params: netbox.Params{"slug": "emea"}}},
+			wantMessage: "2 netbox dcim/regions match map[slug:emea]: id 12 (EMEA), id 19 (Emea)",
+			wantCalls:   []call{{method: "GETONE", endpoint: "dcim/regions", params: netbox.Params{"slug": "emea"}}},
 		},
 		{
 			name:        "slug mode with no match is not found",
@@ -211,7 +214,7 @@ func TestResolve(t *testing.T) {
 			netBox:      &fakeNetBox{},
 			wantCause:   ErrRefNotFound,
 			wantMessage: "no netbox dcim/regions matches",
-			wantCalls:   []call{{method: "LIST", endpoint: "dcim/regions", params: netbox.Params{"slug": "emea"}}},
+			wantCalls:   []call{{method: "GETONE", endpoint: "dcim/regions", params: netbox.Params{"slug": "emea"}}},
 		},
 		{
 			// A VLAN's identity is a pair, which is the whole reason `lookup` exists. The
@@ -224,7 +227,7 @@ func TestResolve(t *testing.T) {
 			netBox:   &fakeNetBox{list: []netbox.Object{{"id": float64(7)}}},
 			want:     Result{ID: 7, ObjectType: "dcim.region", Mode: ModeLookup},
 			wantCalls: []call{{
-				method: "LIST", endpoint: "dcim/regions",
+				method: "GETONE", endpoint: "dcim/regions",
 				params: netbox.Params{"site": "home", "vid": "20"},
 			}},
 		},
@@ -235,7 +238,7 @@ func TestResolve(t *testing.T) {
 			referrer:    types.NamespacedName{Namespace: "team-a", Name: "ams"},
 			netBox:      &fakeNetBox{listErr: &netbox.TransientError{Status: 503}},
 			wantFailure: true,
-			wantCalls:   []call{{method: "LIST", endpoint: "dcim/regions", params: netbox.Params{"slug": "emea"}}},
+			wantCalls:   []call{{method: "GETONE", endpoint: "dcim/regions", params: netbox.Params{"slug": "emea"}}},
 		},
 		{
 			name:      "id mode verifies the object exists",
