@@ -62,8 +62,8 @@ spec:
 
 ## `spec`
 
-`endpointRef`, `onConflict` and `deletionPolicy` come from the shared envelope and behave
-identically on every kind — see [`NetBoxTag`](netboxtag.md#specendpointref) for the full
+`endpointRef`, `onConflict`, `deletionPolicy` and `customFields` come from the shared
+envelope and behave identically on every kind — see [`NetBoxTag`](netboxtag.md#specendpointref) for the full
 treatment of each.
 
 ### `spec.name`
@@ -106,12 +106,12 @@ Two candidates, tried in this order, straight out of `dcim.Region.meta.constrain
 | # | Candidate | Query | Applicable when |
 |---|---|---|---|
 | 1 | `(parent, name)` | `?parent_id=<id>&name=<name>` | `parentRef` **resolves** to an id |
-| 2 | `name` where `parent IS NULL` | `?parent_id__isnull=true&name=<name>` | `parentRef` was **never declared** |
+| 2 | `name` where `parent IS NULL` | `?parent_id=null&name=<name>` | `parentRef` was **never declared** |
 
 The order is not a fallback chain. Candidate 2 is not "what to try if 1 fails" — it is the
 identity of a *different* object, a top-level region.
 
-`parent_id__isnull=true` is pinned rather than omitted, and that is the whole point. A query
+`parent_id=null` is pinned rather than omitted, and that is the whole point. A query
 with `parent_id` merely left out matches a region of that name under *any* parent, so a
 top-level region would adopt an unrelated nested one. See
 [lookups](../concepts/lookups.md#why-a-null-filter-is-pinned-and-never-omitted).
@@ -128,7 +128,7 @@ stamped in full when the endpoint's [`spec.managedBy`](netboxendpoint.md#specman
 set. See [provenance](../operations/provenance.md).
 
 `status.naturalKey` is worth reading on this kind in particular: it records which of the two
-candidates ran, filter by filter, so `{"parent_id__isnull": "true", "name": "Europe"}`
+candidates ran, filter by filter, so `{"parent_id": "null", "name": "Europe"}`
 tells you the engine treated the object as top-level.
 
 ## Conditions

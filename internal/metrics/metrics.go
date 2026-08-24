@@ -199,6 +199,63 @@ var SpecOwnershipUntracked = factory.NewCounterVec(prometheus.CounterOpts{
 	Help: "Reconciles with no spec field ownership to read, falling back to non-zero fields only.",
 }, []string{"kind"})
 
+// Allocation results, for AllocationsTotal. Deliberately not the Result* set above: an
+// allocation has outcomes a declarative reconcile does not have, and the two questions
+// ("did this pass do anything" and "did this claim get an address") are answered by
+// different labels on purpose.
+const (
+	// AllocationAllocated is an object NetBox handed out to a claim that had none.
+	AllocationAllocated = "allocated"
+
+	// AllocationReclaimed is an object found by allocation identity and adopted, so no
+	// second one was allocated.
+	//
+	// Its own bucket rather than folded into allocated, because the ratio between the two
+	// is the health signal: reclaims on a steady cluster mean claims are being re-created,
+	// and a reclaim rate that tracks the reconcile rate means something is failing between
+	// the POST and the status write.
+	AllocationReclaimed = "reclaimed"
+
+	// AllocationExhausted is a pool with nothing left to hand out.
+	AllocationExhausted = "exhausted"
+
+	// AllocationFailed is every other refusal: a pool the operator will not allocate out
+	// of, an identity that resolved outside the pool, two objects sharing one identity, an
+	// endpoint with nowhere to store an identity, or NetBox refusing the POST.
+	AllocationFailed = "failed"
+)
+
+// AllocationsTotal counts allocation attempts by claim kind and outcome.
+//
+// There is deliberately **no free-address or utilisation gauge** beside it. An IPv6 /64 has
+// 2^64 addresses, so a count is both impossible to obtain and misleading to publish, and
+// the operator never asks NetBox how much of a pool is free -- exhaustion is detected only
+// by the allocating POST's own 409 (docs/concepts/claims.md).
+//
+// Cardinality: kind (3 claim kinds) x result (4) = 12 series.
+var AllocationsTotal = factory.NewCounterVec(prometheus.CounterOpts{
+	Name: "netbox_operator_allocations_total",
+	Help: "Allocation attempts by claim kind and outcome.",
+}, []string{"kind", "result"})
+
+// AllocationsRetained counts NetBox objects the operator stopped tracking because their
+// claim was deleted, and did not delete.
+//
+// The metric half of the garbage-collection reporting path: the Event naming the object ages
+// out of its namespace within the hour, and this does not, so "how many addresses has this
+// cluster left behind" stays answerable
+// (https://github.com/ricardomolendijk/netbox-operator/issues/182).
+//
+// Three things increment it and they are not equally normal, which is why the Event beside it
+// carries the reason: spec.deletionPolicy Retain (a choice), a non-writing endpoint, and a
+// Delete the operator gave up on after a bounded retry (a leak). Since #225 made Delete the
+// default, an increment on a cluster that never writes Retain is the third one -- so a rate
+// that is not zero there is worth alerting on rather than graphing.
+var AllocationsRetained = factory.NewCounterVec(prometheus.CounterOpts{
+	Name: "netbox_operator_allocations_retained_total",
+	Help: "NetBox objects left behind, and reported, when their claim was deleted.",
+}, []string{"kind"})
+
 // ClientCacheSize is how many NetBox clients are cached, which is how many endpoints
 // currently have a usable, authenticated, version-checked client. Object reconciles for
 // an endpoint that is not in here can only wait, so this dropping is the earliest

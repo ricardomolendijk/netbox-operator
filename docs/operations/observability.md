@@ -265,6 +265,78 @@ exists only for a `(target, referrer)` pair that some kind's field map actually 
 is a diagnostic to read next to `netbox_operator_reconcile_total{result="waiting"}`: waiting
 objects and no enqueues is a watch that is matching nothing.
 
+### `netbox_operator_allocations_total`
+
+| | |
+|---|---|
+| Type | counter |
+| Labels | `kind`, `result` |
+| Cardinality | 3 claim kinds x 4 results = 12 series |
+
+Allocation attempts by claim kind and outcome. `result` is one of:
+
+| `result` | Meaning |
+|---|---|
+| `allocated` | NetBox handed out an object to a claim that had none |
+| `reclaimed` | an object carrying the claim's allocation identity was found and adopted, so nothing was allocated |
+| `exhausted` | the pool had nothing left |
+| `failed` | every other refusal: a pool the operator will not allocate out of, an identity resolving outside its pool, two objects sharing one identity, no identity store, or NetBox refusing the POST |
+
+The **ratio** between the first two is the signal, not either count. `reclaimed` is expected in
+bursts — a cluster rebuilt from Git reclaims every address it had — and expected to be near
+zero otherwise. A steady `reclaimed` rate that tracks the reconcile rate means something is
+failing between the POST and the status write, and each of those passes is a claim that got its
+address back rather than a duplicate, which is the mechanism working and the underlying fault
+worth finding.
+
+```promql
+# Reclaims outside a rebuild: the crash-recovery path is being exercised in steady state.
+sum(rate(netbox_operator_allocations_total{result="reclaimed"}[30m])) > 0
+```
+
+```promql
+# Somebody's pool is full. Each claim retries every 10m, so this is a low, flat rate.
+sum by (kind) (rate(netbox_operator_allocations_total{result="exhausted"}[30m])) > 0
+```
+
+There is deliberately **no free-address or utilisation gauge** beside this. An IPv6 `/64` has
+2^64 addresses, so the operator never asks NetBox how much of a pool is free: exhaustion is
+detected only by the allocating POST's own `409`, and a number that is both expensive to obtain
+and misleading to publish is worse than no number ([claims](../concepts/claims.md)).
+
+### `netbox_operator_allocations_retained_total`
+
+| | |
+|---|---|
+| Type | counter |
+| Labels | `kind` |
+| Cardinality | 3 series |
+
+NetBox objects the operator stopped tracking because their claim was deleted, and did not
+delete. This is the metric half of reporting them: the `AddressRetained` Event ages out of its
+namespace within the hour, and "how many addresses has this cluster left behind" has to stay
+answerable afterwards.
+
+Three things increment it, and they are not equally normal
+([#225](https://github.com/ricardomolendijk/netbox-operator/issues/225)):
+
+| Cause | How normal |
+|---|---|
+| `spec.deletionPolicy: Retain` | a deliberate choice. `Normal`/`AddressRetained`. |
+| a non-writing endpoint (`driftMode: Report`, `mode: DryRun`) | expected for that endpoint. `Warning`/`AddressRetained`. |
+| a `Delete` the operator **gave up on** after 8 failed attempts | a leak nobody asked for. `Warning`/`AddressRetained`, and always worth looking at. |
+
+Not an alert on its own — retaining on purpose is a normal thing to do — but worth graphing
+next to `allocations_total{result="allocated"}`, and worth alerting on when the cluster uses the
+default `Delete` everywhere, because then every increment is the third row. A cluster that
+retains as fast as it allocates is leaking addresses into NetBox at that rate, and each one is
+findable by its `cf_k8s_allocation_identity`.
+
+```promql
+# Retained addresses over the last day, by claim kind.
+increase(netbox_operator_allocations_retained_total[1d])
+```
+
 ### `netbox_operator_spec_ownership_untracked_total`
 
 | | |

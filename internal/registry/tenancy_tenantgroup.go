@@ -23,7 +23,7 @@ func init() { MustRegister(tenancyTenantGroupDescriptor()) }
 //     Its uniqueness is global, so `slug` identifies at most one group whatever its parent
 //     is.
 //
-// One candidate and no null pin, therefore. Adding a `parent_id__isnull=true` filter here
+// One candidate and no null pin, therefore. Adding a `?parent_id=null` filter here
 // -- the shape plan.md §8.1 asserts every MPTT kind needs -- would be wrong twice over: it
 // would make a nested group's slug unfindable, and it would express a constraint the
 // database does not have.
@@ -50,16 +50,8 @@ func tenancyTenantGroupDescriptor() Descriptor {
 				Spec: "parentRef", API: "parent", Class: ClassRefOne,
 				Target: netboxv1alpha1.TenantGroupRef{}.TargetGVK(),
 				// `parent TreeForeignKey -> tenancy.TenantGroup on_delete=CASCADE`
-				// (docs/netbox-schema.md -> tenancy.TenantGroup). Declared because the flag is
-				// a fact about the column, not a switch: this Kind has no ContainmentRef and by
-				// the cascade rule of ADR-0003 rule 4 it should have this one. Reported rather
-				// than changed here -- #198 covers the three dcim nested groups, and this is a
-				// fourth Kind with the same defect.
-				//
-				// Sharper here than anywhere else, too: unlike the dcim nested groups, this
-				// Kind's single natural key is `slug` alone and does not read `parent`, so a
-				// child whose parent is gone still has an applicable candidate and the
-				// create-if-absent step really does fire.
+				// (docs/netbox-schema.md -> tenancy.TenantGroup), which is what makes this
+				// field the ContainmentRef below.
 				CascadeOnDelete: true,
 			},
 		},
@@ -79,6 +71,19 @@ func tenancyTenantGroupDescriptor() Descriptor {
 		// Stripping it would leave the object top-level for one pass, which is a visible
 		// wrong state in NetBox for no gain (internal/reconciler/deferred.go, strip).
 		Deferred: []DeferredField{{APIField: "parent", Mode: DeferIfUnresolved}},
+
+		// `parent` is the only foreign key on this Kind and NetBox cascades through it, so
+		// by ADR-0003 rule 4 it is the containment parent -- being catalogue-like is not a
+		// counter-argument, a CASCADE self-reference is a containment parent whatever the
+		// Kind feels like.
+		//
+		// It matters more here than on the dcim nested groups (#198), and #203 is the
+		// difference: their candidates all read `parent_id` or pin it null, so a child whose
+		// parent is gone has no applicable candidate and the engine waits. This Kind's single
+		// candidate is `slug` alone, so it stays applicable, finds nothing, and
+		// create-if-absent re-creates a row NetBox cascade-deleted. The owner reference is
+		// what removes the CR before that pass can happen.
+		ContainmentRef: "parentRef",
 
 		UpdateStrategy: UpdatePatch,
 

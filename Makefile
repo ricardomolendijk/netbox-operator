@@ -55,6 +55,10 @@ manifests: controller-gen ## Generate CRDs and RBAC into config/.
 	@# configuration. Generated from config/rbac/credential-namespaces/namespaces.txt into
 	@# config/rbac, so `make verify` covers it like anything else generated (NBO-072).
 	./hack/credential-rbac.sh
+	@# The nullable flag controller-gen cannot express: `nullable` is a field marker and the
+	@# nullable thing is spec.customFields' map *values*, whose null means "remove this
+	@# custom field" (#196). Without it the API server prunes the null before validation.
+	./hack/crd-nullable.sh
 
 .PHONY: fmt
 fmt: ## Format the Go code.
@@ -88,6 +92,9 @@ lint-schema: ## Lint hack/*.py with ruff, the same check CI runs.
 .PHONY: test-schema
 test-schema: lint-schema ## Run the schema extraction pipeline against test/fixtures/netbox-models.
 	python3 hack/test_digest.py
+	@# The API half of the same pipeline: choice values, writable-vs-read-only, and the query
+	@# parameters each Kind's filterset registers, merged into one IR (NBO-041).
+	python3 hack/test_ir.py
 
 .PHONY: test-e2e
 test-e2e: ## Run e2e tests against a kind cluster and a live NetBox.
@@ -114,6 +121,10 @@ verify: manifests generate ## Fail if generated output is not committed.
 .PHONY: build
 build: manifests generate fmt vet ## Build the manager binary.
 	go build -o bin/manager ./cmd/manager
+
+.PHONY: build-nbctl
+build-nbctl: fmt vet ## Build the nbctl CLI.
+	go build -o bin/nbctl ./cmd/nbctl
 
 .PHONY: run
 run: manifests generate fmt vet ## Run the manager against the current kubeconfig.

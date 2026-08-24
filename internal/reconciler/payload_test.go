@@ -98,6 +98,46 @@ func TestSpecFieldsDesired(t *testing.T) {
 			spec:    specFields{"slug": "managed", "unmapped": "surprise"},
 			wantErr: errUnmappedField,
 		},
+		{
+			name:         "custom fields land in netbox's own container, not in the field map",
+			spec:         specFields{"slug": "managed", "customFields": map[string]any{"owner_team": "net"}},
+			descriptor:   customFieldableDescriptor(),
+			wantPayload:  netbox.Object{"slug": "managed", "custom_fields": map[string]any{"owner_team": "net"}},
+			wantDeclared: []string{"slug"},
+			wantResolved: []string{"slug"},
+		},
+		{
+			// The removal of #196. It goes out as JSON null, which is distinct from the
+			// empty string sitting next to it: NetBox stores and returns them differently,
+			// so both intents survive the round trip.
+			name: "a null custom-field value reaches the payload as a null",
+			spec: specFields{"customFields": map[string]any{
+				"audit_ticket": nil, "owner_team": "",
+			}},
+			descriptor: customFieldableDescriptor(),
+			wantPayload: netbox.Object{"custom_fields": map[string]any{
+				"audit_ticket": nil, "owner_team": "",
+			}},
+		},
+		{
+			// `customFields: {}` is what field ownership restores for a map somebody
+			// claimed and emptied (ownership.go, restoreEmpty). It has to keep meaning
+			// "manage nothing": read as "clear everything" it would null out every custom
+			// field another writer on that NetBox owns, on every reconcile.
+			name:        "an emptied custom-field map manages nothing rather than clearing everything",
+			spec:        specFields{"customFields": map[string]any{}},
+			descriptor:  customFieldableDescriptor(),
+			wantPayload: netbox.Object{},
+		},
+		{
+			// extras.Tag is the real case: no CustomFieldsMixin, so there is no column to
+			// write. Refused rather than dropped, or the object would report itself synced
+			// while NetBox never received the values.
+			name:       "custom fields on a kind whose model has no such column are refused",
+			spec:       specFields{"customFields": map[string]any{"owner_team": "net"}},
+			descriptor: fakeDescriptor(),
+			wantErr:    errNoCustomFields,
+		},
 	}
 
 	for _, tc := range tests {
@@ -170,9 +210,9 @@ func TestSpecFieldsParams(t *testing.T) {
 			name: "a null pin is sent rather than omitted",
 			key: registry.NaturalKey{
 				Fields:     []registry.KeyField{{Filter: "slug", Spec: "slug"}},
-				NullFields: []registry.NullField{{Filter: "parent_id", Spec: "parentRef"}},
+				NullFields: []registry.NullField{{Filter: "parent_id", Spec: "parentRef", Column: registry.NullColumnRef}},
 			},
-			want: netbox.Params{"slug": "managed", "parent_id__isnull": "true"},
+			want: netbox.Params{"slug": "managed", "parent_id": "null"},
 		},
 		{
 			name:    "a filter with no value is refused rather than omitted",
@@ -273,10 +313,9 @@ func TestEnvelopeFieldsAreDerived(t *testing.T) {
 func scopedDescriptor() registry.Descriptor {
 	d := fakeDescriptor()
 	d.ReadOnly = append(slices.Clone(d.ReadOnly), registry.ScopeCacheColumns()...)
-	scope := registry.ScopeFK("scope")
 	// As ipam.Prefix carries it: every scope target declares a `prefixes` GenericRelation, so
-	// the pair cascades and may therefore be the containment parent.
-	scope.CascadeOnDelete = true
+	// every member cascades and the pair may therefore be the containment parent.
+	scope := registry.ScopeFK("scope", registry.ScopeCascadesFromEvery())
 	d.GenericFKs = []registry.GenericFKSpec{scope}
 	d.ContainmentRef = "scope"
 

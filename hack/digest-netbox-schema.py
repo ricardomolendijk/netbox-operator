@@ -1,17 +1,8 @@
-import json,re,sys,textwrap
+import json,os,re,sys,textwrap
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from netbox_schema import sql_required
 d=json.load(open(sys.argv[1]))
 want=sys.argv[2].split(',') if len(sys.argv)>2 else None
-GENERIC_FK=('GenericForeignKey','RestrictedGenericForeignKey')
-# Not columns: nothing here has a NOT NULL to violate, so nothing here can be REQ. A
-# TaggableManager is not even a field, so it arrives flagged `not_a_column` rather than
-# being named here.
-NOT_A_COLUMN=('GenericRelation','ManyToManyField')
-# A CounterCacheField *is* a column, but its `default=0` and `editable=False` are set inside
-# the field class rather than at the declaration -- so the AST sees neither, and all 35 of
-# them came out REQ: a denormalised counter the API returns read-only, demanded on create.
-NEVER_REQ=('CounterCacheField',)
-# Columns that hold a reference and nothing else -- no empty value to fall back on.
-RELATIONS=('ForeignKey','OneToOneField','TreeForeignKey')
 # Width of the type column. Must fit the longest class name the extractor can emit
 # (RestrictedGenericForeignKey, 27) or that row's REQ/detail columns shift right and the
 # table stops lining up. test_digest.py checks it against FIELD_TYPES and MANAGER_TARGETS
@@ -20,26 +11,8 @@ RELATIONS=('ForeignKey','OneToOneField','TreeForeignKey')
 TYPE_COL = 27
 MODULE_PREFIX=re.compile(r'^[\w.]*\.')  # models.PROTECT -> PROTECT, models.SET(x) -> SET(x)
 
-def req(f,by_name,seen=()):
-    # Neither half of a generic relation is a column, so neither takes null=: reading the
-    # raw kwargs marks every `scope` / `assigned_object` row REQ, which would make an
-    # unassigned IP or an unscoped prefix look illegal. A GenericRelation is a reverse
-    # relation (never required); a GenericForeignKey inherits its requiredness from the
-    # content-type half of its pair.
-    # A ManyToManyField is a through table, not a column on this model: it has no NOT NULL
-    # to violate and Django ignores null= on it entirely. `REQ` there makes the CRD demand a
-    # value the user has no way to supply -- dcim.Interface.vdcs, where a VDC assignment is
-    # optional, is one of nine such rows.
-    if f['type'] in NOT_A_COLUMN or f['type'] in NEVER_REQ or f.get('not_a_column'): return False
-    if f['type'] in GENERIC_FK:
-        ct=by_name.get(f.get('ct_field'))
-        if ct is None or ct['name'] in seen: return False
-        return req(ct,by_name,seen+(f['name'],))
-    # `blank` is a form-level flag, not SQL. It stands in for optional on a CharField,
-    # whose NOT NULL column takes '' instead, but a ForeignKey(null=False, blank=True) has
-    # no such empty value: that column really must be supplied.
-    if f['type'] in RELATIONS: return not (f.get('null') or 'default' in f)
-    return not (f.get('null') or f.get('blank') or 'default' in f)
+# `req` is `sql_required` in hack/netbox_schema.py: the IR builder needs the same rule, and
+# two copies of it is how the two halves of the pipeline drift apart in silence.
 
 def sym(f,k):
     """A resolved kwarg, or the symbol flagged as unresolved -- never a symbol passed off as
@@ -61,7 +34,7 @@ for k,v in sorted(d.items()):
         print(f"   shadows inherited: {', '.join(v['shadowed'])}")
     by_name={f['name']:f for f in v['fields']}
     for f in v['fields']:
-        r=' REQ' if req(f,by_name) else ''
+        r=' REQ' if sql_required(f,by_name) else ''
         # `name (OrganizationalModel)` — an inherited column is a real column of this model,
         # but a CRD author needs to know it is not declared here.
         label=f"{f['name']} ({f['declared_by']})" if f.get('declared_by') else f['name']

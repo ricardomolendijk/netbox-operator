@@ -22,34 +22,16 @@ rules:
 - apiGroups:
   - netbox.kubeforge.org
   resources:
-  - netboxendpoints
-  - netboxrefgrants
-  verbs:
-  - get
-  - list
-  - watch
-- apiGroups:
-  - netbox.kubeforge.org
-  resources:
-  - netboxendpoints/status
-  - netboxlocations/status
-  - netboxprefixes/status
-  - netboxregions/status
-  - netboxroutetargets/status
-  - netboxsitegroups/status
-  - netboxsites/status
-  - netboxtags/status
-  - netboxtenantgroups/status
-  - netboxtenants/status
-  - netboxvrfs/status
-  verbs:
-  - get
-  - patch
-  - update
-- apiGroups:
-  - netbox.kubeforge.org
-  resources:
+  - netboxclustergroups
+  - netboxclusters
+  - netboxclustertypes
+  - netboxdeviceroles
+  - netboxdevicetypes
+  - netboxipaddressclaims
+  - netboxipaddresses
   - netboxlocations
+  - netboxmanufacturers
+  - netboxplatforms
   - netboxprefixes
   - netboxregions
   - netboxroutetargets
@@ -58,6 +40,11 @@ rules:
   - netboxtags
   - netboxtenantgroups
   - netboxtenants
+  - netboxvirtualdisks
+  - netboxvirtualmachines
+  - netboxvlangroups
+  - netboxvlans
+  - netboxvminterfaces
   - netboxvrfs
   verbs:
   - get
@@ -68,7 +55,16 @@ rules:
 - apiGroups:
   - netbox.kubeforge.org
   resources:
+  - netboxclustergroups/finalizers
+  - netboxclusters/finalizers
+  - netboxclustertypes/finalizers
+  - netboxdeviceroles/finalizers
+  - netboxdevicetypes/finalizers
+  - netboxipaddressclaims/finalizers
+  - netboxipaddresses/finalizers
   - netboxlocations/finalizers
+  - netboxmanufacturers/finalizers
+  - netboxplatforms/finalizers
   - netboxprefixes/finalizers
   - netboxregions/finalizers
   - netboxroutetargets/finalizers
@@ -77,6 +73,52 @@ rules:
   - netboxtags/finalizers
   - netboxtenantgroups/finalizers
   - netboxtenants/finalizers
+  - netboxvirtualdisks/finalizers
+  - netboxvirtualmachines/finalizers
+  - netboxvlangroups/finalizers
+  - netboxvlans/finalizers
+  - netboxvminterfaces/finalizers
   - netboxvrfs/finalizers
   verbs:
   - update
+- apiGroups:
+  - netbox.kubeforge.org
+  resources:
+  - netboxclustergroups/status
+  - netboxclusters/status
+  - netboxclustertypes/status
+  - netboxdeviceroles/status
+  - netboxdevicetypes/status
+  - netboxendpoints/status
+  - netboxipaddressclaims/status
+  - netboxipaddresses/status
+  - netboxlocations/status
+  - netboxmanufacturers/status
+  - netboxplatforms/status
+  - netboxprefixes/status
+  - netboxregions/status
+  - netboxroutetargets/status
+  - netboxsitegroups/status
+  - netboxsites/status
+  - netboxtags/status
+  - netboxtenantgroups/status
+  - netboxtenants/status
+  - netboxvirtualdisks/status
+  - netboxvirtualmachines/status
+  - netboxvlangroups/status
+  - netboxvlans/status
+  - netboxvminterfaces/status
+  - netboxvrfs/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - netbox.kubeforge.org
+  resources:
+  - netboxendpoints
+  - netboxrefgrants
+  verbs:
+  - get
+  - list
+  - watch

@@ -127,11 +127,15 @@ const customFieldsKey = "custom_fields"
 // null out every unmanaged custom field on every reconcile -- and NetBox merges a partial
 // custom_fields PATCH, so sending only the managed subset is both correct and sufficient.
 //
-// The cost is that this container has two states where every other optional field has
-// three: an empty map means "manage nothing" rather than "clear everything", so a value
-// once written cannot be removed. Documented rather than fixed
-// (docs/concepts/field-ownership.md, #171) -- the alternative fights every other writer on
-// the instance.
+// So an empty map still means "manage nothing" rather than "clear everything": there is
+// nothing to iterate, nothing differs, and nothing is sent. That is deliberate and stays
+// (docs/concepts/field-ownership.md, #171).
+//
+// Removing one key is expressed *inside* the map instead, as a nil value, and it needs no
+// arm of its own here: nil compares equal to the null NetBox returns for a custom field
+// with no value, and unequal to any value it does hold, so a removal drifts exactly once
+// and then settles (#196). It is scalarEqual's nil == nil that makes that true, which is
+// why that guard is the first thing it does.
 func customFieldsEqual(have, want any) bool {
 	desired, ok := want.(map[string]any)
 	if !ok {

@@ -43,6 +43,27 @@ func TargetUsable() predicate.Predicate {
 	}
 }
 
+// PoolChanged admits everything TargetUsable admits, plus an edit to the target's own spec.
+//
+// It is the predicate a claim's *pool* watch uses, and it is wider than TargetUsable for a
+// reason TargetUsable's own comment spells out: TargetUsable deliberately drops a spec-only
+// edit on the target, because for an ordinary reference such an edit cannot change the id
+// being resolved. For a claim's pool it changes something else entirely -- widening a prefix
+// is a spec edit that turns an exhausted pool into one with room, and an exhausted claim that
+// slept through it would sit at PoolExhausted for up to another ten minutes
+// (https://github.com/ricardomolendijk/netbox-operator/issues/178).
+//
+// The fan-out is affordable here in a way it would not be for the general case: pools are
+// few, a generation change means a human edited one, and the claims woken by it are only the
+// claims of that pool.
+//
+// It does **not** cover the other fix for an exhausted pool. Freeing an address inside NetBox
+// changes no Kubernetes object at all, so no watch can see it and only the requeue timer
+// catches it. The two mechanisms cover different fixes rather than the same one twice.
+func PoolChanged() predicate.Predicate {
+	return predicate.Or(TargetUsable(), predicate.GenerationChangedPredicate{})
+}
+
 // refState is everything about a target that a reference's outcome depends on.
 //
 // Two fields rather than one because which of them decides a reference is still open

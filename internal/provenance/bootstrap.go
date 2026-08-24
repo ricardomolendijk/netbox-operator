@@ -27,6 +27,20 @@ const (
 // enumerating every cluster name in advance.
 const customFieldType = "text"
 
+// customFieldFilterLogic is the `filter_logic` every definition is created with.
+//
+// `exact`, not NetBox's own default of FILTER_LOOSE (extras.CustomField.filter_logic,
+// docs/netbox-schema.md -> extras.CustomField). Loose filtering makes `?cf_<name>=<value>` a
+// substring match, and every one of these fields is an identity: a claim searching for its
+// own allocation identity, or NBO-036's successor searching by `k8s_uid`, is asking "which
+// object *is* this one" and a substring answer to that question is a different object.
+//
+// Only applied to definitions this operator creates. An existing definition is never
+// narrowed, for the same reason widen() only ever adds object types: the definition may be
+// shared with a NetBox admin's own use of it, and changing somebody else's schema is not a
+// thing an operator should do on a resync.
+const customFieldFilterLogic = "exact"
+
 // customFieldGroup groups the operator's definitions in NetBox's UI, so a user reading an
 // object sees them together and under a name that says where they came from.
 const customFieldGroup = "Kubernetes"
@@ -84,12 +98,25 @@ type Result struct {
 // hand-maintained list would be correct exactly until the next kind lands, and the failure
 // would surface as a hundred identical 400s on that kind rather than as a missing entry
 // anybody could see.
-func ObjectTypes(descriptors []registry.Descriptor) []string {
-	types := make([]string, 0, len(descriptors))
+//
+// extra is for the types no Descriptor supplies: a claim kind allocates `ipam.ipaddress`
+// while being a Kubernetes object with no NetBox counterpart of its own, so the model it
+// writes into has to reach this list some other way (registry.ClaimObjectTypes). Variadic
+// rather than a second parameter so that a caller with nothing to add is unchanged, and
+// deduplicated against the derived set so a claim whose allocated Kind *is* registered adds
+// nothing.
+func ObjectTypes(descriptors []registry.Descriptor, extra ...string) []string {
+	types := make([]string, 0, len(descriptors)+len(extra))
 
 	for _, d := range descriptors {
 		if d.CustomFieldable && !slices.Contains(types, d.ObjectType) {
 			types = append(types, d.ObjectType)
+		}
+	}
+
+	for _, objectType := range extra {
+		if objectType != "" && !slices.Contains(types, objectType) {
+			types = append(types, objectType)
 		}
 	}
 
@@ -247,6 +274,7 @@ func bootstrapField(ctx context.Context, client Client, cfg Config, name string,
 	created, err := client.Create(ctx, customFieldsEndpoint, netbox.Object{
 		"object_types": objectTypes,
 		"type":         customFieldType,
+		"filter_logic": customFieldFilterLogic,
 		"name":         name,
 		"label":        label(name),
 		"group_name":   customFieldGroup,

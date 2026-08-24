@@ -80,11 +80,19 @@ func (s specFields) desired(d registry.Descriptor) (netbox.Object, registry.Spec
 	state := registry.SpecState{}
 	refs := make([]string, 0, len(s))
 
+	if err := addCustomFields(desired, d, s[customFieldsSpec]); err != nil {
+		return nil, registry.SpecState{}, nil, err
+	}
+
 	// Sorted, because the order decides which unmapped field is named in the error and how
 	// the reported references read; both are compared in tests and read by humans.
 	for _, name := range slices.Sorted(maps.Keys(s)) {
 		value := s[name]
-		if value == nil || envelopeFields[name] {
+		// Descriptor.DuplicateSpec is skipped with the envelope's own fields, and for the
+		// same reason: it configures the operator rather than describing a NetBox column.
+		// NetBox ignores a field it does not know rather than rejecting it, so sending it
+		// would be silent.
+		if value == nil || envelopeFields[name] || name == d.DuplicateSpec {
 			continue
 		}
 		state.Declared = append(state.Declared, name)
@@ -109,6 +117,48 @@ func (s specFields) desired(d registry.Descriptor) (netbox.Object, registry.Spec
 	}
 
 	return desired, state, refs, nil
+}
+
+// customFieldsSpec is the envelope field carrying NetBox custom-field values.
+//
+// It is an envelope field rather than an entry in every descriptor's field map for the same
+// reason `tags` is not in one either: it is not a per-kind column but the same container
+// under the same name on every CustomFieldsMixin model, so a field map entry per kind would
+// be one fact copied 120 times. Being an envelope field, the loop in desired skips it and
+// addCustomFields renders it instead.
+const customFieldsSpec = "customFields"
+
+// addCustomFields renders spec.customFields into the container NetBox takes.
+//
+// Values go through untouched, nil included, and the nil is the whole point of this
+// function existing: NetBox merges the container key by key and stores a JSON null as the
+// custom field's absent value, then returns that null on read (extras/api/customfields.py,
+// CustomFieldsDataField; extras/constants.py, CUSTOMFIELD_EMPTY_VALUES). So a null asks for
+// one key's value to be removed, customFieldsEqual then finds the null it asked for, and
+// the removal settles instead of PATCHing forever (#196). `""` is a different value that
+// stores and reads back as the empty string.
+//
+// An empty map sends nothing at all, which is what keeps `customFields: {}` meaning "manage
+// nothing". It has to: field ownership restores a claimed-and-emptied map as `{}` (#121,
+// ownership.go), and reading that as "clear everything" would null out every custom field
+// another writer on that NetBox owns, on every reconcile.
+//
+// A kind whose NetBox model has no `custom_fields` column is refused rather than having the
+// values dropped, for the same reason an unmapped field is: a discarded value leaves the
+// object reporting itself synced while NetBox never received it.
+func addCustomFields(desired netbox.Object, d registry.Descriptor, value any) error {
+	declared, ok := value.(map[string]any)
+	if !ok || len(declared) == 0 {
+		return nil
+	}
+
+	if !d.CustomFieldable {
+		return fmt.Errorf("%w: %s", errNoCustomFields, customFieldsSpec)
+	}
+
+	desired[provenance.CustomFieldsField] = declared
+
+	return nil
 }
 
 // writeValue is the value one mapped field is sent as.
@@ -147,7 +197,7 @@ func (s specFields) params(k registry.NaturalKey) (netbox.Params, error) {
 	}
 
 	for _, field := range k.NullFields {
-		params.Null(field.Filter)
+		params.Null(field.Filter, netbox.NullColumn(field.Column))
 	}
 
 	return params, nil

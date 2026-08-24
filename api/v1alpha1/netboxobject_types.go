@@ -272,6 +272,12 @@ const (
 	//     immediately rather than never.
 	//   - The parent was written as a `slug`, a `lookup` or a raw `id`, so it names a NetBox
 	//     row and there is no CR for an owner reference to point at.
+	//   - The parent is a member of a polymorphic union that NetBox does not cascade from,
+	//     while a sibling member does: the cascade of a generic FK is declared per target
+	//     model, so a Kind can be deleted with one of its legal scopes and not with another
+	//     (#214). The owner reference is decided from the member the object actually
+	//     resolved through, so the same manifest with a different member of the same union
+	//     cascades.
 	ReasonCascadeUnavailable = "CascadeUnavailable"
 
 	// ReasonParentOwnershipDisabled is on ParentOwned: the object carries
@@ -399,18 +405,22 @@ type ProvenanceStatus struct {
 	// These keys are also the only ones compared: NetBox merges a partial `custom_fields`
 	// PATCH and returns every custom field defined for the object type, including ones the
 	// operator knows nothing about, so it compares the keys it sets and leaves the rest
-	// alone. `custom_fields` therefore has two states rather than the three every other
-	// optional field has -- absent or empty means "manage nothing", not "clear everything",
-	// and a value written here cannot be removed through this API
-	// (docs/concepts/field-ownership.md, #171).
+	// alone. An absent or empty map therefore still means "manage nothing" rather than
+	// "clear everything"; removing one key's value is said with a `null` under
+	// spec.customFields (docs/concepts/field-ownership.md, #196).
 	// +optional
 	CustomFields map[string]string `json:"customFields,omitempty"`
 }
 
 // NetBoxObjectSpec is the part of every object CR's spec that the engine owns. Kinds embed
-// it inline, so its fields are spec fields like any other -- and the engine excludes
-// exactly these from the NetBox payload, since they configure the operator rather than
-// describe a NetBox object.
+// it inline, so its fields are spec fields like any other -- and the engine excludes them
+// from the NetBox payload rather than mapping them through a descriptor, since they
+// configure the operator rather than describe one NetBox column.
+//
+// CustomFields is the one that does reach NetBox. It is here rather than in every kind's
+// field map for the same reason `tags` is not in one either: it is not a per-kind column
+// but the same container on every CustomFieldsMixin model, under the same name, so a field
+// map entry per kind would be 120 copies of one fact (NBO-075).
 type NetBoxObjectSpec struct {
 	// EndpointRef names the NetBoxEndpoint to write through, in this object's own
 	// namespace. Required: there is no cluster-wide default endpoint, so an omitted
@@ -428,9 +438,47 @@ type NetBoxObjectSpec struct {
 	// Read fresh on every pass rather than latched when deletion starts, so switching it
 	// to Retain on an object whose delete NetBox keeps refusing is a way out of that
 	// state (docs/concepts/deletion.md).
-	// +kubebuilder:default=Delete
+	//
+	// Left unset it is Delete for most kinds and Retain for the IPAM ones, where deleting
+	// the NetBox object destroys state rather than configuration -- an address freed for
+	// reallocation, a range whose ownership record is gone (decision #176). The default is
+	// therefore *not* a CRD marker: this field is declared once for every kind, so a marker
+	// here could only give them all the same answer. Each kind declares its own on its
+	// Descriptor and docs/concepts/deletion.md lists them.
 	// +optional
 	DeletionPolicy DeletionPolicy `json:"deletionPolicy,omitempty"`
+
+	// CustomFields are NetBox custom-field values to write, keyed by NetBox custom-field
+	// name. Every key must already exist as an `extras.CustomField` covering this object
+	// type -- NetBox rejects the whole payload otherwise.
+	//
+	// The map is deliberately **not** exhaustive: only the keys named here are written and
+	// compared, and every other custom field on the NetBox object is left exactly as it is.
+	// NetBox merges a partial `custom_fields` PATCH and returns every custom field defined
+	// for the object type, including ones this operator knows nothing about, so treating
+	// the map as the whole container would null out every custom field another writer on
+	// that NetBox owns, on every reconcile. Omitting the map, or setting it to `{}`,
+	// therefore means "manage nothing" rather than "clear everything".
+	//
+	// `null` and `""` are different intents and both are expressible:
+	//
+	//   customFields:
+	//     rack_position: ""      # set this custom field to the empty string
+	//     audit_ticket: null     # remove this custom field's value
+	//
+	// `null` is sent to NetBox as JSON null, which is the value NetBox stores for a custom
+	// field that has no value and the value it returns on read -- indistinguishable from a
+	// field never set, which is what "removed" means here. `""` stores and returns the
+	// empty string. Removing the key from the manifest entirely is the third state: it
+	// hands the field back and NetBox keeps whatever it holds
+	// (docs/concepts/field-ownership.md).
+	//
+	// Set on a kind whose NetBox model carries no `custom_fields` column -- extras.Tag is
+	// one, so a NetBoxTag is the case -- and the object reports Ready=False,
+	// Reason=Invalid. Refused rather than dropped: a discarded value would leave the
+	// object claiming to be synced while NetBox never received it.
+	// +optional
+	CustomFields map[string]*string `json:"customFields,omitempty"`
 }
 
 // NetBoxObjectStatus is the part of every object CR's status that the engine owns. It is

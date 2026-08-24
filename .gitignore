@@ -6,6 +6,11 @@
 
 # Build output
 /bin/
+# Without a slash too: `/bin/` matches a directory, so a *symlink* named `bin` -- which is
+# what you get from pointing a worktree at the main checkout's envtest assets -- is not
+# ignored and can be committed. One was, and CI failed on `mkdir -p bin` with a bare
+# "Error 1", because mkdir will not create a directory over a dangling symlink.
+/bin
 /dist/
 /testbin/
 *.test

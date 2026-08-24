@@ -75,6 +75,12 @@ Quote `color` and `weight` carefully in YAML: `color: 2196f3` is a string, but
 kind embeds. They configure the operator rather than describe a NetBox object, and the
 engine excludes exactly those three from every payload it sends.
 
+`customFields` is on that same envelope and is the one field on it that *does* reach NetBox
+(see [field ownership](../concepts/field-ownership.md#the-exception-that-keeps-its-own-rules-customfields)
+for its three states and for what a `null` value means). It is rejected on a NetBoxTag:
+`extras.Tag` mixes in no `CustomFieldsMixin`, so there is no `custom_fields` column to write,
+and setting it reports `Ready=False`, `Reason=Invalid` rather than dropping the values.
+
 ### `spec.endpointRef`
 
 | | |

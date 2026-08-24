@@ -1,0 +1,21 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxManufacturer
+metadata:
+  name: ubiquiti
+  namespace: default
+spec:
+  endpointRef: homelab
+
+  # The default, spelled out. `slug` is column-unique on dcim.Manufacturer, so the second
+  # namespace to claim `ubiquiti` loses -- Fail says so instead of leaving two CRs to fight
+  # over one NetBox manufacturer, which is what Adopt would do on a catalogue kind.
+  onConflict: Fail
+
+  # The default, spelled out. A manufacturer is catalogue data, not IPAM, so deleting the CR
+  # deletes the NetBox object -- which NetBox refuses while any device type or platform still
+  # points at it (on_delete=PROTECT). That surfaces as Deleting=False, Reason=Protected.
+  deletionPolicy: Delete
+
+  name: Ubiquiti
+  slug: ubiquiti
+  description: Ubiquiti Inc.

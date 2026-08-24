@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -435,6 +436,207 @@ func TestACascadeDeletedParentDoesNotRecreateItsChild(t *testing.T) {
 	if regionIsReady(ns, "child") {
 		t.Error("the child reports Ready with no parent and no row")
 	}
+}
+
+// tenantGroupKind points the shared stub at tenancy.TenantGroup, keyed by `slug` -- which is
+// this kind's entire natural key, and the reason #203 is a separate issue from #198.
+var tenantGroupKind = stubKind{endpoint: "tenancy/tenant-groups", key: "slug"}
+
+// makeTenantGroup applies a NetBoxTenantGroup whose NetBox name and slug are both its CR
+// name, and removes it afterwards so the finalizer does not outlive the stub it needs to come
+// off. The region equivalent is makeRegion (refwatch_test.go).
+func makeTenantGroup(
+	t *testing.T, ns, name string, mutate func(*netboxv1alpha1.NetBoxTenantGroup),
+) {
+	t.Helper()
+
+	group := &netboxv1alpha1.NetBoxTenantGroup{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
+		Spec: netboxv1alpha1.NetBoxTenantGroupSpec{
+			NetBoxObjectSpec: netboxv1alpha1.NetBoxObjectSpec{EndpointRef: "homelab"},
+			Name:             name,
+			Slug:             name,
+		},
+	}
+	if mutate != nil {
+		mutate(group)
+	}
+
+	if err := k8sClient.Create(context.Background(), group); err != nil {
+		t.Fatalf("creating tenant group %s/%s: %v", ns, name, err)
+	}
+
+	t.Cleanup(func() { _ = k8sClient.Delete(context.Background(), group) })
+}
+
+func fetchTenantGroup(ns, name string) *netboxv1alpha1.NetBoxTenantGroup {
+	group := &netboxv1alpha1.NetBoxTenantGroup{}
+	if err := k8sClient.Get(context.Background(),
+		client.ObjectKey{Namespace: ns, Name: name}, group); err != nil {
+		return nil
+	}
+
+	return group
+}
+
+// tenantGroupCondition is one condition on a tenant group, or the zero value when the engine
+// has not set it -- which is also what a missing object reads as, since both mean "not that
+// status yet" to every caller here.
+func tenantGroupCondition(ns, name, condType string) metav1.Condition {
+	group := fetchTenantGroup(ns, name)
+	if group == nil {
+		return metav1.Condition{}
+	}
+
+	if found := apimeta.FindStatusCondition(group.Status.Conditions, condType); found != nil {
+		return *found
+	}
+
+	return metav1.Condition{}
+}
+
+// tenantGroupOwnerRefs is a tenant group's owner references, read through the API server
+// rather than the cache so the test sees what was actually persisted.
+func tenantGroupOwnerRefs(t *testing.T, ns, name string) []metav1.OwnerReference {
+	t.Helper()
+
+	group := &netboxv1alpha1.NetBoxTenantGroup{}
+	if err := apiClient.Get(context.Background(),
+		client.ObjectKey{Namespace: ns, Name: name}, group); err != nil {
+		t.Fatalf("fetching tenant group %s/%s: %v", ns, name, err)
+	}
+
+	return group.OwnerReferences
+}
+
+// TestATenantGroupChildIsOwnedByItsCascadingParent is #203.
+// `tenancy.TenantGroup.parent` is `on_delete=CASCADE`, so deleting a group in NetBox deletes
+// its descendants server-side; the kind declared no containment ref, so the child CR outlived
+// the row it described and the engine put the row back.
+//
+// The shape is TestACascadeDeletedParentDoesNotRecreateItsChild's, and the one place it
+// diverges is the whole reason #203 is not a fourth copy of #198. That test asserts two
+// halves -- the owner reference the garbage collector reads, *and* the engine declining to
+// re-create the row -- and the second half is a property of dcim.Region's identity: every one
+// of its natural-key candidates reads `parent_id` or pins it null, so a child whose
+// `parentRef` stopped resolving has no applicable candidate and locate() waits.
+//
+// tenancy.TenantGroup declares no `meta.constraints` at all; its uniqueness is column-level
+// and global, so its single candidate is `slug` alone and never reads `parent`
+// (docs/netbox-schema.md -> tenancy.TenantGroup). The candidate therefore stays applicable
+// with the parent gone, finds nothing, and create-if-absent fires. So the second half is
+// asserted here **inverted**: the row really does come back, which is the whole of #203 and
+// the reason the owner reference is not a second line of defence for this kind but the only
+// one. #204 supplies the guard the key cannot -- a *declared* reference as a precondition for
+// the write, which is a rule about the reference rather than about the key -- and it is not
+// merged, so nothing on this branch stops that create.
+//
+// What envtest can prove is everything garbage collection reads, and nothing it does: there is
+// no kube-controller-manager here and therefore no collector, so the cascade itself is #29's
+// e2e gate. The assertions below are the reference GC resolves -- by uid, because an owner
+// reference carrying anything else is not a weaker cascade but an immediate deletion -- and
+// that the child stops claiming Ready once its parent and its row are gone.
+func TestATenantGroupChildIsOwnedByItsCascadingParent(t *testing.T) {
+	ns := newNamespace(t)
+	stub, target := newNetBoxStub(t, tenantGroupKind)
+	readyEndpoint(t, ns, target)
+
+	ready := func(name string) bool {
+		return tenantGroupCondition(ns, name, netboxv1alpha1.ConditionReady).Status ==
+			metav1.ConditionTrue
+	}
+
+	makeTenantGroup(t, ns, "parent", nil)
+	eventually(t, "the parent to become Ready", func() bool { return ready("parent") })
+
+	makeTenantGroup(t, ns, "child", func(g *netboxv1alpha1.NetBoxTenantGroup) {
+		g.Spec.ParentRef = &netboxv1alpha1.TenantGroupRef{Name: "parent"}
+	})
+	eventually(t, "the child to become Ready", func() bool { return ready("child") })
+	eventually(t, "the child to be owned by its parent", func() bool {
+		return len(tenantGroupOwnerRefs(t, ns, "child")) == 1
+	})
+
+	childID := fetchTenantGroup(ns, "child").Status.ID
+	if childID == 0 {
+		t.Fatal("the child has no status.id, so there is no row for a cascade to take")
+	}
+
+	// The precondition that makes the count at the end mean anything: there is a row named
+	// `child` right now, so whatever is counted afterwards is about the cascade.
+	if got := stub.countByKey("child"); got != 1 {
+		t.Fatalf("netbox holds %d tenant group(s) named `child` before the cascade, want 1", got)
+	}
+
+	owner := tenantGroupOwnerRefs(t, ns, "child")[0]
+	if owner.Kind != "NetBoxTenantGroup" || owner.Name != "parent" {
+		t.Errorf("owner = %s/%s, want NetBoxTenantGroup/parent", owner.Kind, owner.Name)
+	}
+
+	// The assertion the cascade rests on. The collector resolves an owner by
+	// (apiVersion, kind, name, uid) and reads one it cannot resolve as an owner that is
+	// already gone -- so a wrong uid deletes this object at once instead of when its parent
+	// goes.
+	if parent := fetchTenantGroup(ns, "parent"); owner.UID != parent.UID {
+		t.Fatalf("owner uid = %q, want the live parent's uid %q", owner.UID, parent.UID)
+	}
+
+	if owner.Controller != nil && *owner.Controller {
+		t.Error("the containment owner reference is the controller; rule 4 says non-controller")
+	}
+
+	if got := tenantGroupCondition(ns, "child", netboxv1alpha1.ConditionParentOwned); got.Status !=
+		metav1.ConditionTrue || got.Reason != netboxv1alpha1.ReasonParentOwned {
+		t.Errorf("ParentOwned = %s/%s, want True/%s",
+			got.Status, got.Reason, netboxv1alpha1.ReasonParentOwned)
+	}
+
+	// The parent CR first and the row second, as in the region test: on a real cluster the
+	// finalizer's DELETE is what triggers the server-side cascade, but the stub models no
+	// foreign keys, and taking the row first would leave a window where the child still
+	// resolves its parent and legitimately re-creates a row deleted behind the operator's
+	// back. That is drift correction working, not the bug under test.
+	if err := apiClient.Delete(context.Background(),
+		&netboxv1alpha1.NetBoxTenantGroup{
+			ObjectMeta: metav1.ObjectMeta{Name: "parent", Namespace: ns},
+		}); err != nil {
+		t.Fatalf("deleting the parent: %v", err)
+	}
+	eventually(t, "the parent CR to be gone", func() bool { return fetchTenantGroup(ns, "parent") == nil })
+
+	stub.cascade(childID)
+
+	// True whether the engine waits or re-creates, so this one survives #204 unchanged: an
+	// object whose containment parent has vanished must not go on claiming it matches NetBox.
+	eventually(t, "the child to stop reporting Ready", func() bool { return !ready("child") })
+
+	// And this is the resurrection, asserted rather than described, because "the natural key
+	// does not defend this kind" is the entire claim of #203 and a claim nothing else in the
+	// suite holds. It is also what makes the owner-reference assertions above non-vacuous: on
+	// dcim.Region the create-if-absent step would decline here, so an owner reference is a
+	// second line of defence; here it is the only one.
+	//
+	// **#204 inverts this block, deliberately.** Once a declared reference is a precondition
+	// for the write, the guard sits before locate() and this pass stops at
+	// Ready=False/WaitingForRef -- so the row stays away (count 0) and status.id is never even
+	// cleared (still childID). That is a rule about the *reference* rather than about the key,
+	// which is exactly why it reaches this kind where identity cannot. Whoever lands #204
+	// should replace the two assertions below with their opposites and keep everything above.
+	eventually(t, "the child to re-create the row NetBox cascade-deleted", func() bool {
+		group := fetchTenantGroup(ns, "child")
+
+		return group != nil && group.Status.ID != 0 && group.Status.ID != childID
+	})
+
+	if got := stub.countByKey("child"); got != 1 {
+		t.Errorf("netbox holds %d tenant group(s) named `child` after the cascade, want 1: "+
+			"`slug` is the whole natural key, so create-if-absent has nothing to stop it and "+
+			"this test has stopped exercising what #203 is about", got)
+	}
+
+	t.Logf("the cascaded row came back as status.id %d (was %d): with `slug` the whole "+
+		"natural key, the owner reference is the only thing between the child CR and a row "+
+		"NetBox deleted on purpose", fetchTenantGroup(ns, "child").Status.ID, childID)
 }
 
 // regionRefsReason returns the RefsResolved reason, which is where a region whose parentRef

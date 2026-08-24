@@ -94,13 +94,15 @@ accepted and writes nothing is worse than a field that is not there.
 There is no `parentRef`, and there never will be. See
 [a prefix has no parent](#a-prefix-has-no-parent).
 
-There is no `fromPrefixRef` and no `prefixLength`: allocation is a separate kind
-([ADR-0004](../decisions/0004-claims-first-allocation.md)), so `spec.prefix` is required.
+There is no allocation field and no `prefixLength`: allocation is a separate kind
+([ADR-0004](../decisions/0004-claims-first-allocation.md)), so `spec.prefix` is required. "Give
+me a free address out of this prefix" is a
+[`NetBoxIPAddressClaim`](netboxipaddressclaim.md) pointing at it.
 
 ## `spec`
 
-`endpointRef` and `onConflict` come from the shared envelope and behave identically on every
-kind — see [`NetBoxTag`](netboxtag.md#specendpointref) for the full treatment of each.
+`endpointRef`, `onConflict` and `customFields` come from the shared envelope and behave
+identically on every kind — see [`NetBoxTag`](netboxtag.md#specendpointref) for the full treatment of each.
 
 ### `spec.deletionPolicy`
 
@@ -326,7 +328,7 @@ Two candidates, tried in this order:
 | # | Candidate | Query | Applicable when |
 |---|---|---|---|
 | 1 | `(prefix, vrf)` | `?prefix=<cidr>&vrf_id=<id>` | `vrfRef` **resolves** to an id |
-| 2 | `prefix` where `vrf IS NULL` | `?prefix=<cidr>&vrf_id__isnull=true` | `vrfRef` was **never declared** |
+| 2 | `prefix` where `vrf IS NULL` | `?prefix=<cidr>&vrf_id=null` | `vrfRef` was **never declared** |
 
 **`ipam.Prefix` has no `meta.constraints` at all.** Its only table-level lines in
 `docs/netbox-schema.md` are
@@ -356,7 +358,7 @@ identity of a *different* object, the same CIDR in the global table. `vrfRef` de
 yet resolved matches **neither**, and the engine waits rather than adopting the global prefix
 and then `PATCH`ing a VRF onto somebody else's row.
 
-`vrf_id__isnull=true` is pinned rather than omitted, and on this kind that is load-bearing
+`vrf_id=null` is pinned rather than omitted, and on this kind that is load-bearing
 rather than tidy: the whole point of per-VRF prefixes is that the same `10.0.20.0/24` can
 exist in several of them at once, so a lookup that merely left `vrf_id` out would match all of
 them and adopt an arbitrary one. See
@@ -374,7 +376,7 @@ a failing object keep reconciling by id rather than re-deriving an identity.
 `tags` and `custom_fields` ([provenance](../operations/provenance.md)).
 
 `status.naturalKey` is worth reading on this kind in particular. It records which of the two
-candidates ran, filter by filter, so `{"prefix": "10.0.20.0/24", "vrf_id__isnull": "true"}`
+candidates ran, filter by filter, so `{"prefix": "10.0.20.0/24", "vrf_id": "null"}`
 tells you the engine treated the object as a global prefix, and a `vrf_id` there tells you
 which VRF it went looking in.
 

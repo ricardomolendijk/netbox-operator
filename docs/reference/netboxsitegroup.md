@@ -66,8 +66,8 @@ A runnable pair is [`../../config/samples/netbox_v1alpha1_netboxsitegroup.yaml`]
 
 ## `spec`
 
-`endpointRef`, `onConflict` and `deletionPolicy` come from the shared envelope and behave
-identically on every kind — see [`NetBoxTag`](netboxtag.md#specendpointref) for the full
+`endpointRef`, `onConflict`, `deletionPolicy` and `customFields` come from the shared
+envelope and behave identically on every kind — see [`NetBoxTag`](netboxtag.md#specendpointref) for the full
 treatment of each.
 
 ### `spec.name`
@@ -116,14 +116,14 @@ Two candidates, tried in this order, straight out of `dcim.SiteGroup.meta.constr
 | # | Candidate | Query | Applicable when |
 |---|---|---|---|
 | 1 | `(parent, name)` | `?parent_id=<id>&name=<name>` | `parentRef` **resolves** to an id |
-| 2 | `name` where `parent IS NULL` | `?parent_id__isnull=true&name=<name>` | `parentRef` was **never declared** |
+| 2 | `name` where `parent IS NULL` | `?parent_id=null&name=<name>` | `parentRef` was **never declared** |
 
 Not a fallback chain. Candidate 2 is not "what to try if 1 fails" — it is the identity of a
 *different* object, a top-level group. A child whose parent has not been created yet matches
 **neither**, and the engine waits: falling through would find an unrelated top-level group of
 that name, adopt it, and the follow-up PATCH would reparent somebody else's data.
 
-`parent_id__isnull=true` is pinned rather than omitted. A query with `parent_id` merely left
+`parent_id=null` is pinned rather than omitted. A query with `parent_id` merely left
 out matches a group of that name under *any* parent. See
 [lookups](../concepts/lookups.md#why-a-null-filter-is-pinned-and-never-omitted).
 
@@ -138,7 +138,7 @@ stamped in full when the endpoint's [`spec.managedBy`](netboxendpoint.md#specman
 See [provenance](../operations/provenance.md).
 
 `status.naturalKey` records which of the two candidates ran, filter by filter, so
-`{"parent_id__isnull": "true", "name": "Retail"}` tells you the engine treated the object as
+`{"parent_id": "null", "name": "Retail"}` tells you the engine treated the object as
 top-level.
 
 ## Conditions

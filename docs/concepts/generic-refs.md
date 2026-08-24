@@ -6,7 +6,8 @@ new one is added without touching the engine.
 > **Status.** The mechanism is built (NBO-019): the union pattern, CEL validation of the
 > one-of-N shape, resolution to an `(object type, id)` pair, paired drift detection, and
 > ref watches over every allowed target. Two unions ship, both through that one mechanism:
-> [`IPAssignment`](../reference/genericref.md), because `NetBoxIPAddress` needs it
+> [`IPAssignment`](../reference/genericref.md), now on a real CRD as
+> [`NetBoxIPAddress.spec.assignedObject`](../reference/netboxipaddress.md#assignedobject)
 > ([NBO-025](https://github.com/ricardomolendijk/netbox-operator/issues/37)), and
 > [`ScopeRef`](#the-scope-pair) — NetBox's `(scope_type, scope_id)`
 > ([NBO-018](https://github.com/ricardomolendijk/netbox-operator/issues/30)). Several of
@@ -102,10 +103,12 @@ an absent field is never evaluated, so an optional `== 1` union would be satisfi
 leaving it out.
 
 Both shapes are proved against a real API server by `TestUnionCELShapes`, over a test-only
-CRD in `internal/controller/testdata/crd/`. The fixture exists because `IPAssignment` is on
-no shipped CRD until `NetBoxIPAddress` lands, and a CEL rule no CRD carries is compiled by
-nothing; `TestUnionCELRuleMatchesTheAPIType` asserts the fixture's rule is byte-identical to
-the one on the Go type, so it cannot drift away from what it stands in for.
+CRD in `internal/controller/testdata/crd/`. The fixture came first, because a CEL rule no CRD
+carries is compiled by nothing and `IPAssignment` was on no shipped CRD until
+[`NetBoxIPAddress`](../reference/netboxipaddress.md) landed; it stays, because it is the only
+place the `== 1` shape is exercised at all -- no shipped Kind has a `REQ` pair yet.
+`TestUnionCELRuleMatchesTheAPIType` asserts the fixture's rule is byte-identical to the one on
+the Go type, so it cannot drift away from what it stands in for.
 
 ## The Descriptor side
 
@@ -328,16 +331,63 @@ ownership step reads it with the same lookup. A member whose target Kind is not 
 refused as `RefKindUnavailable` and therefore never owned — see
 [ownership](ownership.md#an-unregistered-target-kind).
 
-**It is not usable in a natural key yet.** A lookup on a polymorphic pair needs two filters
-and there is no single value to offer, so a resolved union is not written into the spec the
-way a resolved typed reference is. No shipped Descriptor names one in a natural key —
-not even the scoped kinds, whose keys are all on scalars. The first that will is
-`ipam.VLANGroup`, unique on `(scope_type, scope_id, slug)`. Until it lands such a candidate is
-refused loudly by `params()` rather than sending a lookup with half an identity.
-
 **Reverse accessors are absent from every spec.** `nat_outside` and `l2vpn_terminations`
 are Django `GenericRelation` reverse accessors, not columns. They are read-only views of
 somebody else's foreign key and there is nothing to write.
+
+## Natural keys
+
+A lookup on a polymorphic pair needs **two** filters, and the union's own spec field has no
+single value to offer one — so a natural key names the pair by its two **column** names
+instead:
+
+```go
+NaturalKeys: []registry.NaturalKey{
+    {Fields: []registry.KeyField{
+        {Filter: registry.ScopeTypeField, Spec: registry.ScopeTypeField},
+        {Filter: registry.ScopeIDField, Spec: registry.ScopeIDField},
+        {Filter: "slug", Spec: "slug"},
+    }},
+    {
+        Fields: []registry.KeyField{{Filter: "slug", Spec: "slug"}},
+        NullFields: []registry.NullField{
+            {Filter: registry.ScopeTypeField, Spec: "scope"},
+            {Filter: registry.ScopeIDField, Spec: "scope"},
+        },
+    },
+}
+```
+
+`applyGenericFK` writes the resolved pair into the decoded spec under those two names, so each
+half then renders exactly as `{Filter: "vrf_id", Spec: "vrfRef"}` does, and
+`declaresSpecField` accepts them so a misspelling still fails at boot. `ipam.VLANGroup` is the
+kind this exists for: it is unique on `(scope_type, scope_id, slug)` and
+`(scope_type, scope_id, name)` (`docs/netbox-schema.md` → `ipam.VLANGroup`,
+`meta.constraints`) and could not state its own identity otherwise — see
+[`reference/netboxvlangroup.md`](../reference/netboxvlangroup.md).
+
+Three properties of that shape are load-bearing rather than incidental:
+
+- **Both halves or neither.** A generic FK's id is only unique *within* its type, so
+  `?scope_id=31&slug=mgmt` matches a group scoped to the site with id 31 and one scoped to the
+  region with id 31 alike. It is the same argument as [the atomic
+  pair](#why-the-pair-is-atomic), one step further out.
+- **The type half is the `app_label.model` string, not a ContentType id.** That is what the
+  filterset takes: `VLANGroupFilterSet` declares
+  `scope_type = MultiValueContentTypeFilter()` (NetBox 4.6.8,
+  `netbox/ipam/filtersets.py:948`), which splits the value on `.` and resolves it through
+  `ContentType.objects.get_by_natural_key` (`netbox/utilities/filters.py:186-207`).
+  `scope_id` is an ordinary filter from `Meta.fields` (`netbox/ipam/filtersets.py:980`).
+- **A cleared or unresolved pair resolves neither column.** So the value-matching candidate
+  becomes inapplicable and the null-pinned one takes over — which is the whole difference
+  between "globally scoped" and "scoped to something that does not exist yet". A union that is
+  *declared* and unresolved matches neither candidate and the engine waits, rather than
+  adopting the global object of the same slug and PATCHing a scope onto it.
+
+The per-target filters `VLANGroupFilterSet` also offers (`?site=3`, `?region=2`, and six more)
+are deliberately not used. They would put the union's dispatch table into the natural key as
+well, spelled a second way, in a kind whose whole point is that the union is written down
+once.
 
 ## Adding a union
 

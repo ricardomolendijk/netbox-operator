@@ -64,6 +64,17 @@ type FinalizerWriter interface {
 // deletion sequence, which drops the finalizer without a NetBox call, so the early claim
 // cannot make a CR undeletable.
 func (e *Engine) claim(ctx context.Context, obj Object) error {
+	return takeFinalizer(ctx, e.Finalizers, obj)
+}
+
+// takeFinalizer is Engine.claim's body, over any CR rather than only an engine-driven one.
+//
+// Shared because the allocation engine needs exactly this, for exactly the same reason
+// (claim.go): a claim that POSTs to an allocation endpoint before its finalizer is durable
+// is a CR that can die owing NetBox an object nobody is left to account for. Two copies of
+// the add-then-persist-then-roll-back-on-failure sequence would be two places for that
+// ordering to be got wrong.
+func takeFinalizer(ctx context.Context, writer FinalizerWriter, obj client.Object) error {
 	if controllerutil.ContainsFinalizer(obj, netboxv1alpha1.Finalizer) {
 		return nil
 	}
@@ -71,13 +82,13 @@ func (e *Engine) claim(ctx context.Context, obj Object) error {
 	// A missing collaborator is a wiring mistake, and it must say so rather than panic
 	// halfway through a pass. Claiming runs before any NetBox call, so failing here is
 	// also the safest place to fail: nothing has been created that could leak.
-	if e.Finalizers == nil {
+	if writer == nil {
 		return fmt.Errorf("%w: no FinalizerWriter is wired", errNotConfigured)
 	}
 
 	controllerutil.AddFinalizer(obj, netboxv1alpha1.Finalizer)
 
-	if err := e.Finalizers.UpdateFinalizers(ctx, obj); err != nil {
+	if err := writer.UpdateFinalizers(ctx, obj); err != nil {
 		// Put the in-memory object back the way the API server still sees it. Leaving the
 		// finalizer on a copy the API server rejected would let a later status write
 		// succeed against an object that never got protected.
@@ -159,7 +170,7 @@ func (p *pass) releaseWithoutDeleting() (release, bool) {
 		}, true
 	}
 
-	if deletionPolicyOf(p.obj) == netboxv1alpha1.DeletionRetain {
+	if deletionPolicyOf(p.obj.NetBoxSpec().DeletionPolicy, p.desc.RetainOnDelete) == netboxv1alpha1.DeletionRetain {
 		return release{
 			event: netboxv1alpha1.EventRetained,
 			message: fmt.Sprintf("spec.deletionPolicy is Retain: netbox %s/%d is left in place",
@@ -347,12 +358,29 @@ func (p *pass) release(ctx context.Context, out release) (ctrl.Result, error) {
 	return ctrl.Result{}, nil
 }
 
-// deletionPolicyOf returns the object's deletion policy, defaulting to the one that leaves
-// nothing behind. The CRD defaults it as well; this is the guard for an object stored
-// before that default existed.
-func deletionPolicyOf(obj Object) netboxv1alpha1.DeletionPolicy {
-	if policy := obj.NetBoxSpec().DeletionPolicy; policy != "" {
+// deletionPolicyOf returns the effective deletion policy: the spec's when it states one, and
+// otherwise retainByDefault's answer.
+//
+// It takes the two values it reads rather than an Object and a Descriptor, because the
+// allocation engine needs exactly this rule over a Claim and a registry.ClaimDescriptor,
+// which are different types holding the same two facts (claim.go). One function that both
+// callers pass their own pair into is the only shape in which "unset means the kind's
+// default" cannot come to mean two different things -- and this rule is the last word on
+// whether the operator deletes somebody's data, so it existing twice is not acceptable.
+//
+// For an object CR the default is not a CRD marker, and cannot be: spec.deletionPolicy is
+// declared once on the shared NetBoxObjectSpec, so a `+kubebuilder:default` there is the same
+// value for every one of ~120 kinds (#186). Decision #176 made IPAM the exception -- deleting
+// an ipam.IPAddress frees the address for reallocation, which is destructive in a way deleting
+// a tag is not -- so the per-kind answer is data on the Descriptor, where every other per-kind
+// fact lives. docs/concepts/deletion.md carries the table.
+func deletionPolicyOf(policy netboxv1alpha1.DeletionPolicy, retainByDefault bool) netboxv1alpha1.DeletionPolicy {
+	if policy != "" {
 		return policy
+	}
+
+	if retainByDefault {
+		return netboxv1alpha1.DeletionRetain
 	}
 
 	return netboxv1alpha1.DeletionDelete

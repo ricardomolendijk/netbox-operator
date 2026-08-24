@@ -83,8 +83,8 @@ spec:
 
 ## `spec`
 
-`endpointRef`, `onConflict` and `deletionPolicy` come from the shared envelope and behave
-identically on every kind — see [`NetBoxTag`](netboxtag.md#specendpointref) for the full
+`endpointRef`, `onConflict`, `deletionPolicy` and `customFields` come from the shared
+envelope and behave identically on every kind — see [`NetBoxTag`](netboxtag.md#specendpointref) for the full
 treatment of each.
 
 ### `spec.name`
@@ -285,7 +285,7 @@ Two candidates, tried in this order:
 | # | Candidate | Query | Applicable when |
 |---|---|---|---|
 | 1 | `rd` | `?rd=65000:10` | `spec.rd` holds a value |
-| 2 | `name` with a null `rd` | `?name=<name>&rd__isnull=true` | `spec.rd` was **never declared** |
+| 2 | `name` with a null `rd` | `?name=<name>&rd=null` | `spec.rd` was **never declared** |
 
 Unlike `dcim.Region`'s pair, these do not come from `meta.constraints` — `ipam.VRF` declares
 none. They come from the one column that carries `UNIQUE` and from the fact that the other one
@@ -294,7 +294,7 @@ does not.
 **Candidate 1 sends no `name` filter at all.** That is deliberate: `name` is not unique, so a
 lookup carrying it can match a VRF somebody else owns.
 
-**Candidate 2 pins `rd__isnull=true` rather than leaving the filter out.** Candidates are
+**Candidate 2 pins `rd=null` rather than leaving the filter out.** Candidates are
 tried in order and the engine falls through when one matches nothing, so a name-only second
 candidate would be reached by a VRF that *does* declare an `rd` whose NetBox object does not
 exist yet. It would find an unrelated VRF of the same name, adopt it, and `PATCH` its own `rd`
@@ -337,7 +337,7 @@ Identical to every other kind — `id`, `url`, `naturalKey`, `adopted`, `lastApp
 [`NetBoxTag`](netboxtag.md#status) for what each field means and when it is cleared.
 
 `status.naturalKey` is worth reading on this kind in particular: it records which of the two
-candidates ran, filter by filter, so `{"name": "...", "rd__isnull": "true"}` tells you the
+candidates ran, filter by filter, so `{"name": "...", "rd": "null"}` tells you the
 engine treated the object as the RD-less VRF of that name — which is the lookup that can be
 ambiguous.
 

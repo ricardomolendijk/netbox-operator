@@ -97,6 +97,17 @@ type Endpoint struct {
 	// (docs/decisions/0005-gitops-coexistence.md).
 	DriftMode netboxv1alpha1.DriftMode
 
+	// Allocator is the advisory-locked allocation half of this endpoint's client.
+	//
+	// A field of its own rather than a method on Client, because adding a method to
+	// NetBoxClient would make every fake in every test implement an allocation call it has
+	// no business having -- and because an endpoint that cannot allocate is a state worth
+	// being able to represent. Nil for one; the allocation engine reports it as the wiring
+	// bug it is rather than dereferencing it (claim.go).
+	//
+	// The declarative engine never reads it. Allocation is not a mode of a create.
+	Allocator Allocator
+
 	// Provenance is the stamp this endpoint's bootstrap resolved: the tag id and the
 	// custom-field names that provably exist in NetBox (NBO-075). The zero value stamps
 	// nothing, which is what an endpoint with no spec.managedBy hands over.
@@ -463,12 +474,16 @@ func (p *pass) lookup(ctx context.Context) (match, error) {
 		// for, and that is most of the answer when the lookup turned out to be ambiguous.
 		p.obj.NetBoxStatus().NaturalKey = params
 
+		// On a kind where NetBox may legitimately hold several objects matching one key,
+		// which of them is this CR's is decided by the provenance stamp rather than by the
+		// filter (decision #177, duplicate.go). A pass-through for every other kind.
+		found, err := p.duplicate(live, err)
 		if err != nil {
 			return match{}, lookupFailure(p.desc.Endpoint, params, err)
 		}
 
-		if live != nil {
-			return match{live: live, byNaturalKey: true}, nil
+		if found.live != nil {
+			return found, nil
 		}
 	}
 

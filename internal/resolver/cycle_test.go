@@ -838,7 +838,7 @@ func regionDescriptor() registry.Descriptor {
 			}},
 			{
 				Fields:     []registry.KeyField{{Filter: "name", Spec: "name"}},
-				NullFields: []registry.NullField{{Filter: "parent_id", Spec: "parentRef"}},
+				NullFields: []registry.NullField{{Filter: "parent_id", Spec: "parentRef", Column: registry.NullColumnRef}},
 			},
 		},
 	}

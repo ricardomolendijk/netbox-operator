@@ -1,0 +1,30 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxDeviceType
+metadata:
+  name: ucg-ultra
+  namespace: default
+spec:
+  endpointRef: homelab
+  onConflict: Fail
+  deletionPolicy: Delete
+
+  # Required: `dcim.DeviceType.manufacturer` is a REQ foreign key and both natural keys start
+  # at it, so until this resolves the object writes nothing at all. In a real deployment the
+  # manufacturer lives in a shared catalogue namespace and this ref names it -- which needs a
+  # NetBoxRefGrant there (see docs/reference/netboxdevicetype.md).
+  manufacturerRef:
+    name: ubiquiti
+
+  model: UniFi Cloud Gateway Ultra
+  slug: ucg-ultra
+  partNumber: UCG-Ultra
+
+  # A string, not a number: NetBox returns `u_height` padded ("1.00"), and the engine compares
+  # the two numerically, so this produces no PATCH on the second reconcile.
+  uHeight: "1.0"
+
+  isFullDepth: false
+  excludeFromUtilization: false
+  airflow: passive
+
+  description: Small-office gateway

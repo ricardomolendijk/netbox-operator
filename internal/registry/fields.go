@@ -65,6 +65,10 @@ var (
 	// ErrContainmentNotCascade is returned when the containment ref names a foreign key
 	// whose target's deletion does *not* cascade server-side.
 	//
+	// On a polymorphic pair it is returned when *no* union member cascades; a union whose
+	// members disagree is legal, and reconciler/owners.go then refuses the owner reference
+	// per object, for the member that object resolved through (#214).
+	//
 	// The containment parent is whichever FK the server cascades
 	// (docs/decisions/0003-ownership-and-references.md rule 4), so this is the check that
 	// turns the modelling error into a boot failure. An owner reference on a
@@ -235,10 +239,19 @@ type Field struct {
 	// every write, and the field still unclearable (#170). A text column needs nothing
 	// here: `description: ""` is how NetBox spells an empty description.
 	//
-	// Only meaningful on ClassValue. A reference's empty form is a nil pointer, which
-	// never reaches internal/reconciler's payload as an empty string, so setting this on
-	// one does nothing rather than something surprising -- and Validate does not reject it
-	// yet.
+	// On a ClassRefOne field it means the same thing about the same column: the reference
+	// may be written empty, and an empty one is the foreign key cleared with null rather
+	// than a reference that failed to resolve (#185). The spec field is then typed
+	// v1alpha1.OptionalRef rather than a strict ref alias, so `{}` is admissible in the
+	// first place -- the flag and the type are two halves of one decision, and a field that
+	// sets only the flag simply never receives an empty reference to act on. The resolver
+	// answers such a reference with the zero Result, and internal/reconciler writes null
+	// for it (resolver.Resolve, reconciler.applyRef).
+	//
+	// Meaningless on ClassRefMany, ClassObjectTypeList and ClassArray, where the empty
+	// statement is already `[]` and an empty *element* selects nothing at all: the resolver
+	// refuses one as malformed rather than clearing the column. Validate does not reject
+	// the combination yet.
 	EmptyIsNull bool
 }
 
@@ -305,15 +318,27 @@ func (d Descriptor) GenericFKFor(spec string) (GenericFKSpec, bool) {
 }
 
 // declaresSpecField reports whether spec is a CR spec field this descriptor knows, either
-// as an ordinary field or as the one behind a generic FK.
+// as an ordinary field, as the one behind a generic FK, or as one of that pair's two
+// columns.
+//
+// The third case is the one #180 is about. A natural key on a polymorphic pair needs two
+// filters and the union's own spec field has no single value to offer, so the pair's halves
+// are named by *column* -- `scope_type` and `scope_id`, matching what
+// reconciler.applyGenericFK writes into the decoded spec once the union resolves.
+// ipam.VLANGroup is unique on `(scope_type, scope_id, slug)` and could not state its own
+// identity otherwise.
 func (d Descriptor) declaresSpecField(spec string) bool {
 	if _, ok := d.FieldFor(spec); ok {
 		return true
 	}
 
-	_, ok := d.GenericFKFor(spec)
+	if _, ok := d.GenericFKFor(spec); ok {
+		return true
+	}
 
-	return ok
+	return slices.ContainsFunc(d.GenericFKs, func(pair GenericFKSpec) bool {
+		return pair.TypeField == spec || pair.IDField == spec
+	})
 }
 
 // isRefSpecField reports whether spec names a reference to another object.
@@ -329,8 +354,11 @@ func (d Descriptor) isRefSpecField(spec string) bool {
 
 // cascadesOnDelete reports whether NetBox deletes this object when the target of spec is
 // deleted. Read off the ordinary field map or off the generic-FK pair, the same two places
-// declaresSpecField looks, so a containment parent reached through a generic-FK union needs
-// nothing special here.
+// declaresSpecField looks.
+//
+// For a union it is "some member cascades", which is the most a boot check can ask: which
+// member an object uses is a fact about that object, not about the descriptor. The per-object
+// question is CascadesFrom.
 func (d Descriptor) cascadesOnDelete(spec string) bool {
 	if field, ok := d.FieldFor(spec); ok {
 		return field.CascadeOnDelete
@@ -338,7 +366,68 @@ func (d Descriptor) cascadesOnDelete(spec string) bool {
 
 	generic, ok := d.GenericFKFor(spec)
 
-	return ok && generic.CascadeOnDelete
+	return ok && generic.anyCascades()
+}
+
+// CascadesFrom reports whether NetBox deletes this object when the object spec *resolved to*
+// is deleted, given that object's Kind.
+//
+// The reconcile-time form of the containment rule, and the reason it takes a target at all:
+// on a polymorphic pair the cascade is per member (#214), so "does this reference cascade" has
+// no answer until the reference has resolved. An ordinary reference has one target and gives
+// the same answer for it that validateContainment already checked at boot.
+//
+// An unknown spec field, or a union member for a Kind this pair does not declare, is false:
+// the caller is asking about a reference this descriptor cannot have produced, and the safe
+// answer to that is no cascade rather than an assumed one.
+func (d Descriptor) CascadesFrom(spec string, target schema.GroupVersionKind) bool {
+	if field, ok := d.FieldFor(spec); ok {
+		return field.CascadeOnDelete
+	}
+
+	generic, ok := d.GenericFKFor(spec)
+
+	return ok && generic.Cascades(target)
+}
+
+// ContainmentTargets are the Kinds ContainmentRef may resolve to: the one target of an
+// ordinary reference, or every member's target for a union. Empty for a kind with no
+// containment parent.
+//
+// It exists so reconciler/owners.go can recognise a containment owner reference it set on an
+// earlier pass without storing which one it set. An object that moves from one member of the
+// union to another -- `regionRef` to `siteRef` -- has to *lose* the owner reference naming the
+// member it left, and the only durable way to know that a NetBoxRegion owner reference is the
+// containment slot rather than somebody else's is that NetBoxRegion is a Kind this ref points
+// at (#214).
+func (d Descriptor) ContainmentTargets() []schema.GroupVersionKind {
+	if d.ContainmentRef == "" {
+		return nil
+	}
+
+	if field, ok := d.FieldFor(d.ContainmentRef); ok {
+		// A reference with no target Kind has no slot to recognise -- and no owner reference
+		// to remove either, since the resolver dispatches on Target and cannot resolve one
+		// without it. Nil rather than a failure for the reason Field.Target documents: the
+		// requirement is turned on for every reference at once, with the last typed aliases.
+		if field.Target.Empty() {
+			return nil
+		}
+
+		return []schema.GroupVersionKind{field.Target}
+	}
+
+	generic, ok := d.GenericFKFor(d.ContainmentRef)
+	if !ok {
+		return nil
+	}
+
+	targets := make([]schema.GroupVersionKind, 0, len(generic.Members))
+	for _, member := range generic.Members {
+		targets = append(targets, member.Target)
+	}
+
+	return targets
 }
 
 // validateFieldMap checks the field map itself and every reference into it. It is where a
@@ -435,6 +524,12 @@ func (d Descriptor) validateContainment() error {
 	// The cascade check, and the reason it is here rather than in a review checklist: an
 	// owner reference on a foreign key NetBox does not cascade is a cluster-side cascade
 	// with no server-side counterpart, which deletes the CR and leaves the row.
+	//
+	// For a union this asks whether *any* member cascades, and that is the strongest form a
+	// boot check can take: a union with one cascading member is a legal containment parent
+	// for the objects that use it, and refusing the descriptor would take the cascade away
+	// from those too. A union where no member cascades can never produce an owner reference,
+	// so naming it here is a modelling error no runtime state redeems (#214).
 	if !d.cascadesOnDelete(d.ContainmentRef) {
 		return fmt.Errorf("%w: %s", ErrContainmentNotCascade, d.ContainmentRef)
 	}

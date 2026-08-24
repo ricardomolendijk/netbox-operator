@@ -45,6 +45,16 @@ func regionField() registry.Field {
 	return registry.Field{Spec: "regionRef", API: "region", Class: registry.ClassRefOne, Target: regionGVK}
 }
 
+// nullableRegionField is the same reference on a column the descriptor declares nullable,
+// which is what makes an empty reference an instruction rather than a malformed one (#185).
+// The spec field behind one of these is typed v1alpha1.OptionalRef, so `{}` is admissible.
+func nullableRegionField() registry.Field {
+	field := regionField()
+	field.EmptyIsNull = true
+
+	return field
+}
+
 // tenantField is a reference to a Kind that has no descriptor in these tests, which is the
 // shape of every ref declared before its target Kind exists.
 func tenantField() registry.Field {
