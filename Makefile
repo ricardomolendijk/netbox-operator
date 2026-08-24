@@ -55,6 +55,10 @@ manifests: controller-gen ## Generate CRDs and RBAC into config/.
 	@# configuration. Generated from config/rbac/credential-namespaces/namespaces.txt into
 	@# config/rbac, so `make verify` covers it like anything else generated (NBO-072).
 	./hack/credential-rbac.sh
+	@# The nullable flag controller-gen cannot express: `nullable` is a field marker and the
+	@# nullable thing is spec.customFields' map *values*, whose null means "remove this
+	@# custom field" (#196). Without it the API server prunes the null before validation.
+	./hack/crd-nullable.sh
 
 .PHONY: fmt
 fmt: ## Format the Go code.

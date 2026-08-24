@@ -1,0 +1,93 @@
+# A test-only CRD carrying both reference arities, so the CEL rules #185 settles are proved
+# against a real API server rather than read and believed.
+#
+# It exists for the reason genericunion_fixture.yaml does: no shipped Kind carries a
+# v1alpha1.OptionalRef yet. Every optional reference in v1alpha1 today is part of its kind's
+# natural key -- `parentRef` on the nested-group kinds, `groupRef` on a tenant -- where an
+# omitted reference already means "none" because a candidate pins the column to null. The type
+# ships for #173's endpoint-level default and for the nullable non-identity foreign keys the
+# catalogue is full of (dcim.Site.tenant, ipam.Prefix.tenant), and a CEL rule on a type no CRD
+# embeds is never compiled by anything.
+#
+# `strictRef` is here as the control, not as decoration: the point of #185's option B is that
+# relaxing the arity is confined to the new type, so the fixture has to show the old one still
+# rejecting `{}` in the same API server, in the same request shape. TestObjectRefFixtureMatchesTheAPIType
+# asserts every rule below is byte-identical to the marker on its Go type, so this file cannot
+# drift away from what it stands in for.
+#
+# Its group is deliberately not netbox.kubeforge.org: nothing here is API surface, and a
+# fixture sharing the real group could be mistaken for one.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: objectreffixtures.test.netbox.kubeforge.org
+spec:
+  group: test.netbox.kubeforge.org
+  names:
+    kind: ObjectRefFixture
+    listKind: ObjectRefFixtureList
+    plural: objectreffixtures
+    singular: objectreffixture
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                # v1alpha1.ObjectRef: exactly one mode, so `{}` is rejected. This is what
+                # every required reference in the API is typed as -- `siteRef` on a
+                # NetBoxLocation -- and what makes moving the check into controller code
+                # unnecessary.
+                strictRef:
+                  type: object
+                  x-kubernetes-validations:
+                    - rule: "[has(self.name) && size(self.name) > 0, has(self.slug) && size(self.slug) > 0, has(self.lookup) && size(self.lookup) > 0, has(self.id)].filter(x, x).size() == 1"
+                      message: exactly one of name, slug, lookup or id must be set
+                    - rule: "!has(self.namespace) || (has(self.name) && size(self.name) > 0)"
+                      message: namespace may only be set together with name
+                    - rule: "!has(self.lookup) || self.lookup.all(k, k.matches('^[a-z][a-z0-9_]*$'))"
+                      message: lookup keys must be lowercase NetBox filter names
+                    - rule: "!has(self.lookup) || self.lookup.all(k, !(k in ['limit','offset','format','brief','ordering','q']))"
+                      message: lookup may not set pagination, formatting or fuzzy-search parameters
+                    - rule: "!has(self.lookup) || self.lookup.all(k, size(self.lookup[k]) <= 200)"
+                      message: lookup values are limited to 200 characters
+                  properties:
+                    name: {type: string, maxLength: 253}
+                    namespace: {type: string, maxLength: 63}
+                    slug: {type: string, maxLength: 100}
+                    lookup:
+                      type: object
+                      maxProperties: 8
+                      additionalProperties: {type: string}
+                    id: {type: integer, format: int64, minimum: 1}
+                # v1alpha1.OptionalRef: at most one mode, so `{}` is admitted and means
+                # explicitly no reference. Every other rule is identical, because they are
+                # about what a mode that *is* set may contain.
+                optionalRef:
+                  type: object
+                  x-kubernetes-validations:
+                    - rule: "[has(self.name) && size(self.name) > 0, has(self.slug) && size(self.slug) > 0, has(self.lookup) && size(self.lookup) > 0, has(self.id)].filter(x, x).size() <= 1"
+                      message: at most one of name, slug, lookup or id may be set
+                    - rule: "!has(self.namespace) || (has(self.name) && size(self.name) > 0)"
+                      message: namespace may only be set together with name
+                    - rule: "!has(self.lookup) || self.lookup.all(k, k.matches('^[a-z][a-z0-9_]*$'))"
+                      message: lookup keys must be lowercase NetBox filter names
+                    - rule: "!has(self.lookup) || self.lookup.all(k, !(k in ['limit','offset','format','brief','ordering','q']))"
+                      message: lookup may not set pagination, formatting or fuzzy-search parameters
+                    - rule: "!has(self.lookup) || self.lookup.all(k, size(self.lookup[k]) <= 200)"
+                      message: lookup values are limited to 200 characters
+                  properties:
+                    name: {type: string, maxLength: 253}
+                    namespace: {type: string, maxLength: 63}
+                    slug: {type: string, maxLength: 100}
+                    lookup:
+                      type: object
+                      maxProperties: 8
+                      additionalProperties: {type: string}
+                    id: {type: integer, format: int64, minimum: 1}

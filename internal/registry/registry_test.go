@@ -81,7 +81,8 @@ func regionDescriptor() Descriptor {
 			{Spec: "name", API: "name"},
 			{Spec: "slug", API: "slug"},
 			{Spec: "description", API: "description"},
-			{Spec: "parentRef", API: "parent", Class: ClassRefOne},
+			// `on_delete=CASCADE`, which is what makes it the containment parent below.
+			{Spec: "parentRef", API: "parent", Class: ClassRefOne, CascadeOnDelete: true},
 		},
 		NaturalKeys: []NaturalKey{
 			{Fields: []KeyField{
@@ -145,8 +146,17 @@ func deviceDescriptor() Descriptor {
 			{APIField: "oob_ip", Mode: DeferAlways},
 			{APIField: "virtual_chassis", Mode: DeferAlways},
 		},
-		ReadOnly:       []string{"console_port_count", "interface_count", "created", "last_updated", "url", "display"},
-		ContainmentRef: "siteRef",
+		ReadOnly: []string{"console_port_count", "interface_count", "created", "last_updated", "url", "display"},
+
+		// No containment parent, and this is the Kind that shows why the rule is mechanical
+		// rather than intuitive. `site` reads like a device's container -- ADR-0003's prose
+		// used to name it -- but `dcim.Device.site` is `on_delete=PROTECT`, and so is
+		// `device_type`, `role`, `tenant` and `location`; `platform` is `SET_NULL`
+		// (docs/netbox-schema.md -> dcim.Device). Not one of them cascades, so under the
+		// cascade rule dcim.Device has no containment parent: NetBox refuses to delete a site
+		// that still has devices, so there is no server-side deletion for an owner reference
+		// to mirror, and an owner reference here would delete the CR while the row stayed
+		// (docs/concepts/ownership.md, "when no foreign key qualifies").
 	}
 }
 
@@ -203,8 +213,17 @@ func ipAddressDescriptor() Descriptor {
 				{Spec: "vmInterfaceRef", Target: netboxv1alpha1.VMInterfaceRef{}.TargetGVK()},
 				{Spec: "fhrpGroupRef", Target: netboxv1alpha1.FHRPGroupRef{}.TargetGVK()},
 			},
+			// NetBox deletes an interface's addresses with it, through the `ip_addresses`
+			// GenericRelation on the interface models rather than through an `on_delete` on
+			// this column. That is the cascade ADR-0003 rule 4 builds its whole argument on.
+			CascadeOnDelete: true,
 		}},
-		ContainmentRef: "vrfRef",
+
+		// `assignedObject` and not `vrfRef`: `ipam.IPAddress.vrf` is `on_delete=PROTECT`
+		// (docs/netbox-schema.md -> ipam.IPAddress), so NetBox refuses to delete a VRF that
+		// still holds addresses and there is no server-side cascade for an owner reference to
+		// mirror. The assignment is the one reference on this kind that does cascade.
+		ContainmentRef: "assignedObject",
 	}
 }
 
@@ -237,7 +256,16 @@ func clusterDescriptor() Descriptor {
 		UpdateStrategy: UpdatePatch,
 		ReadOnly:       append(ScopeCacheColumns(), "created", "last_updated", "url", "display"),
 		GenericFKs:     []GenericFKSpec{ScopeFK("scope")},
-		ContainmentRef: "scope",
+
+		// No containment parent, and for a reason worth keeping in front of a reader: the
+		// scope union's cascade is *per member*, and CascadeOnDelete is per pair.
+		// dcim.Region and dcim.SiteGroup declare a `clusters` GenericRelation and dcim.Site
+		// and dcim.Location do not (docs/netbox-schema.md), so a cluster scoped to a region
+		// is deleted with it and one scoped to a site is merely orphaned. One flag cannot say
+		// both, and the half that would be wrong is the one that deletes a CR whose row is
+		// still there -- so this kind declares none. ipam.Prefix is the case where all four
+		// members do cascade (`prefixes` GenericRelation on each), and it is the one that
+		// carries `ContainmentRef: "scope"`.
 	}
 }
 
@@ -255,7 +283,7 @@ func tenantGroupDescriptor() Descriptor {
 			{Spec: "name", API: "name"},
 			{Spec: "slug", API: "slug"},
 			{Spec: "description", API: "description"},
-			{Spec: "parentRef", API: "parent", Class: ClassRefOne},
+			{Spec: "parentRef", API: "parent", Class: ClassRefOne, CascadeOnDelete: true},
 		},
 		NaturalKeys:    []NaturalKey{{Fields: []KeyField{{Filter: "slug", Spec: "slug"}}}},
 		UpdateStrategy: UpdatePatch,

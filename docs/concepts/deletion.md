@@ -83,6 +83,7 @@ to `Retain`, everything else defaults to `Delete`.
 | `NetBoxIPAddress` | `Retain` |
 | `NetBoxIPRange` | `Retain` |
 | `NetBoxVLAN` | `Retain` |
+| `NetBoxVLANGroup` | `Retain` |
 | `NetBoxVRF` | `Retain` |
 | every other kind (`NetBoxTag`, `NetBoxSite`, the catalogue kinds, …) | `Delete` |
 

@@ -299,6 +299,27 @@ func TestResolve(t *testing.T) {
 			wantCalls:   []call{{method: "GET", endpoint: "dcim/regions", id: 12}},
 		},
 		{
+			// The third state #185 adds. An empty reference on a nullable column is the
+			// column cleared, so it resolves to the zero Result with no error and no NetBox
+			// call -- clearing a foreign key asks nothing about the Kind it used to name.
+			name:     "an empty reference on a nullable column clears it",
+			field:    nullableRegionField(),
+			ref:      netboxv1alpha1.ObjectRef{},
+			referrer: types.NamespacedName{Namespace: "team-a", Name: "ams"},
+			want:     Result{},
+		},
+		{
+			// And only on a nullable one. The same empty reference on a strict field is the
+			// case below: EmptyIsNull is what the descriptor says about the column, so a
+			// field that never claimed to be clearable does not silently become so.
+			name:        "an empty reference on a strict field is still malformed",
+			field:       regionField(),
+			ref:         netboxv1alpha1.ObjectRef{},
+			referrer:    types.NamespacedName{Namespace: "team-a", Name: "ams"},
+			wantCause:   ErrRefMalformed,
+			wantMessage: "no mode set",
+		},
+		{
 			// Unreachable through the API server, where CEL requires exactly one mode. It
 			// must not resolve to nothing and have the field quietly dropped.
 			name:        "a reference with no mode set is malformed",

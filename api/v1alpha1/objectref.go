@@ -75,6 +75,84 @@ type ObjectRef struct {
 	ID *int64 `json:"id,omitempty"`
 }
 
+// OptionalRef is a reference that may also be written **empty**, and empty means explicitly
+// no reference: the column is written `null`.
+//
+// Optional in its *value*, not merely in its presence. Every `*ObjectRef` field is already
+// optional in the Go sense, and that is exactly the problem: an absent field means "do not
+// manage this column" (docs/concepts/field-ownership.md), which leaves no way to say "no
+// tenant at all, even though the endpoint supplies a default" (#185, #173). This type is the
+// third state:
+//
+//	tenantRef absent    -> do not manage the column; a default may fill it
+//	tenantRef: {name:}  -> that object
+//	tenantRef: {}       -> no object, and the column is cleared with null
+//
+// The same three states the polymorphic unions already have -- `assignedObject: {}` clears
+// both halves of a generic FK (genericref.go) -- and the same three a nullable scalar has
+// through registry.Field.EmptyIsNull, where `latitude: ""` is *sent* as null rather than
+// dropped. A descriptor opts a column in with that same flag, so "empty clears this column"
+// is one fact spelled one way for a scalar and for a reference.
+//
+// ObjectRef stays strict, deliberately. `siteRef` on a NetBoxLocation is a required
+// reference, and relaxing the arity rule on ObjectRef itself would make `siteRef: {}`
+// admissible and move its enforcement from the API server into controller code -- a worse
+// place to catch it, because `kubectl apply` would report success (#185, option A).
+//
+// A copy of ObjectRef rather than `type OptionalRef ObjectRef` or an embedded
+// `ObjectRef json:",inline"`, and that is forced rather than preferred: controller-gen merges
+// the underlying type's own XValidation markers into the derived schema, so either spelling
+// keeps ObjectRef's `== 1` rule and ANDs `<= 1` onto it, producing an OptionalRef that still
+// rejects `{}`. Both spellings were generated against controller-gen v0.19.0 to check. The
+// copy is held to the original by AsObjectRef below, which only compiles while the two field
+// sets are identical, and by TestOptionalRefMirrorsObjectRef, which compares their markers.
+//
+// +kubebuilder:validation:XValidation:rule="[has(self.name) && size(self.name) > 0, has(self.slug) && size(self.slug) > 0, has(self.lookup) && size(self.lookup) > 0, has(self.id)].filter(x, x).size() <= 1",message="at most one of name, slug, lookup or id may be set"
+// +kubebuilder:validation:XValidation:rule="!has(self.namespace) || (has(self.name) && size(self.name) > 0)",message="namespace may only be set together with name"
+// +kubebuilder:validation:XValidation:rule="!has(self.lookup) || self.lookup.all(k, k.matches('^[a-z][a-z0-9_]*$'))",message="lookup keys must be lowercase NetBox filter names"
+// +kubebuilder:validation:XValidation:rule="!has(self.lookup) || self.lookup.all(k, !(k in ['limit','offset','format','brief','ordering','q']))",message="lookup may not set pagination, formatting or fuzzy-search parameters"
+// +kubebuilder:validation:XValidation:rule="!has(self.lookup) || self.lookup.all(k, size(self.lookup[k]) <= 200)",message="lookup values are limited to 200 characters"
+type OptionalRef struct {
+	// Name of a CR of the target Kind, resolved through that CR's `.status.id`. See
+	// ObjectRef.Name.
+	// +optional
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`
+	Name string `json:"name,omitempty"`
+
+	// Namespace of that CR. Defaults to the namespace of the object whose spec carries this
+	// field -- which for a reference declared on a NetBoxEndpoint is the endpoint's own.
+	// See ObjectRef.Namespace and docs/concepts/references.md.
+	// +optional
+	// +kubebuilder:validation:MaxLength=63
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	Namespace string `json:"namespace,omitempty"`
+
+	// Slug looks the object up in NetBox directly. See ObjectRef.Slug.
+	// +optional
+	// +kubebuilder:validation:MaxLength=100
+	// +kubebuilder:validation:Pattern=`^[-a-zA-Z0-9_]+$`
+	Slug string `json:"slug,omitempty"`
+
+	// Lookup is a raw NetBox API filter. See ObjectRef.Lookup.
+	// +optional
+	// +kubebuilder:validation:MaxProperties=8
+	Lookup map[string]string `json:"lookup,omitempty"`
+
+	// ID is a literal NetBox primary key. See ObjectRef.ID.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	ID *int64 `json:"id,omitempty"`
+}
+
+// AsObjectRef returns the reference as the type everything downstream works against.
+//
+// The conversion is the compile-time half of keeping the copy honest: Go permits it only
+// while both structs have the same fields in the same order with the same types, so a mode
+// added to one and not the other fails the build. Struct tags are ignored by a conversion and
+// the field-level markers are comments, which is what TestOptionalRefMirrorsObjectRef covers.
+func (r OptionalRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
 // RefTarget is implemented by every typed ref alias.
 //
 // It is what lets the resolver learn a reference's target Kind from its *type* rather
@@ -150,6 +228,15 @@ type (
 
 	// VLANRef points at a NetBoxVLAN (ipam.VLAN, ipam/vlans).
 	VLANRef ObjectRef
+
+	// VLANGroupRef points at a NetBoxVLANGroup (ipam.VLANGroup, ipam/vlan-groups).
+	//
+	// The one alias whose target's `slug` is not globally unique: ipam.VLANGroup is unique
+	// on `(scope_type, scope_id, slug)` rather than on `slug` alone (docs/netbox-schema.md
+	// -> ipam.VLANGroup, meta.constraints), so a `slug`-mode ref can legitimately match more
+	// than one group and is reported as a Conflict. Name the CR instead, or use `lookup`
+	// with the scope narrowed.
+	VLANGroupRef ObjectRef
 	// RouteTargetRef points at a NetBoxRouteTarget (ipam.RouteTarget, ipam/route-targets).
 	//
 	// The first alias used to-many: ipam.VRF's `import_targets` and `export_targets` are
@@ -159,6 +246,23 @@ type (
 
 	// VRFRef points at a NetBoxVRF (ipam.VRF, ipam/vrfs).
 	VRFRef ObjectRef
+
+	// ClusterRef points at a NetBoxCluster (virtualization.Cluster,
+	// virtualization/clusters).
+	//
+	// Nothing in NBO-028 uses it: virtualization.Cluster is pointed *at* by
+	// virtualization.VirtualMachine and dcim.Device rather than pointing at itself. It ships
+	// with the Kind so that NBO-029's `clusterRef` is a field on a spec rather than a second
+	// branch's edit to this block.
+	ClusterRef ObjectRef
+
+	// ClusterGroupRef points at a NetBoxClusterGroup (virtualization.ClusterGroup,
+	// virtualization/cluster-groups).
+	ClusterGroupRef ObjectRef
+
+	// ClusterTypeRef points at a NetBoxClusterType (virtualization.ClusterType,
+	// virtualization/cluster-types).
+	ClusterTypeRef ObjectRef
 	// IPAddressRef points at a NetBoxIPAddress (ipam.IPAddress, ipam/ip-addresses).
 	//
 	// The only self-referential alias on a non-tree model: `nat_inside` points at another
@@ -256,6 +360,14 @@ func (r VLANRef) TargetGVK() schema.GroupVersionKind { return GroupVersion.WithK
 func (r VLANRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
 
 // TargetGVK reports the Kind this reference resolves against.
+func (r VLANGroupRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxVLANGroup")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r VLANGroupRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
 func (r RouteTargetRef) TargetGVK() schema.GroupVersionKind {
 	return GroupVersion.WithKind("NetBoxRouteTarget")
 }
@@ -270,6 +382,28 @@ func (r VRFRef) TargetGVK() schema.GroupVersionKind { return GroupVersion.WithKi
 func (r VRFRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
 
 // TargetGVK reports the Kind this reference resolves against.
+func (r ClusterRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxCluster")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r ClusterRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r ClusterGroupRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxClusterGroup")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r ClusterGroupRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r ClusterTypeRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxClusterType")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r ClusterTypeRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
 func (r IPAddressRef) TargetGVK() schema.GroupVersionKind {
 	return GroupVersion.WithKind("NetBoxIPAddress")
 }
@@ -292,8 +426,12 @@ var (
 	_ RefTarget = FHRPGroupRef{}
 	_ RefTarget = RoleRef{}
 	_ RefTarget = VLANRef{}
+	_ RefTarget = VLANGroupRef{}
 	_ RefTarget = RouteTargetRef{}
 	_ RefTarget = VRFRef{}
+	_ RefTarget = ClusterRef{}
+	_ RefTarget = ClusterGroupRef{}
+	_ RefTarget = ClusterTypeRef{}
 	_ RefTarget = VRFRef{}
 	_ RefTarget = IPAddressRef{}
 )
