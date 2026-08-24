@@ -36,6 +36,10 @@ func dcimRegionDescriptor() Descriptor {
 			{
 				Spec: "parentRef", API: "parent", Class: ClassRefOne,
 				Target: netboxv1alpha1.RegionRef{}.TargetGVK(),
+				// `parent TreeForeignKey -> dcim.Region on_delete=CASCADE`
+				// (docs/netbox-schema.md -> dcim.Region), which is what makes it eligible to
+				// be the containment parent below.
+				CascadeOnDelete: true,
 			},
 		},
 
@@ -76,8 +80,8 @@ func dcimRegionDescriptor() Descriptor {
 		// `assignedObject`, whose general rule is that a server-side cascade implies an
 		// owner reference.
 		//
-		// It is also the one FK this kind has, which satisfies "each kind nominates exactly
-		// one containment ref, and it is the required FK" without a choice to make.
+		// It is also the one FK this kind has, so the cascade rule selects it with no tiebreak
+		// to make -- unlike dcim.Location, which has two cascading parents and one slot.
 		ContainmentRef: "parentRef",
 
 		UpdateStrategy: UpdatePatch,

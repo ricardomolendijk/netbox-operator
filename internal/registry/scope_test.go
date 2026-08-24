@@ -87,7 +87,7 @@ func scopedTestDescriptor() Descriptor {
 		UpdateStrategy: UpdatePatch,
 		ReadOnly: append(ScopeCacheColumns(),
 			"created", "last_updated", "url", "display", "depth", "children"),
-		GenericFKs:     []GenericFKSpec{ScopeFK("scope")},
+		GenericFKs:     []GenericFKSpec{prefixScopeFK()},
 		ContainmentRef: "scope",
 	}
 }

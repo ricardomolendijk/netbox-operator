@@ -22,6 +22,10 @@ var nestedGroups = []struct {
 	keys       []NaturalKey
 	// containment is the spec field whose target gets an owner reference, empty for a kind
 	// with no containment parent.
+	//
+	// Not a preference on any of the three: the containment parent is whichever FK the server
+	// cascades (docs/decisions/0003-ownership-and-references.md rule 4, #193), and each entry
+	// below records the `on_delete` that decided it.
 	containment string
 
 	// otherKeyFields are the spec fields this kind's natural keys read besides `parentRef`
@@ -45,8 +49,8 @@ var nestedGroups = []struct {
 				NullFields: []NullField{{Filter: "parent_id", Spec: "parentRef"}},
 			},
 		},
-		// dcim.Region.parent is on_delete=CASCADE, so by ADR-0003's "a server-side cascade
-		// implies an owner reference" rule the self-reference is the containment parent --
+		// dcim.Region.parent is on_delete=CASCADE and is the only FK this kind has, so the
+		// cascade rule selects the self-reference with no tiebreak to make --
 		// without it a child CR outlives its row and the create-if-absent step recreates a
 		// region NetBox deliberately deleted. This expectation was written before owner
 		// references existed and said "" for a while; the two landed in the same hour and
@@ -65,6 +69,12 @@ var nestedGroups = []struct {
 				NullFields: []NullField{{Filter: "parent_id", Spec: "parentRef"}},
 			},
 		},
+		// dcim.SiteGroup.parent is on_delete=CASCADE too, and this kind had no containment
+		// parent at all until #198 -- so deleting a parent group in NetBox cascaded to the
+		// children server-side while the child CRs stayed, and the create-if-absent step
+		// re-created rows NetBox deleted on purpose. The only FK this kind has, so again no
+		// tiebreak.
+		containment: "parentRef",
 	},
 	{
 		// Every candidate starts at `site`, because every constraint NetBox declares on
@@ -84,6 +94,14 @@ var nestedGroups = []struct {
 				NullFields: []NullField{{Filter: "parent_id", Spec: "parentRef"}},
 			},
 		},
+		// The one kind here with *two* cascading FKs and one slot: `site` and `parent` are both
+		// on_delete=CASCADE. `siteRef` wins because it is the REQ one -- so every location has
+		// it, where a containment ref on the optional `parent` would leave every top-level
+		// location unowned -- and because deleting the site cascades to a superset of the rows
+		// deleting one parent location does. The parent path is covered by identity rather than
+		// by ownership: every candidate above reads `parent_id` or pins it null, so a child
+		// whose parentRef stops resolving has no applicable candidate and the engine waits
+		// instead of re-creating. Full argument in internal/registry/dcim_location.go.
 		containment:    "siteRef",
 		otherKeyFields: []string{"siteRef"},
 	},
