@@ -179,14 +179,16 @@ func TestClusterNaturalKeysPinGrouplessnessRatherThanOmittingIt(t *testing.T) {
 		},
 		{
 			Fields:     []KeyField{{Filter: "name", Spec: "name"}},
-			NullFields: []NullField{{Filter: "group_id", Spec: "groupRef"}},
+			NullFields: []NullField{{Filter: "group_id", Spec: "groupRef", Column: NullColumnRef}},
 		},
 	}
 	if !reflect.DeepEqual(d.NaturalKeys, want) {
 		t.Fatalf("NaturalKeys = %+v, want %+v", d.NaturalKeys, want)
 	}
 
-	if got := want[1].NullFields[0].Param(); got != "group_id__isnull" {
+	// NBO-206: an FK pin is the sentinel value, not a suffix -- NetBox registers only negation
+	// on an FK filter, so neither __isnull nor __empty exists for group_id.
+	if got := want[1].NullFields[0]; got.Filter != "group_id" || got.Column != NullColumnRef {
 		t.Errorf("null pin renders as %q, want group_id__isnull", got)
 	}
 

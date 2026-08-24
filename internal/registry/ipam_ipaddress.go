@@ -110,8 +110,12 @@ func ipamIPAddressDescriptor() Descriptor {
 				},
 			},
 			{
-				Fields:     []KeyField{{Filter: "address", Spec: "address"}},
-				NullFields: []NullField{{Filter: "vrf_id", Spec: "vrfRef"}},
+				Fields: []KeyField{{Filter: "address", Spec: "address"}},
+				NullFields: []NullField{
+					// A foreign key: NetBox registers only negation on an FK filter, so the pin
+					// is the sentinel value rather than a suffix (NBO-206).
+					{Filter: "vrf_id", Spec: "vrfRef", Column: NullColumnRef},
+				},
 			},
 		},
 
