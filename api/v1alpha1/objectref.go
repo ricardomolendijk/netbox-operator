@@ -420,6 +420,7 @@ func (r IPAddressRef) TargetGVK() schema.GroupVersionKind {
 
 // AsObjectRef returns the underlying reference.
 func (r IPAddressRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
 // TargetGVK reports the Kind this reference resolves against.
 func (r PrefixRef) TargetGVK() schema.GroupVersionKind {
 	return GroupVersion.WithKind("NetBoxPrefix")
