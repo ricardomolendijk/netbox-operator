@@ -24,9 +24,6 @@ import (
 // stamped set with no Descriptor of its own behind it (registry.ClaimObjectTypes).
 var stampedObjectTypes = []string{
 	"dcim.location", "dcim.region", "dcim.site", "dcim.sitegroup",
-	// ipam.ipaddress arrives without NetBoxIPAddress being registered: the claim kind
-	// contributes it via registry.ClaimObjectTypes(), because an allocated address needs the
-	// identity custom field to exist before the first POST.
 	"ipam.ipaddress", "ipam.prefix", "ipam.routetarget", "ipam.vlan", "ipam.vlangroup",
 	"ipam.vrf",
 	"tenancy.tenant", "tenancy.tenantgroup",

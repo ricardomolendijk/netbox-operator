@@ -328,6 +328,32 @@ type Descriptor struct {
 	// outside it a 400.
 	CustomFieldable bool
 
+	// RetainOnDelete makes spec.deletionPolicy default to Retain rather than Delete on this
+	// kind.
+	//
+	// Data here rather than a `+kubebuilder:default` marker because the field is declared
+	// once, on the shared NetBoxObjectSpec, so a marker there is the same default for every
+	// kind. Decision #176 answered that IPAM is the exception: deleting an ipam.IPAddress
+	// frees the address for reallocation and deleting an ipam.Prefix destroys the record of
+	// who a range belonged to, while a tag or a site is cheap to recreate. See
+	// docs/concepts/deletion.md for the table.
+	RetainOnDelete bool
+
+	// DuplicateSpec is the CR spec field that declares several NetBox objects may match
+	// this object's natural key, and that the provenance stamp decides which one is the
+	// CR's own (decision #177, NBO-025).
+	//
+	// A spec field name like ContainmentRef, and *not* an entry in Fields: it configures the
+	// operator rather than describing a NetBox column, so internal/reconciler excludes it
+	// from the payload exactly as it excludes the envelope's own fields. A name that does not
+	// match the kind's real spec field is not checked at boot and does not need to be -- the
+	// real field is then unmapped, and the first object that sets it reports
+	// Ready=False, Reason=Invalid naming it.
+	//
+	// Empty for every kind whose identity NetBox actually enforces, which is almost all of
+	// them.
+	DuplicateSpec string
+
 	// ContainmentRef is the one spec field whose target gets a non-controller owner
 	// reference, so deleting the parent cascades. Exactly one, because Kubernetes garbage
 	// collection waits for every owner and two containment owners silently turn "delete
