@@ -1,0 +1,30 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxPrefixClaim
+metadata:
+  name: tenant-a-net
+  namespace: default
+spec:
+  # The NetBoxEndpoint to allocate through, in this namespace. It must have
+  # spec.managedBy.clusterID set: the allocation identity is stored in a NetBox custom
+  # field, and an endpoint with nowhere to store one refuses to allocate rather than
+  # risking a prefix per retry.
+  endpointRef: homelab
+
+  # The container to carve out of. Immutable, and resolved like any other reference, so
+  # `slug`, `lookup` and `id` work too -- and a prefix in another namespace needs a
+  # NetBoxRefGrant there.
+  parentPrefixRef:
+    name: container-10-0
+
+  # The size of the child prefix. Immutable: a different size is a different claim.
+  # Whether it is valid depends on the parent -- a /26 out of a /16 is fine, a /16 out of a
+  # /16 is not, and a /64 out of an IPv4 container is not -- so the controller checks it
+  # against the resolved parent and the CRD only bounds it statically.
+  prefixLength: 26
+
+# There is no vrfRef. NetBox's available-prefixes view sets the child's vrf from the
+# parent's, overwriting whatever the request carried, so the child is always in the
+# parent's VRF and a field here could not change that.
+#
+# There is no deletionPolicy either: a claim always retains its NetBox object. The
+# allocated prefix appears in status.prefix, never in this file.

@@ -1,0 +1,36 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxIPRange
+metadata:
+  name: dhcp-clients
+  namespace: default
+spec:
+  endpointRef: homelab
+
+  # Retain, explicitly. Deleting a range destroys the record of who a block of addresses
+  # belonged to, and that record is not recoverable by re-creating the object: the change
+  # log, the journal entries and the id go with it. The default is still Delete because
+  # deletionPolicy is declared once on the shared envelope -- see the type comment on
+  # NetBoxIPRange -- so every IPAM manifest should say this.
+  deletionPolicy: Retain
+
+  # Both endpoints, with a mask, and the two masks must match: NetBox's IPRange.clean()
+  # rejects a mismatched pair. The mask is the containing prefix's, not /32: these are
+  # addresses inside 10.0.30.0/24, and their host bits are the whole point.
+  startAddress: 10.0.30.128/24
+  endAddress: 10.0.30.191/24
+
+  # 64 addresses, inclusive of both ends -- and there is no `size` field to say so. NetBox
+  # derives size from the two endpoints and refuses to accept one, so it appears in
+  # status.lastAppliedHash's input never, in the payload never, and in NetBox always.
+
+  # The VRF is part of this kind's identity: NetBox's overlap check is per-VRF, so the same
+  # block may legitimately be a range once globally and once in every VRF.
+  vrfRef:
+    name: vrf-home
+
+  # Stop NetBox creating ipam.IPAddress objects inside the block. Usually the point of
+  # recording a DHCP scope: its leases are not NetBox's to enumerate.
+  markPopulated: true
+
+  status: active
+  description: "DHCP scope handed out by the router"

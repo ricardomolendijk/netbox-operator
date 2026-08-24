@@ -30,3 +30,6 @@ resources:
 - netbox_v1alpha1_netboxdevice.yaml
 - netbox_v1alpha1_netboxinterface.yaml
 - netbox_v1alpha1_netboxsweep.yaml
+- netbox_v1alpha1_netboxiprange.yaml
+- netbox_v1alpha1_netboxprefixclaim.yaml
+- netbox_v1alpha1_netboxiprangeclaim.yaml

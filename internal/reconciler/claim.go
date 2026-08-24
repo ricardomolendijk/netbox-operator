@@ -426,6 +426,8 @@ func (p *claimPass) allocateOnce(ctx context.Context) (ctrl.Result, error) {
 		return p.stop(ctx, err)
 	}
 
+	p.warnUnexpectedPool(live)
+
 	found, err := p.findByIdentity(ctx)
 	if err != nil {
 		return p.stop(ctx, err)
@@ -553,21 +555,12 @@ func (p *claimPass) setPool(endpoint string, id int, live netbox.Object) error {
 // is then declared exactly once, on the ClaimDescriptor, and a claim kind with two possible
 // pool fields (NBO-064) is a descriptor change rather than an interface change.
 func (p *claimPass) poolRef() (netboxv1alpha1.ObjectRef, error) {
-	encoded, err := json.Marshal(p.claim)
+	spec, err := p.specFields()
 	if err != nil {
-		return netboxv1alpha1.ObjectRef{}, fmt.Errorf("encoding %s/%s: %w",
-			p.claim.GetNamespace(), p.claim.GetName(), err)
+		return netboxv1alpha1.ObjectRef{}, err
 	}
 
-	var envelope struct {
-		Spec map[string]json.RawMessage `json:"spec"`
-	}
-	if err := json.Unmarshal(encoded, &envelope); err != nil {
-		return netboxv1alpha1.ObjectRef{}, fmt.Errorf("decoding the spec of %s/%s: %w",
-			p.claim.GetNamespace(), p.claim.GetName(), err)
-	}
-
-	raw, ok := envelope.Spec[p.desc.Pool.Spec]
+	raw, ok := spec[p.desc.Pool.Spec]
 	if !ok {
 		return netboxv1alpha1.ObjectRef{}, fmt.Errorf("%w: %s", errUnmappedField, p.desc.Pool.Spec)
 	}
@@ -579,6 +572,30 @@ func (p *claimPass) poolRef() (netboxv1alpha1.ObjectRef, error) {
 	}
 
 	return ref, nil
+}
+
+// specFields is the claim's spec as raw JSON, field by field.
+//
+// One round trip through the claim's own JSON representation, which is how every part of this
+// operator reads a spec it knows nothing about. The field *names* are then declared exactly
+// once, on the ClaimDescriptor, and a claim kind with a field shared code has never heard of --
+// NBO-064's prefixLength and size -- is a descriptor entry rather than an interface change.
+func (p *claimPass) specFields() (map[string]json.RawMessage, error) {
+	encoded, err := json.Marshal(p.claim)
+	if err != nil {
+		return nil, fmt.Errorf("encoding %s/%s: %w",
+			p.claim.GetNamespace(), p.claim.GetName(), err)
+	}
+
+	var envelope struct {
+		Spec map[string]json.RawMessage `json:"spec"`
+	}
+	if err := json.Unmarshal(encoded, &envelope); err != nil {
+		return nil, fmt.Errorf("decoding the spec of %s/%s: %w",
+			p.claim.GetNamespace(), p.claim.GetName(), err)
+	}
+
+	return envelope.Spec, nil
 }
 
 // admitPool refuses the pool states this claim kind will not allocate out of.
@@ -610,6 +627,35 @@ func (p *claimPass) admitPool(live netbox.Object) error {
 		"pool %s (netbox %s/%d) has status %q, which %s does not allocate out of;"+
 			" nothing was allocated",
 		p.pool.display, p.pool.endpoint, p.pool.id, status, p.desc.GVK.Kind)
+}
+
+// warnUnexpectedPool says so when the pool is one this claim kind allocates out of but did not
+// expect.
+//
+// The other half of the container asymmetry admitPool's comment describes. A prefix claim
+// expects a `container` and will carve a child out of an `active` prefix anyway, because
+// subdividing a network that is already in service is unusual rather than wrong -- and the
+// operator refusing it would be the operator overruling a decision somebody has already
+// recorded in NetBox. So it allocates and says what it noticed, once, on the pass that
+// allocated.
+//
+// A Warning rather than a condition: the allocation succeeded, and a claim whose Ready is True
+// must not also carry a complaint that nothing can clear.
+func (p *claimPass) warnUnexpectedPool(live netbox.Object) {
+	if len(p.desc.PoolExpectedStatus) == 0 {
+		return
+	}
+
+	status := netbox.ChoiceOf(live["status"])
+	if slices.Contains(p.desc.PoolExpectedStatus, status) {
+		return
+	}
+
+	p.engine.warnClaim(p.claim, netboxv1alpha1.EventPoolUnexpectedStatus,
+		"pool %s (netbox %s/%d) has status %q, and %s expects one of %v;"+
+			" allocating out of it anyway",
+		p.pool.display, p.pool.endpoint, p.pool.id, status, p.desc.GVK.Kind,
+		p.desc.PoolExpectedStatus)
 }
 
 // findByIdentity searches NetBox for an object already carrying this claim's identity.
@@ -714,7 +760,14 @@ func (p *claimPass) allocate(ctx context.Context) (ctrl.Result, error) {
 				" would have allocated one %s out of %s", p.desc.ResultField, p.pool.display))
 	}
 
-	payload := p.payload()
+	payload, err := p.payload()
+	if err != nil {
+		return p.stop(ctx, err)
+	}
+
+	if err := p.admitRequest(payload); err != nil {
+		return p.stop(ctx, err)
+	}
 
 	allocated, err := p.endpoint.Allocator.Allocate(
 		ctx, p.pool.endpoint, p.pool.id, p.desc.PoolSubPath, payload)
@@ -749,11 +802,12 @@ func (p *claimPass) allocate(ctx context.Context) (ctrl.Result, error) {
 	})
 }
 
-// payload is the allocating POST's body: the provenance stamp, plus the identity.
+// payload is the allocating POST's body: the provenance stamp, the identity, and this claim
+// kind's allocation parameters.
 //
 // NetBox injects the allocated value (and the pool's vrf) and otherwise honours the full
 // write serializer, so `custom_fields` and `tags` ride along on the atomic call.
-func (p *claimPass) payload() netbox.Object {
+func (p *claimPass) payload() (netbox.Object, error) {
 	payload := netbox.Object{}
 
 	owner := provenance.Owner{
@@ -772,7 +826,96 @@ func (p *claimPass) payload() netbox.Object {
 	// answer and nobody else's.
 	netbox.SetCustomField(payload, p.identityField(), p.identity)
 
-	return payload
+	if err := p.requestFields(payload); err != nil {
+		return nil, err
+	}
+
+	return payload, nil
+}
+
+// requestFields copies this claim kind's allocation parameters out of the spec and into the
+// body.
+//
+// The parameters, not the desired state: `prefix_length` on a prefix claim is what makes the
+// request a request, and there is no version of the call that omits it. An absent optional one
+// is left out rather than sent empty -- the wire default and "not set" are the same thing for
+// every parameter here, and a claim kind whose parameter had a third state would need the
+// three-state treatment docs/concepts/field-ownership.md gives an ordinary field.
+//
+// Values pass through as the JSON they already are, so an integer stays an integer: NetBox's
+// PrefixLengthSerializer rejects `"26"` by type, not by value, and a quoted number would be a
+// 400 nobody could read.
+func (p *claimPass) requestFields(payload netbox.Object) error {
+	if len(p.desc.RequestFields) == 0 {
+		return nil
+	}
+
+	spec, err := p.specFields()
+	if err != nil {
+		return err
+	}
+
+	for _, field := range p.desc.RequestFields {
+		raw, ok := spec[field.Spec]
+		if !ok {
+			continue
+		}
+
+		var value any
+		if err := json.Unmarshal(raw, &value); err != nil {
+			return fmt.Errorf("decoding %s of %s/%s: %w",
+				field.Spec, p.claim.GetNamespace(), p.claim.GetName(), err)
+		}
+
+		payload[field.API] = value
+	}
+
+	return nil
+}
+
+// admitRequest refuses a request the resolved pool cannot satisfy, before the POST rather than
+// after it.
+//
+// One check, and it is the mask length: a claim asking for a prefix at least as short as its
+// parent's. Data-driven through ClaimDescriptor.RequestLengthField, because a claim kind
+// without a mask length in its request has nothing to check and the pool it would be checked
+// against is resolved at runtime -- CEL sees neither.
+//
+// The point of doing it here is the count of POSTs. `prefixLength: 16` on a /16 parent is
+// accepted by NetBox: `available-prefixes` subtracts the child prefixes from the parent and
+// hands out what is left, which for an empty parent is the parent, so the claim would get a
+// second /16 identical to the first and report success. Refusing costs zero requests and says
+// which two numbers disagree.
+func (p *claimPass) admitRequest(payload netbox.Object) error {
+	if p.desc.RequestLengthField == "" {
+		return nil
+	}
+
+	length, ok := netbox.IntOf(payload[p.desc.RequestLengthField])
+	if !ok {
+		// Nothing to check rather than an error: the field is required by the CRD and by
+		// NetBox's own serializer, and a missing one is reported by whichever of them the
+		// request reaches first.
+		return nil
+	}
+
+	family := p.pool.cidr.Addr().BitLen()
+
+	if length > family {
+		return refuse(netboxv1alpha1.ReasonInvalid, netboxv1alpha1.EventInvalid,
+			"%s is %d, which is not a mask length for the family of pool %s (%d bits);"+
+				" nothing was allocated", p.desc.RequestLengthField, length, p.pool.display, family)
+	}
+
+	if length > p.pool.cidr.Bits() {
+		return nil
+	}
+
+	return refuse(netboxv1alpha1.ReasonInvalid, netboxv1alpha1.EventInvalid,
+		"%s is %d and the pool %s is a /%d, so the request is not smaller than the pool it would"+
+			" come out of -- netbox would hand out the pool itself and this claim would hold a"+
+			" duplicate of it; nothing was allocated",
+		p.desc.RequestLengthField, length, p.pool.display, p.pool.cidr.Bits())
 }
 
 // allocationFailure re-reports the one failure that is about the pool rather than about the

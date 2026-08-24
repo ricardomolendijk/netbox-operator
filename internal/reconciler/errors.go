@@ -159,6 +159,10 @@ func (o outcome) message(err error) string {
 // generic on purpose, which is also what made it a good place for a missing arm to hide
 // (NBO-090). A new client error type belongs here in the same change that adds it.
 func classify(err error, resync time.Duration) outcome {
+	if contended, ok := classifyContended(err); ok {
+		return contended
+	}
+
 	if waiting, ok := classifyWait(err, resync); ok {
 		return waiting
 	}
@@ -168,6 +172,32 @@ func classify(err error, resync time.Duration) outcome {
 	}
 
 	return classifyAPI(err, resync)
+}
+
+// classifyContended covers the one failure that is neither the object's fault nor NetBox's:
+// another writer took the space between this pass's read and its write.
+//
+// Its own arm rather than a case in classifyInvalid, because it is the only entry in this table
+// that resolves *without* anything a human controls changing -- the space is there, and the next
+// pass may well get it. It is nonetheless loud and slow: a pool contended past
+// maxPlacementAttempts is a pool where somebody should look at how many claims are competing,
+// and a fast retry would add this operator to the contention it is reporting.
+//
+// Reached only from the allocation engine, and only from the unlocked placement path
+// (netbox.PlaceRange). The advisory-locked endpoints cannot produce it.
+func classifyContended(err error) (outcome, bool) {
+	var contended *netbox.ContendedError
+	if !errors.As(err, &contended) {
+		return outcome{}, false
+	}
+
+	return outcome{
+		reason: netboxv1alpha1.ReasonAllocationContended, requeue: truncatedRetry,
+		event: netboxv1alpha1.EventAllocationContended, severe: true, result: metrics.ResultError,
+		remedy: "the space is there and another writer took it first, so this is not an exhausted" +
+			" pool; it retries on its own, and a pool that keeps reporting this has more claims" +
+			" competing for it than it has room for",
+	}, true
 }
 
 // classifyWait covers the states that are not failures at all: something the engine is
