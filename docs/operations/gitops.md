@@ -174,6 +174,86 @@ The exception is an allocated address, which does not appear in Git at all. That
 deterministic allocation identity is for: the same manifest reclaims the same address, so a
 rebuild converges rather than re-rolling (ADR-0005 §3, NBO-036).
 
+## Restoring NetBox from backup
+
+The mirror image of the section above: this time **NetBox** is what was lost. It is the one
+scenario the deterministic allocation identity cannot solve by itself, because the identity
+reclaims an address by finding the object that already holds it — and a restore from empty
+has no object to find.
+
+There is no Git copy to fall back on, by design: the operator does not write allocated
+values back to Git and will not
+([ADR-0005 §4](../decisions/0005-gitops-coexistence.md#4-no-git-write-back-in-core)). **The
+answer is to restore NetBox from its own backup.** Under
+[ADR-0005 §3](../decisions/0005-gitops-coexistence.md#3-allocations-survive-a-cluster-rebuild-without-writing-to-git)
+NetBox is the durable store for an allocated address, so it needs a backup for the same
+reason any database holding production state does. A NetBox restored from nothing has also
+lost every device, interface, cable and VLAN that this operator did not create; the addresses
+are the smallest part of that.
+
+### NetBox was lost, the cluster was not
+
+Most of this recovers itself, and the addresses come back unchanged:
+
+1. **Restore the NetBox database from backup** and bring it back up on the same URL. Nothing
+   in Kubernetes needs to change. The `NetBoxEndpoint` re-probes on `spec.resyncPeriod` and
+   returns to `Ready=True` once the token and version checks pass.
+2. **Let the endpoint bootstrap re-run.** If the restore predates the provenance schema, the
+   operator recreates its own tag and custom-field definitions, including the allocation
+   identity field
+   ([provenance → bootstrap](provenance.md#bootstrap-the-operator-creating-its-own-schema)).
+3. **Objects the backup contains need no action.** A restore keeps the database's own ids, so
+   each CR's `status.id` still resolves and the next reconcile is an ordinary drift check
+   against the spec that is still in Git.
+4. **Objects created after the snapshot are re-created.** `status.id` 404s, the engine clears
+   it, the natural-key lookup finds nothing, and the object is created again from the CR.
+   For an address allocated by a claim this lands **at the same address**, because by then
+   the address is literal in the child `NetBoxIPAddress`'s spec — the claim itself never
+   re-allocates
+   ([ADR-0004](../decisions/0004-claims-first-allocation.md#statusaddress-is-immutable-the-operator-never-re-allocates)).
+5. **Check what did not come back.** Every CR reaching `Ready=True` means the operator has
+   rebuilt everything it manages. Anything else in NetBox — hand-made objects, another
+   tool's, another cluster's — is outside this operator's reach and outside its ability to
+   tell you it is missing.
+
+### Both were lost
+
+If the cluster is being rebuilt from Git *and* NetBox from backup, the order matters:
+
+1. **Restore NetBox first, then apply the manifests.** A claim reclaims its address by
+   searching NetBox for its own allocation identity. Bring the cluster up against an empty
+   or not-yet-restored NetBox and it will find nothing, allocate a fresh address, and pin
+   that in `status` — and the old value is then gone for good, because nothing else was
+   holding it.
+2. **Set `onConflict: Adopt`** on the objects this operator owns, as in
+   [rebuilding a cluster from Git](#rebuilding-a-cluster-from-git). Every CR re-adopts the
+   restored object instead of reporting `Conflict`.
+3. **Read `status.address` on each claim afterwards.** Claims whose object is in the backup
+   reclaim exactly what they had; claims allocated after the snapshot get a new address, and
+   `status.address` is where you see which. Compare against whatever independent record you
+   have — DNS, the NetBox changelog from before the loss, a device's static configuration.
+
+### What survives what
+
+| What was lost | Does an allocated address survive? | Because |
+|---|---|---|
+| NetBox, restored from backup; cluster intact | **Yes** | The child `NetBoxIPAddress` holds the address literally in its spec, and the claim never re-allocates |
+| Cluster, rebuilt from Git; NetBox intact | **Yes** | The deterministic allocation identity finds the existing object and adopts it (ADR-0005 §3) |
+| Both; NetBox restored first | **Yes, for everything the backup contains** | Reclaim by identity finds the restored object |
+| Both; NetBox empty or restored afterwards | **No** | Nothing holds the value any more, so every claim allocates afresh |
+
+The bottom row is the only genuine loss, and it is a NetBox backup problem rather than a Git
+one. If a specific address must survive even that, then it is not really a claim: put it in
+Git as a `NetBoxIPAddress` with an explicit `spec.address`, which is the kind that exists for
+exactly that requirement. A claim means "I don't want to know", and its address lives
+wherever NetBox lives.
+
+What there is not, in any of this, is an operator-side path that writes a recovered value
+back into Git — see
+[there is no mode where NetBox wins](#there-is-no-mode-where-netbox-wins). If you want
+NetBox's post-restore contents as manifests, that is `nbctl export` (NBO-040), which writes
+files for a human to review and commit.
+
 ## Drift modes
 
 `NetBoxEndpoint.spec.driftMode` decides what happens when NetBox stops matching a CR.
