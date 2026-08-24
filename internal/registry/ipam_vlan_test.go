@@ -112,13 +112,13 @@ func TestVLANNaturalKeysMatchTheConstraintsThatExist(t *testing.T) {
 		{Fields: []KeyField{{Filter: "group_id", Spec: "groupRef"}, {Filter: "vid", Spec: "vid"}}},
 		{
 			Fields:     []KeyField{{Filter: "site_id", Spec: "siteRef"}, {Filter: "vid", Spec: "vid"}},
-			NullFields: []NullField{{Filter: "group_id", Spec: "groupRef"}},
+			NullFields: []NullField{{Filter: "group_id", Spec: "groupRef", Column: NullColumnRef}},
 		},
 		{
 			Fields: []KeyField{{Filter: "vid", Spec: "vid"}},
 			NullFields: []NullField{
-				{Filter: "group_id", Spec: "groupRef"},
-				{Filter: "site_id", Spec: "siteRef"},
+				{Filter: "group_id", Spec: "groupRef", Column: NullColumnRef},
+				{Filter: "site_id", Spec: "siteRef", Column: NullColumnRef},
 			},
 		},
 	}
@@ -281,8 +281,7 @@ func TestVLANGroupIsKeyedOnTheScopePairAndSlug(t *testing.T) {
 		{
 			Fields: []KeyField{{Filter: "slug", Spec: "slug"}},
 			NullFields: []NullField{
-				{Filter: ScopeTypeField, Spec: "scope"},
-				{Filter: ScopeIDField, Spec: "scope"},
+				{Filter: ScopeIDField, Spec: "scope", Column: NullColumnNumeric},
 			},
 		},
 	}

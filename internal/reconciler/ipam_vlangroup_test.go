@@ -32,8 +32,7 @@ func pairKeyedDescriptor() registry.Descriptor {
 		{
 			Fields: []registry.KeyField{{Filter: "slug", Spec: "slug"}},
 			NullFields: []registry.NullField{
-				{Filter: registry.ScopeTypeField, Spec: "scope"},
-				{Filter: registry.ScopeIDField, Spec: "scope"},
+				{Filter: registry.ScopeIDField, Spec: "scope", Column: registry.NullColumnNumeric},
 			},
 		},
 	}
@@ -80,15 +79,22 @@ func TestPairKeyedLookupCarriesBothScopeColumns(t *testing.T) {
 	}
 }
 
-// TestUnscopedPairKeyedLookupPinsBothColumnsToNull is the other candidate, and the pins are
-// why it exists rather than being a slug-only lookup.
+// TestUnscopedPairKeyedLookupPinsTheScopeIDToNull is the other candidate, and the pin is why
+// it exists rather than being a slug-only lookup.
 //
 // With both scope columns null Postgres treats the NULLs as distinct, so `unique_scope_slug`
 // does not fire and two globally-scoped VLAN groups may legitimately share a slug -- the
-// lookup cannot be made unique and does not pretend to be. What the pins buy is the *other*
+// lookup cannot be made unique and does not pretend to be. What the pin buys is the *other*
 // direction: `?slug=managed` alone matches every scoped group with that slug too, so a global
 // group would adopt a site's group and the follow-up PATCH would strip that group's scope.
-func TestUnscopedPairKeyedLookupPinsBothColumnsToNull(t *testing.T) {
+//
+// One pin for a two-column pair, and `scope_id__empty=true` rather than a sentinel, because
+// that is the only thing NetBox will answer. `scope_id` is numeric and takes the `__empty`
+// suffix; `scope_type` is a ContentType foreign key for which NetBox registers no null filter
+// at all, and pinning it anyway makes the query match *nothing*. Pinning the id half alone
+// loses nothing, since NetBox refuses one half of the pair without the other
+// (docs/concepts/lookups.md#how-a-null-pin-is-spelled-and-why-it-depends-on-the-column).
+func TestUnscopedPairKeyedLookupPinsTheScopeIDToNull(t *testing.T) {
 	obj := fakeObject()
 	obj.Spec.Scope = nil
 
@@ -99,7 +105,7 @@ func TestUnscopedPairKeyedLookupPinsBothColumnsToNull(t *testing.T) {
 		t.Fatalf("Reconcile() = %v", err)
 	}
 
-	want := netbox.Params{"slug": "managed", "scope_type__isnull": "true", "scope_id__isnull": "true"}
+	want := netbox.Params{"slug": "managed", "scope_id__empty": "true"}
 	if got := nb.calls[0].params; !reflect.DeepEqual(got, want) {
 		t.Errorf("lookup params = %v, want %v", got, want)
 	}

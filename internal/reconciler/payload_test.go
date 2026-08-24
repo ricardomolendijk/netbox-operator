@@ -210,9 +210,9 @@ func TestSpecFieldsParams(t *testing.T) {
 			name: "a null pin is sent rather than omitted",
 			key: registry.NaturalKey{
 				Fields:     []registry.KeyField{{Filter: "slug", Spec: "slug"}},
-				NullFields: []registry.NullField{{Filter: "parent_id", Spec: "parentRef"}},
+				NullFields: []registry.NullField{{Filter: "parent_id", Spec: "parentRef", Column: registry.NullColumnRef}},
 			},
-			want: netbox.Params{"slug": "managed", "parent_id__isnull": "true"},
+			want: netbox.Params{"slug": "managed", "parent_id": "null"},
 		},
 		{
 			name:    "a filter with no value is refused rather than omitted",

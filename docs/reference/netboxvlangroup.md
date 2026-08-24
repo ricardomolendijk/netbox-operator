@@ -329,7 +329,7 @@ Two candidates, tried in this order:
 | # | Candidate | Query | Applicable when |
 |---|---|---|---|
 | 1 | `(scope_type, scope_id, slug)` | `?scope_type=dcim.site&scope_id=<id>&slug=<slug>` | `scope` **resolves** to a type and an id |
-| 2 | `slug` where the scope `IS NULL` | `?slug=<slug>&scope_type__isnull=true&scope_id__isnull=true` | `scope` was **never declared** |
+| 2 | `slug` where the scope `IS NULL` | `?slug=<slug>&scope_id__empty=true` | `scope` was **never declared** |
 
 Candidate 1 comes straight from `unique_scope_slug`. It is the first natural key in the codebase
 whose filters are the two columns of a polymorphic pair, and the mechanism that makes it
@@ -391,7 +391,7 @@ in both `TagsMixin` and `CustomFieldsMixin` ([provenance](../operations/provenan
 `status.naturalKey` is worth reading on this kind in particular, because it is the only place
 that records *which* identity was used. A `{"scope_type": "dcim.site", "scope_id": "12", "slug":
 "house-vlans-rtm"}` says the group was found as a scoped object; a
-`{"slug": "…", "scope_type__isnull": "true", "scope_id__isnull": "true"}` says it was found as a
+`{"slug": "…", "scope_id__empty": "true"}` says it was found as a
 global one. The `SCOPE` printer column reads out of here for the same reason.
 
 ## Conditions
@@ -447,32 +447,33 @@ Writing a read-only column does not fail — it silently no-ops, so the next rec
 same difference and `PATCH`es again forever. A read-only field in a write payload is a hot loop,
 not an error ([drift detection](../concepts/drift.md)).
 
-### The unscoped null pins do not reach NetBox 4.6.8
+### The unscoped candidate pins one scope column, not both
 
-**Known limitation, and it is not specific to this kind.** Candidate 2 pins both scope columns
-with `__isnull=true`, and **NetBox 4.6.8 exposes no `__isnull` query parameter at all.** The
-real spellings are the auto-generated `__empty` lookups
-(`netbox/utilities/constants.py:20-27`): `FILTER_NUMERIC_BASED_LOOKUP_MAP` maps `empty` →
-`isnull`, so `?scope_id__empty=true` is the working form, while
-`FILTER_CHAR_BASED_LOOKUP_MAP` (`netbox/utilities/constants.py:5-18`) maps `empty` → the
-*string-emptiness* `empty` lookup, which is not null and is meaningless on a `ContentType`
-foreign key.
+Candidate 1 matches both halves of the pair; candidate 2 pins only `scope_id`. That is not an
+oversight — **NetBox registers no null filter for `scope_type` at all**, and asking for one is
+worse than useless.
 
-`django-filter` ignores an unregistered query parameter rather than erroring, and NetBox 4.6.8
-has no strict-filter validation, so the pins are **silently dropped** and the unscoped lookup
-degrades to `?slug=<slug>`. On this kind the practical effect is a `Conflict` where a match was
-expected — loud rather than silent, which is the better failure of the two, but not correct.
+`scope_id` is `PositiveBigIntegerField` (`docs/netbox-schema.md` → `ipam.VLANGroup`), so it gets
+`FILTER_NUMERIC_BASED_LOOKUP_MAP` and `?scope_id__empty=true` resolves to the ORM's `isnull`
+(`netbox/utilities/constants.py:26`). `scope_type` is a `ForeignKey` to
+`contenttypes.ContentType` behind a `MultiValueContentTypeFilter`, and neither spelling works on
+it:
 
-This is not worked around here, because it is not this kind's bug: `NullField.Param()` emits
-`__isnull` for *every* kind — `parent_id` on
-[`NetBoxRegion`](netboxregion.md) / [`NetBoxSiteGroup`](netboxsitegroup.md) /
-[`NetBoxLocation`](netboxlocation.md), `vrf_id` on [`NetBoxPrefix`](netboxprefix.md), `group_id`
-on [`NetBoxTenant`](netboxtenant.md), `rd` on [`NetBoxVRF`](netboxvrf.md) — and the correct
-spelling differs by filter type, so fixing it is a change to the shared `NullField` mechanism
-rather than to a descriptor. It is tracked as its own issue. End-to-end coverage against a live
-NetBox is deferred to post-v1
-([#29](https://github.com/ricardomolendijk/netbox-operator/issues/29)), which is why the gap
-survived this long.
+- `?scope_type__empty=true` is **never registered**. The `empty` ORM lookup exists only on
+  `CharField` and `JSONField` (`netbox/extras/lookups.py:128-129`), so `resolve_field` raises
+  `FieldLookupError` and `BaseFilterSet` skips the filter
+  (`netbox/netbox/filtersets.py:232-234`). `django-filter` then ignores the parameter and the
+  lookup silently widens to `?slug=<slug>`.
+- `?scope_type=null` is **worse**: `'null'.lower().split('.')` raises `ValueError`, the filter
+  ends up as `scope_type__in=[]`, and the request matches *nothing at all*
+  (`netbox/utilities/filters.py:190-207`). The engine would conclude the group does not exist
+  and create a second one.
+
+Pinning the id half alone loses nothing, because NetBox refuses one half of the pair without the
+other — `Cannot set scope_type without scope_id` and its converse
+(`netbox/ipam/models/vlans.py:105-109`) — so `scope_id IS NULL` is exactly the set of groups with
+no scope. [Lookups](../concepts/lookups.md#how-a-null-pin-is-spelled-and-why-it-depends-on-the-column)
+has the general rule.
 
 ### The scope moves as one pair
 

@@ -91,7 +91,7 @@ func regionDescriptor() Descriptor {
 			}},
 			{
 				Fields:     []KeyField{{Filter: "name", Spec: "name"}},
-				NullFields: []NullField{{Filter: "parent_id", Spec: "parentRef"}},
+				NullFields: []NullField{{Filter: "parent_id", Spec: "parentRef", Column: NullColumnRef}},
 			},
 		},
 		UpdateStrategy: UpdatePatch,
@@ -136,7 +136,7 @@ func deviceDescriptor() Descriptor {
 					{Filter: "name", Spec: "name", Lookup: LookupIExact},
 					{Filter: "site_id", Spec: "siteRef"},
 				},
-				NullFields: []NullField{{Filter: "tenant_id", Spec: "tenantRef"}},
+				NullFields: []NullField{{Filter: "tenant_id", Spec: "tenantRef", Column: NullColumnRef}},
 			},
 		},
 		UpdateStrategy: UpdatePatch,
@@ -168,7 +168,7 @@ func deviceDescriptor() Descriptor {
 func ipAddressDescriptor() Descriptor {
 	address := KeyField{Filter: "address", Spec: "address"}
 	vrf := KeyField{Filter: "vrf_id", Spec: "vrfRef"}
-	noVRF := NullField{Filter: "vrf_id", Spec: "vrfRef"}
+	noVRF := NullField{Filter: "vrf_id", Spec: "vrfRef", Column: NullColumnRef}
 	assigned := []KeyField{
 		{Filter: "assigned_object_type", Spec: "assignedObject"},
 		{Filter: "assigned_object_id", Spec: "assignedObject"},
@@ -338,7 +338,7 @@ func TestDescriptorValidate(t *testing.T) {
 		{
 			name: "candidate with only a null pin",
 			mutate: func(d *Descriptor) {
-				d.NaturalKeys = []NaturalKey{{NullFields: []NullField{{Filter: "parent_id", Spec: "parentRef"}}}}
+				d.NaturalKeys = []NaturalKey{{NullFields: []NullField{{Filter: "parent_id", Spec: "parentRef", Column: NullColumnRef}}}}
 			},
 			wantErr: ErrNoKeyFields,
 		},

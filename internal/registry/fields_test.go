@@ -123,7 +123,7 @@ func TestDescriptorValidateFieldMap(t *testing.T) {
 		{
 			name: "null pin names an undeclared spec field",
 			mutate: func(d *Descriptor) {
-				d.NaturalKeys[0].NullFields = []NullField{{Filter: "tenant_id", Spec: "tenantRef"}}
+				d.NaturalKeys[0].NullFields = []NullField{{Filter: "tenant_id", Spec: "tenantRef", Column: NullColumnRef}}
 			},
 			wantErr: ErrUnknownSpecField,
 		},
@@ -248,7 +248,7 @@ func TestDescriptorValidateFieldMap(t *testing.T) {
 				d.Fields = append(d.Fields,
 					Field{Spec: "objectTypeRefs", API: "object_type_refs", Class: ClassRefMany})
 				d.NaturalKeys[0].NullFields = []NullField{
-					{Filter: "object_type_refs", Spec: "objectTypeRefs"},
+					{Filter: "object_type_refs", Spec: "objectTypeRefs", Column: NullColumnRef},
 				}
 			},
 			wantErr: ErrToManyNaturalKey,

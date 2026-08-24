@@ -49,7 +49,7 @@ golden output contains no `{{if eq .Model "…"}}`.
 | `Endpoint` | `string` | REST path relative to `/api`. Looked up, never derived by pluralising. | `ipam/ip-addresses` |
 | `ObjectType` | `string` | The Django `app_label.model` spelling other kinds use to point at this one through a generic FK. One source for it. | `ipam.ipaddress` |
 | `Scope` | `apiextensionsv1.ResourceScope` | The CRD scope. | `Namespaced` |
-| `NaturalKeys` | `[]NaturalKey` | Lookup candidates, tried in the order given. | `(address, vrf_id)`, then `(address, vrf_id__isnull)` |
+| `NaturalKeys` | `[]NaturalKey` | Lookup candidates, tried in the order given. | `(address, vrf_id)`, then `(address, vrf_id IS NULL)` |
 | `UpdateStrategy` | `UpdateStrategy` | `Patch` or `Recreate`. No zero value. | `Patch` |
 | `RecreateOn` | `[]string` | API fields whose change forces delete-then-create. | `["a_terminations", "b_terminations"]` |
 | `Deferred` | `[]DeferredField` | Fields kept out of the create payload and applied by a follow-up PATCH. | `{APIField: "primary_ip4", Mode: "Always"}` |
@@ -153,7 +153,7 @@ NaturalKeys: []NaturalKey{
 | CR state | Candidates | Query sent |
 |---|---|---|
 | `name` and `parentRef` set, parent resolved | 1 | `?parent_id=<id>&name=eu-west` |
-| `name` set, no `parentRef` | 1 | `?name=eu-west&parent_id__isnull=true` |
+| `name` set, no `parentRef` | 1 | `?name=eu-west&parent_id=null` |
 | `name` and `parentRef` set, parent **not yet resolved** | 0 | nothing is sent |
 
 ### Worked example: `ipam.IPAddress`
@@ -182,9 +182,9 @@ NaturalKeys: []NaturalKey{
 | CR state | Candidates produced, in order |
 |---|---|
 | `address`, `vrfRef`, `assignedObject` all resolved | `(address, vrf_id, assigned_object_type, assigned_object_id)`, then `(address, vrf_id)` |
-| `address`, `assignedObject`, no `vrfRef` | `(address, assigned_object_type, assigned_object_id, vrf_id__isnull)`, then `(address, vrf_id__isnull)` |
+| `address`, `assignedObject`, no `vrfRef` | `(address, assigned_object_type, assigned_object_id, vrf_id IS NULL)`, then `(address, vrf_id IS NULL)` |
 | `address`, `vrfRef` only | `(address, vrf_id)` |
-| `address` only | `(address, vrf_id__isnull)` |
+| `address` only | `(address, vrf_id IS NULL)` |
 
 Note what falls out of the ordering: an assigned address always tries the assignment-bearing
 candidate first and the bare one second, so a match on the assignment wins, and an address
@@ -195,10 +195,12 @@ that has been moved between interfaces is still found rather than duplicated.
 `NullField` exists because "this foreign key is null" and "do not filter on this foreign
 key" are different queries with different results, and the difference is silent.
 
-`NullField.Param()` emits the Django `isnull` lookup — `vrf_id__isnull`, sent as `true`.
-Omitting `vrf_id` instead matches that address **in every VRF**, so a global address adopts
-an identical address out of somebody's VRF and starts managing it. [Lookups](lookups.md)
-covers the query side, including why the value has to be the literal `true`.
+A pin declares its column's filter class as `Column`, and the client emits whichever
+spelling NetBox registers for that class: `?vrf_id=null` for a foreign key or a char
+column, `?scope_id__empty=true` for a plain numeric one. Omitting `vrf_id` instead matches
+that address **in every VRF**, so a global address adopts an identical address out of
+somebody's VRF and starts managing it. [Lookups](lookups.md) covers the query side, with
+the NetBox source behind each spelling and why there is no single one.
 
 The pin is also **state-dependent**, which is the part that is easy to get wrong. A
 candidate that pins `parent_id` to null asserts the parent is unset, so it may only be used

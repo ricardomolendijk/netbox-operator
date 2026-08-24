@@ -59,7 +59,7 @@ func tenancyTenantDescriptor() Descriptor {
 		// was never declared, so a tenant whose group has not been created yet matches
 		// neither and the engine waits.
 		//
-		// The second pins `group_id__isnull=true` rather than omitting `group_id`. Omitting
+		// The second pins `?group_id=null` rather than omitting `group_id`. Omitting
 		// it asks "this slug in any group", so every groupless tenant would match every
 		// tenant of that slug anywhere -- the engine would adopt somebody else's and then
 		// PATCH the group off it (docs/concepts/lookups.md).
@@ -76,7 +76,7 @@ func tenancyTenantDescriptor() Descriptor {
 			},
 			{
 				Fields:     []KeyField{{Filter: "slug", Spec: "slug"}},
-				NullFields: []NullField{{Filter: "group_id", Spec: "groupRef"}},
+				NullFields: []NullField{{Filter: "group_id", Spec: "groupRef", Column: NullColumnRef}},
 			},
 		},
 

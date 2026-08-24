@@ -23,7 +23,7 @@ func init() { MustRegister(tenancyTenantGroupDescriptor()) }
 //     Its uniqueness is global, so `slug` identifies at most one group whatever its parent
 //     is.
 //
-// One candidate and no null pin, therefore. Adding a `parent_id__isnull=true` filter here
+// One candidate and no null pin, therefore. Adding a `?parent_id=null` filter here
 // -- the shape plan.md §8.1 asserts every MPTT kind needs -- would be wrong twice over: it
 // would make a nested group's slug unfindable, and it would express a constraint the
 // database does not have.

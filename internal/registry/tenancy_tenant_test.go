@@ -112,7 +112,7 @@ func TestTenantGroupDefersItsSelfReference(t *testing.T) {
 //
 // The two candidates come from tenancy.Tenant.meta.constraints: `unique_group_slug` on
 // `(group, slug)` and `unique_slug` on `(slug)` conditioned on `group IS NULL`. The second
-// must pin `group_id__isnull=true`; with `group_id` merely omitted the query means "this
+// must pin `?group_id=null`; with `group_id` merely omitted the query means "this
 // slug in any group", so every groupless tenant adopts an unrelated grouped one.
 func TestTenantNaturalKeysPinGrouplessnessRatherThanOmittingIt(t *testing.T) {
 	d, _ := Get(netboxv1alpha1.GroupVersion.WithKind("NetBoxTenant"))
@@ -126,7 +126,7 @@ func TestTenantNaturalKeysPinGrouplessnessRatherThanOmittingIt(t *testing.T) {
 		},
 		{
 			Fields:     []KeyField{{Filter: "slug", Spec: "slug"}},
-			NullFields: []NullField{{Filter: "group_id", Spec: "groupRef"}},
+			NullFields: []NullField{{Filter: "group_id", Spec: "groupRef", Column: NullColumnRef}},
 		},
 	}
 	if !reflect.DeepEqual(d.NaturalKeys, want) {
@@ -134,9 +134,11 @@ func TestTenantNaturalKeysPinGrouplessnessRatherThanOmittingIt(t *testing.T) {
 	}
 
 	// The pin renders as a filter rather than as an absence. If this ever became an
-	// omission the query would be indistinguishable from "any group".
-	if got := want[1].NullFields[0].Param(); got != "group_id__isnull" {
-		t.Errorf("null pin renders as %q, want group_id__isnull", got)
+	// omission the query would be indistinguishable from "any group". `group` is a
+	// `ForeignKey` (docs/netbox-schema.md -> tenancy.Tenant), so the wire form is the null
+	// sentinel `?group_id=null`; internal/netbox pins the rendering itself.
+	if got := want[1].NullFields[0].Column; got != NullColumnRef {
+		t.Errorf("null pin declares Column %q, want %q", got, NullColumnRef)
 	}
 }
 

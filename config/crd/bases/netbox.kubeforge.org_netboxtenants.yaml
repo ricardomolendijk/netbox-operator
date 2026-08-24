@@ -164,8 +164,8 @@ spec:
 
                   Part of this kind's identity, not just an attribute of it: leaving it unset makes a
                   *groupless* tenant, which is a different natural key rather than the same key with a
-                  filter omitted, so the lookup pins `group_id__isnull=true` instead of dropping the
-                  filter (docs/concepts/lookups.md). Declaring it and having it not resolve yet makes
+                  filter omitted, so the lookup pins `?group_id=null` instead of dropping the filter
+                  (docs/concepts/lookups.md). Declaring it and having it not resolve yet makes
                   neither candidate applicable, and the engine waits rather than adopting an unrelated
                   groupless tenant of the same slug.
 
