@@ -159,8 +159,11 @@ func TestEndpointAdoptsDefinitionsMadeByHand(t *testing.T) {
 
 	stub.seedExtras("extras/tags", netbox.Object{"name": "k8s-managed", "slug": "k8s-managed"})
 	for _, name := range []string{"k8s_uid", "k8s_cluster", "k8s_owner", "k8s_allocation_identity"} {
+		// Every CustomFieldable kind, hand-written rather than read off the registry: a
+		// fixture derived from the same list the bootstrap computes could not disagree with
+		// it. Adding a kind means adding it here.
 		stub.seedExtras("extras/custom-fields", netbox.Object{
-			"name": name, "object_types": []any{"dcim.site", "dcim.region"},
+			"name": name, "object_types": []any{"dcim.site", "dcim.region", "ipam.prefix"},
 		})
 	}
 

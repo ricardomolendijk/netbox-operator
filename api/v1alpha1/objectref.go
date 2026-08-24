@@ -134,6 +134,21 @@ type (
 
 	// FHRPGroupRef points at a NetBoxFHRPGroup (ipam.FHRPGroup, ipam/fhrp-groups).
 	FHRPGroupRef ObjectRef
+
+	// RoleRef points at a NetBoxRole (ipam.Role, ipam/roles).
+	//
+	// ipam.Role and not dcim.DeviceRole: they are separate models with separate endpoints,
+	// and this is the one a prefix, a VLAN and an IP range carry. Declared before the Kind
+	// exists (NBO-055), for the reason InterfaceRef is: the alias is where the target Kind
+	// and therefore the `ipam.role` object type is written down, and a field the API accepts
+	// and silently drops would be worse than one that reports RefKindUnavailable.
+	RoleRef ObjectRef
+
+	// VLANRef points at a NetBoxVLAN (ipam.VLAN, ipam/vlans).
+	VLANRef ObjectRef
+
+	// VRFRef points at a NetBoxVRF (ipam.VRF, ipam/vrfs).
+	VRFRef ObjectRef
 )
 
 // TargetGVK reports the Kind this reference resolves against.
@@ -204,6 +219,24 @@ func (r FHRPGroupRef) TargetGVK() schema.GroupVersionKind {
 // AsObjectRef returns the underlying reference.
 func (r FHRPGroupRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
 
+// TargetGVK reports the Kind this reference resolves against.
+func (r RoleRef) TargetGVK() schema.GroupVersionKind { return GroupVersion.WithKind("NetBoxRole") }
+
+// AsObjectRef returns the underlying reference.
+func (r RoleRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r VLANRef) TargetGVK() schema.GroupVersionKind { return GroupVersion.WithKind("NetBoxVLAN") }
+
+// AsObjectRef returns the underlying reference.
+func (r VLANRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r VRFRef) TargetGVK() schema.GroupVersionKind { return GroupVersion.WithKind("NetBoxVRF") }
+
+// AsObjectRef returns the underlying reference.
+func (r VRFRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
 // Compile-time proof that every alias satisfies RefTarget. An alias that forgets its
 // methods fails the build here rather than at the first reconcile that needs it.
 var (
@@ -216,4 +249,7 @@ var (
 	_ RefTarget = InterfaceRef{}
 	_ RefTarget = VMInterfaceRef{}
 	_ RefTarget = FHRPGroupRef{}
+	_ RefTarget = RoleRef{}
+	_ RefTarget = VLANRef{}
+	_ RefTarget = VRFRef{}
 )
