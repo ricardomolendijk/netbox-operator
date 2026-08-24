@@ -20,4 +20,7 @@ resources:
 - bases/netbox.kubeforge.org_netboxclusters.yaml
 - bases/netbox.kubeforge.org_netboxipaddresses.yaml
 - bases/netbox.kubeforge.org_netboxipaddressclaims.yaml
+- bases/netbox.kubeforge.org_netboxvirtualmachines.yaml
+- bases/netbox.kubeforge.org_netboxvminterfaces.yaml
+- bases/netbox.kubeforge.org_netboxvirtualdisks.yaml
 - bases/netbox.kubeforge.org_netboxsweeps.yaml

@@ -1,0 +1,58 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxVirtualMachine
+metadata:
+  name: dns
+  namespace: default
+spec:
+  # The NetBoxEndpoint to write through, in this namespace. There is no cluster-wide
+  # default endpoint; see config/samples/netbox_v1alpha1_netboxendpoint.yaml.
+  endpointRef: homelab
+
+  # Required. Matched case-insensitively: all four of NetBox's unique constraints on this
+  # model are over Lower('name'), so a NetBox holding `DNS` in this cluster is adopted
+  # rather than duplicated.
+  name: dns
+
+  # At least one of clusterRef, siteRef or deviceRef is required by CEL, because NetBox's
+  # own clean() requires one and the schema does not. NetBoxCluster lands with NBO-028, so
+  # a name-mode clusterRef reports RefKindUnavailable until then -- siteRef works today.
+  # clusterRef:
+  #   name: proxmox-home
+  siteRef:
+    name: home
+
+  # Part of the identity. `(name, cluster, tenant)` is one constraint and
+  # `(name, cluster) WHERE tenant IS NULL` is another, so a tenant-less VM has its own
+  # identity rather than the same one with a filter missing.
+  # tenantRef:
+  #   name: acme
+
+  # dcim.DeviceRole, not a virtualization role and not ipam.Role. Kind lands with NBO-027.
+  # roleRef:
+  #   slug: server
+
+  # A choice field: offline, active, planned, staged, failed, decommissioning or paused.
+  status: active
+
+  # A choice field and not a boolean: on, off or laststate. `laststate` is what a boolean
+  # could not express.
+  startOnBoot: "off"
+
+  # A DecimalField, so a string. NetBox returns "2.00" for "2" and the drift comparison is
+  # numeric, so neither spelling produces a PATCH.
+  vcpus: "2"
+
+  # MB or MiB, per the NetBox instance's RAM_BASE_UNIT / DISK_BASE_UNIT. Leave `disk`
+  # unset when NetBoxVirtualDisk children carry the sizes: NetBox rejects a total that
+  # disagrees with their sum.
+  memory: 2048
+
+  # Both are deferred: the ring is VM -> IPAddress -> VMInterface -> VM, so they are
+  # stripped from the create and PATCHed once they resolve. NetBoxIPAddress is NBO-025.
+  # primaryIP4Ref:
+  #   name: dns-v4
+  # primaryIP6Ref:
+  #   name: dns-v6
+
+  description: Recursive resolver
+  comments: Managed by netbox-operator.
