@@ -92,6 +92,9 @@ lint-schema: ## Lint hack/*.py with ruff, the same check CI runs.
 .PHONY: test-schema
 test-schema: lint-schema ## Run the schema extraction pipeline against test/fixtures/netbox-models.
 	python3 hack/test_digest.py
+	@# The API half of the same pipeline: choice values, writable-vs-read-only, and the query
+	@# parameters each Kind's filterset registers, merged into one IR (NBO-041).
+	python3 hack/test_ir.py
 
 .PHONY: test-e2e
 test-e2e: ## Run e2e tests against a kind cluster and a live NetBox.

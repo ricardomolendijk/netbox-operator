@@ -9,5 +9,6 @@ router.register('vlan-groups', views.VLANGroupViewSet)
 router.register('vrfs', views.VRFViewSet)
 router.register('route-targets', views.RouteTargetViewSet)
 router.register('prefixes', views.PrefixViewSet)
+router.register('prefix-ports', views.PrefixPortViewSet)
 
 urlpatterns = router.urls

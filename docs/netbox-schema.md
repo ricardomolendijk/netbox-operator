@@ -98,9 +98,10 @@ nested group model. `MPTTModel` lives outside the ten scanned apps, so the walk 
 them; they are maintained by mptt and are not API fields.
 
 Where the two disagree, the REST API wins — the operator talks to the API, not to Postgres
-(`docs/regenerating.md`). This list is curated by hand, which is the honest cost of deriving
-the document from the source instead of from the OpenAPI schema; NBO-041's ingest is what
-would make it derived.
+(`docs/regenerating.md`). This list is curated by hand. NBO-041's ingest now reads the
+writable-vs-read-only half, the choice *values* and the generic-FK target spellings out of the
+REST serializers and `<app>/choices.py` -- see `hack/build-netbox-ir.py` and
+`hack/testdata/ir-4.6.8.json.gz`, whose `conflicts` list is the derived form of this section.
 
 Regenerate with `hack/extract-netbox-schema.py` (see `docs/regenerating.md`).
 > Generated from the `v4.6.8` tag of netbox-community/netbox (commit `3db98de`,
@@ -110,9 +111,15 @@ Regenerate with `hack/extract-netbox-schema.py` (see `docs/regenerating.md`).
 > `len=` symbols, `decimal(p,s)` precision, and a `tags` row on each of the 92 taggable models.
 > A `def=UNRESOLVED:X` value is a symbol the extractor did not evaluate, not a literal.
 >
-> One model is still unattributed: `ComponentModel` is declared in both `dcim` and
-> `virtualization`, so columns inherited from it cannot be pinned to one app. Both entries
-> appear below.
+> Two omissions NBO-041 fixed while building the code-generator IR, both of them silent:
+> `circuits.CircuitType` and `circuits.VirtualCircuitType` -- two shipped API endpoints --
+> had no entry at all, because the inclusion test asked whether a base class's *name*
+> contained "Model", "Component" or "Template" and `BaseCircuitType` contains none of them.
+> And `ComponentModel` is declared in both `dcim` and `virtualization`, which made the base
+> unattributable and so dropped `name`, `label` and `description` from eleven shipped
+> component Kinds; a base now resolves within the declaring model's own app first. The one
+> remaining unattributable case is a base declared in two apps and in neither the subclass's
+> own -- there are none at 4.6.8, and the extractor warns per affected model if one appears.
 
 ## API endpoint -> model map
 
@@ -376,6 +383,24 @@ wireless/wireless-links                              wireless.WirelessLink
    meta.ordering: ['circuit', 'term_side']
    meta.indexes: (models.Index(fields=('termination_type', 'termination_id')),)
 
+## circuits.CircuitType   (circuits/models/circuits.py)
+   bases: BaseCircuitType
+   (no own columns — every field is inherited from BaseCircuitType)
+     color (BaseCircuitType)                ColorField
+     name (OrganizationalModel)             CharField                   REQ UNIQUE len=100
+     slug (OrganizationalModel)             SlugField                   REQ UNIQUE len=100
+     description (OrganizationalModel)      CharField                       len=200
+     comments (OrganizationalModel)         TextField
+     owner (OwnerMixin)                     ForeignKey                      -> users.Owner on_delete=PROTECT
+     bookmarks (BookmarksMixin)             GenericRelation
+     created (ChangeLoggingMixin)           DateTimeField
+     last_updated (ChangeLoggingMixin)      DateTimeField
+     custom_field_data (CustomFieldsMixin)  JSONField                       def=UNRESOLVED:dict
+     journal_entries (JournalingMixin)      GenericRelation
+     subscriptions (NotificationsMixin)     GenericRelation
+     tags (TagsMixin)                       NetBoxTaggableManagerField      M2M -> extras.Tag (via TaggedItem, not a column)
+   meta.ordering: ('name',)
+
 ## circuits.Provider   (circuits/models/providers.py)
    bases: ContactsMixin, PrimaryModel
      name                                   CharField                   REQ UNIQUE len=100
@@ -473,6 +498,24 @@ wireless/wireless-links                              wireless.WirelessLink
      last_updated (ChangeLoggingMixin)      DateTimeField
    meta.ordering: ['virtual_circuit', 'role', 'pk']
    meta.indexes: (models.Index(fields=('virtual_circuit', 'role', 'id')),)
+
+## circuits.VirtualCircuitType   (circuits/models/virtual_circuits.py)
+   bases: BaseCircuitType
+   (no own columns — every field is inherited from BaseCircuitType)
+     color (BaseCircuitType)                ColorField
+     name (OrganizationalModel)             CharField                   REQ UNIQUE len=100
+     slug (OrganizationalModel)             SlugField                   REQ UNIQUE len=100
+     description (OrganizationalModel)      CharField                       len=200
+     comments (OrganizationalModel)         TextField
+     owner (OwnerMixin)                     ForeignKey                      -> users.Owner on_delete=PROTECT
+     bookmarks (BookmarksMixin)             GenericRelation
+     created (ChangeLoggingMixin)           DateTimeField
+     last_updated (ChangeLoggingMixin)      DateTimeField
+     custom_field_data (CustomFieldsMixin)  JSONField                       def=UNRESOLVED:dict
+     journal_entries (JournalingMixin)      GenericRelation
+     subscriptions (NotificationsMixin)     GenericRelation
+     tags (TagsMixin)                       NetBoxTaggableManagerField      M2M -> extras.Tag (via TaggedItem, not a column)
+   meta.ordering: ('name',)
 
 ## core.AutoSyncRecord   (core/models/data.py)
    bases: models.Model
@@ -736,6 +779,21 @@ wireless/wireless-links                              wireless.WirelessLink
      speed                                  PositiveIntegerField            choices=ConsolePortSpeedChoices
      module (ModularComponentModel)         ForeignKey                      -> dcim.Module on_delete=CASCADE
      inventory_items (ModularComponentModel) GenericRelation
+     device (ComponentModel)                ForeignKey                  REQ -> dcim.Device on_delete=CASCADE
+     name (ComponentModel)                  CharField                   REQ len=64
+     label (ComponentModel)                 CharField                       len=64
+     description (ComponentModel)           CharField                       len=200
+     _site (ComponentModel)                 ForeignKey                      -> dcim.Site on_delete=SET_NULL
+     _location (ComponentModel)             ForeignKey                      -> dcim.Location on_delete=SET_NULL
+     _rack (ComponentModel)                 ForeignKey                      -> dcim.Rack on_delete=SET_NULL
+     owner (OwnerMixin)                     ForeignKey                      -> users.Owner on_delete=PROTECT
+     bookmarks (BookmarksMixin)             GenericRelation
+     created (ChangeLoggingMixin)           DateTimeField
+     last_updated (ChangeLoggingMixin)      DateTimeField
+     custom_field_data (CustomFieldsMixin)  JSONField                       def=UNRESOLVED:dict
+     journal_entries (JournalingMixin)      GenericRelation
+     subscriptions (NotificationsMixin)     GenericRelation
+     tags (TagsMixin)                       NetBoxTaggableManagerField      M2M -> extras.Tag (via TaggedItem, not a column)
      cable (CabledObjectModel)              ForeignKey                      -> dcim.Cable on_delete=SET_NULL
      cable_end (CabledObjectModel)          CharField                       len=1 choices=CableEndChoices
      cable_connector (CabledObjectModel)    PositiveSmallIntegerField
@@ -762,6 +820,21 @@ wireless/wireless-links                              wireless.WirelessLink
      speed                                  PositiveIntegerField            choices=ConsolePortSpeedChoices
      module (ModularComponentModel)         ForeignKey                      -> dcim.Module on_delete=CASCADE
      inventory_items (ModularComponentModel) GenericRelation
+     device (ComponentModel)                ForeignKey                  REQ -> dcim.Device on_delete=CASCADE
+     name (ComponentModel)                  CharField                   REQ len=64
+     label (ComponentModel)                 CharField                       len=64
+     description (ComponentModel)           CharField                       len=200
+     _site (ComponentModel)                 ForeignKey                      -> dcim.Site on_delete=SET_NULL
+     _location (ComponentModel)             ForeignKey                      -> dcim.Location on_delete=SET_NULL
+     _rack (ComponentModel)                 ForeignKey                      -> dcim.Rack on_delete=SET_NULL
+     owner (OwnerMixin)                     ForeignKey                      -> users.Owner on_delete=PROTECT
+     bookmarks (BookmarksMixin)             GenericRelation
+     created (ChangeLoggingMixin)           DateTimeField
+     last_updated (ChangeLoggingMixin)      DateTimeField
+     custom_field_data (CustomFieldsMixin)  JSONField                       def=UNRESOLVED:dict
+     journal_entries (JournalingMixin)      GenericRelation
+     subscriptions (NotificationsMixin)     GenericRelation
+     tags (TagsMixin)                       NetBoxTaggableManagerField      M2M -> extras.Tag (via TaggedItem, not a column)
      cable (CabledObjectModel)              ForeignKey                      -> dcim.Cable on_delete=SET_NULL
      cable_end (CabledObjectModel)          CharField                       len=1 choices=CableEndChoices
      cable_connector (CabledObjectModel)    PositiveSmallIntegerField
@@ -847,6 +920,21 @@ wireless/wireless-links                              wireless.WirelessLink
    bases: ComponentModel, TrackingModelMixin
      installed_device                       OneToOneField                   -> dcim.Device on_delete=SET_NULL
      enabled                                BooleanField                    def=True
+     device (ComponentModel)                ForeignKey                  REQ -> dcim.Device on_delete=CASCADE
+     name (ComponentModel)                  CharField                   REQ len=64
+     label (ComponentModel)                 CharField                       len=64
+     description (ComponentModel)           CharField                       len=200
+     _site (ComponentModel)                 ForeignKey                      -> dcim.Site on_delete=SET_NULL
+     _location (ComponentModel)             ForeignKey                      -> dcim.Location on_delete=SET_NULL
+     _rack (ComponentModel)                 ForeignKey                      -> dcim.Rack on_delete=SET_NULL
+     owner (OwnerMixin)                     ForeignKey                      -> users.Owner on_delete=PROTECT
+     bookmarks (BookmarksMixin)             GenericRelation
+     created (ChangeLoggingMixin)           DateTimeField
+     last_updated (ChangeLoggingMixin)      DateTimeField
+     custom_field_data (CustomFieldsMixin)  JSONField                       def=UNRESOLVED:dict
+     journal_entries (JournalingMixin)      GenericRelation
+     subscriptions (NotificationsMixin)     GenericRelation
+     tags (TagsMixin)                       NetBoxTaggableManagerField      M2M -> extras.Tag (via TaggedItem, not a column)
 
 ## dcim.DeviceBayTemplate   (dcim/models/device_component_templates.py)
    bases: ComponentTemplateModel
@@ -938,6 +1026,21 @@ wireless/wireless-links                              wireless.WirelessLink
      positions                              PositiveSmallIntegerField       def=1
      module (ModularComponentModel)         ForeignKey                      -> dcim.Module on_delete=CASCADE
      inventory_items (ModularComponentModel) GenericRelation
+     device (ComponentModel)                ForeignKey                  REQ -> dcim.Device on_delete=CASCADE
+     name (ComponentModel)                  CharField                   REQ len=64
+     label (ComponentModel)                 CharField                       len=64
+     description (ComponentModel)           CharField                       len=200
+     _site (ComponentModel)                 ForeignKey                      -> dcim.Site on_delete=SET_NULL
+     _location (ComponentModel)             ForeignKey                      -> dcim.Location on_delete=SET_NULL
+     _rack (ComponentModel)                 ForeignKey                      -> dcim.Rack on_delete=SET_NULL
+     owner (OwnerMixin)                     ForeignKey                      -> users.Owner on_delete=PROTECT
+     bookmarks (BookmarksMixin)             GenericRelation
+     created (ChangeLoggingMixin)           DateTimeField
+     last_updated (ChangeLoggingMixin)      DateTimeField
+     custom_field_data (CustomFieldsMixin)  JSONField                       def=UNRESOLVED:dict
+     journal_entries (JournalingMixin)      GenericRelation
+     subscriptions (NotificationsMixin)     GenericRelation
+     tags (TagsMixin)                       NetBoxTaggableManagerField      M2M -> extras.Tag (via TaggedItem, not a column)
      cable (CabledObjectModel)              ForeignKey                      -> dcim.Cable on_delete=SET_NULL
      cable_end (CabledObjectModel)          CharField                       len=1 choices=CableEndChoices
      cable_connector (CabledObjectModel)    PositiveSmallIntegerField
@@ -991,6 +1094,21 @@ wireless/wireless-links                              wireless.WirelessLink
      l2vpn_terminations                     GenericRelation
      module (ModularComponentModel)         ForeignKey                      -> dcim.Module on_delete=CASCADE
      inventory_items (ModularComponentModel) GenericRelation
+     device (ComponentModel)                ForeignKey                  REQ -> dcim.Device on_delete=CASCADE
+     name (ComponentModel)                  CharField                   REQ len=64
+     label (ComponentModel)                 CharField                       len=64
+     description (ComponentModel)           CharField                       len=200
+     _site (ComponentModel)                 ForeignKey                      -> dcim.Site on_delete=SET_NULL
+     _location (ComponentModel)             ForeignKey                      -> dcim.Location on_delete=SET_NULL
+     _rack (ComponentModel)                 ForeignKey                      -> dcim.Rack on_delete=SET_NULL
+     owner (OwnerMixin)                     ForeignKey                      -> users.Owner on_delete=PROTECT
+     bookmarks (BookmarksMixin)             GenericRelation
+     created (ChangeLoggingMixin)           DateTimeField
+     last_updated (ChangeLoggingMixin)      DateTimeField
+     custom_field_data (CustomFieldsMixin)  JSONField                       def=UNRESOLVED:dict
+     journal_entries (JournalingMixin)      GenericRelation
+     subscriptions (NotificationsMixin)     GenericRelation
+     tags (TagsMixin)                       NetBoxTaggableManagerField      M2M -> extras.Tag (via TaggedItem, not a column)
      enabled (BaseInterface)                BooleanField                    def=True
      mtu (BaseInterface)                    PositiveIntegerField
      mode (BaseInterface)                   CharField                       len=50 choices=InterfaceModeChoices
@@ -1042,6 +1160,21 @@ wireless/wireless-links                              wireless.WirelessLink
      serial                                 CharField                       len=50
      asset_tag                              CharField                       UNIQUE len=50
      discovered                             BooleanField                    def=False
+     device (ComponentModel)                ForeignKey                  REQ -> dcim.Device on_delete=CASCADE
+     name (ComponentModel)                  CharField                   REQ len=64
+     label (ComponentModel)                 CharField                       len=64
+     description (ComponentModel)           CharField                       len=200
+     _site (ComponentModel)                 ForeignKey                      -> dcim.Site on_delete=SET_NULL
+     _location (ComponentModel)             ForeignKey                      -> dcim.Location on_delete=SET_NULL
+     _rack (ComponentModel)                 ForeignKey                      -> dcim.Rack on_delete=SET_NULL
+     owner (OwnerMixin)                     ForeignKey                      -> users.Owner on_delete=PROTECT
+     bookmarks (BookmarksMixin)             GenericRelation
+     created (ChangeLoggingMixin)           DateTimeField
+     last_updated (ChangeLoggingMixin)      DateTimeField
+     custom_field_data (CustomFieldsMixin)  JSONField                       def=UNRESOLVED:dict
+     journal_entries (JournalingMixin)      GenericRelation
+     subscriptions (NotificationsMixin)     GenericRelation
+     tags (TagsMixin)                       NetBoxTaggableManagerField      M2M -> extras.Tag (via TaggedItem, not a column)
    meta.constraints: (models.UniqueConstraint(fields=('device', 'parent', 'name'),
       name='%(app_label)s_%(class)s_unique_device_parent_name'),)
    meta.ordering: ('device__id', 'parent__id', 'name')
@@ -1160,6 +1293,21 @@ wireless/wireless-links                              wireless.WirelessLink
    bases: ComponentModel
      module                                 ForeignKey                      -> dcim.Module on_delete=CASCADE
      inventory_items                        GenericRelation
+     device (ComponentModel)                ForeignKey                  REQ -> dcim.Device on_delete=CASCADE
+     name (ComponentModel)                  CharField                   REQ len=64
+     label (ComponentModel)                 CharField                       len=64
+     description (ComponentModel)           CharField                       len=200
+     _site (ComponentModel)                 ForeignKey                      -> dcim.Site on_delete=SET_NULL
+     _location (ComponentModel)             ForeignKey                      -> dcim.Location on_delete=SET_NULL
+     _rack (ComponentModel)                 ForeignKey                      -> dcim.Rack on_delete=SET_NULL
+     owner (OwnerMixin)                     ForeignKey                      -> users.Owner on_delete=PROTECT
+     bookmarks (BookmarksMixin)             GenericRelation
+     created (ChangeLoggingMixin)           DateTimeField
+     last_updated (ChangeLoggingMixin)      DateTimeField
+     custom_field_data (CustomFieldsMixin)  JSONField                       def=UNRESOLVED:dict
+     journal_entries (JournalingMixin)      GenericRelation
+     subscriptions (NotificationsMixin)     GenericRelation
+     tags (TagsMixin)                       NetBoxTaggableManagerField      M2M -> extras.Tag (via TaggedItem, not a column)
 
 ## dcim.ModularComponentTemplateModel   (dcim/models/device_component_templates.py)
    bases: ComponentTemplateModel
@@ -1204,6 +1352,21 @@ wireless/wireless-links                              wireless.WirelessLink
      enabled                                BooleanField                    def=True
      module (ModularComponentModel)         ForeignKey                      -> dcim.Module on_delete=CASCADE
      inventory_items (ModularComponentModel) GenericRelation
+     device (ComponentModel)                ForeignKey                  REQ -> dcim.Device on_delete=CASCADE
+     name (ComponentModel)                  CharField                   REQ len=64
+     label (ComponentModel)                 CharField                       len=64
+     description (ComponentModel)           CharField                       len=200
+     _site (ComponentModel)                 ForeignKey                      -> dcim.Site on_delete=SET_NULL
+     _location (ComponentModel)             ForeignKey                      -> dcim.Location on_delete=SET_NULL
+     _rack (ComponentModel)                 ForeignKey                      -> dcim.Rack on_delete=SET_NULL
+     owner (OwnerMixin)                     ForeignKey                      -> users.Owner on_delete=PROTECT
+     bookmarks (BookmarksMixin)             GenericRelation
+     created (ChangeLoggingMixin)           DateTimeField
+     last_updated (ChangeLoggingMixin)      DateTimeField
+     custom_field_data (CustomFieldsMixin)  JSONField                       def=UNRESOLVED:dict
+     journal_entries (JournalingMixin)      GenericRelation
+     subscriptions (NotificationsMixin)     GenericRelation
+     tags (TagsMixin)                       NetBoxTaggableManagerField      M2M -> extras.Tag (via TaggedItem, not a column)
    meta.constraints: (models.UniqueConstraint(fields=('device', 'module', 'name'),
       name='%(app_label)s_%(class)s_unique_device_module_name'),)
    meta.indexes: ()
@@ -1378,6 +1541,21 @@ wireless/wireless-links                              wireless.WirelessLink
      color                                  ColorField
      module (ModularComponentModel)         ForeignKey                      -> dcim.Module on_delete=CASCADE
      inventory_items (ModularComponentModel) GenericRelation
+     device (ComponentModel)                ForeignKey                  REQ -> dcim.Device on_delete=CASCADE
+     name (ComponentModel)                  CharField                   REQ len=64
+     label (ComponentModel)                 CharField                       len=64
+     description (ComponentModel)           CharField                       len=200
+     _site (ComponentModel)                 ForeignKey                      -> dcim.Site on_delete=SET_NULL
+     _location (ComponentModel)             ForeignKey                      -> dcim.Location on_delete=SET_NULL
+     _rack (ComponentModel)                 ForeignKey                      -> dcim.Rack on_delete=SET_NULL
+     owner (OwnerMixin)                     ForeignKey                      -> users.Owner on_delete=PROTECT
+     bookmarks (BookmarksMixin)             GenericRelation
+     created (ChangeLoggingMixin)           DateTimeField
+     last_updated (ChangeLoggingMixin)      DateTimeField
+     custom_field_data (CustomFieldsMixin)  JSONField                       def=UNRESOLVED:dict
+     journal_entries (JournalingMixin)      GenericRelation
+     subscriptions (NotificationsMixin)     GenericRelation
+     tags (TagsMixin)                       NetBoxTaggableManagerField      M2M -> extras.Tag (via TaggedItem, not a column)
      cable (CabledObjectModel)              ForeignKey                      -> dcim.Cable on_delete=SET_NULL
      cable_end (CabledObjectModel)          CharField                       len=1 choices=CableEndChoices
      cable_connector (CabledObjectModel)    PositiveSmallIntegerField
@@ -1429,6 +1607,21 @@ wireless/wireless-links                              wireless.WirelessLink
      allocated_draw                         PositiveIntegerField
      module (ModularComponentModel)         ForeignKey                      -> dcim.Module on_delete=CASCADE
      inventory_items (ModularComponentModel) GenericRelation
+     device (ComponentModel)                ForeignKey                  REQ -> dcim.Device on_delete=CASCADE
+     name (ComponentModel)                  CharField                   REQ len=64
+     label (ComponentModel)                 CharField                       len=64
+     description (ComponentModel)           CharField                       len=200
+     _site (ComponentModel)                 ForeignKey                      -> dcim.Site on_delete=SET_NULL
+     _location (ComponentModel)             ForeignKey                      -> dcim.Location on_delete=SET_NULL
+     _rack (ComponentModel)                 ForeignKey                      -> dcim.Rack on_delete=SET_NULL
+     owner (OwnerMixin)                     ForeignKey                      -> users.Owner on_delete=PROTECT
+     bookmarks (BookmarksMixin)             GenericRelation
+     created (ChangeLoggingMixin)           DateTimeField
+     last_updated (ChangeLoggingMixin)      DateTimeField
+     custom_field_data (CustomFieldsMixin)  JSONField                       def=UNRESOLVED:dict
+     journal_entries (JournalingMixin)      GenericRelation
+     subscriptions (NotificationsMixin)     GenericRelation
+     tags (TagsMixin)                       NetBoxTaggableManagerField      M2M -> extras.Tag (via TaggedItem, not a column)
      cable (CabledObjectModel)              ForeignKey                      -> dcim.Cable on_delete=SET_NULL
      cable_end (CabledObjectModel)          CharField                       len=1 choices=CableEndChoices
      cable_connector (CabledObjectModel)    PositiveSmallIntegerField
@@ -1626,6 +1819,21 @@ wireless/wireless-links                              wireless.WirelessLink
      positions                              PositiveSmallIntegerField       def=1
      module (ModularComponentModel)         ForeignKey                      -> dcim.Module on_delete=CASCADE
      inventory_items (ModularComponentModel) GenericRelation
+     device (ComponentModel)                ForeignKey                  REQ -> dcim.Device on_delete=CASCADE
+     name (ComponentModel)                  CharField                   REQ len=64
+     label (ComponentModel)                 CharField                       len=64
+     description (ComponentModel)           CharField                       len=200
+     _site (ComponentModel)                 ForeignKey                      -> dcim.Site on_delete=SET_NULL
+     _location (ComponentModel)             ForeignKey                      -> dcim.Location on_delete=SET_NULL
+     _rack (ComponentModel)                 ForeignKey                      -> dcim.Rack on_delete=SET_NULL
+     owner (OwnerMixin)                     ForeignKey                      -> users.Owner on_delete=PROTECT
+     bookmarks (BookmarksMixin)             GenericRelation
+     created (ChangeLoggingMixin)           DateTimeField
+     last_updated (ChangeLoggingMixin)      DateTimeField
+     custom_field_data (CustomFieldsMixin)  JSONField                       def=UNRESOLVED:dict
+     journal_entries (JournalingMixin)      GenericRelation
+     subscriptions (NotificationsMixin)     GenericRelation
+     tags (TagsMixin)                       NetBoxTaggableManagerField      M2M -> extras.Tag (via TaggedItem, not a column)
      cable (CabledObjectModel)              ForeignKey                      -> dcim.Cable on_delete=SET_NULL
      cable_end (CabledObjectModel)          CharField                       len=1 choices=CableEndChoices
      cable_connector (CabledObjectModel)    PositiveSmallIntegerField
@@ -2585,10 +2793,6 @@ wireless/wireless-links                              wireless.WirelessLink
      bookmarks (BookmarksMixin)             GenericRelation
      subscriptions (NotificationsMixin)     GenericRelation
 
-## netbox.BaseModel   (netbox/models/__init__.py)
-   bases: models.Model
-   (no own columns — every field is inherited from models.Model)
-
 ## netbox.BookmarksMixin   (netbox/models/features.py)
    bases: models.Model
      bookmarks                              GenericRelation
@@ -2604,10 +2808,6 @@ wireless/wireless-links                              wireless.WirelessLink
      created                                DateTimeField
      last_updated                           DateTimeField
 
-## netbox.CloningMixin   (netbox/models/features.py)
-   bases: models.Model
-   (no own columns — every field is inherited from models.Model)
-
 ## netbox.ContactsMixin   (netbox/models/features.py)
    bases: models.Model
      contacts                               GenericRelation
@@ -2616,27 +2816,11 @@ wireless/wireless-links                              wireless.WirelessLink
    bases: models.Model
      custom_field_data                      JSONField                       def=UNRESOLVED:dict
 
-## netbox.CustomLinksMixin   (netbox/models/features.py)
-   bases: models.Model
-   (no own columns — every field is inherited from models.Model)
-
-## netbox.CustomValidationMixin   (netbox/models/features.py)
-   bases: models.Model
-   (no own columns — every field is inherited from models.Model)
-
 ## netbox.DistanceMixin   (netbox/models/mixins.py)
    bases: models.Model
      distance                               DecimalField                    decimal(8,2)
      distance_unit                          CharField                       len=50 choices=DistanceUnitChoices
      _abs_distance                          DecimalField                    decimal(13,4)
-
-## netbox.EventRulesMixin   (netbox/models/features.py)
-   bases: models.Model
-   (no own columns — every field is inherited from models.Model)
-
-## netbox.ExportTemplatesMixin   (netbox/models/features.py)
-   bases: models.Model
-   (no own columns — every field is inherited from models.Model)
 
 ## netbox.ImageAttachmentsMixin   (netbox/models/features.py)
    bases: models.Model
@@ -3028,6 +3212,7 @@ wireless/wireless-links                              wireless.WirelessLink
 
 ## virtualization.VMInterface   (virtualization/models/virtualmachines.py)
    bases: ComponentModel, BaseInterface, TrackingModelMixin
+   shadows inherited: virtual_machine (ComponentModel), name (ComponentModel)
      name                                   CharField                   REQ len=64
      _name                                  NaturalOrderingField            len=100
      virtual_machine                        ForeignKey                  REQ -> virtualization.VirtualMachine on_delete=CASCADE
@@ -3037,6 +3222,15 @@ wireless/wireless-links                              wireless.WirelessLink
      tunnel_terminations                    GenericRelation
      l2vpn_terminations                     GenericRelation
      mac_addresses                          GenericRelation
+     description (ComponentModel)           CharField                       len=200
+     owner (OwnerMixin)                     ForeignKey                      -> users.Owner on_delete=PROTECT
+     bookmarks (BookmarksMixin)             GenericRelation
+     created (ChangeLoggingMixin)           DateTimeField
+     last_updated (ChangeLoggingMixin)      DateTimeField
+     custom_field_data (CustomFieldsMixin)  JSONField                       def=UNRESOLVED:dict
+     journal_entries (JournalingMixin)      GenericRelation
+     subscriptions (NotificationsMixin)     GenericRelation
+     tags (TagsMixin)                       NetBoxTaggableManagerField      M2M -> extras.Tag (via TaggedItem, not a column)
      enabled (BaseInterface)                BooleanField                    def=True
      mtu (BaseInterface)                    PositiveIntegerField
      mode (BaseInterface)                   CharField                       len=50 choices=InterfaceModeChoices
@@ -3052,6 +3246,17 @@ wireless/wireless-links                              wireless.WirelessLink
 ## virtualization.VirtualDisk   (virtualization/models/virtualmachines.py)
    bases: ComponentModel, TrackingModelMixin
      size                                   PositiveIntegerField        REQ
+     virtual_machine (ComponentModel)       ForeignKey                  REQ -> virtualization.VirtualMachine on_delete=CASCADE
+     name (ComponentModel)                  CharField                   REQ len=64
+     description (ComponentModel)           CharField                       len=200
+     owner (OwnerMixin)                     ForeignKey                      -> users.Owner on_delete=PROTECT
+     bookmarks (BookmarksMixin)             GenericRelation
+     created (ChangeLoggingMixin)           DateTimeField
+     last_updated (ChangeLoggingMixin)      DateTimeField
+     custom_field_data (CustomFieldsMixin)  JSONField                       def=UNRESOLVED:dict
+     journal_entries (JournalingMixin)      GenericRelation
+     subscriptions (NotificationsMixin)     GenericRelation
+     tags (TagsMixin)                       NetBoxTaggableManagerField      M2M -> extras.Tag (via TaggedItem, not a column)
    meta.ordering: ('virtual_machine', 'name')
 
 ## virtualization.VirtualMachine   (virtualization/models/virtualmachines.py)
