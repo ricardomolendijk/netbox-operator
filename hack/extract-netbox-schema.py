@@ -12,7 +12,7 @@ FIELD_TYPES = {
     # mattered immediately: dcim.Site.time_zone is a shipped CRD field (NetBoxSite.timeZone)
     # whose schema row did not exist, so it could not be cited.
     'TimeZoneField','BigAutoField','AutoField','ImageField','FilePathField','BinaryField',
-    'ChoiceSetField','PathField','DurationField','TimeField','GenericIPAddressField',
+    'ChoiceSetField','PathField','DurationField','TimeField',
     'CachedValueField','WWNField','NaturalOrderingField','GenericIPAddressField',
     # mptt's FK flavour, which is how every NestedGroupModel declares `parent`.
     'TreeForeignKey',

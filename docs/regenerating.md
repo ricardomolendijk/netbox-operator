@@ -61,7 +61,7 @@ run. `make test-schema` runs all four scripts over both trees and asserts the ou
 extractors stay honest in CI — where cloning NetBox is not worth the minute.
 
 ```sh
-make test-schema        # == python3 hack/test_digest.py
+make test-schema        # ruff check hack/ + python3 hack/test_digest.py
 ```
 
 Any fix to an extractor belongs with a fixture declaration that reproduces the bug.
