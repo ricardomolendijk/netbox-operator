@@ -23,20 +23,21 @@ import (
 // with the manifest and reports OutOfSync on a spec that has diverged; a generation bump is
 // how it finds out.
 func TestStatusOnlyReconcileNeverBumpsGeneration(t *testing.T) {
-	ns, stub := newNamespace(t), newTagStub(t)
-	readyEndpoint(t, ns, stub.URL)
+	ns := newNamespace(t)
+	stub, target := newNetBoxStub(t, tagKind)
+	readyEndpoint(t, ns, target)
 	makeTag(t, ns, "stable", func(tag *netboxv1alpha1.NetBoxTag) { tag.Spec.Color = "2196f3" })
 
 	eventually(t, "Ready=True", func() bool { return tagIsReady(ns, "stable") })
 
 	settled := mustFetchTag(t, ns, "stable")
 	generation, version := settled.Generation, settled.ResourceVersion
-	id := int(settled.Status.ID)
+	id := settled.Status.ID
 
 	// A NetBox-side edit, corrected: the busiest status-writing path there is, since it
 	// writes lastSyncTime, lastAppliedHash and two conditions.
-	stub.setField(t, id, "color", "ff0000")
-	eventually(t, "the colour corrected", func() bool { return stub.tag(id)["color"] == "2196f3" })
+	stub.setField(id, "color", "ff0000")
+	eventually(t, "the colour corrected", func() bool { return stub.get(id)["color"] == "2196f3" })
 
 	// Several resyncs on top, because the interesting failure is a slow leak: one path in
 	// ten that writes the whole object rather than the status.
@@ -70,8 +71,9 @@ func TestStatusOnlyReconcileNeverBumpsGeneration(t *testing.T) {
 // mode -- which is why Report is implemented by handing the engine a client that cannot
 // write at all, and why this test asserts on the wire and not on a condition.
 func TestDriftModeReportLeavesNetBoxUntouched(t *testing.T) {
-	ns, stub := newNamespace(t), newTagStub(t)
-	readyEndpointWith(t, ns, stub.URL, func(e *netboxv1alpha1.NetBoxEndpoint) {
+	ns := newNamespace(t)
+	stub, target := newNetBoxStub(t, tagKind)
+	readyEndpointWith(t, ns, target, func(e *netboxv1alpha1.NetBoxEndpoint) {
 		e.Spec.DriftMode = netboxv1alpha1.DriftReport
 	})
 
@@ -100,7 +102,7 @@ func TestDriftModeReportLeavesNetBoxUntouched(t *testing.T) {
 		t.Errorf("netbox saw %+v; Report must send nothing at all", writes)
 	}
 
-	if got := stub.tag(id)["color"]; got != "ff0000" {
+	if got := stub.get(id)["color"]; got != "ff0000" {
 		t.Errorf("colour = %v, want the human's ff0000 left alone", got)
 	}
 
@@ -176,26 +178,27 @@ func TestReportModeOverridesApplyAtTheClient(t *testing.T) {
 // enough that the resync cost is real, and it buys that by letting a UI edit stand until
 // something touches the object again.
 func TestDriftModeOffDoesNotResync(t *testing.T) {
-	ns, stub := newNamespace(t), newTagStub(t)
-	readyEndpointWith(t, ns, stub.URL, func(e *netboxv1alpha1.NetBoxEndpoint) {
+	ns := newNamespace(t)
+	stub, target := newNetBoxStub(t, tagKind)
+	readyEndpointWith(t, ns, target, func(e *netboxv1alpha1.NetBoxEndpoint) {
 		e.Spec.DriftMode = netboxv1alpha1.DriftOff
 	})
 	makeTag(t, ns, "unwatched", func(tag *netboxv1alpha1.NetBoxTag) { tag.Spec.Color = "2196f3" })
 
 	eventually(t, "Ready=True", func() bool { return tagIsReady(ns, "unwatched") })
-	id := int(mustFetchTag(t, ns, "unwatched").Status.ID)
+	id := mustFetchTag(t, ns, "unwatched").Status.ID
 
-	stub.setField(t, id, "color", "ff0000")
+	stub.setField(id, "color", "ff0000")
 
 	// The endpoint's resyncPeriod is one second, so this is several periods of the
 	// requeue that Off is meant to have suppressed.
 	time.Sleep(3 * time.Second)
 
-	if got := stub.tag(id)["color"]; got != "ff0000" {
+	if got := stub.get(id)["color"]; got != "ff0000" {
 		t.Errorf("colour = %v; Off must not re-check netbox on a timer", got)
 	}
 
-	if writes := stub.recorded(); len(writes) != 1 || writes[0].method != http.MethodPost {
+	if writes := stub.recorded(); len(writes) != 1 || writes[0].Method != http.MethodPost {
 		t.Errorf("netbox saw %+v, want only the original POST", writes)
 	}
 
@@ -209,7 +212,7 @@ func TestDriftModeOffDoesNotResync(t *testing.T) {
 		t.Fatalf("editing spec.color: %v", err)
 	}
 
-	eventually(t, "the spec change reaching netbox", func() bool { return stub.tag(id)["color"] == "4caf50" })
+	eventually(t, "the spec change reaching netbox", func() bool { return stub.get(id)["color"] == "4caf50" })
 }
 
 // TestSpecEditsSurviveTheGuard is the regression test for the guard itself: it sits in front
@@ -217,8 +220,9 @@ func TestDriftModeOffDoesNotResync(t *testing.T) {
 // operator taking a finalizer or writing a status, and the symptom would be an orphaned
 // NetBox object rather than an error anybody reads.
 func TestSpecEditsSurviveTheGuard(t *testing.T) {
-	ns, stub := newNamespace(t), newTagStub(t)
-	readyEndpoint(t, ns, stub.URL)
+	ns := newNamespace(t)
+	_, target := newNetBoxStub(t, tagKind)
+	readyEndpoint(t, ns, target)
 	makeTag(t, ns, "guarded-write", nil)
 
 	eventually(t, "Ready=True", func() bool { return tagIsReady(ns, "guarded-write") })

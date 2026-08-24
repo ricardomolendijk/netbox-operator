@@ -2,17 +2,11 @@ package controller
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
-	"maps"
 	"net/http"
-	"net/http/httptest"
-	"net/url"
 	"reflect"
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -23,264 +17,6 @@ import (
 	netboxv1alpha1 "github.com/ricardomolendijk/netbox-operator/api/v1alpha1"
 	"github.com/ricardomolendijk/netbox-operator/internal/netbox"
 )
-
-// tagWrite is one mutating request the stub received, in the order it received them.
-// Recording the payload too, because "PATCHed exactly one field" is the assertion that
-// separates an operator that co-exists with humans from one that overwrites their work.
-type tagWrite struct {
-	method  string
-	id      int
-	payload netbox.Object
-}
-
-// tagStub is a NetBox that serves extras/tags out of a map.
-//
-// Enough of the REST contract for the engine to look a tag up, create it, patch it and
-// delete it -- plus the ability to change a tag behind the operator's back, which is how
-// a drift test simulates somebody editing the NetBox UI.
-type tagStub struct {
-	*httptest.Server
-
-	mu     sync.Mutex
-	tags   map[int]netbox.Object
-	nextID int
-	writes []tagWrite
-}
-
-func newTagStub(t *testing.T) *tagStub {
-	t.Helper()
-
-	stub := &tagStub{tags: map[int]netbox.Object{}, nextID: 1}
-	stub.Server = httptest.NewServer(http.HandlerFunc(stub.route))
-	t.Cleanup(stub.Close)
-
-	return stub
-}
-
-func (s *tagStub) route(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path == "/api/status/" {
-		writeJSON(w, http.StatusOK, netbox.Object{"netbox-version": "4.6.8", "plugins": map[string]any{}})
-
-		return
-	}
-
-	rest, isTags := strings.CutPrefix(r.URL.Path, "/api/extras/tags/")
-	if !isTags {
-		http.NotFound(w, r)
-
-		return
-	}
-
-	id, err := strconv.Atoi(strings.Trim(rest, "/"))
-	hasID := err == nil
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	switch {
-	case r.Method == http.MethodGet && hasID:
-		s.serveGet(w, id)
-	case r.Method == http.MethodGet:
-		s.serveList(w, r)
-	case r.Method == http.MethodPost:
-		s.servePost(w, r)
-	case r.Method == http.MethodPatch && hasID:
-		s.servePatch(w, r, id)
-	case r.Method == http.MethodDelete && hasID:
-		s.serveDelete(w, id)
-	default:
-		w.WriteHeader(http.StatusMethodNotAllowed)
-	}
-}
-
-func (s *tagStub) serveGet(w http.ResponseWriter, id int) {
-	tag, ok := s.tags[id]
-	if !ok {
-		writeJSON(w, http.StatusNotFound, netbox.Object{"detail": "Not found."})
-
-		return
-	}
-
-	writeJSON(w, http.StatusOK, tag)
-}
-
-func (s *tagStub) serveList(w http.ResponseWriter, r *http.Request) {
-	results := []netbox.Object{}
-
-	// Sorted, so a query matching several tags returns them in a stable order and an
-	// ambiguity test cannot pass by accident.
-	for _, id := range slices.Sorted(maps.Keys(s.tags)) {
-		if tagMatches(s.tags[id], r.URL.Query()) {
-			results = append(results, s.tags[id])
-		}
-	}
-
-	writeJSON(w, http.StatusOK, netbox.Object{"count": len(results), "next": nil, "results": results})
-}
-
-func (s *tagStub) servePost(w http.ResponseWriter, r *http.Request) {
-	payload, ok := decodeTag(w, r)
-	if !ok {
-		return
-	}
-
-	id := s.nextID
-	s.nextID++
-
-	tag := maps.Clone(payload)
-	tag["id"] = id
-	tag["url"] = fmt.Sprintf("%s/api/extras/tags/%d/", s.URL, id)
-	// The read-only columns every ChangeLoggedModel returns. Present so that a descriptor
-	// which wrongly tried to manage one would show up as a permanent diff here.
-	tag["display"] = tag["name"]
-	tag["created"] = "2026-08-21T00:00:00Z"
-	tag["last_updated"] = "2026-08-21T00:00:00Z"
-
-	s.tags[id] = tag
-	s.writes = append(s.writes, tagWrite{method: http.MethodPost, id: id, payload: payload})
-
-	writeJSON(w, http.StatusCreated, tag)
-}
-
-func (s *tagStub) servePatch(w http.ResponseWriter, r *http.Request, id int) {
-	tag, exists := s.tags[id]
-	if !exists {
-		writeJSON(w, http.StatusNotFound, netbox.Object{"detail": "Not found."})
-
-		return
-	}
-
-	payload, ok := decodeTag(w, r)
-	if !ok {
-		return
-	}
-
-	// Merged, not replaced: NetBox's PATCH leaves a column the body omits alone, which is
-	// the whole reason the operator can send only the diff.
-	for name, value := range payload {
-		tag[name] = value
-	}
-
-	s.tags[id] = tag
-	s.writes = append(s.writes, tagWrite{method: http.MethodPatch, id: id, payload: payload})
-
-	writeJSON(w, http.StatusOK, tag)
-}
-
-func (s *tagStub) serveDelete(w http.ResponseWriter, id int) {
-	if _, exists := s.tags[id]; !exists {
-		writeJSON(w, http.StatusNotFound, netbox.Object{"detail": "Not found."})
-
-		return
-	}
-
-	delete(s.tags, id)
-	s.writes = append(s.writes, tagWrite{method: http.MethodDelete, id: id})
-
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// tagMatches applies the query the engine sent. Only exact matches, which is all a
-// natural key on extras.Tag can produce.
-func tagMatches(tag netbox.Object, query url.Values) bool {
-	for name, values := range query {
-		if name == "limit" || name == "offset" {
-			continue
-		}
-
-		if fmt.Sprint(tag[name]) != values[0] {
-			return false
-		}
-	}
-
-	return true
-}
-
-// seed puts a tag in NetBox that the operator did not create, which is the object every
-// adoption and Conflict case turns on. It returns its id.
-func (s *tagStub) seed(tag netbox.Object) int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	id := s.nextID
-	s.nextID++
-
-	stored := maps.Clone(tag)
-	stored["id"] = id
-	stored["url"] = fmt.Sprintf("%s/api/extras/tags/%d/", s.URL, id)
-	s.tags[id] = stored
-
-	return id
-}
-
-// tag returns a copy of one stored tag, or nil when it is gone.
-func (s *tagStub) tag(id int) netbox.Object {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	tag, ok := s.tags[id]
-	if !ok {
-		return nil
-	}
-
-	return maps.Clone(tag)
-}
-
-// setField changes a tag behind the operator's back: a human editing the NetBox UI.
-func (s *tagStub) setField(t *testing.T, id int, name string, value any) {
-	t.Helper()
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	tag, ok := s.tags[id]
-	if !ok {
-		t.Fatalf("no tag %d to edit", id)
-	}
-
-	tag[name] = value
-}
-
-// countBySlug is how many tags carry a slug. NetBox enforces one; more than one would
-// mean the operator duplicated rather than adopted.
-func (s *tagStub) countBySlug(slug string) int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	count := 0
-
-	for _, tag := range s.tags {
-		if tag["slug"] == slug {
-			count++
-		}
-	}
-
-	return count
-}
-
-func (s *tagStub) recorded() []tagWrite {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	return slices.Clone(s.writes)
-}
-
-func writeJSON(w http.ResponseWriter, status int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(body)
-}
-
-func decodeTag(w http.ResponseWriter, r *http.Request) (netbox.Object, bool) {
-	payload := netbox.Object{}
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		writeJSON(w, http.StatusBadRequest, netbox.Object{"detail": "unparseable body"})
-
-		return nil, false
-	}
-
-	return payload, true
-}
 
 // readyEndpoint points a namespace at stub and waits until it has a client.
 //
@@ -324,6 +60,9 @@ func readyEndpointWith(t *testing.T, ns, target string, mutate func(*netboxv1alp
 		return ok
 	})
 }
+
+// tagKind points the shared stub at extras.Tag.
+var tagKind = stubKind{endpoint: "extras/tags", key: "slug"}
 
 // makeTag applies a NetBoxTag whose slug is its name, and removes it again afterwards so
 // the finalizer does not outlive the stub it needs in order to come off.
@@ -416,8 +155,9 @@ func tagIsReady(ns, slug string) bool {
 // a `kubectl apply` of the first real kind produces a NetBox object, records its id, and
 // says so.
 func TestTagIsCreatedInNetBoxAndReachesReady(t *testing.T) {
-	ns, stub := newNamespace(t), newTagStub(t)
-	readyEndpoint(t, ns, stub.URL)
+	ns := newNamespace(t)
+	stub, target := newNetBoxStub(t, tagKind)
+	readyEndpoint(t, ns, target)
 
 	makeTag(t, ns, "managed", func(tag *netboxv1alpha1.NetBoxTag) {
 		tag.Spec.Color = "2196f3"
@@ -460,7 +200,7 @@ func TestTagIsCreatedInNetBoxAndReachesReady(t *testing.T) {
 	}
 
 	writes := stub.recorded()
-	if len(writes) != 1 || writes[0].method != http.MethodPost {
+	if len(writes) != 1 || writes[0].Method != http.MethodPost {
 		t.Fatalf("netbox saw %+v, want exactly one POST", writes)
 	}
 
@@ -472,15 +212,15 @@ func TestTagIsCreatedInNetBoxAndReachesReady(t *testing.T) {
 		"weight":       float64(1000),
 		"object_types": []any{"dcim.device", "virtualization.virtualmachine"},
 	}
-	if !reflect.DeepEqual(writes[0].payload, want) {
-		t.Errorf("POST body = %v, want %v", writes[0].payload, want)
+	if !reflect.DeepEqual(writes[0].Payload, want) {
+		t.Errorf("POST body = %v, want %v", writes[0].Payload, want)
 	}
 
 	// The envelope stayed out of the payload. NetBox ignores a column it does not know
 	// rather than rejecting it, so a leaked endpointRef would travel over the wire forever
 	// and never fail.
 	for _, envelope := range []string{"endpointRef", "onConflict", "deletionPolicy"} {
-		if _, leaked := writes[0].payload[envelope]; leaked {
+		if _, leaked := writes[0].Payload[envelope]; leaked {
 			t.Errorf("the POST body carried the envelope field %q", envelope)
 		}
 	}
@@ -490,32 +230,33 @@ func TestTagIsCreatedInNetBoxAndReachesReady(t *testing.T) {
 // one-shot CLI it replaces: an edit made in the NetBox UI is drift, and drift is corrected
 // without anything changing in Git.
 func TestTagDriftIsCorrectedWithinOneResync(t *testing.T) {
-	ns, stub := newNamespace(t), newTagStub(t)
-	readyEndpoint(t, ns, stub.URL)
+	ns := newNamespace(t)
+	stub, target := newNetBoxStub(t, tagKind)
+	readyEndpoint(t, ns, target)
 	makeTag(t, ns, "drifting", func(tag *netboxv1alpha1.NetBoxTag) { tag.Spec.Color = "2196f3" })
 
 	eventually(t, "Ready=True", func() bool { return tagIsReady(ns, "drifting") })
-	id := int(mustFetchTag(t, ns, "drifting").Status.ID)
+	id := mustFetchTag(t, ns, "drifting").Status.ID
 
-	stub.setField(t, id, "color", "ff0000")
+	stub.setField(id, "color", "ff0000")
 
-	eventually(t, "the colour corrected", func() bool { return stub.tag(id)["color"] == "2196f3" })
+	eventually(t, "the colour corrected", func() bool { return stub.get(id)["color"] == "2196f3" })
 
 	// Corrected in place. A new id would mean the engine created a second tag rather than
 	// recognising the one it already owned.
-	if got := int(mustFetchTag(t, ns, "drifting").Status.ID); got != id {
+	if got := mustFetchTag(t, ns, "drifting").Status.ID; got != id {
 		t.Errorf("status.id = %d after drift correction, want the original %d", got, id)
 	}
 
 	writes := stub.recorded()
 	last := writes[len(writes)-1]
 
-	if last.method != http.MethodPatch {
-		t.Fatalf("the last write was %s, want a PATCH: %+v", last.method, writes)
+	if last.Method != http.MethodPatch {
+		t.Fatalf("the last write was %s, want a PATCH: %+v", last.Method, writes)
 	}
 
-	if !reflect.DeepEqual(last.payload, netbox.Object{"color": "2196f3"}) {
-		t.Errorf("PATCH body = %v, want only color", last.payload)
+	if !reflect.DeepEqual(last.Payload, netbox.Object{"color": "2196f3"}) {
+		t.Errorf("PATCH body = %v, want only color", last.Payload)
 	}
 }
 
@@ -523,37 +264,39 @@ func TestTagDriftIsCorrectedWithinOneResync(t *testing.T) {
 // wire. NetBox merges a partial PATCH, so sending unchanged columns is precisely how an
 // operator overwrites a value somebody else owns.
 func TestTagSpecEditPatchesOnlyTheChangedField(t *testing.T) {
-	ns, stub := newNamespace(t), newTagStub(t)
-	readyEndpoint(t, ns, stub.URL)
+	ns := newNamespace(t)
+	stub, target := newNetBoxStub(t, tagKind)
+	readyEndpoint(t, ns, target)
 	makeTag(t, ns, "recoloured", func(tag *netboxv1alpha1.NetBoxTag) { tag.Spec.Color = "2196f3" })
 
 	eventually(t, "Ready=True", func() bool { return tagIsReady(ns, "recoloured") })
 
 	tag := mustFetchTag(t, ns, "recoloured")
-	id := int(tag.Status.ID)
+	id := tag.Status.ID
 	tag.Spec.Color = "4caf50"
 
 	if err := k8sClient.Update(context.Background(), tag); err != nil {
 		t.Fatalf("editing spec.color: %v", err)
 	}
 
-	eventually(t, "the new colour reached netbox", func() bool { return stub.tag(id)["color"] == "4caf50" })
+	eventually(t, "the new colour reached netbox", func() bool { return stub.get(id)["color"] == "4caf50" })
 
 	writes := stub.recorded()
 	if len(writes) != 2 {
 		t.Fatalf("netbox saw %+v, want one POST and one PATCH", writes)
 	}
 
-	if !reflect.DeepEqual(writes[1].payload, netbox.Object{"color": "4caf50"}) {
-		t.Errorf("PATCH body = %v, want only color", writes[1].payload)
+	if !reflect.DeepEqual(writes[1].Payload, netbox.Object{"color": "4caf50"}) {
+		t.Errorf("PATCH body = %v, want only color", writes[1].Payload)
 	}
 }
 
 // TestTagAdoptsAPreExistingNetBoxTag covers the case a fresh cluster pointed at an
 // existing NetBox is entirely made of.
 func TestTagAdoptsAPreExistingNetBoxTag(t *testing.T) {
-	ns, stub := newNamespace(t), newTagStub(t)
-	readyEndpoint(t, ns, stub.URL)
+	ns := newNamespace(t)
+	stub, target := newNetBoxStub(t, tagKind)
+	readyEndpoint(t, ns, target)
 
 	id := stub.seed(netbox.Object{
 		"name": "Legacy", "slug": "legacy", "color": "ff0000",
@@ -568,7 +311,7 @@ func TestTagAdoptsAPreExistingNetBoxTag(t *testing.T) {
 	eventually(t, "Ready=True", func() bool { return tagIsReady(ns, "legacy") })
 
 	tag := mustFetchTag(t, ns, "legacy")
-	if int(tag.Status.ID) != id {
+	if tag.Status.ID != id {
 		t.Errorf("status.id = %d, want the pre-existing tag %d", tag.Status.ID, id)
 	}
 
@@ -580,30 +323,30 @@ func TestTagAdoptsAPreExistingNetBoxTag(t *testing.T) {
 		t.Errorf("status.naturalKey = %v, want %v", tag.Status.NaturalKey, want)
 	}
 
-	if n := stub.countBySlug("legacy"); n != 1 {
+	if n := stub.countByKey("legacy"); n != 1 {
 		t.Errorf("%d tags with slug legacy, want 1: it was duplicated rather than adopted", n)
 	}
 
 	writes := stub.recorded()
 	for _, write := range writes {
-		if write.method == http.MethodPost {
+		if write.Method == http.MethodPost {
 			t.Fatalf("netbox saw a POST during adoption: %+v", writes)
 		}
 	}
 
 	// The adopting PATCH carried the fields the spec sets and differ, and nothing else.
-	if len(writes) != 1 || writes[0].method != http.MethodPatch {
+	if len(writes) != 1 || writes[0].Method != http.MethodPatch {
 		t.Fatalf("netbox saw %+v, want exactly one PATCH", writes)
 	}
 
 	want := netbox.Object{"name": "Managed", "color": "2196f3", "weight": float64(1000)}
-	if !reflect.DeepEqual(writes[0].payload, want) {
-		t.Errorf("adopting PATCH = %v, want %v", writes[0].payload, want)
+	if !reflect.DeepEqual(writes[0].Payload, want) {
+		t.Errorf("adopting PATCH = %v, want %v", writes[0].Payload, want)
 	}
 
 	// The description the CR never mentions is left alone. "Spec omission means do not
 	// manage" is what lets the operator share an object with a human.
-	if got := stub.tag(id)["description"]; got != "made by hand" {
+	if got := stub.get(id)["description"]; got != "made by hand" {
 		t.Errorf("description = %v, want it untouched at %q", got, "made by hand")
 	}
 }
@@ -612,8 +355,9 @@ func TestTagAdoptsAPreExistingNetBoxTag(t *testing.T) {
 // else's object is not permission to take it over, because the very next step reconciles
 // it towards this spec and there is no undo for that.
 func TestTagConflictRefusesToAdoptByDefault(t *testing.T) {
-	ns, stub := newNamespace(t), newTagStub(t)
-	readyEndpoint(t, ns, stub.URL)
+	ns := newNamespace(t)
+	stub, target := newNetBoxStub(t, tagKind)
+	readyEndpoint(t, ns, target)
 
 	id := stub.seed(netbox.Object{"name": "Legacy", "slug": "guarded", "color": "ff0000"})
 	makeTag(t, ns, "guarded", nil)
@@ -634,7 +378,7 @@ func TestTagConflictRefusesToAdoptByDefault(t *testing.T) {
 		t.Errorf("Ready = %q, want False", ready.Status)
 	}
 
-	if !strings.Contains(ready.Message, strconv.Itoa(id)) {
+	if !strings.Contains(ready.Message, strconv.FormatInt(id, 10)) {
 		t.Errorf("Ready message = %q, want it to name netbox object %d", ready.Message, id)
 	}
 
@@ -646,7 +390,7 @@ func TestTagConflictRefusesToAdoptByDefault(t *testing.T) {
 		t.Errorf("netbox saw %+v, want no writes at all", writes)
 	}
 
-	if got := stub.tag(id)["color"]; got != "ff0000" {
+	if got := stub.get(id)["color"]; got != "ff0000" {
 		t.Errorf("colour = %v, want the pre-existing ff0000 left alone", got)
 	}
 }
@@ -654,25 +398,26 @@ func TestTagConflictRefusesToAdoptByDefault(t *testing.T) {
 // TestDeletingATagRemovesItFromNetBox is the deletion contract at its simplest: no
 // dependents, no PROTECT, and the finalizer comes off only once NetBox has confirmed.
 func TestDeletingATagRemovesItFromNetBox(t *testing.T) {
-	ns, stub := newNamespace(t), newTagStub(t)
-	readyEndpoint(t, ns, stub.URL)
+	ns := newNamespace(t)
+	stub, target := newNetBoxStub(t, tagKind)
+	readyEndpoint(t, ns, target)
 	tag := makeTag(t, ns, "doomed", nil)
 
 	eventually(t, "Ready=True", func() bool { return tagIsReady(ns, "doomed") })
-	id := int(mustFetchTag(t, ns, "doomed").Status.ID)
+	id := mustFetchTag(t, ns, "doomed").Status.ID
 
 	if err := k8sClient.Delete(context.Background(), tag); err != nil {
 		t.Fatalf("deleting the tag: %v", err)
 	}
 
-	eventually(t, "the tag gone from netbox", func() bool { return stub.tag(id) == nil })
+	eventually(t, "the tag gone from netbox", func() bool { return stub.get(id) == nil })
 	eventually(t, "the CR gone from the cluster", func() bool { return fetchTag(ns, "doomed") == nil })
 
 	writes := stub.recorded()
 	last := writes[len(writes)-1]
 
-	if last.method != http.MethodDelete || last.id != id {
-		t.Errorf("the last write was %s on %d, want DELETE on %d", last.method, last.id, id)
+	if last.Method != http.MethodDelete || last.ID != id {
+		t.Errorf("the last write was %s on %d, want DELETE on %d", last.Method, last.ID, id)
 	}
 }
 
@@ -681,10 +426,10 @@ func TestDeletingATagRemovesItFromNetBox(t *testing.T) {
 // catalogue-shaped, so two teams claiming `shared` is Tuesday
 // (docs/decisions/0002-crd-scoping.md).
 func TestSameSlugInTwoNamespacesFirstWins(t *testing.T) {
-	stub := newTagStub(t)
 	first, second := newNamespaceSuffixed(t, "-a"), newNamespaceSuffixed(t, "-b")
-	readyEndpoint(t, first, stub.URL)
-	readyEndpoint(t, second, stub.URL)
+	stub, target := newNetBoxStub(t, tagKind)
+	readyEndpoint(t, first, target)
+	readyEndpoint(t, second, target)
 
 	makeTag(t, first, "shared", nil)
 	eventually(t, "the first namespace ready", func() bool { return tagIsReady(first, "shared") })
@@ -708,7 +453,7 @@ func TestSameSlugInTwoNamespacesFirstWins(t *testing.T) {
 	// engine has: it reconciles one object at a time and never sees the other namespace,
 	// so it cannot name the winning CR.
 	loser := tagCondition(mustFetchTag(t, second, "shared"), netboxv1alpha1.ConditionReady)
-	if !strings.Contains(loser.Message, strconv.Itoa(int(winner.Status.ID))) {
+	if !strings.Contains(loser.Message, strconv.FormatInt(winner.Status.ID, 10)) {
 		t.Errorf("Ready message = %q, want it to name the winning netbox object %d",
 			loser.Message, winner.Status.ID)
 	}
@@ -729,7 +474,7 @@ func TestSameSlugInTwoNamespacesFirstWins(t *testing.T) {
 		t.Error("the winner stopped being Ready once the second namespace claimed its slug")
 	}
 
-	if n := stub.countBySlug("shared"); n != 1 {
+	if n := stub.countByKey("shared"); n != 1 {
 		t.Errorf("%d tags with slug shared, want 1", n)
 	}
 

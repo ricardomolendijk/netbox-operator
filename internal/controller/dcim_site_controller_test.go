@@ -13,6 +13,9 @@ import (
 	"github.com/ricardomolendijk/netbox-operator/internal/netbox"
 )
 
+// siteKind points the shared stub at dcim.Site.
+var siteKind = stubKind{endpoint: "dcim/sites", key: "slug"}
+
 // makeSite applies a NetBoxSite whose slug is its name, and removes it afterwards so the
 // finalizer does not outlive the stub it needs in order to come off.
 func makeSite(t *testing.T, ns, slug string, mutate func(*netboxv1alpha1.NetBoxSite)) *netboxv1alpha1.NetBoxSite {
@@ -68,7 +71,7 @@ func siteIsReady(ns, slug string) bool {
 // against.
 func TestSiteIsCreatedInNetBoxAndReachesReady(t *testing.T) {
 	ns := newNamespace(t)
-	stub, target := newNetBoxStub(t, "dcim/sites", "slug")
+	stub, target := newNetBoxStub(t, siteKind)
 	readyEndpoint(t, ns, target)
 
 	makeSite(t, ns, "home", func(s *netboxv1alpha1.NetBoxSite) {
@@ -101,7 +104,7 @@ func TestSiteIsCreatedInNetBoxAndReachesReady(t *testing.T) {
 // to observe a hot loop -- a single reconcile cannot show one.
 func TestSiteChoiceAndDecimalDoNotHotLoop(t *testing.T) {
 	ns := newNamespace(t)
-	stub, target := newNetBoxStub(t, "dcim/sites", "slug")
+	stub, target := newNetBoxStub(t, siteKind)
 	readyEndpoint(t, ns, target)
 
 	makeSite(t, ns, "steady", func(s *netboxv1alpha1.NetBoxSite) {
@@ -129,7 +132,7 @@ func TestSiteChoiceAndDecimalDoNotHotLoop(t *testing.T) {
 // UI would, and asserts the operator puts it back.
 func TestSiteDriftIsCorrected(t *testing.T) {
 	ns := newNamespace(t)
-	stub, target := newNetBoxStub(t, "dcim/sites", "slug")
+	stub, target := newNetBoxStub(t, siteKind)
 	readyEndpoint(t, ns, target)
 
 	makeSite(t, ns, "drifty", nil)
@@ -151,7 +154,7 @@ func TestSiteDriftIsCorrected(t *testing.T) {
 // created is not a default worth having.
 func TestSiteAdoptsAPreExistingNetBoxSite(t *testing.T) {
 	ns := newNamespace(t)
-	stub, target := newNetBoxStub(t, "dcim/sites", "slug")
+	stub, target := newNetBoxStub(t, siteKind)
 	readyEndpoint(t, ns, target)
 
 	existing := stub.seed(netbox.Object{
@@ -176,7 +179,7 @@ func TestSiteAdoptsAPreExistingNetBoxSite(t *testing.T) {
 
 func TestSiteRefusesToAdoptByDefault(t *testing.T) {
 	ns := newNamespace(t)
-	stub, target := newNetBoxStub(t, "dcim/sites", "slug")
+	stub, target := newNetBoxStub(t, siteKind)
 	readyEndpoint(t, ns, target)
 
 	stub.seed(netbox.Object{"name": "Home", "slug": "handsoff", "status": "active"})
@@ -210,7 +213,7 @@ func TestSiteRefusesToAdoptByDefault(t *testing.T) {
 func TestSameSiteSlugInTwoNamespaces(t *testing.T) {
 	first := newNamespaceSuffixed(t, "-a")
 	second := newNamespaceSuffixed(t, "-b")
-	stub, target := newNetBoxStub(t, "dcim/sites", "slug")
+	stub, target := newNetBoxStub(t, siteKind)
 	readyEndpoint(t, first, target)
 	readyEndpoint(t, second, target)
 
@@ -243,7 +246,7 @@ func TestSameSiteSlugInTwoNamespaces(t *testing.T) {
 
 func TestDeletingASiteRemovesItFromNetBox(t *testing.T) {
 	ns := newNamespace(t)
-	stub, target := newNetBoxStub(t, "dcim/sites", "slug")
+	stub, target := newNetBoxStub(t, siteKind)
 	readyEndpoint(t, ns, target)
 
 	site := makeSite(t, ns, "transient", nil)
@@ -263,7 +266,7 @@ func TestDeletingASiteRemovesItFromNetBox(t *testing.T) {
 // unchanged cannot help, and the operator must say so rather than spin.
 func TestSiteRejectedByNetBoxReportsAndStops(t *testing.T) {
 	ns := newNamespace(t)
-	stub, target := newNetBoxStub(t, "dcim/sites", "slug")
+	stub, target := newNetBoxStub(t, siteKind)
 	stub.createStatus = http.StatusBadRequest
 	readyEndpoint(t, ns, target)
 

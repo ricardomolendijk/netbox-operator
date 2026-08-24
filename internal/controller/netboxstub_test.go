@@ -3,9 +3,11 @@ package controller
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -29,11 +31,15 @@ type stubWrite struct {
 // extensibility claim is only true of the production code.
 //
 // `key` is the natural-key field the kind is looked up by, which is all the stub needs to
-// know about the kind: everything else it stores and returns verbatim.
+// know about the kind: every other column it stores as it was sent, and reads back in the
+// shape NetBox would.
 type netboxStubServer struct {
 	t        *testing.T
 	endpoint string
 	key      string
+	// url is the stub's own base URL, kept because every object carries a self `url` and
+	// that column is where status.url comes from.
+	url string
 
 	mu      sync.Mutex
 	objects map[int64]netbox.Object
@@ -45,25 +51,31 @@ type netboxStubServer struct {
 	createStatus int
 }
 
-// newNetBoxStub returns a running stub and its URL. `key` names the natural-key field, for
-// example "slug".
+// stubKind is everything the stub needs to know about a kind: the endpoint it serves and
+// the natural-key field objects are looked up by. Each kind declares its own next to that
+// kind's tests.
 //
-// unparam is correct that `endpoint` has one caller today: NetBoxTag predates this stub and
-// still carries its own 250-line copy. Migrating it is a separate change -- CONTRIBUTING.md
-// forbids refactoring another kind's tests inside a feature PR -- and until then the
-// parameter is generic by design rather than by use.
-//
-//nolint:unparam // generic by design; NetBoxTag migrates onto it separately
-func newNetBoxStub(t *testing.T, endpoint, key string) (*netboxStubServer, string) {
+// One value rather than two parameters because unparam is right that `key` is the same
+// string at every call site -- both kinds registered so far are keyed by `slug` -- and that
+// is a fact about those two kinds rather than about the stub, which is parameterised for the
+// first kind whose identity is not a slug.
+type stubKind struct {
+	endpoint string
+	key      string
+}
+
+// newNetBoxStub returns a running stub and its URL.
+func newNetBoxStub(t *testing.T, kind stubKind) (*netboxStubServer, string) {
 	t.Helper()
 
 	s := &netboxStubServer{
-		t: t, endpoint: endpoint, key: key,
+		t: t, endpoint: kind.endpoint, key: kind.key,
 		objects: map[int64]netbox.Object{}, nextID: 100,
 	}
 
 	srv := httptest.NewServer(http.HandlerFunc(s.route))
 	t.Cleanup(srv.Close)
+	s.url = srv.URL
 
 	return s, srv.URL
 }
@@ -109,9 +121,11 @@ func (s *netboxStubServer) list(w http.ResponseWriter, r *http.Request) {
 
 	query := r.URL.Query()
 	results := []netbox.Object{}
-	for _, obj := range s.objects {
-		if stubMatches(obj, query, s.key) {
-			results = append(results, obj)
+	// Ordered by id rather than by map iteration, so a query matching more than one object
+	// answers the same way on every run and an ambiguity test cannot pass by luck.
+	for _, id := range slices.Sorted(maps.Keys(s.objects)) {
+		if stubMatches(s.objects[id], query, s.key) {
+			results = append(results, s.objects[id])
 		}
 	}
 	writeStubJSON(w, http.StatusOK, netbox.Object{
@@ -135,16 +149,45 @@ func (s *netboxStubServer) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	_, created := s.store(payload)
+	writeStubJSON(w, http.StatusCreated, created)
+}
+
+// stubTimestamp is what every object's created and last_updated read back as. Fixed rather
+// than the wall clock, because no operator behaviour may depend on their value and a stable
+// one keeps a failing test's diff readable.
+const stubTimestamp = "2026-08-21T00:00:00Z"
+
+// store puts obj into NetBox under a fresh id and returns both. The caller holds the lock.
+//
+// It adds the four read-only columns every ChangeLoggedModel serialises rather than storing
+// only what it was sent, because two things are unobservable against a NetBox that omits
+// them: status.url is copied straight out of a write response, and a descriptor that wrongly
+// tried to manage `display`, `created` or `last_updated` would PATCH the same value on every
+// resync forever (docs/netbox-schema.md, preamble).
+func (s *netboxStubServer) store(obj netbox.Object) (int64, netbox.Object) {
 	s.nextID++
-	obj := netbox.Object{"id": float64(s.nextID)}
-	for k, v := range payload {
-		obj[k] = v
+
+	stored := netbox.Object{"id": float64(s.nextID)}
+	for k, v := range obj {
+		stored[k] = v
 	}
+
+	stored["url"] = fmt.Sprintf("%s/api/%s/%d/", s.url, s.endpoint, s.nextID)
+	stored["created"], stored["last_updated"] = stubTimestamp, stubTimestamp
+	// `display` is the model's __str__, which is `name` on every kind that has one and the
+	// natural key on a kind that does not.
+	stored["display"] = stored[s.key]
+	if name, ok := stored["name"]; ok {
+		stored["display"] = name
+	}
+
 	// NetBox returns a choice column as {"value","label"} and a decimal as a padded string.
 	// Reproducing that here is the point of an integration stub: a stub that echoes the
 	// request cannot catch a normalisation bug.
-	s.objects[s.nextID] = netboxShape(obj)
-	writeStubJSON(w, http.StatusCreated, s.objects[s.nextID])
+	s.objects[s.nextID] = netboxShape(stored)
+
+	return s.nextID, s.objects[s.nextID]
 }
 
 func (s *netboxStubServer) object(w http.ResponseWriter, r *http.Request, id int64) {
@@ -184,9 +227,17 @@ func (s *netboxStubServer) object(w http.ResponseWriter, r *http.Request, id int
 // netboxShape rewrites a stored object into the shape NetBox returns on read: choice
 // columns become {"value","label"} and the two decimal columns become padded strings.
 //
-// Hardcoding which fields those are keeps the stub honest without a schema: `status` is the
-// only choice column on the kinds that use this stub, and latitude/longitude the only
-// decimals. Extend it when a kind needs more, and the extension is the documentation.
+// Which columns those are is hardcoded rather than read off the kind's Descriptor, and that
+// is the decision worth defending: a stub that derived NetBox's read shape from the same
+// descriptor the production code writes against would agree with it by construction, and a
+// test that cannot disagree cannot fail. `status` is the only choice column on the kinds
+// that use this stub and latitude/longitude the only decimals; extend the list when a kind
+// needs more, and the extension is the documentation.
+//
+// `object_types` is deliberately not in it. NetBox serialises extras.Tag.object_types as the
+// same `app_label.model` strings it accepts on write (docs/netbox-schema.md -> extras.Tag,
+// a ManyToManyField onto contenttypes.ContentType), so it reads back as it was written and
+// there is no normalisation to reproduce.
 func netboxShape(obj netbox.Object) netbox.Object {
 	out := netbox.Object{}
 	for k, v := range obj {
@@ -234,14 +285,9 @@ func (s *netboxStubServer) seed(obj netbox.Object) int64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.nextID++
-	stored := netbox.Object{"id": float64(s.nextID)}
-	for k, v := range obj {
-		stored[k] = v
-	}
-	s.objects[s.nextID] = netboxShape(stored)
+	id, _ := s.store(obj)
 
-	return s.nextID
+	return id
 }
 
 // setField changes a value server-side, as a human editing the NetBox UI would. This is how
@@ -258,11 +304,16 @@ func (s *netboxStubServer) setField(id int64, name string, value any) {
 	s.objects[id] = netboxShape(obj)
 }
 
+// get returns a copy of one stored object, or nil once it is gone.
+//
+// A copy, because a test polls it from its own goroutine while the engine is still writing
+// the original: handing out the stored map is a concurrent map read and write, which is a
+// runtime fatal error rather than a flake.
 func (s *netboxStubServer) get(id int64) netbox.Object {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	return s.objects[id]
+	return maps.Clone(s.objects[id])
 }
 
 // countByKey is how a test asserts the engine did not create a duplicate.
