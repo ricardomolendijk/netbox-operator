@@ -286,7 +286,15 @@ assert schema['dcim.Rack']['meta']['ordering'] == "('site', 'position')", 'a nes
 # missing from any CRD derived from it. It is still dropped -- but no longer in silence, and
 # that warning is the only thing the extractor has to say about a healthy tree.
 assert not any(f['name'] == 'outer_unit' for f in schema['dcim.Rack']['fields'])
-assert extract_err.split() == '!! dcim.Rack.outer_unit: unknown field type RackUnitField, column omitted'.split(), \
+# The second line is NBO-041's narrowing of the cross-app base warning: it now fires only where
+# it actually cost a column, naming the model that lost it. `TenancyMixin` is declared in ipam
+# and netbox and in neither of dcim's modules, so dcim.RackPort's `ambiguous_tenant` really is
+# missing -- while `ComponentModel`, declared in dcim *and* ipam, no longer warns at all because
+# each app's models now resolve their own.
+assert extract_err.split() == (
+    '!! dcim.Rack.outer_unit: unknown field type RackUnitField, column omitted\n'
+    '!! dcim.RackPort: base TenancyMixin is declared in more than one app and not in dcim: '
+    'columns inherited from it cannot be attributed').split(), \
     f"unexpected extractor stderr: {extract_err}"
 
 # --- NBO-071 "also worth checking": blank is form-level, not SQL -------------------------

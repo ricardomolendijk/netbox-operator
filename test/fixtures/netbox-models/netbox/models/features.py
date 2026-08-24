@@ -43,3 +43,12 @@ class LegacyTagsMixin(models.Model):
 
     class Meta:
         abstract = True
+
+
+class TenancyMixin(models.Model):
+    """The netbox half of the pair declared in ipam too: a bare `TenancyMixin` in a dcim model's
+    bases matches neither dcim nor a single other app, so its columns cannot be attributed."""
+    ambiguous_tenant = models.CharField(max_length=8, blank=True)
+
+    class Meta:
+        abstract = True

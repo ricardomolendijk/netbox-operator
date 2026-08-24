@@ -7,6 +7,7 @@ import (
 
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/utils/ptr"
 
 	netboxv1alpha1 "github.com/ricardomolendijk/netbox-operator/api/v1alpha1"
 )
@@ -208,15 +209,22 @@ func ipAddressDescriptor() Descriptor {
 			// the Kind by its own typed alias rather than by a GVK written out here --
 			// so a renamed member or a re-aimed alias fails the descriptor rather than
 			// silently resolving against the wrong Kind.
-			Members: []GenericFKMember{
-				{Spec: "interfaceRef", Target: netboxv1alpha1.InterfaceRef{}.TargetGVK()},
-				{Spec: "vmInterfaceRef", Target: netboxv1alpha1.VMInterfaceRef{}.TargetGVK()},
-				{Spec: "fhrpGroupRef", Target: netboxv1alpha1.FHRPGroupRef{}.TargetGVK()},
-			},
+			//
 			// NetBox deletes an interface's addresses with it, through the `ip_addresses`
 			// GenericRelation on the interface models rather than through an `on_delete` on
-			// this column. That is the cascade ADR-0003 rule 4 builds its whole argument on.
-			CascadeOnDelete: true,
+			// this column. That is the cascade ADR-0003 rule 4 builds its whole argument on,
+			// and it is stated per member because that is where NetBox declares it: all three
+			// of dcim.Interface, virtualization.VMInterface and ipam.FHRPGroup carry
+			// `ip_addresses GenericRelation` (docs/netbox-schema.md), so this union happens to
+			// agree -- which the descriptor has to say member by member rather than assume.
+			Members: []GenericFKMember{
+				{Spec: "interfaceRef", Target: netboxv1alpha1.InterfaceRef{}.TargetGVK(),
+					CascadeOnDelete: ptr.To(true)},
+				{Spec: "vmInterfaceRef", Target: netboxv1alpha1.VMInterfaceRef{}.TargetGVK(),
+					CascadeOnDelete: ptr.To(true)},
+				{Spec: "fhrpGroupRef", Target: netboxv1alpha1.FHRPGroupRef{}.TargetGVK(),
+					CascadeOnDelete: ptr.To(true)},
+			},
 		}},
 
 		// `assignedObject` and not `vrfRef`: `ipam.IPAddress.vrf` is `on_delete=PROTECT`
@@ -255,17 +263,14 @@ func clusterDescriptor() Descriptor {
 		},
 		UpdateStrategy: UpdatePatch,
 		ReadOnly:       append(ScopeCacheColumns(), "created", "last_updated", "url", "display"),
-		GenericFKs:     []GenericFKSpec{ScopeFK("scope")},
+		GenericFKs:     []GenericFKSpec{ScopeFK("scope", ScopeCascadesFromEvery())},
 
-		// No containment parent, and for a reason worth keeping in front of a reader: the
-		// scope union's cascade is *per member*, and CascadeOnDelete is per pair.
-		// dcim.Region and dcim.SiteGroup declare a `clusters` GenericRelation and dcim.Site
-		// and dcim.Location do not (docs/netbox-schema.md), so a cluster scoped to a region
-		// is deleted with it and one scoped to a site is merely orphaned. One flag cannot say
-		// both, and the half that would be wrong is the one that deletes a CR whose row is
-		// still there -- so this kind declares none. ipam.Prefix is the case where all four
-		// members do cascade (`prefixes` GenericRelation on each), and it is the one that
-		// carries `ContainmentRef: "scope"`.
+		// The containment parent, and every member of the union cascades -- by two mechanisms,
+		// which is why the descriptor states it per member (#214). dcim.Region and
+		// dcim.SiteGroup declare a `clusters` GenericRelation; dcim.Site and dcim.Location do
+		// not need one, because dcim.CachedScopeMixin's `_site` and `_location` are
+		// `on_delete=CASCADE` on this very model (docs/netbox-schema.md).
+		ContainmentRef: "scope",
 	}
 }
 

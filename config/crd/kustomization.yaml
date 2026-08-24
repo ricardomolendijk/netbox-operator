@@ -18,5 +18,6 @@ resources:
 - bases/netbox.kubeforge.org_netboxclustertypes.yaml
 - bases/netbox.kubeforge.org_netboxclustergroups.yaml
 - bases/netbox.kubeforge.org_netboxclusters.yaml
+- bases/netbox.kubeforge.org_netboxipaddresses.yaml
 - bases/netbox.kubeforge.org_netboxdevices.yaml
 - bases/netbox.kubeforge.org_netboxinterfaces.yaml

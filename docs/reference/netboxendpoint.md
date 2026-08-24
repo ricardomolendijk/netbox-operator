@@ -318,7 +318,7 @@ conflicting object, and it does not affect this endpoint's own re-probe, which i
 token and the version rather than about drift.
 
 There is deliberately no value in which NetBox wins and the difference is promoted back into
-a `spec`: that would make the operator a second writer to desired state. `nbctl export`
+a `spec`: that would make the operator a second writer to desired state. [`nbctl export`](../operations/exporting.md)
 (NBO-040) is the supported way to turn NetBox's contents into manifests.
 
 **If it is wrong.** Any other value is rejected at admission by the enum. An endpoint stored

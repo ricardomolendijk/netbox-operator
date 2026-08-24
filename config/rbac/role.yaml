@@ -27,6 +27,7 @@ rules:
   - netboxclustertypes
   - netboxdevices
   - netboxinterfaces
+  - netboxipaddresses
   - netboxlocations
   - netboxprefixes
   - netboxregions
@@ -53,6 +54,7 @@ rules:
   - netboxclustertypes/finalizers
   - netboxdevices/finalizers
   - netboxinterfaces/finalizers
+  - netboxipaddresses/finalizers
   - netboxlocations/finalizers
   - netboxprefixes/finalizers
   - netboxregions/finalizers
@@ -76,6 +78,7 @@ rules:
   - netboxdevices/status
   - netboxendpoints/status
   - netboxinterfaces/status
+  - netboxipaddresses/status
   - netboxlocations/status
   - netboxprefixes/status
   - netboxregions/status

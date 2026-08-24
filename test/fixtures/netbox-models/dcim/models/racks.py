@@ -1,10 +1,12 @@
 """Fixture models, shaped like netbox/dcim/models/*.py. See ../../README.md."""
 from django.contrib.auth.models import User
 from django.db import models
+from django.db.models import Q
+from django.db.models.functions import Lower
 
 from dcim.choices import RackAirflow, RackStatus
 from dcim.fields import RackUnitField
-from dcim.models.mixins import WeightMixin
+from dcim.models.mixins import ComponentModel, TenancyMixin, WeightMixin
 from dcim.models.sites import Site
 from netbox.models import OrganizationalModel, PrimaryModel
 from utilities.fields import ColorField, CounterCacheField
@@ -122,3 +124,35 @@ class RackReservation(PrimaryModel):
 
     class Meta(PrimaryModel.Meta):
         ordering = ('created',)
+
+
+class BaseRackKind(OrganizationalModel):
+    """NBO-041: the base half of a field-less subclass pair, named so that no substring of it
+    is "Model", "Component" or "Template"."""
+    color = models.CharField(max_length=6)
+
+    class Meta:
+        abstract = True
+
+
+class SpecialRackKind(BaseRackKind):
+    """NBO-041: a subclass with a docstring for a body, whose base's *name* matched none of the
+    substrings the inclusion test used to look for. Both `circuits.CircuitType` and
+    `circuits.VirtualCircuitType` -- two shipped API endpoints -- had no schema entry at all.
+    Whether a class is a model is reachability, not a substring of a base's name.
+    """
+
+
+class RackPort(ComponentModel, TenancyMixin, PrimaryModel):
+    """NBO-041: inherits dcim's ComponentModel, not ipam's, and the ambiguous TenancyMixin."""
+    rack = models.ForeignKey(to=Rack, on_delete=models.CASCADE, related_name='ports')
+
+    class Meta:
+        constraints = (
+            models.UniqueConstraint(Lower('name'), 'rack', name='%(app_label)s_%(class)s_unique_name_rack'),
+            models.UniqueConstraint(
+                fields=('name',),
+                name='%(app_label)s_%(class)s_unique_name',
+                condition=Q(rack__isnull=True),
+            ),
+        )

@@ -22,7 +22,8 @@ import (
 var stampedObjectTypes = []string{
 	"dcim.device", "dcim.interface", "dcim.location", "dcim.region", "dcim.site",
 	"dcim.sitegroup",
-	"ipam.prefix", "ipam.routetarget", "ipam.vlan", "ipam.vlangroup", "ipam.vrf",
+	"ipam.ipaddress", "ipam.prefix", "ipam.routetarget", "ipam.vlan", "ipam.vlangroup",
+	"ipam.vrf",
 	"tenancy.tenant", "tenancy.tenantgroup",
 	"virtualization.cluster", "virtualization.clustergroup", "virtualization.clustertype",
 }

@@ -263,6 +263,11 @@ type (
 	// ClusterTypeRef points at a NetBoxClusterType (virtualization.ClusterType,
 	// virtualization/cluster-types).
 	ClusterTypeRef ObjectRef
+	// IPAddressRef points at a NetBoxIPAddress (ipam.IPAddress, ipam/ip-addresses).
+	//
+	// The only self-referential alias on a non-tree model: `nat_inside` points at another
+	// address of the same kind (docs/netbox-schema.md -> ipam.IPAddress, `nat_inside
+	// ForeignKey -> ipam.IPAddress on_delete=SET_NULL`).
 
 	// DeviceRef points at a NetBoxDevice (dcim.Device, dcim/devices).
 	//
@@ -490,6 +495,7 @@ var (
 	_ RefTarget = ClusterRef{}
 	_ RefTarget = ClusterGroupRef{}
 	_ RefTarget = ClusterTypeRef{}
+	_ RefTarget = VRFRef{}
 	_ RefTarget = DeviceRef{}
 	_ RefTarget = DeviceTypeRef{}
 	_ RefTarget = DeviceRoleRef{}

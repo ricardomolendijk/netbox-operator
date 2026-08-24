@@ -76,6 +76,19 @@ var (
 	// no target Kind, or a name a sibling member already claims.
 	ErrInvalidGenericFKMember = errors.New("malformed generic-FK union member")
 
+	// ErrMemberCascadePartial is returned when a union states CascadeOnDelete for some of its
+	// members and leaves the rest unstated.
+	//
+	// The check exists because the flags are supplied per referring model and cannot be
+	// defaulted (#214, ScopeFK): the scope union's cascade is a fact about ipam.Prefix or
+	// virtualization.Cluster, not about the scope. So a caller listing three of four scope
+	// members has almost certainly mistyped or forgotten the fourth, and the failure is
+	// silent in the worst direction -- the forgotten member reads as "does not cascade", the
+	// object scoped through it gets no owner reference, and the CR outlives the row NetBox
+	// deleted until the engine recreates it. All or none, so that "unstated" stays a
+	// statement about the whole union rather than an accident about one member.
+	ErrMemberCascadePartial = errors.New("generic-FK union states cascadeOnDelete for only some members")
+
 	// ErrMemberTypeNotAllowed is returned when a union member's target Kind is registered
 	// and its object type is not in the pair's AllowedTypes.
 	//
@@ -175,6 +188,29 @@ type GenericFKMember struct {
 	// alias's own answer, `v1alpha1.InterfaceRef{}.TargetGVK()`, so the alias stays the
 	// single source of truth for what it points at.
 	Target schema.GroupVersionKind
+
+	// CascadeOnDelete says NetBox deletes *this* object when the object this member points
+	// at is deleted. Same meaning and same job as Field.CascadeOnDelete, one level down:
+	// it is what lets a polymorphic reference be a containment parent under ADR-0003 rule 4.
+	//
+	// Per member and not per pair (#214), because that is where the fact lives. A generic
+	// FK's cascade is a property of the *referring* model per target, and NetBox reaches it
+	// by a different mechanism for different members of one union: a `GenericRelation` on
+	// the target model, or a denormalised `on_delete=CASCADE` column on the referring one.
+	// virtualization.Cluster is the worked example -- `clusters GenericRelation` on
+	// dcim.Region and dcim.SiteGroup, `_site` and `_location` CASCADE from
+	// dcim.CachedScopeMixin for the other two (docs/netbox-schema.md) -- so a pair-wide flag
+	// could record neither the value nor its citation per member, and the Kind shipped with
+	// no containment parent at all rather than one that was right for half its scopes.
+	//
+	// A *bool because "not stated" is a third answer and has to be distinguishable from
+	// "does not cascade". A union whose members state it unevenly is a boot failure
+	// (ErrMemberCascadePartial): with cascade stated on three of four scope members, the
+	// fourth silently loses a cascade the server performs, which resurrects rows NetBox
+	// deleted. A union where *no* member states it is legal and simply has no containment
+	// parent -- most unions have no cascade fact recorded yet, and an unstated cascade is
+	// the safe default rather than a claim.
+	CascadeOnDelete *bool
 }
 
 // GenericFKSpec describes one polymorphic foreign key: a `*_type` / `*_id` column pair
@@ -206,16 +242,6 @@ type GenericFKSpec struct {
 	// them, so a member the API accepts and NetBox would reject cannot ship.
 	Members []GenericFKMember
 
-	// CascadeOnDelete says NetBox deletes *this* object when the object this pair points at
-	// is deleted, which for a generic FK is a `GenericRelation` on the target model rather
-	// than an `on_delete` on the column (docs/netbox-schema.md). dcim.Site declares
-	// `prefixes GenericRelation`, so deleting a site deletes the prefixes scoped to it.
-	//
-	// Same meaning and same job as Field.CascadeOnDelete: it is what lets a polymorphic
-	// reference be a containment parent under ADR-0003 rule 4, and validateContainment
-	// refuses one that does not cascade.
-	CascadeOnDelete bool
-
 	// Cached are the read-only denormalised columns NetBox maintains from this pair:
 	// `_region`, `_site_group`, `_site` and `_location` for CachedScopeMixin
 	// (docs/netbox-schema.md -> dcim.CachedScopeMixin). Each must also appear in
@@ -239,6 +265,49 @@ func (g GenericFKSpec) MemberFor(spec string) (GenericFKMember, bool) {
 	}
 
 	return GenericFKMember{}, false
+}
+
+// MemberByTarget returns the union member that resolves against a Kind.
+//
+// The reverse of MemberFor, and it exists because the owner reference is decided from a
+// *resolved* reference rather than from the spec field the user wrote: resolver.Result carries
+// the target's GVK and not the member name it came in under. Keyed on the Kind for the same
+// reason MemberFor is keyed on the spec name -- both are data on the member, and neither is a
+// switch on Kind.
+func (g GenericFKSpec) MemberByTarget(target schema.GroupVersionKind) (GenericFKMember, bool) {
+	for _, member := range g.Members {
+		if member.Target == target {
+			return member, true
+		}
+	}
+
+	return GenericFKMember{}, false
+}
+
+// Cascades reports whether NetBox deletes the referring object when the object *this member*
+// points at is deleted. A member that does not state a cascade does not cascade.
+//
+// The reconcile-time half of the containment rule: which member a union resolved to is not
+// known until the reference resolves, so this is the question reconciler/owners.go asks once
+// it is (#214).
+func (g GenericFKSpec) Cascades(target schema.GroupVersionKind) bool {
+	member, declared := g.MemberByTarget(target)
+
+	return declared && member.CascadeOnDelete != nil && *member.CascadeOnDelete
+}
+
+// anyCascades reports whether at least one member cascades.
+//
+// The boot-time half, and the reason it is "any" rather than "all": a union where *some*
+// member cascades can be a containment parent for the objects that use those members, and
+// refusing the whole descriptor would take the cascade away from the members that have one.
+// A union where *no* member cascades can never produce an owner reference, so naming it as a
+// containment ref is a modelling error nothing about the running system can redeem --
+// validateContainment refuses it at boot.
+func (g GenericFKSpec) anyCascades() bool {
+	return slices.ContainsFunc(g.Members, func(member GenericFKMember) bool {
+		return member.CascadeOnDelete != nil && *member.CascadeOnDelete
+	})
 }
 
 // MemberSpecs are the union's member field names, in declaration order. It is what the
@@ -328,18 +397,52 @@ type Descriptor struct {
 	// outside it a 400.
 	CustomFieldable bool
 
+	// RetainOnDelete makes spec.deletionPolicy default to Retain rather than Delete on this
+	// kind.
+	//
+	// Data here rather than a `+kubebuilder:default` marker because the field is declared
+	// once, on the shared NetBoxObjectSpec, so a marker there is the same default for every
+	// kind. Decision #176 answered that IPAM is the exception: deleting an ipam.IPAddress
+	// frees the address for reallocation and deleting an ipam.Prefix destroys the record of
+	// who a range belonged to, while a tag or a site is cheap to recreate. See
+	// docs/concepts/deletion.md for the table.
+	RetainOnDelete bool
+
+	// DuplicateSpec is the CR spec field that declares several NetBox objects may match
+	// this object's natural key, and that the provenance stamp decides which one is the
+	// CR's own (decision #177, NBO-025).
+	//
+	// A spec field name like ContainmentRef, and *not* an entry in Fields: it configures the
+	// operator rather than describing a NetBox column, so internal/reconciler excludes it
+	// from the payload exactly as it excludes the envelope's own fields. A name that does not
+	// match the kind's real spec field is not checked at boot and does not need to be -- the
+	// real field is then unmapped, and the first object that sets it reports
+	// Ready=False, Reason=Invalid naming it.
+	//
+	// Empty for every kind whose identity NetBox actually enforces, which is almost all of
+	// them.
+	DuplicateSpec string
+
 	// ContainmentRef is the one spec field whose target gets a non-controller owner
 	// reference, so deleting the parent cascades. Exactly one, because Kubernetes garbage
 	// collection waits for every owner and two containment owners silently turn "delete
 	// the site or the VRF" into "delete both"
 	// (docs/decisions/0003-ownership-and-references.md rule 4). Empty when the kind has no
-	// containment parent, which is every catalogue kind.
+	// FK the server cascades -- which is not the same as "every catalogue kind", the
+	// equivalence #203 was: tenancy.TenantGroup is as catalogue-like as they come and its
+	// `parent` is CASCADE, so it has one.
 	//
 	// Which one it is, is not a judgement per Kind: it is whichever FK the *server*
 	// cascades, and validateContainment rejects a ref whose Field.CascadeOnDelete is false.
 	// A Kind with no cascading FK gets no containment parent and no cascade -- which is a
 	// consequence rather than a gap, since NetBox refuses that deletion anyway
 	// (docs/concepts/ownership.md).
+	//
+	// On a polymorphic pair the cascade is per union member, so the boot check is that *some*
+	// member cascades and the owner reference is decided per pass from the member the object
+	// actually resolved through (GenericFKMember.CascadeOnDelete, reconciler/owners.go). A
+	// Kind whose union members disagree keeps its containment parent for the members that
+	// cascade instead of losing it for all of them (#214).
 	ContainmentRef string
 }
 
@@ -551,7 +654,28 @@ func validateGenericFKMembers(generic GenericFKSpec) error {
 		seen[member.Spec] = struct{}{}
 	}
 
-	return errors.Join(errs...)
+	return errors.Join(append(errs, validateMemberCascades(generic))...)
+}
+
+// validateMemberCascades holds the union's cascade statement to all-or-none.
+//
+// Named members rather than a count in the message: the whole point is to say *which* member
+// was left out, because the caller supplied the others by hand and is looking for a typo.
+func validateMemberCascades(generic GenericFKSpec) error {
+	unstated := make([]string, 0, len(generic.Members))
+
+	for _, member := range generic.Members {
+		if member.CascadeOnDelete == nil {
+			unstated = append(unstated, member.Spec)
+		}
+	}
+
+	if len(unstated) == 0 || len(unstated) == len(generic.Members) {
+		return nil
+	}
+
+	return fmt.Errorf("%w: %s does not state it for %v", ErrMemberCascadePartial,
+		generic.TypeField, unstated)
 }
 
 // validateGenericFKCaches ties the pair's denormalised columns to ReadOnly, so that a kind

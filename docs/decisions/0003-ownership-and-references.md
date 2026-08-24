@@ -11,6 +11,12 @@ owner reference, and what cross-namespace containment therefore gives up
 **Amended:** 2026-08-24 — rule 4 built, and its mechanism recorded below: the condition it
 reports, and the parts of the prose that are deliberately not built
 ([#175](https://github.com/ricardomolendijk/netbox-operator/issues/175)).
+**Amended:** 2026-08-24 — rule 4's cascade check moved **per union member**, and the premise of
+the limitation recorded below corrected: `GenericRelation` is not a generic FK's only cascade
+path, so `virtualization.Cluster` regains the containment parent it shipped without
+([#214](https://github.com/ricardomolendijk/netbox-operator/issues/214)). The owner reference
+is now decided from the *resolved* member and **removed** when an object moves to a member that
+does not cascade.
 **Amended:** 2026-08-24 — rule 4 rewritten: **one** containment parent per Kind, chosen by
 whether the server cascades rather than by which reference reads like a container, with the
 garbage-collection reason it has to be one
@@ -126,6 +132,7 @@ without a human deciding each one. Worked through:
 | `NetBoxRegion`, `NetBoxSiteGroup` | `parentRef` | `parentRef` | `parent` is `CASCADE`, and it is the only FK |
 | `NetBoxLocation` | `siteRef` (`CASCADE`), `parentRef` (`CASCADE`) | `siteRef` | two qualify; `site` is the **required** one, so every location has it, and deleting the site cascades to a superset of what deleting a parent location does |
 | `NetBoxPrefix` | `scopeRef` (cascades), `vrfRef` (`PROTECT`) | `scopeRef` | every scope target declares a `prefixes` `GenericRelation`; `vrf` is `PROTECT`, so NetBox refuses that deletion outright |
+| `NetBoxCluster` | `scopeRef` (cascades), `typeRef` / `groupRef` (`PROTECT`) | `scopeRef` | `clusters GenericRelation` on the two `SET_NULL` scope targets, `_site` / `_location` `CASCADE` on the other two — the per-member case ([#214](https://github.com/ricardomolendijk/netbox-operator/issues/214)) |
 | `NetBoxIPAddress` | `assignedObject` (cascades), `vrfRef` (`PROTECT`) | `assignedObject` | the `GenericRelation` case below |
 | `NetBoxDevice` | `siteRef`, `roleRef`, `deviceTypeRef`, `tenantRef`, `locationRef` (`PROTECT`), `platformRef` (`SET_NULL`) | **none** | not one of them cascades |
 
@@ -181,7 +188,7 @@ prose above left open, settled here:
   `OwnerReferencesPermissionEnforcement` is enabled. A controller reference earns the flag by
   having created the child; a containment reference has not.
 - **The cascade rule is a boot check, not a review convention.** `Field.CascadeOnDelete` and
-  `GenericFKSpec.CascadeOnDelete` carry the `on_delete` a Kind's foreign key declares, and
+  `GenericFKMember.CascadeOnDelete` carry the `on_delete` a Kind's foreign key declares, and
   `registry.validateContainment` returns `ErrContainmentNotCascade` for a `ContainmentRef`
   naming one that is false. Before this, "does the target's deletion cascade server-side" was
   the one fact a Descriptor could not express and lived in `docs/netbox-schema.md` and a
@@ -189,20 +196,68 @@ prose above left open, settled here:
   The flag is per foreign key rather than only on the containment ref, because it is a fact
   about the column and the generator emits it from the schema either way.
 
-  What it still cannot express: a **generic FK whose union members disagree**. The flag is per
-  pair, and the scope cascade is a `GenericRelation` on each target model — `prefixes` and
-  `vlan_groups` exist on all four scope targets while `clusters` and `wireless_lans` exist only
-  on `dcim.Region` and `dcim.SiteGroup`. So `ipam.Prefix` may declare it and
-  `virtualization.Cluster` may not, and a Kind in that position gets no containment parent at
-  all rather than a cascade that is right for half its scopes.
+- **On a polymorphic reference the cascade is per union member, and so is the decision**
+  ([#214](https://github.com/ricardomolendijk/netbox-operator/issues/214)). A generic FK's
+  cascade is a fact about the *referring* model **per target**: NetBox states it on each
+  target model, so one member of a union can cascade while its sibling does not. A pair-wide
+  flag left two options, and `virtualization.Cluster` shipped with the second — a cascade
+  right for half its scopes, or no containment parent at all. So:
+
+  - `GenericFKMember.CascadeOnDelete` carries it, per member. There is no pair-wide flag left;
+    one mechanism, not two.
+  - `validateContainment` still refuses at boot a `ContainmentRef` where **no** member
+    cascades: nothing about such a reference can ever produce an owner reference. A union
+    whose members *disagree* is legal, and the refusal moves to the object.
+  - The owner reference is decided per pass, from the member the object **resolved through**
+    — `Descriptor.CascadesFrom(spec, targetGVK)`. A member that does not cascade is
+    `False/CascadeUnavailable`, alongside the cross-namespace and raw-`id` causes.
+  - An object that moves to a member that does not cascade **loses** the owner reference of
+    the member it left, and one that moves between two cascading members swaps it in a single
+    pass. A stale containment owner reference is worse than none twice over: beside a new one
+    it gives the object two owners, which garbage collection ANDs; alone it is a promise about
+    an object this one no longer references, so deleting that former parent collects this
+    object and its finalizer deletes a row that was never in its scope.
+  - `ScopeFK` still cannot default the flags — the cascade belongs to the referring kind, not
+    to the union — but a caller stating them for some members and not others is
+    `ErrMemberCascadePartial` at boot rather than a member that silently does not cascade.
+
+  **The premise of the limitation this section used to record was wrong, and the correction is
+  the reason `virtualization.Cluster` has a parent again.** `GenericRelation` is not a generic
+  FK's only cascade path. `dcim.CachedScopeMixin` — which `ipam.Prefix`,
+  `virtualization.Cluster` and `wireless.WirelessLAN` all mix in — declares `_site` and
+  `_location` as `on_delete=CASCADE` and `_region` and `_site_group` as `SET_NULL`, and NetBox
+  maintains all four from `(scope_type, scope_id)`. That is precisely *why* `clusters` and
+  `wireless_lans` are declared as a `GenericRelation` on `dcim.Region` and `dcim.SiteGroup`
+  and not on `dcim.Site` or `dcim.Location`: the two `SET_NULL` targets need the
+  `GenericRelation` to cascade at all, and the two `CASCADE` targets do not. Read together,
+  every scoped Kind NetBox 4.6.8 ships cascades from **all four** members:
+
+  | referring model | region | site group | site | location |
+  |---|---|---|---|---|
+  | `ipam.Prefix` | `prefixes` GR | `prefixes` GR | `_site` CASCADE (+ GR) | `_location` CASCADE (+ GR) |
+  | `ipam.VLANGroup` (no cached columns) | `vlan_groups` GR | `vlan_groups` GR | `vlan_groups` GR | `vlan_groups` GR |
+  | `virtualization.Cluster` | `clusters` GR | `clusters` GR | `_site` CASCADE | `_location` CASCADE |
+  | `wireless.WirelessLAN` | `wireless_lans` GR | `wireless_lans` GR | `_site` CASCADE | `_location` CASCADE |
+
+  So no union a shipped Kind carries disagrees today, and the per-member shape is still the
+  right one: the fact is per `(referring model, target model)`, it is reached by a *different
+  mechanism per member of one union*, and a `CachedScopeMixin` model without a
+  `GenericRelation` on `dcim.Region` — one `GenericRelation` away — cascades from a site and
+  not from a region. The old reading cost `NetBoxCluster` its cascade in exactly the direction
+  that resurrects data: the CR outlived the row NetBox deleted, and the engine's
+  create-if-absent step recreated it.
 
 - **`spec.parentOwnership` on the endpoint is not built.** The per-object annotation is, and it
   covers the case; an endpoint-wide switch would be a third deletion knob beside
   `deletionPolicy` and `onConflict` for a need nobody has stated. Revisit if one is.
 
-The dedupe rule is enforced by only ever *appending*: `controllerutil.SetOwnerReference`
-upserts, so it would strip `controller: true` off an entry naming the same parent, taking away
-the marker rule 5's pruning and [ADR-0005 §2](0005-gitops-coexistence.md) both read.
+The dedupe rule is enforced by never *rewriting*: `controllerutil.SetOwnerReference` upserts,
+so it would strip `controller: true` off an entry naming the same parent, taking away the
+marker rule 5's pruning and [ADR-0005 §2](0005-gitops-coexistence.md) both read. Entries are
+appended, and the only ones ever removed are those in the **containment slot** — a
+*non-controller* owner reference naming one of the Kinds `ContainmentRef` resolves to, which
+is the operator's own slot and the one it would have written itself. A controller reference is
+never removed, and neither is an owner reference to any other Kind.
 
 **5. Inline child sugar is in `v1alpha1`, and every inline field is optional.**
 

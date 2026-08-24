@@ -14,6 +14,7 @@ import (
 
 	netboxv1alpha1 "github.com/ricardomolendijk/netbox-operator/api/v1alpha1"
 	"github.com/ricardomolendijk/netbox-operator/internal/netbox"
+	"github.com/ricardomolendijk/netbox-operator/internal/registry"
 )
 
 // Deletion intervals. A refused delete is not a failure to retry harder: it will keep
@@ -159,7 +160,7 @@ func (p *pass) releaseWithoutDeleting() (release, bool) {
 		}, true
 	}
 
-	if deletionPolicyOf(p.obj) == netboxv1alpha1.DeletionRetain {
+	if deletionPolicyOf(p.obj, p.desc) == netboxv1alpha1.DeletionRetain {
 		return release{
 			event: netboxv1alpha1.EventRetained,
 			message: fmt.Sprintf("spec.deletionPolicy is Retain: netbox %s/%d is left in place",
@@ -347,12 +348,22 @@ func (p *pass) release(ctx context.Context, out release) (ctrl.Result, error) {
 	return ctrl.Result{}, nil
 }
 
-// deletionPolicyOf returns the object's deletion policy, defaulting to the one that leaves
-// nothing behind. The CRD defaults it as well; this is the guard for an object stored
-// before that default existed.
-func deletionPolicyOf(obj Object) netboxv1alpha1.DeletionPolicy {
+// deletionPolicyOf returns the object's deletion policy: the spec's when it states one, and
+// otherwise the default its kind declares.
+//
+// The default is not a CRD marker, and cannot be: spec.deletionPolicy is declared once on the
+// shared NetBoxObjectSpec, so a `+kubebuilder:default` there is the same value for every one
+// of ~120 kinds. Decision #176 made IPAM the exception -- deleting an ipam.IPAddress frees
+// the address for reallocation, which is destructive in a way deleting a tag is not -- so the
+// per-kind answer is data on the Descriptor, where every other per-kind fact lives.
+// docs/concepts/deletion.md carries the table.
+func deletionPolicyOf(obj Object, d registry.Descriptor) netboxv1alpha1.DeletionPolicy {
 	if policy := obj.NetBoxSpec().DeletionPolicy; policy != "" {
 		return policy
+	}
+
+	if d.RetainOnDelete {
+		return netboxv1alpha1.DeletionRetain
 	}
 
 	return netboxv1alpha1.DeletionDelete

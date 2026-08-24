@@ -169,8 +169,14 @@ func fakeDescriptor() registry.Descriptor {
 			{Spec: "localContextData", API: "local_context_data"},
 			// CascadeOnDelete, so this field can stand in for a containment parent: a
 			// descriptor naming a non-cascading ref fails registry validation
-			// (docs/decisions/0003-ownership-and-references.md rule 4).
-			{Spec: "parentRef", API: "parent", Class: registry.ClassRefOne, CascadeOnDelete: true},
+			// (docs/decisions/0003-ownership-and-references.md rule 4). Target too, as every
+			// shipped reference carries one -- it is what the resolver dispatches on, and what
+			// tells owners.go which owner references occupy the containment slot and may
+			// therefore be removed when the reference moves (#214).
+			{
+				Spec: "parentRef", API: "parent", Class: registry.ClassRefOne,
+				Target: fakeGVK, CascadeOnDelete: true,
+			},
 			{Spec: "asnRefs", API: "asns", Class: registry.ClassRefMany},
 		},
 		NaturalKeys:    []registry.NaturalKey{{Fields: []registry.KeyField{{Filter: "slug", Spec: "slug"}}}},

@@ -1,0 +1,52 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxIPAddress
+metadata:
+  name: gateway
+  namespace: default
+spec:
+  # The NetBoxEndpoint to write through, in this namespace. There is no cluster-wide
+  # default endpoint; see config/samples/netbox_v1alpha1_netboxendpoint.yaml.
+  endpointRef: homelab
+
+  # Host bits are preserved: this is the address 10.0.20.1 in the /24 it sits in, and the
+  # operator neither masks it nor requires it to be set. NetBoxPrefix masks; this does not.
+  address: 10.0.20.1/24
+  status: active
+  dnsName: gw.home.arpa
+  description: House gateway
+
+  # No vrfRef, which puts the address in the global table -- a different natural key rather
+  # than the same key with a filter left out. See docs/concepts/lookups.md.
+
+  # spec.deletionPolicy is Retain by default on this kind: deleting an address frees it for
+  # reallocation, so `kubectl delete` leaves NetBox alone unless you say otherwise
+  # (docs/concepts/deletion.md).
+---
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxIPAddress
+metadata:
+  name: vrrp-virtual
+  namespace: default
+spec:
+  endpointRef: homelab
+
+  address: 2001:db8:20::1/64
+  role: vrrp
+
+  # A VRRP virtual address exists once per participating router, so several NetBox objects
+  # legitimately hold it. This says so: a multi-match stops being a Conflict, and this CR's
+  # own object is the one carrying its provenance stamp. It needs the endpoint's
+  # spec.managedBy (docs/operations/provenance.md, docs/reference/netboxipaddress.md).
+  allowDuplicate: true
+
+  # The address is attached to an interface, written as the polymorphic pair
+  # (assigned_object_type, assigned_object_id) -- both columns or neither.
+  #
+  # `lookup` mode resolves against NetBox directly and works today. `name` mode would point
+  # at a NetBoxInterface CR, and that Kind arrives in NBO-030: until then it reports
+  # RefsResolved=False, Reason=RefKindUnavailable rather than being silently dropped.
+  assignedObject:
+    interfaceRef:
+      lookup:
+        device: router-01
+        name: vlan20
