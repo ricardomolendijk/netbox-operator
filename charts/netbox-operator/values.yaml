@@ -1,0 +1,183 @@
+# Default values for netbox-operator.
+#
+# Every value below changes something a user can observe. Values that would only be
+# rendered into a ConfigMap nobody reads are deliberately absent -- see
+# docs/install.md#what-this-chart-does-not-expose for the list and why.
+
+nameOverride: ""
+fullnameOverride: ""
+
+image:
+  repository: ghcr.io/ricardomolendijk/netbox-operator
+  # Empty means .Chart.AppVersion, which is the only place the version is written.
+  tag: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+replicaCount: 1
+
+# Leader election, so a replicaCount above 1 is a warm standby rather than two writers.
+# Its Role and RoleBinding are namespaced to the release namespace, where the Lease lives.
+leaderElection: true
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+# ---------------------------------------------------------------------------------------
+# The operator's Secret blast radius.
+#
+# One Role and RoleBinding per namespace, and nothing cluster-wide: the generated
+# ClusterRole carries no `secrets` rule at all (docs/operations/rbac.md, #100). Every
+# namespace listed here is a namespace in which a compromised operator can read every
+# Secret, so keep the list to the ones that actually hold NetBoxEndpoint credentials.
+#
+# `*` is rejected by values.schema.json. Reading Secrets cluster-wide needs a cluster-wide
+# grant this chart does not ship and will not render from a value; the overlay to add it
+# yourself is in docs/operations/rbac.md#reading-secrets-cluster-wide-anyway.
+#
+# The same list becomes NETBOX_CREDENTIAL_NAMESPACES on the manager. Both halves come from
+# one value for the reason hack/credential-rbac.sh generates two files from one list: a
+# grant without an informer is unused, an informer without a grant stops the manager.
+# ---------------------------------------------------------------------------------------
+credentialNamespaces:
+- default
+
+# ---------------------------------------------------------------------------------------
+# GitOps annotations, ADR-0005 section 5.
+#
+# These become the annotation set the operator stamps onto CRs it materialises itself --
+# inline children, a claim's NetBoxIPAddress. Without the Argo CD entry, an Application
+# containing a NetBoxVirtualMachine with inline interfaces reports OutOfSync forever,
+# because the children are in the cluster and not in Git. Annotating for a tool you do not
+# run is noise, so every entry is switchable and extraAnnotations covers the rest.
+#
+# Rendered as NETBOX_GENERATED_ANNOTATIONS on the manager. Nothing materialises a child CR
+# yet (that is NBO-032, #45), so the value is inert until then -- stated here rather than
+# left to be discovered.
+# ---------------------------------------------------------------------------------------
+gitops:
+  argocd:
+    enabled: true            # argocd.argoproj.io/compare-options: IgnoreExtraneous
+  flux:
+    enabled: false           # kustomize.toolkit.fluxcd.io/reconcile: disabled
+  extraAnnotations: {}
+
+# ---------------------------------------------------------------------------------------
+# Drift and allocation.
+#
+# Both are fields of a NetBoxEndpoint, not of the manager: driftMode is per endpoint on
+# purpose, because two NetBoxes in one cluster can be at different stages of an adoption.
+# So these values reach the endpoint this chart optionally renders (see `endpoint` below)
+# and nothing else -- an endpoint you manage in Git takes them from its own manifest.
+# docs/operations/gitops.md#chart-values says which is which.
+# ---------------------------------------------------------------------------------------
+drift:
+  # Correct is the default and the intended steady state: Git is authoritative, so
+  # NetBox-side drift is simply wrong. Report is migration time -- the first week of an
+  # adoption -- not an operating mode: it writes nothing at all and nothing converges
+  # while it is on. Off drops the periodic resync only.
+  mode: Correct              # Correct | Report | Off
+  resyncPeriod: 10m          # ignored under Off
+  webhookReceiver:
+    # NBO-045 (#69): sub-5s correction driven by NetBox events. Not implemented; the
+    # schema accepts only false so that enabling it is a chart bump, not a silent no-op.
+    enabled: false
+
+allocation:
+  identity:
+    # Derived is sha256(endpoint url + namespace + kind + name), which is what makes a
+    # claim re-applied to a rebuilt cluster reclaim the same address. Explicit means every
+    # claim sets spec.allocationIdentity itself.
+    mode: Derived            # Derived | Explicit
+    # The NetBox custom field the identity is stored in. "" leaves the definition
+    # uncreated, for an endpoint that will never serve a claim.
+    customField: k8s_allocation_identity
+
+# ---------------------------------------------------------------------------------------
+# Metrics. The manager binds nothing unless told to (--metrics-bind-address defaults to 0).
+# There is one port and one scrape target; see docs/operations/observability.md.
+# ---------------------------------------------------------------------------------------
+metrics:
+  enabled: true
+  port: 8443
+  # HTTPS with a self-signed certificate and no authn/authz filter, so the port must not
+  # be reachable outside the cluster and a scraper needs insecureSkipVerify. Setting this
+  # false serves plain HTTP instead.
+  secure: true
+  service:
+    annotations: {}
+  serviceMonitor:
+    # Off by default and skipped entirely when the Prometheus Operator CRD is absent, so
+    # enabling it on a cluster without it is a no-op rather than an install failure.
+    enabled: false
+    interval: 30s
+    scrapeTimeout: ""
+    labels: {}
+    relabelings: []
+    metricRelabelings: []
+
+health:
+  port: 8081
+
+# ---------------------------------------------------------------------------------------
+# An optional NetBoxEndpoint and its token Secret, so a demo install is one command.
+# Leave it off and manage endpoints in Git, which is what ADR-0005 assumes.
+# ---------------------------------------------------------------------------------------
+endpoint:
+  enabled: false
+  name: netbox
+  # Empty means the release namespace. It must be one of credentialNamespaces, or the
+  # operator cannot read the token -- the template refuses to render otherwise.
+  namespace: ""
+  url: ""
+  # Inline token: convenient for a demo, and it puts a NetBox API token in your values
+  # file and in the release's stored manifest. Use existingSecret for anything else.
+  token: ""
+  existingSecret:
+    name: ""
+    key: token
+  mode: Apply                # Apply | DryRun
+  managedBy:
+    # Required before an endpoint may serve a claim: the allocation identity has to be
+    # stored somewhere, and an endpoint with nowhere to store one refuses to allocate.
+    # Empty leaves spec.managedBy unset, which means the operator stamps nothing.
+    clusterID: ""
+  timeout: 30s
+  rateLimit:
+    qps: 20
+    burst: 40
+
+podAnnotations: {}
+podLabels: {}
+priorityClassName: ""
+terminationGracePeriodSeconds: 10
+
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 256Mi
+  requests:
+    cpu: 10m
+    memory: 64Mi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# Extra args and env, for a flag this chart has no value for yet. Escape hatch, not a
+# supported surface: anything durable belongs above.
+extraArgs: []
+extraEnv: []

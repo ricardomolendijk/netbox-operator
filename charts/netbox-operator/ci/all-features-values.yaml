@@ -1,0 +1,101 @@
+# Everything the chart can render, at once. `helm template` over this in CI is what stops a
+# template that is only ever exercised with its default off from breaking unnoticed.
+#
+# Paired with the default values in the same job: between them, every `if` in templates/
+# is taken both ways.
+replicaCount: 2
+leaderElection: true
+
+image:
+  repository: ghcr.io/ricardomolendijk/netbox-operator
+  tag: ci
+  pullPolicy: Always
+imagePullSecrets:
+- name: ghcr
+
+serviceAccount:
+  create: true
+  name: netbox-operator-ci
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::000000000000:role/netbox-operator
+
+credentialNamespaces:
+- default
+- team-a
+- team-b
+
+gitops:
+  argocd:
+    enabled: true
+  flux:
+    enabled: true
+  extraAnnotations:
+    example.com/owner: platform-team
+
+drift:
+  mode: Report
+  resyncPeriod: 5m
+
+allocation:
+  identity:
+    mode: Explicit
+    customField: k8s_allocation_identity
+
+metrics:
+  enabled: true
+  port: 8443
+  secure: true
+  service:
+    annotations:
+      prometheus.io/scrape: "false"
+  serviceMonitor:
+    enabled: true
+    interval: 15s
+    scrapeTimeout: 10s
+    labels:
+      release: kube-prometheus-stack
+    relabelings:
+    - action: labeldrop
+      regex: pod
+    metricRelabelings:
+    - action: drop
+      regex: go_.*
+      sourceLabels: [__name__]
+
+endpoint:
+  enabled: true
+  name: netbox
+  namespace: team-a
+  url: https://netbox.example.invalid
+  token: not-a-real-token
+  mode: DryRun
+  managedBy:
+    clusterID: ci
+  timeout: 15s
+  rateLimit:
+    qps: 5
+    burst: 10
+
+podAnnotations:
+  example.com/annotation: "yes"
+podLabels:
+  example.com/label: "yes"
+priorityClassName: system-cluster-critical
+nodeSelector:
+  kubernetes.io/arch: arm64
+tolerations:
+- key: node-role.kubernetes.io/control-plane
+  operator: Exists
+  effect: NoSchedule
+affinity:
+  podAntiAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+    - topologyKey: kubernetes.io/hostname
+      labelSelector:
+        matchLabels:
+          app.kubernetes.io/name: netbox-operator
+extraArgs:
+- --zap-log-level=debug
+extraEnv:
+- name: EXAMPLE
+  value: "1"

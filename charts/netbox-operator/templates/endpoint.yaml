@@ -1,0 +1,69 @@
+{{- if .Values.endpoint.enabled }}
+{{- /*
+An optional NetBoxEndpoint and its token Secret, so a demo install is one command.
+
+This is also where .Values.drift.* and .Values.allocation.identity.* land, and the only
+place they can: driftMode and resyncPeriod are fields of a NetBoxEndpoint, not settings of
+the manager, because two NetBoxes in one cluster can be at different stages of an
+adoption. An endpoint you manage in Git takes them from its own manifest and this chart
+never sees it -- docs/operations/gitops.md#chart-values.
+*/ -}}
+{{- $ns := include "netbox-operator.endpointNamespace" . -}}
+{{- if not (has $ns (.Values.credentialNamespaces | default list)) -}}
+{{- fail (printf "endpoint.enabled is set and the endpoint is in namespace %q, which is not in credentialNamespaces -- the operator would have no Role for its token Secret there and the endpoint would report Ready=False/SecretMissing. Add %q to credentialNamespaces." $ns $ns) -}}
+{{- end -}}
+{{- if not .Values.endpoint.url -}}
+{{- fail "endpoint.enabled is set but endpoint.url is empty." -}}
+{{- end -}}
+{{- $secretName := .Values.endpoint.existingSecret.name | default (printf "%s-token" (include "netbox-operator.fullname" .)) -}}
+{{- if and (not .Values.endpoint.existingSecret.name) (not .Values.endpoint.token) -}}
+{{- fail "endpoint.enabled is set but neither endpoint.token nor endpoint.existingSecret.name is: there would be no NetBox API token to read." -}}
+{{- end }}
+{{- if not .Values.endpoint.existingSecret.name }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $secretName }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "netbox-operator.labels" . | nindent 4 }}
+    {{- /*
+    Required. The operator's Secret cache selects on this label, so a Secret without it is
+    invisible to the operator even when the name and the namespace are right.
+    */}}
+    netbox.kubeforge.org/endpoint-credential: "true"
+type: Opaque
+stringData:
+  {{ .Values.endpoint.existingSecret.key }}: {{ .Values.endpoint.token | quote }}
+---
+{{- end }}
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxEndpoint
+metadata:
+  name: {{ .Values.endpoint.name }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "netbox-operator.labels" . | nindent 4 }}
+spec:
+  url: {{ .Values.endpoint.url | quote }}
+  tokenSecretRef:
+    name: {{ $secretName }}
+    key: {{ .Values.endpoint.existingSecret.key }}
+  mode: {{ .Values.endpoint.mode }}
+  driftMode: {{ .Values.drift.mode }}
+  resyncPeriod: {{ .Values.drift.resyncPeriod }}
+  timeout: {{ .Values.endpoint.timeout }}
+  rateLimit:
+    qps: {{ .Values.endpoint.rateLimit.qps }}
+    burst: {{ .Values.endpoint.rateLimit.burst }}
+  {{- if .Values.endpoint.managedBy.clusterID }}
+  managedBy:
+    clusterID: {{ .Values.endpoint.managedBy.clusterID | quote }}
+    {{- /*
+    allocation.identity.customField is the NetBox custom field a claim's deterministic
+    identity is stored in (ADR-0005 section 3). Empty leaves the definition uncreated, for
+    an endpoint that will never serve a claim.
+    */}}
+    allocationIdentityField: {{ .Values.allocation.identity.customField | quote }}
+  {{- end }}
+{{- end }}

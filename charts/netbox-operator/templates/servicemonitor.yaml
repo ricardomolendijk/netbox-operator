@@ -1,0 +1,56 @@
+{{- if and .Values.metrics.enabled .Values.metrics.serviceMonitor.enabled }}
+{{- /*
+Gated on the CRD existing, not just on the value. A ServiceMonitor on a cluster without the
+Prometheus Operator is an install failure ("no matches for kind"), and a chart that fails
+that way on a value the user set on purpose is worse than one that skips it.
+*/ -}}
+{{- if .Capabilities.APIVersions.Has "monitoring.coreos.com/v1" }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "netbox-operator.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "netbox-operator.labels" . | nindent 4 }}
+    {{- with .Values.metrics.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "netbox-operator.selectorLabels" . | nindent 6 }}
+  namespaceSelector:
+    matchNames: [{{ .Release.Namespace }}]
+  endpoints:
+  - port: {{ if .Values.metrics.secure }}https{{ else }}http{{ end }}
+    path: /metrics
+    interval: {{ .Values.metrics.serviceMonitor.interval }}
+    {{- with .Values.metrics.serviceMonitor.scrapeTimeout }}
+    scrapeTimeout: {{ . }}
+    {{- end }}
+    {{- if .Values.metrics.secure }}
+    scheme: https
+    {{- /*
+    The manager presents a self-signed certificate and applies no authn/authz filter
+    (docs/operations/observability.md), so the scraper has to skip verification and the
+    port must not be reachable outside the cluster. Naming that here rather than leaving a
+    scrape that silently fails its TLS handshake.
+    */}}
+    tlsConfig:
+      insecureSkipVerify: true
+    {{- end }}
+    {{- with .Values.metrics.serviceMonitor.relabelings }}
+    relabelings:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+    {{- with .Values.metrics.serviceMonitor.metricRelabelings }}
+    metricRelabelings:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+{{- else }}
+{{- /*
+Not an error: the value asked for a scrape target on a cluster that cannot hold one.
+NOTES.txt says so after install, so it is not silent either.
+*/ -}}
+{{- end }}
+{{- end }}
