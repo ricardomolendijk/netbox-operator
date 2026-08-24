@@ -30,6 +30,17 @@ func extrasTagDescriptor() Descriptor {
 		ObjectType: "extras.tag",
 		Scope:      apiextensionsv1.NamespaceScoped,
 
+		// Neither Taggable nor CustomFieldable, and left at false explicitly rather than
+		// omitted, because it is the fact worth writing down: extras.Tag's bases are
+		// CloningMixin, ExportTemplatesMixin, OwnerMixin, ChangeLoggedModel and
+		// django-taggit's TagBase (docs/netbox-schema.md -> extras.Tag) -- no TagsMixin and
+		// no CustomFieldsMixin. A tag cannot be tagged, so a NetBoxTag is a managed object
+		// that carries no provenance stamp at all, which is the case
+		// docs/operations/provenance.md calls out and NetBoxSweep (NBO-046) must never
+		// delete.
+		Taggable:        false,
+		CustomFieldable: false,
+
 		// The bridge between the two vocabularies every other list here uses: CR spec
 		// names on the left, NetBox API names on the right. `objectTypes` -> `object_types`
 		// is the entry that earns the table -- no camelCase-to-snake_case convention gets

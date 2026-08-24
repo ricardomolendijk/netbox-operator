@@ -223,6 +223,7 @@ named. That is expected, not a bug: delete what references it first.
 | `naturalKey` | `object` | The query the operator used to look the site up. Recorded even when nothing matched, because the first question about an object that was not adopted is what was actually searched for. |
 | `adopted` | `boolean` | Whether this site was taken over rather than created. |
 | `lastAppliedHash` | `string` | Digest of the last payload written. Diagnostic only — it deliberately gates nothing, because skipping a PATCH on it would suppress exactly the drift correction the operator exists to perform. |
+| `provenance` | `object` | The stamp this site carries in NetBox — the tag and the custom fields the engine wrote, as it wrote them. Unset when the endpoint's [`spec.managedBy`](netboxendpoint.md#specmanagedby) is unset. `dcim.Site` is a `PrimaryModel`, so it carries both columns and is stamped in full. See [provenance](../operations/provenance.md). |
 | `deletionAttempts` | `integer` | How many times a blocked delete has been retried, so backoff survives a restart. |
 | `observedGeneration` | `integer` | The spec generation this status describes. |
 | `conditions` | `[]Condition` | Below. |

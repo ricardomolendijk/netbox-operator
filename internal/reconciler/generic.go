@@ -26,6 +26,7 @@ import (
 	netboxv1alpha1 "github.com/ricardomolendijk/netbox-operator/api/v1alpha1"
 	"github.com/ricardomolendijk/netbox-operator/internal/metrics"
 	"github.com/ricardomolendijk/netbox-operator/internal/netbox"
+	"github.com/ricardomolendijk/netbox-operator/internal/provenance"
 	"github.com/ricardomolendijk/netbox-operator/internal/registry"
 )
 
@@ -94,6 +95,15 @@ type Endpoint struct {
 	// from writing is not a mode anyone can trust
 	// (docs/decisions/0005-gitops-coexistence.md).
 	DriftMode netboxv1alpha1.DriftMode
+
+	// Provenance is the stamp this endpoint's bootstrap resolved: the tag id and the
+	// custom-field names that provably exist in NetBox (NBO-075). The zero value stamps
+	// nothing, which is what an endpoint with no spec.managedBy hands over.
+	//
+	// Resolved by the endpoint controller rather than by the engine because the tag id can
+	// only be learned from NetBox, and learning it once per endpoint is the difference
+	// between two extra requests per reconcile and two per resync period.
+	Provenance provenance.Stamp
 }
 
 // Endpoints hands out the client for one NetBoxEndpoint by namespace and name. A miss
@@ -453,6 +463,11 @@ func (p *pass) create(ctx context.Context) (ctrl.Result, error) {
 		return p.stop(ctx, errAdoptOnly)
 	}
 
+	// Stamp before the payload is built, not after: createPayload copies p.desired, so a
+	// stamp applied afterwards would reach the status and never the POST body.
+	// No live object to merge with, so the tag list is exactly the operator's own tag.
+	p.stamp(ctx, nil)
+
 	payload, stripped := p.deferred.createPayload(p.desired)
 	if len(stripped) > 0 {
 		logf.FromContext(ctx).V(1).Info("deferring fields the create cannot carry",
@@ -470,6 +485,10 @@ func (p *pass) create(ctx context.Context) (ctrl.Result, error) {
 // update PATCHes the difference, and nothing at all when there is none.
 func (p *pass) update(ctx context.Context, live netbox.Object) (ctrl.Result, error) {
 	p.live = live
+
+	// Before the comparison, and with the live object in hand: an adopted object gains the
+	// stamp here, and one that already carries it produces no change at all.
+	p.stamp(ctx, live)
 
 	changes := netbox.Changes(live, p.desired, fieldRules(p.desc))
 	if len(changes) == 0 {

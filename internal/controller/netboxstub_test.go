@@ -18,9 +18,12 @@ import (
 
 // stubWrite is one mutating request the stub received.
 type stubWrite struct {
-	Method  string
-	ID      int64
-	Payload netbox.Object
+	Method string
+	// Endpoint is set only for a provenance write, where two endpoints share one slice and
+	// a test has to tell a tag POST from a custom-field POST.
+	Endpoint string
+	ID       int64
+	Payload  netbox.Object
 }
 
 // netboxStubServer is a NetBox for one endpoint, generic over the kind.
@@ -46,10 +49,29 @@ type netboxStubServer struct {
 	writes  []stubWrite
 	nextID  int64
 
+	// extrasWrites is kept apart from writes so that recorded() still means "what the
+	// engine did to the kind under test". A provenance bootstrap runs once per endpoint and
+	// would otherwise show up in every write count in this package.
+	extrasWrites []stubWrite
+
 	// createStatus, when set, is returned for a POST instead of creating. For asserting
 	// what the engine does with a 400 or a 409.
 	createStatus int
+
+	// extras holds the provenance definitions -- extras.Tag and extras.CustomField -- when
+	// a test has switched them on with withProvenance. Nil otherwise, and that is what
+	// keeps this stub honest for every other test: an endpoint with no spec.managedBy must
+	// not touch these paths at all, so a request to one 404s rather than being quietly
+	// served.
+	extras map[string][]netbox.Object
+
+	// extrasStatus, when set, is returned for a POST to an extras path. A NetBox token
+	// without extras.add_customfield is the case it stands for.
+	extrasStatus int
 }
+
+// provenanceEndpoints are the two paths the provenance bootstrap talks to.
+var provenanceEndpoints = []string{"extras/tags", "extras/custom-fields"}
 
 // stubKind is everything the stub needs to know about a kind: the endpoint it serves and
 // the natural-key field objects are looked up by. Each kind declares its own next to that
@@ -90,6 +112,10 @@ func (s *netboxStubServer) route(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if s.routeExtras(w, r) {
+		return
+	}
+
 	tail := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/"+s.endpoint), "/")
 	if tail == "" {
 		s.collection(w, r)
@@ -104,6 +130,168 @@ func (s *netboxStubServer) route(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.object(w, r, id)
+}
+
+// withProvenance switches on the extras endpoints the provenance bootstrap needs.
+func (s *netboxStubServer) withProvenance() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.extras = map[string][]netbox.Object{}
+}
+
+// routeExtras serves the provenance definitions, and reports whether it handled the
+// request.
+//
+// A store that is switched off handles nothing, so the path falls through to the kind's own
+// routing and 404s -- which is how a test proves an endpoint with no spec.managedBy never
+// asks. It also never claims the kind's own endpoint: when the kind under test *is*
+// extras.Tag, its store already is the tag store, and two stores fighting over one path
+// would make a test pass or fail on which check ran first.
+func (s *netboxStubServer) routeExtras(w http.ResponseWriter, r *http.Request) bool {
+	s.mu.Lock()
+	enabled := s.extras != nil
+	s.mu.Unlock()
+
+	if !enabled {
+		return false
+	}
+
+	for _, endpoint := range provenanceEndpoints {
+		prefix := "/api/" + endpoint + "/"
+		if endpoint == s.endpoint || !strings.HasPrefix(r.URL.Path, prefix) {
+			continue
+		}
+
+		s.extrasRequest(w, r, endpoint, strings.Trim(strings.TrimPrefix(r.URL.Path, prefix), "/"))
+
+		return true
+	}
+
+	return false
+}
+
+func (s *netboxStubServer) extrasRequest(w http.ResponseWriter, r *http.Request, endpoint, tail string) {
+	if r.Method == http.MethodGet {
+		s.extrasList(w, r, endpoint)
+
+		return
+	}
+
+	if r.Method == http.MethodPost {
+		s.extrasCreate(w, r, endpoint)
+
+		return
+	}
+
+	s.extrasPatch(w, r, endpoint, tail)
+}
+
+func (s *netboxStubServer) extrasList(w http.ResponseWriter, r *http.Request, endpoint string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	query := r.URL.Query()
+	results := []netbox.Object{}
+
+	for _, obj := range s.extras[endpoint] {
+		if extrasMatches(obj, query) {
+			results = append(results, obj)
+		}
+	}
+
+	writeStubJSON(w, http.StatusOK, netbox.Object{"count": len(results), "results": results, "next": nil})
+}
+
+func (s *netboxStubServer) extrasCreate(w http.ResponseWriter, r *http.Request, endpoint string) {
+	payload, ok := decodeStub(w, r)
+	if !ok {
+		return
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.extrasWrites = append(s.extrasWrites, stubWrite{
+		Method: http.MethodPost, Endpoint: endpoint, Payload: payload,
+	})
+
+	if s.extrasStatus != 0 {
+		writeStubJSON(w, s.extrasStatus, netbox.Object{"detail": "You do not have permission."})
+
+		return
+	}
+
+	s.nextID++
+
+	stored := netbox.Object{"id": float64(s.nextID)}
+	for key, value := range payload {
+		stored[key] = value
+	}
+	s.extras[endpoint] = append(s.extras[endpoint], stored)
+
+	writeStubJSON(w, http.StatusCreated, stored)
+}
+
+func (s *netboxStubServer) extrasPatch(w http.ResponseWriter, r *http.Request, endpoint, tail string) {
+	id, err := strconv.ParseInt(tail, 10, 64)
+	if err != nil {
+		writeStubJSON(w, http.StatusNotFound, netbox.Object{"detail": "Not found."})
+
+		return
+	}
+
+	payload, ok := decodeStub(w, r)
+	if !ok {
+		return
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.extrasWrites = append(s.extrasWrites, stubWrite{
+		Method: http.MethodPatch, Endpoint: endpoint, ID: id, Payload: payload,
+	})
+
+	for _, obj := range s.extras[endpoint] {
+		if stored, ok := obj.ID(); ok && int64(stored) == id {
+			for key, value := range payload {
+				obj[key] = value
+			}
+			writeStubJSON(w, http.StatusOK, obj)
+
+			return
+		}
+	}
+
+	writeStubJSON(w, http.StatusNotFound, netbox.Object{"detail": "Not found."})
+}
+
+// extrasMatches applies the exact-match filters the bootstrap sends: `slug` for a tag and
+// `name` for a custom field.
+func extrasMatches(obj netbox.Object, query url.Values) bool {
+	for name, values := range query {
+		if name == "limit" || name == "offset" {
+			continue
+		}
+		if fmt.Sprint(obj[name]) != values[0] {
+			return false
+		}
+	}
+
+	return true
+}
+
+// seedExtras puts a definition into NetBox without the operator having created it, for the
+// case where a NetBox admin made them by hand.
+func (s *netboxStubServer) seedExtras(endpoint string, obj netbox.Object) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.nextID++
+
+	stored := netbox.Object{"id": float64(s.nextID)}
+	for key, value := range obj {
+		stored[key] = value
+	}
+	s.extras[endpoint] = append(s.extras[endpoint], stored)
 }
 
 func (s *netboxStubServer) collection(w http.ResponseWriter, r *http.Request) {
@@ -329,6 +517,15 @@ func (s *netboxStubServer) countByKey(value string) int {
 	}
 
 	return count
+}
+
+// recordedExtras is what the provenance bootstrap wrote, which is how "created once, and
+// re-running changes nothing" is asserted from the outside.
+func (s *netboxStubServer) recordedExtras() []stubWrite {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return append([]stubWrite(nil), s.extrasWrites...)
 }
 
 func (s *netboxStubServer) recorded() []stubWrite {

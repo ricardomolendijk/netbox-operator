@@ -55,7 +55,7 @@ func readyEndpointWith(t *testing.T, ns, target string, mutate func(*netboxv1alp
 	t.Cleanup(func() { _ = k8sClient.Delete(context.Background(), endpoint) })
 
 	eventually(t, "an endpoint client in "+ns, func() bool {
-		_, ok := clients.Lookup(ns, "homelab")
+		_, _, ok := clients.Lookup(ns, "homelab")
 
 		return ok
 	})

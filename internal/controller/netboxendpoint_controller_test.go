@@ -125,7 +125,7 @@ func TestEndpointBecomesReady(t *testing.T) {
 	if c := conditionOf(e, netboxv1alpha1.ConditionAuthenticated); c == nil || c.Status != metav1.ConditionTrue {
 		t.Errorf("Authenticated = %v", c)
 	}
-	if _, ok := cache.Lookup(ns, "homelab"); !ok {
+	if _, _, ok := cache.Lookup(ns, "homelab"); !ok {
 		t.Error("no client in the cache for a Ready endpoint")
 	}
 }
@@ -156,7 +156,7 @@ func TestBadTokenHandsOutNoClient(t *testing.T) {
 	if c := conditionOf(e, netboxv1alpha1.ConditionVersionSupported); c == nil || c.Status != metav1.ConditionUnknown {
 		t.Errorf("VersionSupported = %v, want Unknown -- it was never probed", c)
 	}
-	if _, ok := cache.Lookup(ns, "badauth"); ok {
+	if _, _, ok := cache.Lookup(ns, "badauth"); ok {
 		t.Error("a client was cached for an endpoint with a bad token")
 	}
 }
@@ -187,7 +187,7 @@ func TestUnsupportedVersionRefusesAClient(t *testing.T) {
 	if e.Status.NetBoxVersion != "3.7.8" {
 		t.Errorf("netboxVersion = %q, want it recorded even when unsupported", e.Status.NetBoxVersion)
 	}
-	if _, ok := cache.Lookup(ns, "ancient"); ok {
+	if _, _, ok := cache.Lookup(ns, "ancient"); ok {
 		t.Error("a client was cached for an unsupported NetBox version")
 	}
 }
@@ -296,7 +296,7 @@ func TestSecretRotationRebuildsTheClientWithoutRestart(t *testing.T) {
 		v, _ := seen.Load().(string)
 		return v == "Token first-token"
 	})
-	firstClient, _ := cache.Lookup(ns, "rotate")
+	firstClient, _, _ := cache.Lookup(ns, "rotate")
 
 	secret.Data["token"] = []byte("second-token")
 	if err := k8s.Update(context.Background(), secret); err != nil {
@@ -309,7 +309,7 @@ func TestSecretRotationRebuildsTheClientWithoutRestart(t *testing.T) {
 	})
 	// The cache is keyed on the Secret's resourceVersion, so a rotation cannot leave the
 	// old client reachable.
-	secondClient, ok := cache.Lookup(ns, "rotate")
+	secondClient, _, ok := cache.Lookup(ns, "rotate")
 	if !ok {
 		t.Fatal("no client after rotation")
 	}
@@ -363,7 +363,7 @@ func TestCABundleKeyDefaultsToCACrt(t *testing.T) {
 	t.Cleanup(func() { _ = k8s.Delete(context.Background(), endpoint) })
 
 	eventually(t, "client built with the CA bundle", func() bool {
-		_, ok := cache.Lookup(ns, "withca")
+		_, _, ok := cache.Lookup(ns, "withca")
 		return ok
 	})
 }
@@ -442,10 +442,10 @@ func TestDryRunModeReachesTheClient(t *testing.T) {
 	makeEndpoint(t, k8s, ns, "planonly", srv.URL, "nb-token", netboxv1alpha1.EndpointModeDryRun)
 
 	eventually(t, "client cached", func() bool {
-		_, ok := cache.Lookup(ns, "planonly")
+		_, _, ok := cache.Lookup(ns, "planonly")
 		return ok
 	})
-	nbClient, _ := cache.Lookup(ns, "planonly")
+	nbClient, _, _ := cache.Lookup(ns, "planonly")
 	if !nbClient.DryRun() {
 		t.Error("mode DryRun did not reach the client")
 	}
@@ -458,14 +458,14 @@ func TestDeletingAnEndpointForgetsItsClient(t *testing.T) {
 	endpoint := makeEndpoint(t, k8s, ns, "transient", srv.URL, "nb-token", netboxv1alpha1.EndpointModeApply)
 
 	eventually(t, "client cached", func() bool {
-		_, ok := cache.Lookup(ns, "transient")
+		_, _, ok := cache.Lookup(ns, "transient")
 		return ok
 	})
 	if err := k8s.Delete(context.Background(), endpoint); err != nil {
 		t.Fatalf("deleting endpoint: %v", err)
 	}
 	eventually(t, "client forgotten", func() bool {
-		_, ok := cache.Lookup(ns, "transient")
+		_, _, ok := cache.Lookup(ns, "transient")
 		return !ok
 	})
 }
@@ -480,8 +480,8 @@ func TestTwoEndpointsInOneNamespaceAreIndependent(t *testing.T) {
 	makeEndpoint(t, k8s, ns, "lab", old.URL, "nb-token", netboxv1alpha1.EndpointModeApply)
 
 	eventually(t, "prod ready and lab refused", func() bool {
-		_, prodOK := cache.Lookup(ns, "prod")
-		_, labOK := cache.Lookup(ns, "lab")
+		_, _, prodOK := cache.Lookup(ns, "prod")
+		_, _, labOK := cache.Lookup(ns, "lab")
 		return prodOK && !labOK
 	})
 }

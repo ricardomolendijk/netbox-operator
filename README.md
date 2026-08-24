@@ -74,6 +74,9 @@ Longer form, one page each:
 - [Coexisting with Flux and Argo CD](docs/operations/gitops.md) — why the operator never
   writes a `spec`, how that is enforced rather than intended, and what the three
   `driftMode` values each do.
+- [Provenance](docs/operations/provenance.md) — the tag and custom fields the operator
+  stamps onto every object it manages, how the definitions get created, and how to turn the
+  whole thing off.
 
 Full index: [`docs/README.md`](docs/README.md). Decisions and their rationale:
 [`docs/decisions/README.md`](docs/decisions/README.md). Running it, including what the

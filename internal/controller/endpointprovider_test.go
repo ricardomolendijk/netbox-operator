@@ -10,6 +10,7 @@ import (
 
 	netboxv1alpha1 "github.com/ricardomolendijk/netbox-operator/api/v1alpha1"
 	"github.com/ricardomolendijk/netbox-operator/internal/netbox"
+	"github.com/ricardomolendijk/netbox-operator/internal/provenance"
 	"github.com/ricardomolendijk/netbox-operator/internal/reconciler"
 )
 
@@ -63,7 +64,10 @@ func cachedEndpoint(t *testing.T, reader client.Reader) *endpointProvider {
 	}
 
 	cache := NewClientCache()
-	cache.put(clientKey{namespace: "team-a", name: "homelab"}, nbClient)
+	// A zero Stamp: this fixture exercises the provider's context and read-failure
+	// behaviour, not provenance, and an unstamped endpoint is a real state (spec.managedBy
+	// is unset by default).
+	cache.put(clientKey{namespace: "team-a", name: "homelab"}, nbClient, provenance.Stamp{})
 
 	return &endpointProvider{reader: reader, clients: cache}
 }

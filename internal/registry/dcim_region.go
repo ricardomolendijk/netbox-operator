@@ -21,6 +21,12 @@ func dcimRegionDescriptor() Descriptor {
 		ObjectType: "dcim.region",
 		Scope:      apiextensionsv1.NamespaceScoped,
 
+		// dcim.Region is a NestedGroupModel (docs/netbox-schema.md -> dcim.Region, bases),
+		// which mixes in both TagsMixin and CustomFieldsMixin, so it carries the whole
+		// provenance stamp.
+		Taggable:        true,
+		CustomFieldable: true,
+
 		Fields: []Field{
 			{Spec: "name", API: "name"},
 			{Spec: "slug", API: "slug"},

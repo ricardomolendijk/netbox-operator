@@ -268,6 +268,27 @@ const (
 	DeletionRetain DeletionPolicy = "Retain"
 )
 
+// ProvenanceStatus is the provenance stamp the engine last wrote onto one NetBox object.
+//
+// It records what was written rather than what was configured, so an object stamped
+// before spec.managedBy was edited reports the old stamp until it is next reconciled --
+// which is the honest answer to "what is on the object in NetBox right now".
+type ProvenanceStatus struct {
+	// ClusterID is the cluster identifier written into the cluster custom field.
+	// +optional
+	ClusterID string `json:"clusterID,omitempty"`
+
+	// Tag is the tag's slug, written by id. Empty for a kind whose NetBox model has no
+	// `tags` column.
+	// +optional
+	Tag string `json:"tag,omitempty"`
+
+	// CustomFields are the custom fields written, as NetBox names to the values sent.
+	// Empty for a kind whose NetBox model has no `custom_fields` column.
+	// +optional
+	CustomFields map[string]string `json:"customFields,omitempty"`
+}
+
 // NetBoxObjectSpec is the part of every object CR's spec that the engine owns. Kinds embed
 // it inline, so its fields are spec fields like any other -- and the engine excludes
 // exactly these from the NetBox payload, since they configure the operator rather than
@@ -316,6 +337,16 @@ type NetBoxObjectStatus struct {
 	// Adopted reports that the engine took over an object it did not create.
 	// +optional
 	Adopted bool `json:"adopted,omitempty"`
+
+	// Provenance is the stamp this object carries in NetBox: the tag and the custom fields
+	// the engine wrote, as it wrote them.
+	//
+	// Unset when the endpoint's spec.managedBy is unset, and unset for a kind whose NetBox
+	// model carries neither `tags` nor `custom_fields` -- extras.Tag is one, so a
+	// NetBoxTag is managed and unstamped by construction. That is the state NetBoxSweep
+	// (NBO-046) reports and never deletes; see docs/operations/provenance.md.
+	// +optional
+	Provenance *ProvenanceStatus `json:"provenance,omitempty"`
 
 	// LastAppliedHash is a digest of the last payload NetBox accepted. NetBox
 	// canonicalises some values on write, so the request and the response legitimately

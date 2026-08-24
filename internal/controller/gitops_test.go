@@ -163,12 +163,12 @@ func TestReportModeOverridesApplyAtTheClient(t *testing.T) {
 	t.Cleanup(func() { _ = k8sClient.Delete(context.Background(), endpoint) })
 
 	eventually(t, "a client for the reporting endpoint", func() bool {
-		_, ok := clients.Lookup(ns, "reporting")
+		_, _, ok := clients.Lookup(ns, "reporting")
 
 		return ok
 	})
 
-	nbClient, _ := clients.Lookup(ns, "reporting")
+	nbClient, _, _ := clients.Lookup(ns, "reporting")
 	if !nbClient.DryRun() {
 		t.Error("driftMode Report produced a client that can write to netbox")
 	}

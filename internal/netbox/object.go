@@ -125,8 +125,14 @@ func nestedIDs(v any) []int {
 	return ids
 }
 
-// idsOf reads a list of bare ids, which is how an M2M field is written.
-func idsOf(v any) []int {
+// IDsOf reads a list of NetBox ids out of either shape the API uses: the bare ids an M2M
+// field is written as, or the nested objects it is read back as.
+//
+// Exported because internal/provenance has to union the operator's tag into whichever of
+// the two shapes it was handed -- the desired payload's ids, or a live object's nested
+// tags -- and re-deriving that coercion outside this package would be a second, divergent
+// answer to what a NetBox id list is.
+func IDsOf(v any) []int {
 	switch list := v.(type) {
 	case []int:
 		return list
@@ -151,9 +157,13 @@ func idsOf(v any) []int {
 	}
 }
 
-// stringsOf reads a list of strings, accepting the nested-object shape NetBox uses for
-// object-type lists on some endpoints.
-func stringsOf(v any) []string {
+// ObjectTypesOf reads a list of `app_label.model` strings, accepting the nested-object
+// shape NetBox uses for object-type lists on some endpoints.
+//
+// Exported because internal/provenance has to read an existing extras.CustomField's
+// object_types before it can widen it, and it may get either shape back depending on the
+// endpoint — which is exactly the normalisation this function is.
+func ObjectTypesOf(v any) []string {
 	list, ok := v.([]any)
 	if !ok {
 		if typed, ok := v.([]string); ok {

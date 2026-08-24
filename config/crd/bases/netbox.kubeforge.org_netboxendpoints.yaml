@@ -76,6 +76,107 @@ spec:
                 - Report
                 - "Off"
                 type: string
+              managedBy:
+                description: |-
+                  ManagedBy configures the provenance stamp written onto every object managed through
+                  this endpoint. Unset means the operator stamps nothing, because the cluster
+                  identifier it would have to write is not something it may invent.
+                properties:
+                  allocationIdentityField:
+                    default: k8s_allocation_identity
+                    description: |-
+                      AllocationIdentityField is the custom field that holds a claim's deterministic
+                      allocation identity (docs/decisions/0005-gitops-coexistence.md section 3).
+
+                      Bootstrapped here and written by nothing yet: the identity is computed by the
+                      allocation engine (NBO-036), and the definition has to exist before it can write
+                      one, because NetBox answers a `custom_fields` key it has no CustomField for with a
+                      400. Set it to "" to leave the definition uncreated on an endpoint that will never
+                      serve a claim.
+                    maxLength: 50
+                    pattern: ^[a-z0-9_]*$
+                    type: string
+                  bootstrap:
+                    default: true
+                    description: |-
+                      Bootstrap permits the operator to create the tag and the custom-field definitions
+                      above when they are absent. Defaults to true, and is the field to set to false.
+
+                      Creating a CustomField is a schema change to somebody else's NetBox, so it is
+                      opt-out rather than unconditional: with it false the operator only ever looks the
+                      definitions up, and reports exactly which ones a human has to create through
+                      ProvenanceReady=False/BootstrapDisabled.
+
+                      A pointer so that `bootstrap: false` survives a round trip: a plain bool with
+                      omitempty marshals a deliberate false to nothing, which the CRD default then reads
+                      back as true.
+                    type: boolean
+                  clusterField:
+                    default: k8s_cluster
+                    description: |-
+                      ClusterField is the custom field holding ClusterID. It is what makes a multi-writer
+                      conflict visible (NBO-047): two clusters managing one object differ here and nowhere
+                      else, because the tag is the same on both.
+                    maxLength: 50
+                    pattern: ^[a-z0-9_]*$
+                    type: string
+                  clusterID:
+                    description: |-
+                      ClusterID names the cluster this operator runs in, and is the only required field.
+
+                      Deliberately not derived from the kube-system namespace UID or the API server URL.
+                      Both are stable enough to be tempting and neither is predictable: an operator that
+                      invents its own identifier produces a value nobody can guess when they need to
+                      search NetBox for "everything cluster X owns", and one that changes on a cluster
+                      rebuild breaks the reclaim in docs/decisions/0005-gitops-coexistence.md section 3 --
+                      which is the one thing the identifier exists to make survive a rebuild.
+                    maxLength: 100
+                    minLength: 1
+                    pattern: ^[a-zA-Z0-9._-]+$
+                    type: string
+                  ownerField:
+                    default: k8s_owner
+                    description: |-
+                      OwnerField is the custom field holding the owning CR as
+                      `<lowercased kind>/<namespace>/<name>`.
+
+                      The same spelling as the netbox.kubeforge.org/generated-by annotation in
+                      docs/decisions/0005-gitops-coexistence.md section 2, so one string identifies a CR on
+                      both sides. It is the human-readable half of the pair: a UID answers "is this the
+                      same object", this answers "which manifest do I go and edit".
+                    maxLength: 50
+                    pattern: ^[a-z0-9_]*$
+                    type: string
+                  tag:
+                    default: k8s-managed
+                    description: |-
+                      Tag is the NetBox tag applied to every managed object, used as both the tag's name
+                      and its slug -- which is why it is constrained to the slug alphabet rather than to
+                      extras.Tag's freer `name` column.
+
+                      It is the load-bearing half of the stamp: NetBoxSweep (NBO-046) decides what it may
+                      delete by this tag alone, so renaming it on a live endpoint leaves every object
+                      stamped with the old name unsweepable until the next resync re-stamps them.
+                    maxLength: 100
+                    minLength: 1
+                    pattern: ^[-a-zA-Z0-9_]+$
+                    type: string
+                  uidField:
+                    default: k8s_uid
+                    description: |-
+                      UIDField is the custom field holding the owning CR's metadata.uid.
+
+                      Every custom-field name here is constrained to NetBox's own alphabet for the column
+                      (`^[a-z0-9_]+$`, at most 50 characters): NetBox rejects anything else on the
+                      CustomField, and a name rejected at bootstrap would fail the endpoint rather than
+                      the object. The empty string switches one field off, which is why the pattern
+                      permits it.
+                    maxLength: 50
+                    pattern: ^[a-z0-9_]*$
+                    type: string
+                required:
+                - clusterID
+                type: object
               mode:
                 default: Apply
                 description: Mode is Apply or DryRun.
@@ -233,6 +334,31 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              managedBy:
+                description: |-
+                  ManagedBy is the provenance bootstrap as it stands in NetBox: the tag's resolved id
+                  and the custom-field definitions that exist. Unset while spec.managedBy is.
+                properties:
+                  clusterID:
+                    description: ClusterID is spec.managedBy.clusterID, echoed so
+                      the whole stamp reads in one place.
+                    type: string
+                  customFields:
+                    description: |-
+                      CustomFields are the custom-field definitions that exist in NetBox, sorted. A name
+                      configured but absent from this list is one the operator could not create.
+                    items:
+                      type: string
+                    type: array
+                  tag:
+                    description: Tag is the tag's slug in NetBox.
+                    type: string
+                  tagID:
+                    description: TagID is the tag's NetBox id, which is what an object
+                      write actually carries.
+                    format: int64
+                    type: integer
+                type: object
               netboxVersion:
                 description: NetBoxVersion is the version string reported by GET /api/status/.
                 type: string

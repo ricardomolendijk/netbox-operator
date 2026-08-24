@@ -245,7 +245,7 @@ func TestUngrantedNamespaceIsAConditionNotAForbidden(t *testing.T) {
 	}
 	// And no client was handed out, so nothing downstream writes to NetBox with a token
 	// this reconcile never read.
-	if _, ok := reconciler.Cache.Lookup("default", "homelab"); ok {
+	if _, _, ok := reconciler.Cache.Lookup("default", "homelab"); ok {
 		t.Error("an endpoint in an ungranted namespace still handed out a client")
 	}
 }

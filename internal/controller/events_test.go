@@ -19,6 +19,7 @@ import (
 	netboxv1alpha1 "github.com/ricardomolendijk/netbox-operator/api/v1alpha1"
 	"github.com/ricardomolendijk/netbox-operator/internal/metrics"
 	"github.com/ricardomolendijk/netbox-operator/internal/netbox"
+	"github.com/ricardomolendijk/netbox-operator/internal/provenance"
 )
 
 // Events are asserted against a fake client rather than through the package's envtest
@@ -155,14 +156,14 @@ func TestClientCacheSizeGauge(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	cache.put(clientKey{namespace: "default", name: "homelab"}, client)
+	cache.put(clientKey{namespace: "default", name: "homelab"}, client, provenance.Stamp{})
 	if got := testutil.ToFloat64(metrics.ClientCacheSize); got != 1 {
 		t.Errorf("client_cache_size = %v after one put, want 1", got)
 	}
 
 	// A second client for the same endpoint replaces the first rather than adding to it,
 	// which is the property that makes this gauge a count of endpoints.
-	cache.put(clientKey{namespace: "default", name: "homelab", secretVersion: "2"}, client)
+	cache.put(clientKey{namespace: "default", name: "homelab", secretVersion: "2"}, client, provenance.Stamp{})
 	if got := testutil.ToFloat64(metrics.ClientCacheSize); got != 1 {
 		t.Errorf("client_cache_size = %v after a rotation, want 1", got)
 	}

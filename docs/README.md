@@ -26,7 +26,7 @@ One page per CRD: every field, every condition, every way it fails.
 
 | Page | Answers |
 |---|---|
-| [`NetBoxEndpoint`](reference/netboxendpoint.md) | How to point the operator at a NetBox: URL, token Secret, TLS, dry run, rate limit, and the `>=4.2, <5.0` version gate |
+| [`NetBoxEndpoint`](reference/netboxendpoint.md) | How to point the operator at a NetBox: URL, token Secret, TLS, dry run, rate limit, the provenance stamp, and the `>=4.2, <5.0` version gate |
 | [`NetBoxRegion`](reference/netboxregion.md) | The first kind whose identity depends on a reference: two natural keys, why a top-level region is a different identity rather than a missing filter, and why a child region waits instead of guessing |
 | [`NetBoxTag`](reference/netboxtag.md) | The first NetBox object kind: `slug` as a natural key, adoption and `Conflict`, `objectTypes` as content-type strings, and what happens when two namespaces claim one slug |
 | [`NetBoxSite`](reference/netboxsite.md) | A choice column and two decimals that need no per-kind handling, a globally-unique slug over namespaced CRDs, and which of `dcim.Site`'s foreign keys are deliberately absent |
@@ -82,6 +82,7 @@ Dated records of decisions that are expensive to reverse. Index and status:
 | Page | Answers |
 |---|---|
 | [Coexisting with Flux and Argo CD](operations/gitops.md) | Why the operator never writes a `spec` and how that is enforced, the Argo CD `ignoreDifferences` and Flux `Kustomization` snippets that make it quiet, the three `driftMode` values, the cluster-rebuild walkthrough, and the NetBox permission model |
+| [Provenance](operations/provenance.md) | What `spec.managedBy` writes into every NetBox object the operator manages, how the tag and custom-field definitions get bootstrapped, why stamping is not mandatory, and what stops working when you turn it off |
 | [Observability](operations/observability.md) | Every metric with its labels, cardinality and what to alert on; which Events fire and when; the log levels and the stable key set, with `kubectl logs \| jq` recipes |
 | [NetBox schema reference](netbox-schema.md) | The authoritative field list every CRD is derived from: 159 models, 138 endpoints, machine-extracted from NetBox 4.6.8. Grep it; do not read it |
 | [Regenerating the schema](regenerating.md) | How to retarget a newer NetBox release, how to test the extraction pipeline without a NetBox checkout, and how to cross-check the AST walk against a live instance |
