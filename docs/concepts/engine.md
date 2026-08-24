@@ -61,9 +61,13 @@ for.
 **More than one match is a `Conflict` that names every matching NetBox id, and zero
 writes.** Not first-match adoption: `ipam.Prefix` and `ipam.IPAddress` have no
 `meta.constraints` at all, so several matches is a routine state rather than a corrupt
-database, and picking one silently reparents whatever else keys on it. This is why the
-engine's `Reader` lists rather than calling `GetOne`: `netbox.AmbiguousError` carries a
-count, and a count is not something an operator can act on.
+database, and picking one silently reparents whatever else keys on it.
+
+The engine's `Reader` asks for one object rather than listing and counting: `GetOne` returns
+a [`netbox.AmbiguousError`](errors-and-retries.md#why-ambiguity-is-an-error) carrying the id
+and the `display` of every match, and that error *is* the `Conflict` message, verbatim.
+Counting here as well would be a second decision about when a lookup is ambiguous, and the
+only thing a second one can do is disagree with the first.
 
 ## Adoption is opt-in
 

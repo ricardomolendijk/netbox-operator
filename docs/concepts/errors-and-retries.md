@@ -34,6 +34,37 @@ cosmetic problem: every prefix and address keyed on that VRF gets reparented. Th
 populator this operator replaces does exactly that. Here it is an `AmbiguousError` and a
 `Conflict` condition naming what matched.
 
+### What the error tells you
+
+Refusing is only half an answer, because the next question is always "which ones?". So
+`AmbiguousError` carries the matched set rather than a count — a count leaves you to
+reproduce the query by hand:
+
+| Field | What it holds |
+|---|---|
+| `Endpoint`, `Params` | the lookup that was ambiguous, so it can be re-run as written |
+| `Matched` | how many objects matched, including any whose body carried no `id` |
+| `IDs` | the NetBox primary key of every match that carried one, in NetBox's order |
+| `Display` | NetBox's own `display` for each of `IDs`, at the same index — `10.0.0.0/24` is what a human recognises, `11` is what they then have to go and look up |
+
+`Error()` renders all of it, and that string is the `Conflict` condition's message verbatim:
+
+```
+ambiguous lookup on ipam/prefixes: map[prefix:10.0.0.0/24] matched 2 netbox objects,
+id 11 (10.0.0.0/24), id 12 (10.0.0.0/24 (VRF prod)); refusing to guess which one was meant
+```
+
+So `kubectl describe` is enough to open both objects in NetBox and decide which one the
+manifest meant — the fix is usually a narrower natural key, a `vrf` pinned rather than
+omitted, or deleting the duplicate.
+
+Both callers that need the matched set read it off this error. `Client.GetOne` is built on
+`Client.List` and is what the engine's natural-key lookup and the resolver's `slug`/`lookup`
+modes call; neither counts results for itself, because a second place deciding when a lookup
+is ambiguous is a second place that can disagree with this one. A reference reports the same
+matches under `RefAmbiguous` on `RefsResolved` — see
+[References](references.md#what-happens-when-it-does-not-resolve).
+
 ## What is retried, and where
 
 The client retries **only** `TransientError` and `RateLimitError`, with full jitter

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -297,11 +299,15 @@ func TestGetByIDAttachesTheIDToNotFound(t *testing.T) {
 	}
 }
 
-func TestGetOneAmbiguityIsAnError(t *testing.T) {
-	// ipam.Prefix has no meta.constraints, so two matches is a state NetBox permits.
-	// Taking the first would silently adopt an unrelated object.
+// TestGetOneAmbiguityNamesEveryMatch is the whole of NBO-074 on the client side. ipam.Prefix
+// has no meta.constraints, so two matches is a state NetBox permits and taking the first
+// would silently adopt an unrelated object -- but refusing is only half an answer. The
+// caller's next step is to look at those two objects, so the error has to say which two, and
+// a count leaves them to reproduce the query by hand.
+func TestGetOneAmbiguityNamesEveryMatch(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{"count":2,"results":[{"id":1},{"id":2}]}`))
+		_, _ = w.Write([]byte(`{"count":2,"results":[` +
+			`{"id":11,"display":"10.0.0.0/24"},{"id":12,"display":"10.0.0.0/24 (VRF prod)"}]}`))
 	}))
 	defer srv.Close()
 
@@ -311,8 +317,47 @@ func TestGetOneAmbiguityIsAnError(t *testing.T) {
 	if !errors.As(err, &ambiguous) {
 		t.Fatalf("want *AmbiguousError, got %T (%v)", err, err)
 	}
+
 	if ambiguous.Matched != 2 {
 		t.Errorf("Matched = %d, want 2", ambiguous.Matched)
+	}
+
+	if !reflect.DeepEqual(ambiguous.IDs, []int{11, 12}) {
+		t.Errorf("IDs = %v, want [11 12]", ambiguous.IDs)
+	}
+
+	// Positional with IDs, because "10.0.0.0/24 (VRF prod)" is what a human recognises and
+	// the id alone is what sends them looking it up.
+	if !reflect.DeepEqual(ambiguous.Display, []string{"10.0.0.0/24", "10.0.0.0/24 (VRF prod)"}) {
+		t.Errorf("Display = %v, want the display of each match", ambiguous.Display)
+	}
+
+	// Asserted on the rendered message and not only on the fields: this string is the
+	// Conflict condition's message verbatim, so it is the one the operator reads.
+	for _, want := range []string{"id 11 (10.0.0.0/24)", "id 12 (10.0.0.0/24 (VRF prod))"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("Error() = %q, want it to contain %q", err, want)
+		}
+	}
+}
+
+// TestGetOneAmbiguityWithoutIDsStillSaysSo covers the response that can be reported no
+// further: several matches, none of which carried an id. Saying "matched 2 objects" and
+// stopping there would read like a message with the ids omitted by mistake.
+func TestGetOneAmbiguityWithoutIDsStillSaysSo(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"count":2,"results":[{"name":"a"},{"name":"b"}]}`))
+	}))
+	defer srv.Close()
+
+	_, err := newTestClient(t, srv, nil).GetOne(context.Background(), "ipam/prefixes",
+		map[string]string{"prefix": "10.0.0.0/24"})
+	if err == nil {
+		t.Fatal("two matches with no ids reported no error; the caller would treat that as no match")
+	}
+
+	if !strings.Contains(err.Error(), "none of which carried a netbox id") {
+		t.Errorf("Error() = %q, want it to say the matches carried no id", err)
 	}
 }
 

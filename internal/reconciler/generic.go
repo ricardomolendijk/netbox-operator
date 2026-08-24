@@ -40,12 +40,14 @@ type Reader interface {
 	// *netbox.NotFoundError, which is how the engine learns that status.id is stale.
 	GetByID(ctx context.Context, endpoint string, id int) (netbox.Object, error)
 
-	// List returns every object matching params.
+	// GetOne returns the one object matching params, nil when nothing matches, and a
+	// *netbox.AmbiguousError when several do.
 	//
-	// The engine lists rather than asking for exactly one, because a natural key that
-	// matches several objects has to name every one of them in the Conflict it reports,
-	// and a count is not something an operator can act on. See docs/concepts/engine.md.
-	List(ctx context.Context, endpoint string, params netbox.Params) ([]netbox.Object, error)
+	// The engine asks for one rather than listing and counting for itself. The Conflict it
+	// reports has to name every matching NetBox id, and since NBO-074 the client's error
+	// carries them -- so a second decision here about when a lookup is ambiguous would only
+	// be one that can disagree with the client's. See docs/concepts/engine.md.
+	GetOne(ctx context.Context, endpoint string, params netbox.Params) (netbox.Object, error)
 }
 
 // Writer mutates NetBox. A DryRun client implements every method by returning a suppressed
@@ -352,25 +354,38 @@ func (p *pass) lookup(ctx context.Context) (match, error) {
 			return match{}, err
 		}
 
-		matches, err := p.endpoint.Client.List(ctx, p.desc.Endpoint, params)
-		if err != nil {
-			return match{}, fmt.Errorf("looking up netbox %s by %v: %w", p.desc.Endpoint, params, err)
-		}
+		live, err := p.endpoint.Client.GetOne(ctx, p.desc.Endpoint, params)
 
-		// Recorded even when nothing matched: the first question about an object that was
-		// not adopted is what the engine actually looked for.
+		// Recorded before the error is looked at, and even when nothing matched: the first
+		// question about an object that was not adopted is what the engine actually looked
+		// for, and that is most of the answer when the lookup turned out to be ambiguous.
 		p.obj.NetBoxStatus().NaturalKey = params
 
-		if len(matches) > 1 {
-			return match{}, &ambiguousMatch{params: params, ids: idsOf(matches)}
+		if err != nil {
+			return match{}, lookupFailure(p.desc.Endpoint, params, err)
 		}
 
-		if len(matches) == 1 {
-			return match{live: matches[0], byNaturalKey: true}, nil
+		if live != nil {
+			return match{live: live, byNaturalKey: true}, nil
 		}
 	}
 
 	return match{}, nil
+}
+
+// lookupFailure wraps a failed natural-key lookup with what it was looking for, except for
+// the one failure that is already a complete sentence.
+//
+// A *netbox.AmbiguousError is returned untouched: it becomes the Conflict condition's
+// message verbatim, and it already names the endpoint, the query and every matching id, so
+// wrapping it would only say the query twice.
+func lookupFailure(endpoint string, params netbox.Params, err error) error {
+	var ambiguous *netbox.AmbiguousError
+	if errors.As(err, &ambiguous) {
+		return err
+	}
+
+	return fmt.Errorf("looking up netbox %s by %v: %w", endpoint, params, err)
 }
 
 // claim acts on a live object: refuse it, adopt it, or update it.
@@ -640,19 +655,6 @@ func (p *pass) recordHash(ctx context.Context) {
 	}
 
 	p.obj.NetBoxStatus().LastAppliedHash = hash
-}
-
-// idsOf reads the NetBox ids out of a list of matches, for a Conflict that names them.
-func idsOf(matches []netbox.Object) []int {
-	ids := make([]int, 0, len(matches))
-
-	for _, obj := range matches {
-		if id, ok := obj.ID(); ok {
-			ids = append(ids, id)
-		}
-	}
-
-	return ids
 }
 
 func urlOf(obj netbox.Object) string {

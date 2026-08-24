@@ -109,14 +109,77 @@ func (e *TransientError) Unwrap() error { return e.Err }
 // meta.constraints at all, and ipam.VRF.name is not unique -- so picking the first match
 // silently adopts an unrelated object. In the populator that reparents every prefix and
 // address keyed on that VRF. See docs/netbox-schema.md.
+//
+// It names every match rather than counting them. The reader's next question is always
+// "which ones?", and a count leaves them to reproduce the query by hand -- while the ids
+// and NetBox's own display strings are already in the response body the lookup would
+// otherwise throw away.
 type AmbiguousError struct {
 	Endpoint string
 	Params   Params
-	Matched  int
+
+	// Matched is how many objects the lookup matched. Kept alongside IDs rather than
+	// derived from it, because a match whose body carried no id is still a match and must
+	// not quietly reduce the total.
+	Matched int
+
+	// IDs is the NetBox primary key of every match that carried one, in the order NetBox
+	// returned them.
+	IDs []int
+
+	// Display is NetBox's `display` for each of IDs, at the same index -- empty where the
+	// endpoint sent none. Carried because "10.0.0.0/24" is what a human recognises and
+	// "11" is not, and the two together are enough to go and look.
+	Display []string
 }
 
 func (e *AmbiguousError) Error() string {
-	return fmt.Sprintf("ambiguous lookup on %s matched %d objects: %v", e.Endpoint, e.Matched, e.Params)
+	return fmt.Sprintf("ambiguous lookup on %s: %v matched %d netbox objects, %s; refusing to guess which one was meant",
+		e.Endpoint, e.Params, e.Matched, e.Matches())
+}
+
+// Matches renders the matched objects as `id 11 (10.0.0.0/24), id 12 (10.0.0.0/24)`.
+//
+// Exported so that a caller which already names the endpoint and the query -- a reference,
+// whose own rendering carries both -- can report what it hit without repeating them.
+func (e *AmbiguousError) Matches() string {
+	if len(e.IDs) == 0 {
+		return "none of which carried a netbox id"
+	}
+
+	parts := make([]string, 0, len(e.IDs)+1)
+	for i, id := range e.IDs {
+		part := fmt.Sprintf("id %d", id)
+		if i < len(e.Display) && e.Display[i] != "" {
+			part += " (" + e.Display[i] + ")"
+		}
+		parts = append(parts, part)
+	}
+
+	if len(e.IDs) < e.Matched {
+		parts = append(parts, "and others that carried no netbox id")
+	}
+
+	return strings.Join(parts, ", ")
+}
+
+// ambiguous builds the error for a lookup that matched more than one object, reading the id
+// and the display of each out of the matches so that no caller has to ask NetBox a second
+// time to find out what it hit.
+func ambiguous(endpoint string, params Params, matches []Object) *AmbiguousError {
+	err := &AmbiguousError{Endpoint: endpoint, Params: params, Matched: len(matches)}
+
+	for _, obj := range matches {
+		id, ok := obj.ID()
+		if !ok {
+			continue
+		}
+
+		err.IDs = append(err.IDs, id)
+		err.Display = append(err.Display, asString(obj["display"]))
+	}
+
+	return err
 }
 
 // TruncatedError is a list that hit the page cap before NetBox stopped offering pages.

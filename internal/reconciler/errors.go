@@ -69,21 +69,6 @@ var (
 	errNotConfigured = errors.New("the engine is missing a collaborator")
 )
 
-// ambiguousMatch is more than one NetBox object matching one natural-key candidate.
-//
-// It names every id rather than counting them, because the operator's next step is to look
-// at those objects and decide which one this CR meant. netbox.AmbiguousError carries only
-// a count, which is why the engine lists instead of asking for one.
-type ambiguousMatch struct {
-	params netbox.Params
-	ids    []int
-}
-
-func (e *ambiguousMatch) Error() string {
-	return fmt.Sprintf("the natural key %v matches %d netbox objects: ids %v; refusing to guess which one this object means",
-		e.params, len(e.ids), e.ids)
-}
-
 // refusedAdoption is a live NetBox object this CR is not permitted to take over.
 type refusedAdoption struct {
 	id int
@@ -170,7 +155,7 @@ func classifyWait(err error, resync time.Duration) (outcome, bool) {
 func classifyInvalid(err error, resync time.Duration) (outcome, bool) {
 	var validation *netbox.ValidationError
 	var protected *netbox.ProtectedError
-	var ambiguous *ambiguousMatch
+	var ambiguous *netbox.AmbiguousError
 	var refused *refusedAdoption
 
 	conflict := outcome{

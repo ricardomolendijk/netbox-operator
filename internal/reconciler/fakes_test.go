@@ -188,10 +188,17 @@ func (f *fakeClient) GetByID(_ context.Context, endpoint string, id int) (netbox
 	return f.get, f.getErr
 }
 
-func (f *fakeClient) List(_ context.Context, endpoint string, params netbox.Params) ([]netbox.Object, error) {
-	f.calls = append(f.calls, call{method: "LIST", endpoint: endpoint, params: params})
+// GetOne answers out of the canned list, classifying it with netbox.One rather than with a
+// copy of the rule -- a fake that decides for itself when a lookup is ambiguous can
+// disagree with the client about the one thing the ambiguity cases assert.
+func (f *fakeClient) GetOne(_ context.Context, endpoint string, params netbox.Params) (netbox.Object, error) {
+	f.calls = append(f.calls, call{method: "GETONE", endpoint: endpoint, params: params})
 
-	return f.list, f.listErr
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+
+	return netbox.One(endpoint, params, f.list)
 }
 
 func (f *fakeClient) Create(ctx context.Context, endpoint string, payload netbox.Object) (netbox.Object, error) {

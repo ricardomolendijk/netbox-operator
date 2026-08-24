@@ -133,10 +133,10 @@ func TestErrorRenders(t *testing.T) {
 			name: "slug mode names the slug",
 			err: &Error{
 				Cause: ErrRefAmbiguous, Field: "regionRef", Mode: ModeSlug, TargetGVK: regionGVK,
-				Ref: slugRef("emea"), Detail: "2 netbox dcim/regions match map[slug:emea]: ids [12 19]",
+				Ref: slugRef("emea"), Detail: "2 netbox dcim/regions match map[slug:emea]: id 12 (EMEA), id 19 (Emea)",
 			},
 			want: "regionRef -> netboxregion slug=emea: ambiguous " +
-				"(2 netbox dcim/regions match map[slug:emea]: ids [12 19])",
+				"(2 netbox dcim/regions match map[slug:emea]: id 12 (EMEA), id 19 (Emea))",
 		},
 		{
 			name: "lookup mode names the filter",

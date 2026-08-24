@@ -184,8 +184,9 @@ you wrote and the object it pointed at. From there:
   referrer's, not to the one the catalogue lives in.
 - `RefNotFound` on a `slug`, `lookup` or `id` → NetBox does not hold it. Nothing will
   announce it appearing, so this retries on a timer.
-- `RefAmbiguous` → the message lists the matching ids. Replace the `slug` with a `lookup`
-  that adds whatever distinguishes them, or with the `id`.
+- `RefAmbiguous` → the message names every matching id and what NetBox calls each one
+  (`id 12 (EMEA), id 19 (Emea)`). Replace the `slug` with a `lookup` that adds whatever
+  distinguishes them, or with the `id`.
 - `RefKindUnavailable` → the operator has no descriptor for that Kind, or the CRD is not
   installed. Your manifest is fine.
 
