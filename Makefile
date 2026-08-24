@@ -96,6 +96,17 @@ test-schema: lint-schema ## Run the schema extraction pipeline against test/fixt
 	@# parameters each Kind's filterset registers, merged into one IR (NBO-041).
 	python3 hack/test_ir.py
 
+.PHONY: coverage
+coverage: ## Regenerate docs/coverage.md and print the coverage summary.
+	@# The audit itself is a Go test, because the implemented kind set lives in
+	@# internal/registry and asking the registry is the only reading that cannot disagree
+	@# with the running operator. -update rewrites the document; without it the same test
+	@# compares against the committed copy, which is how `make test` and CI gate coverage
+	@# without a second workflow step.
+	go test ./internal/registry/ -run TestCoverage -count=1 -update
+	@awk '/^## Summary/{f=1} /^## Uncovered/{f=0} f' docs/coverage.md
+	@echo "Full table: docs/coverage.md"
+
 .PHONY: test-e2e
 test-e2e: ## Run e2e tests against a kind cluster and a live NetBox.
 	@if [ -z "$$(find test/e2e -name '*_test.go' 2>/dev/null)" ]; then \
