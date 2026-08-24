@@ -13,8 +13,8 @@ const (
 	ConditionSynced = "Synced"
 
 	// ConditionRefsResolved is true when every reference in the spec resolved to a NetBox
-	// id. References are accepted and ignored until NBO-012, so in v1alpha1's first
-	// milestone this condition reports NotImplemented rather than lying.
+	// id. False names the field that has not resolved and why, and the object does not
+	// reach Ready while it is False.
 	ConditionRefsResolved = "RefsResolved"
 
 	// ConditionDriftDetected is true when NetBox differs from the spec and the operator
