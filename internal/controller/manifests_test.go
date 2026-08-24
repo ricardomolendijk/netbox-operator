@@ -18,6 +18,7 @@ import (
 var shippedManifests = []string{
 	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxendpoint.yaml"),
 	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxtag.yaml"),
+	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxrefgrant.yaml"),
 	filepath.Join("..", "..", "docs", "examples", "tag.yaml"),
 }
 

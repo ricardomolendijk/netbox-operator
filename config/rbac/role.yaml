@@ -14,6 +14,7 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - namespaces
   - secrets
   verbs:
   - get
@@ -23,6 +24,7 @@ rules:
   - netbox.kubeforge.org
   resources:
   - netboxendpoints
+  - netboxrefgrants
   verbs:
   - get
   - list

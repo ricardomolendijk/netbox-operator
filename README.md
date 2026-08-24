@@ -90,7 +90,9 @@ hand-reading the REST docs — see [`docs/netbox-schema.md`](docs/netbox-schema.
 ## Supported kinds
 
 `NetBoxEndpoint` is the connection; `NetBoxTag` is the first NetBox object to land, and
-the one that proves the engine. The delivery order for the rest is deliberate: **the
+the one that proves the engine. `NetBoxRefGrant` is neither — it is the one kind that
+describes no NetBox object at all, and authorises references between namespaces. The
+delivery order for the rest is deliberate: **the
 logical model first** — tenancy, IPAM and virtualization — with physical plant (racks,
 power, modules, cabling), circuits and VPN deliberately last.
 
@@ -99,6 +101,7 @@ power, modules, cabling), circuits and VPN deliberately last.
 | Connection | [`NetBoxEndpoint`](docs/reference/netboxendpoint.md) | **Available** (M1) |
 | `extras` | [`NetBoxTag`](docs/reference/netboxtag.md) | **Available** (M1) |
 | `dcim` | [`NetBoxSite`](docs/reference/netboxsite.md) | **Available** (M1) |
+| Authorisation | [`NetBoxRefGrant`](docs/reference/netboxrefgrant.md) | **Available** (M2) |
 | `tenancy` | `NetBoxTenantGroup`, `NetBoxTenant` | M3 |
 | `ipam` | `NetBoxVRF`, `NetBoxRouteTarget`, `NetBoxVLAN`, `NetBoxVLANGroup`, `NetBoxPrefix`, `NetBoxIPAddress` | M3 |
 | `virtualization` | `NetBoxClusterType`, `NetBoxClusterGroup`, `NetBoxCluster`, `NetBoxVirtualMachine`, `NetBoxVMInterface`, `NetBoxVirtualDisk` | M4 |

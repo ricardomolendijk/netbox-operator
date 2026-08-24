@@ -392,9 +392,10 @@ kubectl get nbtag -A -o jsonpath='{range .items[?(@.status.id==7)]}{.metadata.na
 ```
 
 The intended resolution is for one namespace to own the tag and the others to reference it
-across namespaces once `NetBoxRefGrant` exists (NBO-014). Until then, either move the
-duplicate out or set `onConflict: AdoptOnly` on it — which makes both CRs manage the same
-NetBox tag, and makes the last writer win on every field they disagree about.
+across namespaces, which a [`NetBoxRefGrant`](netboxrefgrant.md) in the owning namespace now
+permits. The alternatives are to move the duplicate out, or to set `onConflict: AdoptOnly` on
+it — which makes both CRs manage the same NetBox tag, and makes the last writer win on every
+field they disagree about.
 
 ### `objectTypes` are content types, not references
 
