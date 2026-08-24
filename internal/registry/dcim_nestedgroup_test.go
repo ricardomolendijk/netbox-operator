@@ -36,6 +36,13 @@ var nestedGroups = []struct {
 				NullFields: []NullField{{Filter: "parent_id", Spec: "parentRef"}},
 			},
 		},
+		// dcim.Region.parent is on_delete=CASCADE, so by ADR-0003's "a server-side cascade
+		// implies an owner reference" rule the self-reference is the containment parent --
+		// without it a child CR outlives its row and the create-if-absent step recreates a
+		// region NetBox deliberately deleted. This expectation was written before owner
+		// references existed and said "" for a while; the two landed in the same hour and
+		// each passed CI against a main that did not yet contain the other.
+		containment: "parentRef",
 	},
 	{
 		kind: "NetBoxSiteGroup", endpoint: "dcim/site-groups", objectType: "dcim.sitegroup",
