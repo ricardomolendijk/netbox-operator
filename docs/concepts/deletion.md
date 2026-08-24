@@ -37,6 +37,7 @@ rather than averaged away (decision
 | Kind | Default | Why |
 |---|---|---|
 | [`NetBoxIPAddress`](../reference/netboxipaddress.md) | `Retain` | Deleting frees the address for reallocation, and if a claim allocated it that is destructive with no undo |
+| [`NetBoxIPAddressClaim`](../reference/netboxipaddressclaim.md) | `Delete` | The claim's CR is the only record its allocation exists, so retaining leaves an address nothing can attribute ([#225](https://github.com/ricardomolendijk/netbox-operator/issues/225)) |
 | [`NetBoxTag`](../reference/netboxtag.md), [`NetBoxSite`](../reference/netboxsite.md), [`NetBoxRegion`](../reference/netboxregion.md) | `Delete` | Configuration: cheap to delete, cheap to recreate |
 
 Every other Kind defaults to `Delete`, and the IPAM Kinds still to come
@@ -85,21 +86,58 @@ to `Retain`, everything else defaults to `Delete`.
 | `NetBoxVLAN` | `Retain` |
 | `NetBoxVLANGroup` | `Retain` |
 | `NetBoxVRF` | `Retain` |
-| `NetBoxIPAddressClaim` | `Retain`, and **there is no field** — see below |
+| `NetBoxIPAddressClaim` | **`Delete`** — the one IPAM kind that deletes, see below |
 | every other kind (`NetBoxTag`, `NetBoxSite`, the catalogue kinds, …) | `Delete` |
 
-A claim goes one step further and carries no `deletionPolicy` at all
-([#182](https://github.com/ricardomolendijk/netbox-operator/issues/182)). A single-valued knob
-is not one, and `Retain` is the value that makes its deterministic allocation identity worth
-having: delete the claim, re-apply the same manifest, get the same address back. What stops
-that from being a silent leak is that the operator **reports** it — deleting a claim emits an
-`AddressRetained` Event naming the address, the NetBox id and the identity, and increments
-`netbox_operator_allocations_retained_total`. The operator never deletes an object it cannot
-prove is unused, and it cannot prove that of an allocated address; to free one, delete it in
-NetBox ([claims](claims.md#deleting-a-claim)).
+### The claim is the exception to the exception
 
-That deletion pass makes no NetBox call whatsoever, which is worth saying next to everything
-else on this page: a claim's finalizer cannot get stuck, however unreachable NetBox is.
+**Decided** on
+[#225](https://github.com/ricardomolendijk/netbox-operator/issues/225), which reverses
+[#182](https://github.com/ricardomolendijk/netbox-operator/issues/182): a claim defaults to
+`Delete`, and its `deletionPolicy` field exists so that a specific claim can opt into `Retain`.
+
+The rule the whole table turns on is not "IPAM is special". It is **whether anything still
+names the NetBox object once the CR is gone.**
+
+- A `NetBoxIPAddress` with an explicit `spec.address` is a deliberate statement about one
+  address. Somebody typed `10.0.0.9/24` and something outside Kubernetes very likely agrees
+  with them. `Retain` protects real intent.
+- A claim says "give me any free address out of `mgmt-net`". That is *not* a statement about
+  `10.0.20.37`, and nothing in Git names that address — the claim's CR is the only record the
+  allocation exists at all. So a retained address is not protected, it is unattributable:
+  invisible litter by construction.
+
+The arithmetic settled it. An inline `claimFrom` on a VM materialises a claim owned by that VM
+([#174](https://github.com/ricardomolendijk/netbox-operator/issues/174)), so uniform `Retain`
+leaked **one address per VM deletion** — and pool exhaustion is a wait-forever state, so in a
+CI-driven cluster the leak did not degrade allocation, it eventually stopped it.
+
+**What the new default costs, stated rather than sold: a freed address can be reallocated
+immediately, so an accidental `kubectl delete` on a claim is unrecoverable** where a leak was
+recoverable by hand. Re-applying the same manifest derives the same allocation identity, but if
+something has taken the address meanwhile the claim gets a different one. That is a real
+regression in one direction, traded for a leak that stopped the operator working in the other.
+
+`deletionPolicy: Retain` on a claim keeps the previous behaviour exactly: no NetBox call, an
+`AddressRetained` Event naming the address, the id and the identity, and
+`netbox_operator_allocations_retained_total{kind}`
+([claims](claims.md#deleting-a-claim)).
+
+A claim's `deletionPolicy` is also the one copy of this field with a real CRD default, so
+`kubectl explain netboxipaddressclaim.spec.deletionPolicy` says `Delete`. It is declared on
+`NetBoxClaimSpec`, which only claim kinds embed and which all want the same answer, rather than
+on the envelope ~120 kinds embed
+([#186](https://github.com/ricardomolendijk/netbox-operator/issues/186)).
+
+The deletion pass used to make **no NetBox call whatsoever**, which made "a claim's finalizer
+cannot get stuck" free. `Delete` spends that, so it is bought back explicitly: a refusal or a
+failure is reported the way the [sequence below](#the-deletion-sequence) reports one, and after
+**8 attempts** (~20 minutes) the claim releases its finalizer anyway and reports the address as
+retained. The declarative engine never gives up and relies on a human writing the
+[skip annotation](#getting-out-of-a-blocked-delete); a claim cannot afford that, because claims are created by
+machinery rather than by hand and a namespace full of them would have to be unwedged one CR at a
+time. It gives up into exactly the behaviour that shipped before this reversal — a reported,
+counted leak — which is why the trade is acceptable and a wedged namespace would not have been.
 
 The asymmetry is deliberate, and the reason it is honest rather than inconsistent is that the
 two groups hold different sorts of thing: **an address a claim allocated is *state*; a tag is
@@ -167,6 +205,12 @@ unreachable**. An escape hatch that only works when it is not needed is not an e
 
 A CR that carries no finalizer of ours is left alone entirely: something else is holding it
 open, and requeueing against that would be a busy loop.
+
+That table is the **declarative** engine's. A claim runs the same sequence in the same order,
+over `status.netboxID` instead of `status.id` and reporting `AddressRetained` where this one
+reports `Retained` — with one difference: steps 4, 7 and 8 are bounded, and the eighth attempt
+releases the finalizer rather than keeping it
+([the claim reference](../reference/netboxipaddressclaim.md#it-still-cannot-make-a-namespace-undeletable)).
 
 The `Deleting` condition is only ever `False`. The finalizer comes off the instant the NetBox
 side settles, so a `True` would have to sit on a CR that no longer exists to carry it. The

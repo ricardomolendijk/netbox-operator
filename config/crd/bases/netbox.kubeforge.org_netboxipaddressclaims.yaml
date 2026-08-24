@@ -38,14 +38,16 @@ spec:
 
           Namespaced like every kind in v1alpha1 (docs/decisions/0002-crd-scoping.md).
 
-          **A claim always retains its NetBox object.** There is no `deletionPolicy` field: a
-          single-valued knob is not one, and Retain is the value that makes the deterministic
-          identity worth having -- delete the claim, re-apply the same manifest, get the same
-          address back. What stops that from being a silent leak is that the operator *reports*
-          it: deleting a claim emits the AddressRetained Event naming the address, the NetBox id and
-          the identity, and never deletes anything
-          (https://github.com/ricardomolendijk/netbox-operator/issues/182). To free the address,
-          delete the NetBox object.
+          **Deleting a claim frees its address.** `spec.deletionPolicy` defaults to `Delete`, because
+          the claim CR is the only record that the allocation exists -- nothing else in Git names the
+          address it was handed, so a retained address is litter nobody can attribute
+          (https://github.com/ricardomolendijk/netbox-operator/issues/225, reversing #182). Set
+          `deletionPolicy: Retain` on a claim whose address something outside Kubernetes depends on;
+          that path emits the AddressRetained Event naming the address, the NetBox id and the
+          identity, and calls NetBox not at all.
+
+          The cost of the default, plainly: **a freed address can be reallocated immediately, so an
+          accidental `kubectl delete` is unrecoverable** where a leak was recoverable by hand.
 
           The printer columns are the three things a human wants side by side: what was asked for,
           what was handed out, and whether it stuck.
@@ -107,17 +109,42 @@ spec:
                 - message: allocationIdentity is immutable; changing it points this
                     claim at a different allocation
                   rule: self == oldSelf
+              deletionPolicy:
+                default: Delete
+                description: |-
+                  DeletionPolicy is what happens to the allocated NetBox object when this claim is
+                  deleted. The same two values and the same meanings as on every other kind
+                  (docs/concepts/deletion.md).
+
+                  **`Delete`, unlike the IPAM object kinds, and that asymmetry is the decision** (#225,
+                  reversing #182). A claim's CR is the only record that its allocation exists: "give me
+                  any free address out of mgmt-net" is not a statement about 10.0.20.37, and nothing in
+                  Git names that address. So when the claim goes, nothing refers to the address it was
+                  handed and it becomes litter that is invisible by construction. A NetBoxIPAddress with
+                  an explicit spec.address is the opposite -- a deliberate statement about one address,
+                  where Retain protects real intent -- and it still defaults to Retain (#176).
+
+                  The cost of this default, stated rather than sold: **a freed address can be reallocated
+                  immediately, so an accidental `kubectl delete` on a claim is unrecoverable.**
+                  Re-applying the same manifest derives the same allocation identity, but if something
+                  else has taken the address meanwhile the claim gets a different one, and whatever was
+                  configured to use the old address is now pointed at somebody else's. Under Retain that
+                  mistake was recoverable by hand. Set this to Retain on a claim whose address something
+                  outside Kubernetes depends on and cannot be told about.
+
+                  Read fresh on every pass rather than latched when deletion starts, so switching it to
+                  Retain on a claim whose delete NetBox keeps refusing is the way out of that state.
+                enum:
+                - Delete
+                - Retain
+                type: string
               endpointRef:
                 description: |-
                   EndpointRef names the NetBoxEndpoint to allocate through, in this claim's own
                   namespace.
 
-                  Declared here rather than inherited from NetBoxObjectSpec, because two of that
-                  struct's three fields mean nothing to a claim. `onConflict` is about adopting an
-                  object that matches a natural key, and a claim has no natural key -- it adopts by
-                  allocation identity and by nothing else. `deletionPolicy` is fixed at Retain, see the
-                  type comment on NetBoxIPAddressClaim. A field that is accepted and ignored is worse
-                  than a field that is not there.
+                  Declared here rather than inherited from NetBoxObjectSpec: see the type comment above
+                  for why a claim does not embed that envelope.
 
                   It also participates in the allocation identity: the same claim pointed at a different
                   NetBox is a different allocation, and asking a second NetBox for the object of the
@@ -316,6 +343,21 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              deletionAttempts:
+                description: |-
+                  DeletionAttempts counts the deletes of the allocated object that did not succeed:
+                  refused by NetBox, failed, or not attempted because the endpoint was not Ready.
+
+                  A status field for the same reason NetBoxObjectStatus's is -- a controller has no
+                  memory between passes, so a backoff computed from a count has to survive a requeue, a
+                  leader election and a restart. Non-zero only while a claim is terminating.
+
+                  It is also the bound on that retry: past a fixed number of attempts the claim releases
+                  its finalizer anyway and reports the address as retained, because a claim's finalizer
+                  must not be able to wedge a namespace (#225). Counting anything other than a success
+                  here would make that bound unenforceable.
+                format: int32
+                type: integer
               netboxID:
                 description: |-
                   NetBoxID is the allocated object's NetBox primary key. Zero until an allocation is

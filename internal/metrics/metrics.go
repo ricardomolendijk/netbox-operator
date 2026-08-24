@@ -239,12 +239,18 @@ var AllocationsTotal = factory.NewCounterVec(prometheus.CounterOpts{
 }, []string{"kind", "result"})
 
 // AllocationsRetained counts NetBox objects the operator stopped tracking because their
-// claim was deleted, and deliberately did not delete.
+// claim was deleted, and did not delete.
 //
 // The metric half of the garbage-collection reporting path: the Event naming the object ages
 // out of its namespace within the hour, and this does not, so "how many addresses has this
 // cluster left behind" stays answerable
 // (https://github.com/ricardomolendijk/netbox-operator/issues/182).
+//
+// Three things increment it and they are not equally normal, which is why the Event beside it
+// carries the reason: spec.deletionPolicy Retain (a choice), a non-writing endpoint, and a
+// Delete the operator gave up on after a bounded retry (a leak). Since #225 made Delete the
+// default, an increment on a cluster that never writes Retain is the third one -- so a rate
+// that is not zero there is worth alerting on rather than graphing.
 var AllocationsRetained = factory.NewCounterVec(prometheus.CounterOpts{
 	Name: "netbox_operator_allocations_retained_total",
 	Help: "NetBox objects left behind, and reported, when their claim was deleted.",
