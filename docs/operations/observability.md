@@ -435,6 +435,41 @@ sum by (result) (rate(netbox_operator_sweep_runs_total{result!="Complete"}[1h]))
 client's page cap, so the operator saw a partial set of NetBox — and a partial set makes live
 objects look absent.
 
+### `netbox_operator_webhook_duration_seconds`
+
+| | |
+|---|---|
+| Type | Histogram |
+| Labels | `kind`, `operation` |
+| Buckets | 0.5ms, 1ms, 2.5ms, 5ms, 10ms, 25ms, 50ms, 100ms, 250ms, 1s, 5s |
+| Cardinality | ~120 x 2 x 14 = ~3360 series worst case |
+
+One admission review by the validating webhook, end to end
+([the admission webhook](admission-webhooks.md)).
+
+Not labelled by webhook name, because there is one webhook serving the whole API group; the
+interesting axis is which Kind is slow. `operation` is `CREATE` or `UPDATE`, which do not do the
+same work — an update carries an old object and a create does not.
+
+This is the instrument the whole design of the webhook hangs off. Its budget is **p99 under
+10ms** for an object with ten references, and it is met by reading cached objects and never
+NetBox: an admission path that started making a live read would show up here as a p99 in the
+tens of milliseconds long before anybody noticed the API server's own latency had gone into
+every apply. The webhook's own `timeoutSeconds` is 5, which is the top bucket, so a review the
+API server gave up on is still containable.
+
+A review that reaches the timeout is *not* an error for the applier —
+`failurePolicy: Ignore` admits the object — so this metric and nothing else is how a slow
+webhook becomes visible.
+
+**Alert on:** p99 above 100ms, which is an order of magnitude over budget and a fifth of the
+way to the timeout.
+
+```promql
+histogram_quantile(0.99,
+  sum by (le, kind) (rate(netbox_operator_webhook_duration_seconds_bucket[5m]))) > 0.1
+```
+
 ## Cardinality
 
 A label whose value set is unbounded turns a metric into an outage: every distinct value
@@ -453,6 +488,7 @@ are:
 | `field` | NetBox API column names, from a Descriptor's field map | tens per model |
 | `targetKind`, `referrerKind` | Kind names from a Descriptor, paired only where a field map declares a reference | a few hundred pairs |
 | `reason` | The sweep finding reasons in `api/v1alpha1` | 3 |
+| `operation` | The admission verbs the webhook registers | 2 |
 
 Worst case, with every kind implemented and every path and status exercised, is roughly
 **25 000 series**. Realistically a cluster using a handful of kinds against one NetBox

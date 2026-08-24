@@ -6,6 +6,9 @@
 to the restore runbook.
 **Amended:** 2026-08-24 — §2 now documents **both** markers a materialised child carries, not
 just `generated-by` ([#166](https://github.com/ricardomolendijk/netbox-operator/issues/166)).
+**Amended:** 2026-08-24 — §1 now says where a *mutating admission webhook* sits against this
+rule, and why the operator ships none
+([#68](https://github.com/ricardomolendijk/netbox-operator/issues/68)).
 
 ## The governing principle
 
@@ -69,6 +72,16 @@ The operator does **read** `metadata.managedFields`, to learn which spec fields 
 that is how an optional field gets three states rather than two
 ([field ownership](../concepts/field-ownership.md), NBO-079). Reading is not writing, and the
 operator's own ownership of `spec` is empty by construction, so the invariant is unchanged.
+
+A **mutating admission webhook** is the one actor this rule does not literally cover: it is not
+the operator, and it mutates an object in flight on the same request the GitOps tool made,
+exactly as a `+kubebuilder:default` does. The operator nonetheless ships none, and the reasoning
+is in [the admission webhook](../operations/admission-webhooks.md#why-there-is-no-defaulting-webhook):
+this rule's premise is that Flux and Argo CD own the spec, and both use server-side apply, under
+which a field a webhook filled is owned by the webhook's field manager and is stripped by the
+next apply that omits it. So a defaulting webhook survives the letter of this rule and not its
+spirit. Per-namespace defaults, if they are wanted, are resolved at reconcile and reported in
+`status`.
 
 Consequence to accept: **an allocated address lives in `status`, not in Git.** See §3.
 

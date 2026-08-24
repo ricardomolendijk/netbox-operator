@@ -52,6 +52,11 @@ engine: the missing behaviour belongs in the `Descriptor` as data, not in the en
 as a branch. **There is no `switch` on kind anywhere in the reconcile path** — that
 switch is the specific smell this rule exists to prevent.
 
+The same holds for admission: `internal/webhook/admission` serves one path matching
+`resources: ["*"]` within the API group and reads the `Descriptor` for whatever arrives, so a
+new kind is covered by the validating webhook with no edit there either
+([the admission webhook](docs/operations/admission-webhooks.md)).
+
 ### Optional spec fields have three states, not two
 
 An optional field can be **absent** (leave NetBox's value alone), **empty** (clear
