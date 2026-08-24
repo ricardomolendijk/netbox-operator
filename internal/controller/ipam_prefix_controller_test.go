@@ -212,13 +212,21 @@ func TestPrefixScopeTargetsResolveOrSayWhy(t *testing.T) {
 			wantType:  "dcim.site",
 			wantReady: true,
 		},
+		// These two were the "no Descriptor, so no mode resolves" cases when this test was
+		// written. NBO-066 registered both Kinds, so they now resolve like any other member
+		// -- which is the whole point of that ticket, and is asserted here rather than in a
+		// separate test so that the four members stay one table.
 		{
-			name:  "site-group-kind-not-built-yet",
-			scope: netboxv1alpha1.ScopeRef{SiteGroupRef: &netboxv1alpha1.SiteGroupRef{ID: idOf(21)}},
+			name:      "site-group",
+			scope:     netboxv1alpha1.ScopeRef{SiteGroupRef: &netboxv1alpha1.SiteGroupRef{ID: idOf(21)}},
+			wantType:  "dcim.sitegroup",
+			wantReady: true,
 		},
 		{
-			name:  "location-kind-not-built-yet",
-			scope: netboxv1alpha1.ScopeRef{LocationRef: &netboxv1alpha1.LocationRef{ID: idOf(31)}},
+			name:      "location",
+			scope:     netboxv1alpha1.ScopeRef{LocationRef: &netboxv1alpha1.LocationRef{ID: idOf(31)}},
+			wantType:  "dcim.location",
+			wantReady: true,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
