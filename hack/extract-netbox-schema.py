@@ -8,6 +8,11 @@ FIELD_TYPES = {
     'ForeignKey','OneToOneField','ManyToManyField','GenericForeignKey','GenericRelation',
     'IPAddressField','IPNetworkField','MACAddressField','ASNField','URLField','EmailField',
     'UUIDField','ArrayField','ColorField','CounterCacheField','RestrictedGenericForeignKey',
+    # Found by the first run against real 4.6.8 source. TimeZoneField is the one that
+    # mattered immediately: dcim.Site.time_zone is a shipped CRD field (NetBoxSite.timeZone)
+    # whose schema row did not exist, so it could not be cited.
+    'TimeZoneField','BigAutoField','AutoField','ImageField','FilePathField','BinaryField',
+    'ChoiceSetField','PathField','DurationField','TimeField','GenericIPAddressField',
     'CachedValueField','WWNField','NaturalOrderingField','GenericIPAddressField',
     # mptt's FK flavour, which is how every NestedGroupModel declares `parent`.
     'TreeForeignKey',
@@ -20,7 +25,15 @@ FK_TYPES = ('ForeignKey','OneToOneField','ManyToManyField','TreeForeignKey')
 # from every entry. Emitted as what it is: an M2M onto the tag model through a through
 # table, never a column. Any other manager (`objects = TreeManager()`) is a queryset
 # accessor and no part of the API, so it stays out.
-MANAGER_TARGETS = {'TaggableManager': 'extras.Tag'}
+# NetBox declares `tags = NetBoxTaggableManagerField(...)`, a subclass of taggit's
+# TaggableManager (extras/managers.py). Matching only the base class name meant this fired
+# on no real model at all -- the fixture used the base name because the spec did, so the
+# omission survived a fixture that was built to catch it. Both names are listed: the
+# subclass is what 4.6.8 uses, the base is what a plugin or an older release might.
+MANAGER_TARGETS = {
+    'NetBoxTaggableManagerField': 'extras.Tag',
+    'TaggableManager': 'extras.Tag',
+}
 GENERIC_FK_TYPES = ('GenericForeignKey','RestrictedGenericForeignKey')
 # Kwargs that must be an integer to be usable downstream; the rest of what we keep is
 # either boolean or symbolic by nature (choices, default).
@@ -117,7 +130,11 @@ for app in ['circuits','core','dcim','extras','ipam','netbox','tenancy','users',
                         # A field class the whitelist does not know is a column missing from the
                         # entry, and so a property missing from any CRD derived from it -- the
                         # same silent loss as a missed endpoint. Say it out loud.
-                        if fn.endswith('Field') and fn not in FIELD_TYPES:
+                        # MANAGER_TARGETS is checked too: NetBoxTaggableManagerField ends
+                        # in "Field" and is admitted below, so warning on it would be a
+                        # warning about a column that was kept -- and a warning that fires
+                        # on a field it admitted is how people learn to ignore warnings.
+                        if fn.endswith('Field') and fn not in FIELD_TYPES and fn not in MANAGER_TARGETS:
                             print(f"!! {app}.{node.name}.{name}: unknown field type {fn}, column omitted",
                                   file=sys.stderr)
                         if fn in FIELD_TYPES or fn in MANAGER_TARGETS:

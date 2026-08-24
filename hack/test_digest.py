@@ -61,7 +61,25 @@ constraints = ' '.join(line.strip() for line in vlan if 'meta.constraints:' in l
 for name in ('unique_group_vid', 'unique_group_name', 'unique_qinq_svlan_vid', 'unique_qinq_svlan_name', 'unique_site_vid'):
     assert name in constraints, f"meta.constraints truncated before {name}"
 assert constraints.rstrip().endswith("site.')))"), f"meta.constraints does not end at the closing paren: {constraints[-80:]}"
-assert max(len(line) for line in digest.splitlines()) <= 120, 'a digest line is too long to wrap into the doc'
+# Was: every digest line <= 120 chars, "too long to wrap into the doc". That was never true of
+# real output -- the committed doc has lines of 249 (a bases list of 11 mixins) -- so it held only
+# because the fixture is small, and it failed the moment a real 26-char field class was added to
+# the whitelist. What the padding is actually for is column alignment, so check that instead, and
+# check it against every type the extractor can emit rather than the handful the fixture uses.
+# Read the constants out of the sources rather than importing them: both scripts run their
+# main body at import time and would execute against this test's sys.argv.
+def _const(path, name):
+    tree = ast.parse(open(os.path.join(HACK, path)).read())
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and getattr(node.targets[0], 'id', None) == name:
+            return ast.literal_eval(node.value)
+    raise AssertionError(f'{name} not found in {path} -- renamed?')
+
+_type_col = _const('digest-netbox-schema.py', 'TYPE_COL')
+_types = set(_const('extract-netbox-schema.py', 'FIELD_TYPES')) | set(_const('extract-netbox-schema.py', 'MANAGER_TARGETS'))
+_widest = max(_types, key=len)
+assert len(_widest) <= _type_col, (
+    f'{_widest} ({len(_widest)}) overflows the digest type column ({_type_col}); widen TYPE_COL')
 
 # --- defect 2: on_delete recorded per FK, for every flavour Django accepts ----------------
 assert 'on_delete=PROTECT'     in field(digest, 'ipam.VLAN', 'site')
