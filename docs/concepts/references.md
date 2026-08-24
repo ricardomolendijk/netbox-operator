@@ -167,6 +167,61 @@ create bodies.
 
 Two references to the same object are one member of a set, which is what NetBox stores either
 way.
+
+### A list needs a bound
+
+**Every `[]ObjectRef` field carries `+kubebuilder:validation:MaxItems`.** Without it the CRD
+does not install — not the field, the whole CRD:
+
+```
+spec.properties[importTargets].items.x-kubernetes-validations[3].rule: Forbidden:
+  estimated rule cost exceeds budget by factor of 18.1x (try simplifying the rule, or
+  adding maxItems, maxProperties, and maxLength where arrays, maps, and strings are declared)
+```
+
+The API server costs a CEL rule at the list's **maximum** length, and a list with no maximum
+is costed as unbounded. `ObjectRef` carries [five rules](#what-the-api-server-rejects), so the estimate for
+an unbounded list of them clears both the per-rule budget and the whole-schema one by an order
+of magnitude. Nothing earlier in the pipeline objects: controller-gen emits the schema,
+`kustomize build` renders it and `make verify` passes. `TestEveryValidatedListIsBounded`
+(`api/v1alpha1/reflistbounds_test.go`) is what fails instead, by walking the generated CRDs
+for any list whose items carry CEL rules and declares no `maxItems` — so it covers a Kind
+added by somebody who has never read this page, and a reference type whose rule set differs
+from `ObjectRef`'s.
+
+**The bound is 256**, and it is a statement about the API rather than about the cost budget.
+An object with more than 256 references of one kind is a modelling mistake or a runaway
+generator, and refusing it at admission is more useful than storing it. A field with a
+narrower real-world maximum may of course be tighter — `NetBoxRefGrant.from` is 16 — but 256
+is what a to-many reference gets when nothing else argues for a number.
+
+The cost budget is nowhere near it. Measured against a real API server (Kubernetes 1.34,
+`envtest`) by installing CRDs carrying a list of the generated `ObjectRef` schema at
+successive bounds:
+
+| Shape | Largest `maxItems` accepted |
+| --- | --- |
+| one `[]ObjectRef` field | **57 803** |
+| three such fields on one Kind | 57 803 each |
+| five | 46 619 each |
+| ten | 23 309 each |
+
+The first three rows are capped by the **per-rule** budget; from five fields on it is the
+**whole-schema** budget that binds, and the ceiling falls roughly as one over the number of
+fields sharing it. So 256 leaves about 90× of headroom even for a Kind with ten to-many
+reference fields, which is enough that [#185](https://github.com/ricardomolendijk/netbox-operator/issues/185)
+adding rules to `ObjectRef`, or wrapping it, cannot quietly make 256 unaffordable.
+
+`MaxItems=32`, applied when this was first hit on `NetBoxVRF.importTargets`/`exportTargets`
+([#191](https://github.com/ricardomolendijk/netbox-operator/issues/191)), was a guess that
+cleared the budget with ~1800× to spare. It should be 256: a cluster with 40 route targets on
+one VRF was being refused by a validation-cost artefact rather than by anything true about
+NetBox.
+
+The generator ([NBO-042 (#66)](https://github.com/ricardomolendijk/netbox-operator/issues/66))
+must emit the marker on every `RefMany` field it produces. It emits ~90 Kinds, so one omitted
+bound is one unloadable CRD, and the check above is what fails if the emitter forgets.
+
 ## Ordering and convergence
 
 **Apply order does not matter.** A manifest applied backwards converges as fast as one
@@ -735,6 +790,9 @@ reconcile. There is nothing to restart and no requeue to wait out.
 ## What the API server rejects
 
 Five CEL rules live on the `ObjectRef` type itself, so a new ref field cannot forget them.
+
+Those five rules are also why a list of references needs a `maxItems`: see
+[A list needs a bound](#a-list-needs-a-bound).
 
 | Rejected | Why |
 |---|---|
