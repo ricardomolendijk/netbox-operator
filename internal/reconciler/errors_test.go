@@ -201,14 +201,14 @@ func TestJitter(t *testing.T) {
 	const base = 10 * time.Minute
 
 	for range 100 {
-		got := jitter(base)
+		got := Jitter(base)
 
 		if got < base-base/10 || got > base+base/10 {
-			t.Fatalf("jitter(%s) = %s, want within 10%%", base, got)
+			t.Fatalf("Jitter(%s) = %s, want within 10%%", base, got)
 		}
 	}
 
-	if got := jitter(0); got != 0 {
-		t.Errorf("jitter(0) = %s, want 0: no requeue means no requeue", got)
+	if got := Jitter(0); got != 0 {
+		t.Errorf("Jitter(0) = %s, want 0: no requeue means no requeue", got)
 	}
 }

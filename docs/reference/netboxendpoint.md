@@ -329,13 +329,15 @@ identical until you read the `Reason`.
 
 How often a `Ready` endpoint re-probes NetBox even when nothing changed. This is the
 requeue interval on the success path, for this endpoint and for every object that points at
-it.
+it, **± 10% jitter** so that endpoints applied in one manifest do not probe in lockstep for
+the life of the process.
 
 Ignored for objects when `spec.driftMode` is `Off`, which is the whole of what "no periodic
 resync" means. The endpoint's own re-probe continues either way: that checks the token, the
 version and reachability, none of which is drift.
 
-**If it is wrong.** Zero or negative falls back to 10 minutes. A very short period
+**If it is wrong.** Zero or negative falls back to 10 minutes (`internal/reconciler`'s
+`DefaultResync`, the one Go definition of the default). A very short period
 multiplies request volume against NetBox by every endpoint in the cluster; pair it with
 `spec.rateLimit`. Same admission caveat as `spec.timeout` for an unparseable value.
 
@@ -444,6 +446,12 @@ Retries are spaced by how likely a retry is to help.
 | `VersionUnsupported`, `VersionUnparseable` | 10m — it will not fix itself; re-probing every 30s is pure noise |
 | `AuthError`, `InvalidConfig` | 2m |
 | `SecretMissing`, `TokenMissing`, `ProbeFailed` | 30s |
+
+Every interval above carries ± 10% jitter, which is what stops endpoints from a manifest
+applied all at once — lab, staging and prod — from probing in lockstep for the rest of the
+process's life, and every endpoint pointed at one NetBox from hitting it at the same
+instant. It is the same spread object kinds get, from the same helper. A tenth either way
+never moves an interval into the tier below it, so the tiers still mean what the table says.
 
 None of these is returned as a controller error. An unreachable or misconfigured NetBox is
 a condition on this object, not a controller failure — otherwise the manager's error rate
