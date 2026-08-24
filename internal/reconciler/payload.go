@@ -95,7 +95,7 @@ func (s specFields) desired(d registry.Descriptor) (netbox.Object, registry.Spec
 		case mapped && field.Class.Ref(), !mapped && isGenericFK(d, name):
 			refs = append(refs, name)
 		case mapped:
-			desired[field.API] = value
+			desired[field.API] = writeValue(field, value)
 
 			if _, filterable := filterValue(value); filterable {
 				state.Resolved = append(state.Resolved, name)
@@ -109,6 +109,23 @@ func (s specFields) desired(d registry.Descriptor) (netbox.Object, registry.Spec
 	}
 
 	return desired, state, refs, nil
+}
+
+// writeValue is the value one mapped field is sent as.
+//
+// Everything goes as it arrived, bar one case: a cleared column that NetBox nulls rather
+// than empties. The user's `latitude: ""` becomes JSON null, which is the only thing a
+// nullable DecimalField accepts as "no value" -- DRF parses the empty string as a number and
+// rejects it, so without this the empty state would be admissible and unwritable (#170,
+// registry.Field.EmptyIsNull). The null is a value being written rather than an omission,
+// and the drift comparison then finds it equal to the null NetBox returns, so a cleared
+// column settles instead of PATCHing forever.
+func writeValue(field registry.Field, value any) any {
+	if field.EmptyIsNull && value == "" {
+		return nil
+	}
+
+	return value
 }
 
 // params renders one natural-key candidate as a query string.
