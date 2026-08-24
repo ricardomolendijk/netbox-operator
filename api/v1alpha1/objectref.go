@@ -150,6 +150,15 @@ type (
 
 	// VLANRef points at a NetBoxVLAN (ipam.VLAN, ipam/vlans).
 	VLANRef ObjectRef
+
+	// VLANGroupRef points at a NetBoxVLANGroup (ipam.VLANGroup, ipam/vlan-groups).
+	//
+	// The one alias whose target's `slug` is not globally unique: ipam.VLANGroup is unique
+	// on `(scope_type, scope_id, slug)` rather than on `slug` alone (docs/netbox-schema.md
+	// -> ipam.VLANGroup, meta.constraints), so a `slug`-mode ref can legitimately match more
+	// than one group and is reported as a Conflict. Name the CR instead, or use `lookup`
+	// with the scope narrowed.
+	VLANGroupRef ObjectRef
 	// RouteTargetRef points at a NetBoxRouteTarget (ipam.RouteTarget, ipam/route-targets).
 	//
 	// The first alias used to-many: ipam.VRF's `import_targets` and `export_targets` are
@@ -250,6 +259,14 @@ func (r VLANRef) TargetGVK() schema.GroupVersionKind { return GroupVersion.WithK
 func (r VLANRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
 
 // TargetGVK reports the Kind this reference resolves against.
+func (r VLANGroupRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxVLANGroup")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r VLANGroupRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
 func (r RouteTargetRef) TargetGVK() schema.GroupVersionKind {
 	return GroupVersion.WithKind("NetBoxRouteTarget")
 }
@@ -278,6 +295,7 @@ var (
 	_ RefTarget = FHRPGroupRef{}
 	_ RefTarget = RoleRef{}
 	_ RefTarget = VLANRef{}
+	_ RefTarget = VLANGroupRef{}
 	_ RefTarget = RouteTargetRef{}
 	_ RefTarget = VRFRef{}
 )
