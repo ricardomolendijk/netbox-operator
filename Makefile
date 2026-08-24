@@ -102,11 +102,14 @@ test-schema: lint-schema ## Run the schema extraction pipeline against test/fixt
 
 .PHONY: test-e2e
 test-e2e: ## Run e2e tests against a kind cluster and a live NetBox.
+	@# One recipe line, not two. `exit 0` in a separate line's shell exits that shell and
+	@# make runs the next one anyway, so the skip printed its message and then failed on a
+	@# test/e2e that is not there -- which is every checkout until the harness lands (#29).
 	@if [ -z "$$(find test/e2e -name '*_test.go' 2>/dev/null)" ]; then \
-		echo "No e2e suite yet -- the harness lands with NBO-017. Skipping."; \
-		exit 0; \
+		echo "No e2e suite yet -- the harness lands with NBO-017 (#29). Skipping."; \
+	else \
+		go test ./test/e2e/ -v -ginkgo.v; \
 	fi
-	go test ./test/e2e/ -v -ginkgo.v
 
 # Paths whose contents are produced by controller-gen. Listed explicitly so that a dirty
 # working tree does not read as stale codegen: the two failures have different fixes, and

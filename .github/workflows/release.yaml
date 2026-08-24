@@ -1,0 +1,237 @@
+# Release automation. It does not decide *when* to release: a maintainer pushes a tag, and
+# this is everything that happens after. No release-on-merge, no automatic version bump, no
+# schedule -- a deliberate constraint, not a missing feature (NBO-061).
+#
+# Two triggers and one of them cannot publish:
+#
+#   push: tags v*        the real thing, and only on this repository
+#   workflow_dispatch    a rehearsal. `publish` defaults to false, and on a fork the guard
+#                        below refuses regardless, so a fork produces the same image, chart,
+#                        SBOM and signature into the job's artifacts and pushes nothing.
+#
+# A push to a branch does not start this workflow at all.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to rehearse, e.g. v0.1.0. Must match the chart's appVersion.
+        required: true
+      publish:
+        description: Publish to ghcr.io. Ignored outside the canonical repository.
+        type: boolean
+        default: false
+
+# A tag is immutable, so two runs for the same ref are the same run -- but do not cancel a
+# release halfway through pushing a manifest list.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  REGISTRY: ghcr.io
+  # The one repository allowed to publish. A fork's tag builds and signs, and stops there.
+  CANONICAL_REPO: ricardomolendijk/netbox-operator
+  # Pinned, like every tool version in the Makefile. A @latest here is a reproducibility bug.
+  HELM_VERSION: v3.16.3
+  COSIGN_VERSION: v2.4.1
+  SYFT_VERSION: v1.18.1
+
+jobs:
+  release:
+    name: build, package, sign
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # the GitHub release, on a tag
+      packages: write   # ghcr.io, only when publishing
+      id-token: write   # cosign keyless
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0   # release notes are assembled from the commit range
+
+      # One source of truth for the version: the chart's appVersion. The tag has to agree
+      # with it, and disagreeing is the failure this step exists to cause -- an image tagged
+      # v0.2.0 from a chart that says 0.1.0 is a release nobody can reason about afterwards.
+      - name: Resolve and check the version
+        id: version
+        run: |
+          set -euo pipefail
+          ref='${{ github.event_name == 'push' && github.ref_name || inputs.version }}'
+          version=${ref#v}
+          chart_version=$(sed -n 's/^version: *//p' charts/netbox-operator/Chart.yaml)
+          app_version=$(sed -n 's/^appVersion: *"\?\([^"]*\)"\?/\1/p' charts/netbox-operator/Chart.yaml)
+          echo "tag=$ref version=$version chart=$chart_version app=$app_version"
+          if [ "$version" != "$app_version" ] || [ "$version" != "$chart_version" ]; then
+            echo "::error::tag $ref disagrees with charts/netbox-operator/Chart.yaml" \
+                 "(version: $chart_version, appVersion: $app_version). Bump the chart, or tag what it says."
+            exit 1
+          fi
+          echo "version=$version" >>"$GITHUB_OUTPUT"
+          echo "tag=$ref" >>"$GITHUB_OUTPUT"
+
+      # The gate. Publishing needs a real tag on the canonical repository *and*, for a
+      # manual run, an explicit opt-in. Everything downstream reads this one output, so
+      # there is a single place to read to answer "can this run push anything".
+      - name: Decide whether this run publishes
+        id: gate
+        run: |
+          set -euo pipefail
+          publish=false
+          if [ '${{ github.repository }}' = '${{ env.CANONICAL_REPO }}' ] \
+             && [ '${{ startsWith(github.ref, 'refs/tags/v') }}' = 'true' ] \
+             && [ '${{ github.event_name != 'workflow_dispatch' || inputs.publish }}' = 'true' ]; then
+            publish=true
+          fi
+          echo "publish=$publish" >>"$GITHUB_OUTPUT"
+          echo "::notice::publish=$publish (repository=${{ github.repository }}, ref=${{ github.ref }})"
+
+      - name: Install pinned tooling
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz" | tar xz
+          sudo install -m755 linux-amd64/helm /usr/local/bin/helm
+          curl -fsSL -o /tmp/cosign \
+            "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-linux-amd64"
+          sudo install -m755 /tmp/cosign /usr/local/bin/cosign
+          curl -fsSL "https://github.com/anchore/syft/releases/download/${SYFT_VERSION}/syft_${SYFT_VERSION#v}_linux_amd64.tar.gz" \
+            | tar xz syft
+          sudo install -m755 syft /usr/local/bin/syft
+
+      # The chart is linted here as well as in CI: a release must not be the first time
+      # anybody rendered what it ships.
+      - name: Lint and render the chart
+        run: make helm-lint helm-template
+
+      # No QEMU: the Dockerfile pins its builder stage to $BUILDPLATFORM and cross-compiles
+      # with GOARCH, so an arm64 image is built natively on an amd64 runner. Emulating a Go
+      # toolchain to produce a statically linked binary would be minutes of nothing.
+      - name: Set up buildx
+        run: docker buildx create --use --name release
+
+      - name: Log in to ghcr.io
+        if: steps.gate.outputs.publish == 'true'
+        run: |
+          echo '${{ secrets.GITHUB_TOKEN }}' \
+            | docker login "$REGISTRY" -u '${{ github.actor }}' --password-stdin
+
+      # Multi-arch, because the reference lab is a Raspberry Pi. --push only when the gate
+      # says so; otherwise the manifest list is built into an OCI layout on disk, which is
+      # the same build producing the same digest without a registry.
+      - name: Build the image
+        id: image
+        run: |
+          set -euo pipefail
+          image="$REGISTRY/${{ github.repository }}"
+          version='${{ steps.version.outputs.version }}'
+          if [ '${{ steps.gate.outputs.publish }}' = 'true' ]; then
+            output="--push"
+          else
+            mkdir -p dist
+            output="--output=type=oci,dest=dist/netbox-operator-$version.oci.tar"
+          fi
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            --provenance=true --sbom=true \
+            -t "$image:$version" -t "$image:latest" \
+            --metadata-file dist/image-metadata.json \
+            $output .
+          echo "ref=$image:$version" >>"$GITHUB_OUTPUT"
+
+      - name: Package the chart
+        run: make helm-package
+
+      - name: SBOM
+        run: |
+          set -euo pipefail
+          version='${{ steps.version.outputs.version }}'
+          # From the source tree, not from the image: the image is distroless static, so its
+          # only package is the Go binary, and the Go module graph is what anybody consuming
+          # an SBOM here is actually asking about.
+          syft scan dir:. -o spdx-json="dist/netbox-operator-$version.spdx.json"
+
+      # Keyless, so there is no key to hold. Signing-key custody is deliberately not a
+      # thing this repository has a policy for (NBO-061, out of scope).
+      - name: Sign the image and the chart
+        if: steps.gate.outputs.publish == 'true'
+        run: |
+          set -euo pipefail
+          digest=$(jq -r '."containerimage.digest"' dist/image-metadata.json)
+          cosign sign --yes "$REGISTRY/${{ github.repository }}@$digest"
+          version='${{ steps.version.outputs.version }}'
+          cosign attest --yes --predicate "dist/netbox-operator-$version.spdx.json" \
+            --type spdxjson "$REGISTRY/${{ github.repository }}@$digest"
+
+      - name: Push the chart as an OCI artifact
+        if: steps.gate.outputs.publish == 'true'
+        run: |
+          set -euo pipefail
+          echo '${{ secrets.GITHUB_TOKEN }}' \
+            | helm registry login "$REGISTRY" -u '${{ github.actor }}' --password-stdin
+          version='${{ steps.version.outputs.version }}'
+          helm push "dist/netbox-operator-$version.tgz" \
+            "oci://$REGISTRY/${{ github.repository_owner }}/charts"
+
+      # Release notes from `NBO-nnn:` commit subjects between the previous tag and this one.
+      # Everything in this repository is committed that way, so the notes are a by-product of
+      # the commit discipline rather than a file somebody remembers to edit.
+      - name: Assemble release notes
+        run: |
+          set -euo pipefail
+          previous=$(git describe --tags --abbrev=0 '${{ steps.version.outputs.tag }}^' 2>/dev/null || true)
+          range=${previous:+$previous..}'${{ steps.version.outputs.tag }}'
+          {
+            echo "## Changes"
+            echo
+            git log --no-merges --pretty='%s' ${range:-HEAD} | grep -E '^NBO-[0-9]+: ' | sed 's/^/- /' || \
+              echo "- No NBO-nnn: commits in this range."
+            echo
+            echo "## Install"
+            echo
+            echo '```sh'
+            echo "helm install netbox-operator oci://$REGISTRY/${{ github.repository_owner }}/charts/netbox-operator \\"
+            echo "  --version ${{ steps.version.outputs.version }} --namespace netbox-operator-system --create-namespace"
+            echo '```'
+            echo
+            echo "A chart upgrade does **not** upgrade the CRDs. See \`docs/install.md\`."
+          } >dist/release-notes.md
+          cat dist/release-notes.md
+
+      # Always uploaded, publishing or not. This is what makes a fork's run inspectable:
+      # the same artifacts, in the run, with nothing pushed anywhere.
+      - name: Upload the artifacts
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
+        with:
+          name: release-${{ steps.version.outputs.version }}
+          path: dist/
+          if-no-files-found: error
+
+      - name: GitHub release
+        if: steps.gate.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create '${{ steps.version.outputs.tag }}' \
+            --title '${{ steps.version.outputs.tag }}' \
+            --notes-file dist/release-notes.md \
+            dist/*.tgz dist/*.spdx.json
+
+      - name: Summary
+        run: |
+          {
+            echo "### netbox-operator ${{ steps.version.outputs.tag }}"
+            echo
+            if [ '${{ steps.gate.outputs.publish }}' = 'true' ]; then
+              echo "Published \`${{ steps.image.outputs.ref }}\` and the chart to \`$REGISTRY\`."
+            else
+              echo "**Dry run: nothing was published.** The image, chart, SBOM and (unsigned)"
+              echo "artifacts are attached to this run."
+            fi
+          } >>"$GITHUB_STEP_SUMMARY"
