@@ -77,8 +77,9 @@ func (p *pass) ownParent(ctx context.Context) error {
 // containmentParent is the resolved containment reference, and whether this object has one
 // to be owned by at all.
 //
-// Two ways not to: the kind names no containment ref -- every catalogue kind, where a
-// catalogue is not a parent -- or it names one the spec did not set or that did not resolve.
+// Two ways not to: the kind names no containment ref -- no foreign key on it cascades, which
+// is a narrower set than "every catalogue kind" (#203) -- or it names one the spec did not set
+// or that did not resolve.
 // Neither is this step's news to break. An unset optional ref means there is no parent, and
 // an unresolved one is already RefsResolved=False naming itself; a second condition about it
 // would report one fact twice and be free to disagree with the first.

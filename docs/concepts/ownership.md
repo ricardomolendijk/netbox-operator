@@ -62,9 +62,20 @@ convention somebody can forget.
 |---|---|---|
 | `NetBoxRegion` | `parentRef` | `parent` is `CASCADE`, and it is the only reference |
 | `NetBoxSiteGroup` | `parentRef` | same model, same `CASCADE` |
+| `NetBoxTenantGroup` | `parentRef` | same `CASCADE`; its `slug`-only key would not catch the miss |
 | `NetBoxLocation` | `siteRef` | `site` **and** `parent` are both `CASCADE`; `site` is the required one |
 | `NetBoxPrefix` | `scopeRef` | every scope target deletes its prefixes; `vrf` is `PROTECT` |
 | `NetBoxDevice` | *none* | every reference on it is `PROTECT` or `SET_NULL` |
+
+`NetBoxTenantGroup` is the row worth reading twice, because there the owner reference is
+carrying the weight on its own. The three `dcim` nested groups read `parent_id` in every
+natural-key candidate, so a child whose parent has gone has no usable identity and the engine
+waits even with no owner reference — a missing cascade there leaves a stale CR and nothing
+worse. `tenancy.TenantGroup` has no `meta.constraints`; its uniqueness is column-level and
+global, so it keys on `slug` alone and never asks about a parent. Its candidate stays
+applicable, finds nothing, and create-if-absent **re-creates a row NetBox deleted on purpose**
+(#203). Same missing declaration, one class worse outcome — and the reason a kind's containment
+parent is read off `on_delete` rather than off how catalogue-like the kind looks.
 
 `NetBoxLocation` is the only kind so far where two references qualify and there is one slot, so
 it needs a tiebreak. `siteRef` wins on three counts: `site` is required, so every location has
