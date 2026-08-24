@@ -447,11 +447,15 @@ func TestDryRunModeReachesTheClient(t *testing.T) {
 	makeSecret(t, k8s, ns, "nb-token", "valid-token")
 	makeEndpoint(t, k8s, ns, "planonly", srv.URL, "nb-token", netboxv1alpha1.EndpointModeDryRun)
 
-	eventually(t, "client cached", func() bool {
-		_, _, ok := cache.Lookup(ns, "planonly")
-		return ok
-	})
-	nbClient, _, _ := cache.Lookup(ns, "planonly")
+	// Ready=True rather than "the cache has an entry": put runs before the status write, so
+	// this is the later of the two signals, and the `ok` below cannot then be a stale
+	// entry's (#159).
+	eventually(t, "Ready=True", func() bool { return endpointIsReady(ns, "planonly") })
+
+	nbClient, _, ok := cache.Lookup(ns, "planonly")
+	if !ok {
+		t.Fatal("no client cached for an endpoint reporting Ready=True")
+	}
 	if !nbClient.DryRun() {
 		t.Error("mode DryRun did not reach the client")
 	}

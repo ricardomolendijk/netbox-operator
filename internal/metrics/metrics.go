@@ -181,6 +181,24 @@ var EndpointReconcileTotal = factory.NewCounterVec(prometheus.CounterOpts{
 	Help: "NetBoxEndpoint reconciles by the condition reason they settled on.",
 }, []string{"result"})
 
+// SpecOwnershipUntracked counts reconciles of an object whose `metadata.managedFields`
+// says nothing about its spec, so the engine had to read the user's intent off the Go zero
+// value instead (NBO-079).
+//
+// It is the observability half of that fallback. On such an object an explicitly-empty
+// string, bool or plain number cannot be told apart from an absent one, so clearing the
+// field in Git changes nothing in NetBox and no condition disagrees -- exactly the silent
+// failure the tri-state work exists to remove. Nonzero here means some client is writing
+// these objects in a way that erases field ownership: a cache transform stripping
+// managedFields, or an object restored from a backup that dropped them.
+//
+// Cardinality: kind (~120) = ~120 series worst case, and zero series on a healthy cluster,
+// because the API server has tracked field ownership on every write since 1.18.
+var SpecOwnershipUntracked = factory.NewCounterVec(prometheus.CounterOpts{
+	Name: "netbox_operator_spec_ownership_untracked_total",
+	Help: "Reconciles with no spec field ownership to read, falling back to non-zero fields only.",
+}, []string{"kind"})
+
 // ClientCacheSize is how many NetBox clients are cached, which is how many endpoints
 // currently have a usable, authenticated, version-checked client. Object reconciles for
 // an endpoint that is not in here can only wait, so this dropping is the earliest

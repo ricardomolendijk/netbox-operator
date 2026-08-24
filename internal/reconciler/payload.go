@@ -60,6 +60,11 @@ func specOf(obj Object) (specFields, error) {
 
 // desired renders the spec into the payload to send, and reports what it could not render.
 //
+// What arrives here has already been through specFields.restoreEmpty, so a field the user
+// explicitly emptied is present and empty rather than absent (NBO-079,
+// docs/concepts/field-ownership.md). Everything below then treats it like any other value,
+// which is why nothing here had to learn about field ownership.
+//
 // Read-only columns need no filtering here: a spec field may not map onto one, enforced by
 // registry.Descriptor.Validate at boot. So the only thing left out is a reference, and that
 // is returned rather than dropped.

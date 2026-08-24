@@ -123,14 +123,17 @@ Rejected at admission if it does not match the pattern, so a bad slug never reac
 |---|---|
 | Type | `string`, one of `planned` `staging` `active` `decommissioning` `retired` |
 | Required | no |
-| Default | none set by the operator; NetBox defaults to `active` |
+| Default | `active` (`+kubebuilder:default=active`), which is also NetBox's own default |
 
 A choice column. The API server rejects any other value at admission, from the CRD's enum,
 so a typo fails your `kubectl apply` rather than surfacing as a NetBox 400 one reconcile
 later.
 
-Omitting it means "do not manage the status" — NetBox's own default applies on create, and
-a value someone set in the UI is left alone.
+Omitting it does **not** mean "do not manage the status": the field carries a default, so the
+API server fills it in and the operator manages it from the first reconcile. A status set in
+the NetBox UI is drift and gets corrected back to `active`. Set it explicitly to whatever the
+site should be. (A defaulted field that never reached a payload would be a field the operator
+could never correct, which is why it has one.)
 
 ### `description`, `facility`, `comments`
 
@@ -142,11 +145,14 @@ a value someone set in the UI is left alone.
 
 Free text. `facility` is the building or room; `comments` is NetBox's long-form field.
 
-> **Known limitation ([#121](https://github.com/ricardomolendijk/netbox-operator/issues/121)):**
-> setting one of these to `""` **cannot clear it.** An absent field and an explicitly-empty
-> one are indistinguishable in the current API, so both mean "do not manage". Clearing a
-> value requires editing it in NetBox. This affects every optional string on every kind and
-> is a decision pending on that issue.
+Setting one of these to `""` clears it in NetBox; omitting the key leaves whatever NetBox
+holds. Absent, empty and set are three states and the operator tells them apart from
+`metadata.managedFields` — see [field ownership](../concepts/field-ownership.md), which also
+covers the one case where an empty value is still invisible.
+
+> `latitude` and `longitude` are the exception on this kind. Their validation pattern does
+> not match the empty string, so `latitude: ""` is rejected at admission and the value can
+> only be changed, not removed.
 
 ### `physicalAddress`, `shippingAddress`
 
@@ -305,7 +311,7 @@ office   office   planned  8    True    4m
 | `Reason=Conflict` | the `jsonpath` above | Another namespace holds this slug. Pick another, or `onConflict: Adopt` |
 | `Reason=Invalid`, message names `time_zone` | `kubectl describe netboxsite <name> -n <ns>` | Not a valid IANA zone. The CRD does not validate this; NetBox does |
 | `status.id` is `0` and `READY` is `True` | — | Should be impossible. `status.id` is only set once the object exists; file a bug |
-| Setting `description: ""` changes nothing | — | Expected, and [#121](https://github.com/ricardomolendijk/netbox-operator/issues/121). Empty and absent are currently indistinguishable |
+| Setting `description: ""` changes nothing | `kubectl get netboxsite <name> -n <ns> -o jsonpath='{.metadata.managedFields}'` | Nothing claims `description`, so the operator read the empty string as "not set". Either the key was deleted rather than emptied, or this object has no field-ownership metadata — see [field ownership](../concepts/field-ownership.md) |
 | A delete hangs, `Reason=Protected` | `kubectl describe netboxsite <name> -n <ns>` | Devices or prefixes still reference the site. The message names them; delete those first |
 | A delete hangs, `Reason=WaitingForEndpoint` | `kubectl get netboxendpoint -n <ns>` | The operator will not orphan a real NetBox object. Fix the endpoint, or annotate `netbox.kubeforge.org/skip-finalizer=true` to force it through and accept the orphan |
 

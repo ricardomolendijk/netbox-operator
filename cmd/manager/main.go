@@ -12,12 +12,14 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	netboxv1alpha1 "github.com/ricardomolendijk/netbox-operator/api/v1alpha1"
 	"github.com/ricardomolendijk/netbox-operator/internal/controller"
+	"github.com/ricardomolendijk/netbox-operator/internal/reconciler"
 )
 
 var scheme = runtime.NewScheme()
@@ -132,8 +134,11 @@ func run() error {
 	// read from it. A miss means the endpoint is not Ready.
 	clients := controller.NewClientCache()
 
+	// Every write the operator makes carries one field manager name, the endpoint
+	// controller's included: the engine reads metadata.managedFields to tell a user's spec
+	// fields from its own writes, and it identifies its own by elimination (NBO-079).
 	if err := (&controller.NetBoxEndpointReconciler{
-		Client:   mgr.GetClient(),
+		Client:   client.WithFieldOwner(mgr.GetClient(), reconciler.FieldManager),
 		Cache:    clients,
 		Recorder: mgr.GetEventRecorderFor("netboxendpoint-controller"),
 		Secrets:  secrets,

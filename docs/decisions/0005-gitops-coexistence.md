@@ -57,6 +57,16 @@ This is the whole ballgame. Enforced, not merely intended:
   object issues zero non-status writes.
 - `envtest` coverage asserts `metadata.generation` is unchanged across a reconcile that
   only updates status — a generation bump is the signature of a spec write.
+- Every write the operator makes carries one fixed field manager, `netbox-operator`, so
+  the API server's own `metadata.managedFields` records what the operator wrote. `f:spec`
+  appearing under that manager means this rule has been broken, which makes the invariant
+  checkable with `kubectl get -o yaml` rather than only by reading the code. `envtest`
+  asserts it.
+
+The operator does **read** `metadata.managedFields`, to learn which spec fields a user set —
+that is how an optional field gets three states rather than two
+([field ownership](../concepts/field-ownership.md), NBO-079). Reading is not writing, and the
+operator's own ownership of `spec` is empty by construction, so the invariant is unchanged.
 
 Consequence to accept: **an allocated address lives in `status`, not in Git.** See §3.
 

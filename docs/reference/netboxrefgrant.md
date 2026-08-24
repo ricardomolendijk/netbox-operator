@@ -294,7 +294,9 @@ NetBox permission on that namespace's token, and no Kubernetes object can substi
 
 The same applies to a reference that resolved yesterday: revoking a grant stops the referrer
 from resolving the reference again, and does **not** clear the value already written to
-NetBox. Spec omission means "do not manage" ([references](../concepts/references.md)).
+NetBox. An unresolved reference is not a cleared one — clearing is something you ask for by
+writing an empty value ([references](../concepts/references.md),
+[field ownership](../concepts/field-ownership.md)).
 
 ### Same-namespace references are free
 

@@ -16,6 +16,7 @@ How the engine behaves, and why.
 | [The Descriptor](concepts/descriptor.md) | What per-kind facts the engine needs, why they are data rather than code, and how natural keys establish identity before a `status.id` exists |
 | [Deletion](concepts/deletion.md) | What `deletionPolicy: Delete` and `Retain` each do, why the finalizer goes on before the first write and comes off after the last one, what a `PROTECT`-blocked delete looks like and how to get out of it |
 | [Drift detection](concepts/drift.md) | Why what NetBox returns is not what you wrote, and the eight comparison rules that stop a reconcile loop from PATCHing forever |
+| [Field ownership](concepts/field-ownership.md) | The three states of an optional field -- absent, empty, set -- how to write each, how `metadata.managedFields` tells them apart, and what happens when there is no ownership metadata to read |
 | [Generic references](concepts/generic-refs.md) | What a polymorphic foreign key is, why the `app_label.model` spelling is written down once, why the schema digest's `REQ` on a `GenericForeignKey` row must be ignored, and how a `*_type` / `*_id` pair is kept atomic |
 | [Errors and retries](concepts/errors-and-retries.md) | Which NetBox failure becomes which typed error, what gets retried and where, and why more than one lookup match is an error rather than a guess |
 | [Lookups](concepts/lookups.md) | How a natural key becomes a query string, why `?name__ie=` exists, and why a null filter is pinned rather than omitted |
