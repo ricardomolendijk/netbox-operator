@@ -15,6 +15,15 @@ func init() { MustRegister(virtualizationVirtualMachineDescriptor()) }
 // NaturalKeys below for the four UniqueConstraints it is derived from and the reading of
 // each; the rest of this kind -- seven foreign keys, two deferred one-to-ones, two choice
 // columns, a decimal-as-string and two counter caches -- is ordinary.
+// A VM has no containment parent. Every FK it could be owned by is on_delete=PROTECT --
+// cluster, site, device and tenant (docs/netbox-schema.md -> virtualization.VirtualMachine) --
+// so none cascades, and NBO-193 refuses a containment ref on a PROTECT-ed FK at boot: an owner
+// reference there promises a cluster-side cascade the server declines, leaving the row alive
+// after garbage collection removed the CR. This descriptor declared clusterRef until that
+// check landed.
+//
+// The VM's own children (VMInterface, VirtualDisk) do cascade from it, so the ownership chain
+// runs downward from the VM and stops here.
 func virtualizationVirtualMachineDescriptor() Descriptor {
 	return Descriptor{
 		GVK:        netboxv1alpha1.GroupVersion.WithKind("NetBoxVirtualMachine"),
@@ -125,7 +134,6 @@ func virtualizationVirtualMachineDescriptor() Descriptor {
 		// ParentOwned=False. That is visible in the status rather than silent, and a
 		// per-Kind conditional parent is a change to the shared Descriptor, which is out of
 		// scope for one kind (docs/decisions/0003-ownership-and-references.md rule 4).
-		ContainmentRef: "clusterRef",
 	}
 }
 

@@ -22,15 +22,59 @@ rules:
 - apiGroups:
   - netbox.kubeforge.org
   resources:
-  - netboxendpoints
-  - netboxrefgrants
+  - netboxclustergroups
+  - netboxclusters
+  - netboxclustertypes
+  - netboxlocations
+  - netboxprefixes
+  - netboxregions
+  - netboxroutetargets
+  - netboxsitegroups
+  - netboxsites
+  - netboxtags
+  - netboxtenantgroups
+  - netboxtenants
+  - netboxvirtualdisks
+  - netboxvirtualmachines
+  - netboxvlangroups
+  - netboxvlans
+  - netboxvminterfaces
+  - netboxvrfs
   verbs:
   - get
   - list
+  - patch
+  - update
   - watch
 - apiGroups:
   - netbox.kubeforge.org
   resources:
+  - netboxclustergroups/finalizers
+  - netboxclusters/finalizers
+  - netboxclustertypes/finalizers
+  - netboxlocations/finalizers
+  - netboxprefixes/finalizers
+  - netboxregions/finalizers
+  - netboxroutetargets/finalizers
+  - netboxsitegroups/finalizers
+  - netboxsites/finalizers
+  - netboxtags/finalizers
+  - netboxtenantgroups/finalizers
+  - netboxtenants/finalizers
+  - netboxvirtualdisks/finalizers
+  - netboxvirtualmachines/finalizers
+  - netboxvlangroups/finalizers
+  - netboxvlans/finalizers
+  - netboxvminterfaces/finalizers
+  - netboxvrfs/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - netbox.kubeforge.org
+  resources:
+  - netboxclustergroups/status
+  - netboxclusters/status
+  - netboxclustertypes/status
   - netboxendpoints/status
   - netboxlocations/status
   - netboxprefixes/status
@@ -43,6 +87,8 @@ rules:
   - netboxtenants/status
   - netboxvirtualdisks/status
   - netboxvirtualmachines/status
+  - netboxvlangroups/status
+  - netboxvlans/status
   - netboxvminterfaces/status
   - netboxvrfs/status
   verbs:
@@ -52,40 +98,9 @@ rules:
 - apiGroups:
   - netbox.kubeforge.org
   resources:
-  - netboxlocations
-  - netboxprefixes
-  - netboxregions
-  - netboxroutetargets
-  - netboxsitegroups
-  - netboxsites
-  - netboxtags
-  - netboxtenantgroups
-  - netboxtenants
-  - netboxvirtualdisks
-  - netboxvirtualmachines
-  - netboxvminterfaces
-  - netboxvrfs
+  - netboxendpoints
+  - netboxrefgrants
   verbs:
   - get
   - list
-  - patch
-  - update
   - watch
-- apiGroups:
-  - netbox.kubeforge.org
-  resources:
-  - netboxlocations/finalizers
-  - netboxprefixes/finalizers
-  - netboxregions/finalizers
-  - netboxroutetargets/finalizers
-  - netboxsitegroups/finalizers
-  - netboxsites/finalizers
-  - netboxtags/finalizers
-  - netboxtenantgroups/finalizers
-  - netboxtenants/finalizers
-  - netboxvirtualdisks/finalizers
-  - netboxvirtualmachines/finalizers
-  - netboxvminterfaces/finalizers
-  - netboxvrfs/finalizers
-  verbs:
-  - update

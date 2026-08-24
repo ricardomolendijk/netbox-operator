@@ -213,15 +213,31 @@ func (p *pass) applyResolved(resolution resolver.Resolution) (resolved, notes []
 // them out. Leaving them out would mean "do not manage this reference", which is what an
 // *absent* field means -- an empty one is an instruction.
 //
-// Not written into p.spec, unlike applyRef: a natural key filtering on one of these needs two
-// filters, and there is no single value to offer. No descriptor names a generic FK in a
-// natural key yet -- not even the scoped kinds NBO-018 added, whose keys are all on scalars.
-// The first that will is ipam.VLANGroup, unique on (scope_type, scope_id, slug), and until it
-// arrives params() refuses such a candidate loudly rather than sending a lookup with half an
-// identity. See docs/concepts/generic-refs.md, "Natural keys".
+// Written into p.spec under the *two column names* rather than under the union's own spec
+// field, which is what lets a natural key filter on a polymorphic pair (#180). A pair has no
+// single value, so `{Filter: "scope_id", Spec: "scope"}` could never render -- but its two
+// halves are two ordinary scalars once resolved, and `{Filter: "scope_id", Spec: "scope_id"}`
+// renders exactly as `{Filter: "vrf_id", Spec: "vrfRef"}` does. ipam.VLANGroup is the kind
+// that needs it, unique on (scope_type, scope_id, slug); registry.declaresSpecField accepts
+// the two column names for the same reason. See docs/concepts/generic-refs.md, "Natural keys".
+//
+// The cleared pair writes nothing there and resolves neither column. A candidate matching on
+// `scope_type` is then inapplicable, which is correct: a globally-scoped group's identity is
+// the *null-pinned* candidate, and falling through to a value match on a column that holds
+// null would send `?scope_type=` and adopt every group sharing its slug.
 func (p *pass) applyGenericFK(pair registry.GenericFKSpec, refs resolver.FieldRefs) {
-	p.desired[pair.TypeField], p.desired[pair.IDField] = genericFKValues(refs)
+	objectType, id := genericFKValues(refs)
+	p.desired[pair.TypeField], p.desired[pair.IDField] = objectType, id
 	p.state.Resolved = append(p.state.Resolved, pair.Spec)
+
+	if objectType == nil {
+		return
+	}
+
+	// float64 for the id, because that is what every JSON number in a decoded spec is and
+	// what filterValue renders; an int64 there would be dropped as unfilterable.
+	p.spec[pair.TypeField], p.spec[pair.IDField] = objectType, float64(refs[0].ID)
+	p.state.Resolved = append(p.state.Resolved, pair.TypeField, pair.IDField)
 }
 
 // genericFKValues renders one resolved polymorphic reference as its two column values.
@@ -245,11 +261,33 @@ func genericFKValues(refs resolver.FieldRefs) (objectType, id any) {
 // or adopt needs the id under `parentRef`. Writing it into the decoded spec is what "a
 // reference has become an id" means to every later step.
 func (p *pass) applyRef(field registry.Field, refs resolver.FieldRefs) {
+	// A reference written empty is the column cleared: null in the payload, and nothing for a
+	// natural key to filter on. Declared but not resolved, exactly as an emptied EmptyIsNull
+	// scalar is (payload.go, writeValue and filterValue) -- so a candidate that matches on
+	// this field is inapplicable rather than filtering on id 0, which would adopt whatever
+	// NetBox returns for a primary key that cannot exist.
+	if cleared(field, refs) {
+		p.desired[field.API] = nil
+
+		return
+	}
+
 	payload, filterable := refValues(field, refs)
 
 	p.desired[field.API] = payload
 	p.spec[field.Spec] = filterable
 	p.state.Resolved = append(p.state.Resolved, field.Spec)
+}
+
+// cleared reports whether this to-one reference resolved to no object at all.
+//
+// The zero Result is the carrier, as it is for an empty union (genericFKValues reads the same
+// answer off ObjectType). Id zero is the sentinel and is safe as one: NetBox primary keys
+// start at 1, which is why v1alpha1.ObjectRef.ID rejects zero rather than treating it as
+// unset. A to-many field has no such state -- `[]` is its empty statement and resolves to an
+// empty list of ids, not to one absent id.
+func cleared(field registry.Field, refs resolver.FieldRefs) bool {
+	return !field.Class.ToMany() && len(refs) == 1 && refs[0].ID == 0
 }
 
 // refValues renders resolved references twice: as the value NetBox is sent, and as the value

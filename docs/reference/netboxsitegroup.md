@@ -66,8 +66,8 @@ A runnable pair is [`../../config/samples/netbox_v1alpha1_netboxsitegroup.yaml`]
 
 ## `spec`
 
-`endpointRef`, `onConflict` and `deletionPolicy` come from the shared envelope and behave
-identically on every kind — see [`NetBoxTag`](netboxtag.md#specendpointref) for the full
+`endpointRef`, `onConflict`, `deletionPolicy` and `customFields` come from the shared
+envelope and behave identically on every kind — see [`NetBoxTag`](netboxtag.md#specendpointref) for the full
 treatment of each.
 
 ### `spec.name`
@@ -93,6 +93,10 @@ Optional. An [`ObjectRef`](../concepts/references.md) pointing at another `NetBo
 
 Self-referential: `dcim.SiteGroup.parent` is a `TreeForeignKey` to `dcim.SiteGroup`. Omitting
 it makes a **top-level** group.
+
+It is also this kind's **containment reference**, so a child group carries a non-controller
+owner reference to its parent — see
+[a child group is owned by its parent](#a-child-group-is-owned-by-its-parent).
 
 Written to NetBox as `parent`, filtered as `parent_id`. Both spellings appear below, because
 the write name and the filter name genuinely differ for a foreign key.
@@ -144,9 +148,27 @@ top-level.
 | `Ready` | the group exists in NetBox and matches the spec | anything else | `Synced`, `WaitingForEndpoint`, `WaitingForKey`, `WaitingForRef`, `Conflict`, `AdoptOnly`, `Invalid`, `APIError`, `DryRunPending`, `ReportPending` |
 | `Synced` | the last write succeeded, or no drift was found | drift found and not corrected | `NoDrift`, `DriftCorrected`, `DriftReported`, `DriftDetectedDryRun` |
 | `RefsResolved` | `parentRef` is unset or resolved | `parentRef` does not resolve | `AllResolved`, `RefNotFound`, `RefNotReady`, `RefTargetFailed`, `RefAmbiguous`, `RefDenied`, `RefCycle`, `RefDepthExceeded` |
+| `ParentOwned` | `parentRef` resolved to a group in this namespace, so deleting it cascades | `parentRef` resolved to a group in another namespace, to a raw `id` or `slug`, or ownership was declined | `ParentOwned`, `CascadeUnavailable`, `ParentOwnershipDisabled` |
 | `Deleting` | never | while terminating and NetBox is not settled | `Protected`, `WaitingForEndpoint`, `APIError`, `Invalid` |
 
 ## Kind-specific behaviour
+
+### A child group is owned by its parent
+
+`parentRef` is this kind's containment reference, so a child group carries a non-controller
+owner reference to its parent and `kubectl delete` on the parent takes its children with it.
+
+Not a convenience, and not a preference either: the containment parent is whichever foreign key
+the *server* cascades, and `dcim.SiteGroup.parent` is `on_delete=CASCADE`. Deleting a site group
+in NetBox deletes its descendants server-side, so without the owner reference the child CR would
+outlive the row it described, find nothing at `status.id`, and be **re-created** by the engine's
+create-if-absent step — a group NetBox deleted on purpose, put back.
+
+The owner reference is only set when the parent is in the same namespace, because an owner
+reference may never cross one. A group whose parent lives in a shared catalogue namespace
+reports `ParentOwned=False, Reason=CascadeUnavailable` and does not cascade — the common shape,
+so read that condition before relying on the cascade. See
+[ownership](../concepts/ownership.md) for the whole rule and the opt-out annotation.
 
 ### A child converges off its parent's event, in either order
 
@@ -212,6 +234,7 @@ unresolved and `ID` is empty.
 | `RefsResolved=False`, `Reason=RefCycle` | Two groups name each other as parent. Edit either one. |
 | `RefsResolved=False`, `Reason=RefDenied` | A cross-namespace `parentRef` with no [`NetBoxRefGrant`](netboxrefgrant.md) in the target namespace. |
 | A second group appeared after an edit | `spec.name` was changed. See [Renaming changes identity](#renaming-changes-identity). |
+| Deleting the parent left the children behind | `ParentOwned` says why. Almost always `CascadeUnavailable` because the parent is in another namespace, where an owner reference is illegal. |
 
 ## Related
 
@@ -219,5 +242,6 @@ unresolved and `ID` is empty.
 - [`NetBoxLocation`](netboxlocation.md) — the third nested-group kind, the one with a required site
 - [Generic references](genericref.md#scoperef) — the union this Kind is a member of
 - [References](../concepts/references.md) — the four ref modes, cycles, and grants
+- [Ownership](../concepts/ownership.md) — why `parentRef` is the containment parent and when the cascade is unavailable
 - [Lookups](../concepts/lookups.md) — why a null filter is pinned rather than omitted
 - [The Descriptor](../concepts/descriptor.md) — where this kind's per-kind facts live

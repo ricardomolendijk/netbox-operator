@@ -1,0 +1,44 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxVLANGroup
+metadata:
+  # A DNS-1123 label, and unrelated to spec.name below.
+  name: house-vlans-rtm
+  namespace: default
+spec:
+  # The NetBoxEndpoint to write through, in this namespace. There is no cluster-wide
+  # default endpoint; see config/samples/netbox_v1alpha1_netboxendpoint.yaml.
+  endpointRef: homelab
+
+  # Set explicitly on every IPAM object. The envelope's default is Delete, and the per-Kind
+  # default this Kind wants (docs/concepts/deletion.md) needs #199 to land first.
+  deletionPolicy: Retain
+
+  # Required, and neither is globally unique on this Kind: ipam.VLANGroup is unique on
+  # (scope_type, scope_id, name) and (scope_type, scope_id, slug), so two groups may share
+  # a slug as long as their scopes differ. With no scope at all Postgres treats the NULLs
+  # as distinct and even that does not fire -- so more than one match is a Conflict.
+  name: Donkerslootstraat VLANs
+  slug: house-vlans-rtm
+
+  # NetBox's scope, not Kubernetes'. Here it is *half of the object's identity*: the lookup
+  # is `?scope_type=dcim.site&scope_id=<id>&slug=house-vlans-rtm`. At most one member;
+  # omit the whole block for a globally-scoped group, and the lookup then pins both columns
+  # to null rather than omitting them.
+  scope:
+    siteRef:
+      name: home
+
+  # Omitting this field is NOT the same as `[]`. The column has a Django default of the
+  # whole 1-4094 space, so nil leaves that alone while `[]` leaves the group governing no
+  # VLAN IDs at all. Compared in order, because NetBox stores and returns it in order.
+  vidRanges:
+    - start: 1
+      end: 100
+
+  # on_delete=PROTECT: this reference blocks deletion of that tenant in NetBox, and a
+  # catalogue group in a shared namespace makes the blocker invisible to the tenant's owner.
+  # tenantRef:
+  #   name: donkerslootstraat
+
+  description: VLAN IDs governed at this site
+  comments: Managed by netbox-operator.

@@ -22,6 +22,10 @@ ever sees it.
 > readiness** (NBO-089) are both built — see
 > [To-one and to-many](#to-one-and-to-many) and
 > [A reference needs an id](#a-reference-needs-an-id-not-a-ready-target).
+>
+> **An empty reference** ([#185](https://github.com/ricardomolendijk/netbox-operator/issues/185)) is decided and built: `OptionalRef` is the
+> type a field opts into to accept `{}` as "explicitly no reference". No shipped field is one
+> yet — see [An empty reference is a value](#an-empty-reference-is-a-value-when-the-field-says-so).
 
 A **polymorphic** reference — one NetBox column pair that may point at any of several models
 — is a union of the references described here, and has a page of its own:
@@ -41,7 +45,10 @@ by the field's Go type instead — see [the typed aliases](#the-typed-aliases).
 ## The four modes
 
 Exactly one of these must be set. The API server enforces that, so a malformed reference
-is rejected by `kubectl apply` rather than becoming a condition nobody reads.
+is rejected by `kubectl apply` rather than becoming a condition nobody reads. A field may opt
+into one more shape — the **empty** one, which is a value rather than a mode, and means
+explicitly no reference. See
+[An empty reference is a value](#an-empty-reference-is-a-value-when-the-field-says-so).
 
 | Mode | Shape | Use it when |
 |---|---|---|
@@ -68,6 +75,25 @@ Crossing a namespace requires a [`NetBoxRefGrant`](../reference/netboxrefgrant.m
 **target** namespace. There is no grant to write for the common case of staying put: a
 reference that resolves to the referrer's own namespace is never authorised against
 anything. See [crossing a namespace](#crossing-a-namespace) below.
+
+**Relative to which namespace, exactly:** the namespace of the object **whose spec carries the
+field**. For an ordinary reference that is the referring object. For a reference declared on a
+`NetBoxEndpoint` — [#173](https://github.com/ricardomolendijk/netbox-operator/issues/173)'s `defaultTenantRef` — it
+is the **endpoint's own** namespace, not that of the object the default is applied to.
+
+Today those are the same namespace, which is worth stating rather than relying on quietly:
+`spec.endpointRef` is a plain name with no `namespace` of its own and is looked up in *the
+object's* namespace, so an endpoint and every object that writes through it are co-namespaced,
+and a second namespace runs its own `NetBoxEndpoint`. Both readings coincide, and the rule
+above is what decides the day they stop — a shared or cluster-scoped endpoint.
+
+The consequence for an endpoint-level default, recorded on
+[#173](https://github.com/ricardomolendijk/netbox-operator/issues/173): in `name:` mode it needs a CR of the target
+Kind in the endpoint's namespace, which is one per namespace that has an endpoint — and if it
+spells a `namespace:` out to avoid that, it becomes a cross-namespace reference *from every
+consuming namespace*, needing a `NetBoxRefGrant` in the target namespace that names each of
+them. A `slug:` default needs no CR and no grant at all, which is the argument for writing a
+shared default that way.
 
 ## How a reference is resolved
 
@@ -157,6 +183,72 @@ empty list. Omitting the field entirely is a different statement: spec omission 
 manage", so the column is left as NetBox has it. The two are deliberately distinct, the same
 way an absent reference and a present-but-empty one are.
 
+### An empty reference is a value, when the field says so
+
+`importTargets: []` has a to-one counterpart: `tenantRef: {}` — this object has no tenant.
+Both are statements, and both are different from omitting the field, which says nothing about
+the column at all.
+
+It has to be opted into, because most references must not accept it. A reference field is typed
+one of two ways, and the type is the whole of the difference:
+
+| Go type | Arity rule | `{}` |
+|---|---|---|
+| `ObjectRef`, and every typed alias over it | `…filter(x, x).size() == 1` | rejected at admission |
+| `OptionalRef` | `…filter(x, x).size() <= 1` | admitted, and the column is written `null` |
+
+**Decided on [#185](https://github.com/ricardomolendijk/netbox-operator/issues/185): a second type, not a relaxed
+`ObjectRef`.** Relaxing the arity rule on `ObjectRef` itself is a one-line change and it is the
+one that would cause a bug — `siteRef` on a `NetBoxLocation` is a *required* reference, and a
+blanket `<= 1` would make `siteRef: {}` admissible and move its enforcement into controller
+code, where `kubectl apply` reports success and the refusal becomes a condition somebody has to
+go and read. Two types that look alike is the price, and it is paid in one file: `OptionalRef`
+carries the same five rules with the arity relaxed, and a test compares them line by line.
+
+The three states, which is the point of the exercise:
+
+| Spec | Means | What NetBox receives |
+|---|---|---|
+| the field is absent | do not manage this column | the column is not in the payload at all |
+| `tenantRef: {name: acme}` | that object | `"tenant": 41` |
+| `tenantRef: {}` | no object, deliberately | `"tenant": null` |
+
+`null` and *absent* are two different instructions and the operator must not confuse them: a
+column left out is one somebody else may own, and a column written null is one this object
+just cleared. The same distinction a nullable *scalar* has, and through the same declaration —
+a descriptor opts the column in with `Field.EmptyIsNull`, which is what already sends an
+emptied `latitude` as `null` rather than as `""`
+([#170](https://github.com/ricardomolendijk/netbox-operator/issues/170)). One fact, spelled one way, for a scalar and
+for a reference. The polymorphic unions have had it all along: `assignedObject: {}` clears both
+halves of a generic foreign key ([generic references](generic-refs.md)).
+
+An empty reference is **resolved**, not blocked. `RefsResolved` stays `True` and the object
+reaches `Ready`, because "no tenant" is an answer rather than something to wait for — and no
+NetBox request is made for it, since clearing a column asks nothing about the object it used to
+name.
+
+Two rules for a field that adopts it:
+
+- **Not an identity field.** An empty reference is declared but has no id to filter on, so no
+  natural-key candidate that matches on it applies, and none that pins it to `IS NULL` applies
+  either — the pin asserts the field was never *declared*. The object would wait, exactly as it
+  already does for an emptied identity scalar. Where a candidate pins the column to null,
+  omitting the reference is already how a manifest says "none".
+- **Not the containment reference.** That one is read for the parent's uid
+  ([ownership](ownership.md)), and a reference to no object has none.
+
+**No shipped field is an `OptionalRef` yet.** The type lands ahead of its users, as the typed
+aliases did: what needs it is [#173](https://github.com/ricardomolendijk/netbox-operator/issues/173)'s endpoint-level
+default, and what will need it is the growing set of nullable non-identity foreign keys. The
+`parentRef`s on the nested-group kinds and `groupRef` on a tenant are *not* among them — they
+are natural-key participants, where omitting the reference already says "none". `vlanRef` and
+`roleRef` on a `NetBoxPrefix` are the first two that qualify (`ipam.Prefix.role` is
+`on_delete=SET_NULL`, and neither field is in a candidate or a containment parent); adopting
+them changes a shipped field's type, which is its own change rather than part of this decision.
+Meanwhile the rules are compiled by a real API server through a test-only fixture CRD, for the
+reason the [union fixture](generic-refs.md) exists: a CEL rule no CRD carries is never compiled
+by anything.
+
 ### Order is not data
 
 The ids are written **sorted and deduplicated**. NetBox does not preserve many-to-many order
@@ -167,6 +259,61 @@ create bodies.
 
 Two references to the same object are one member of a set, which is what NetBox stores either
 way.
+
+### A list needs a bound
+
+**Every `[]ObjectRef` field carries `+kubebuilder:validation:MaxItems`.** Without it the CRD
+does not install — not the field, the whole CRD:
+
+```
+spec.properties[importTargets].items.x-kubernetes-validations[3].rule: Forbidden:
+  estimated rule cost exceeds budget by factor of 18.1x (try simplifying the rule, or
+  adding maxItems, maxProperties, and maxLength where arrays, maps, and strings are declared)
+```
+
+The API server costs a CEL rule at the list's **maximum** length, and a list with no maximum
+is costed as unbounded. `ObjectRef` carries [five rules](#what-the-api-server-rejects), so the estimate for
+an unbounded list of them clears both the per-rule budget and the whole-schema one by an order
+of magnitude. Nothing earlier in the pipeline objects: controller-gen emits the schema,
+`kustomize build` renders it and `make verify` passes. `TestEveryValidatedListIsBounded`
+(`api/v1alpha1/reflistbounds_test.go`) is what fails instead, by walking the generated CRDs
+for any list whose items carry CEL rules and declares no `maxItems` — so it covers a Kind
+added by somebody who has never read this page, and a reference type whose rule set differs
+from `ObjectRef`'s.
+
+**The bound is 256**, and it is a statement about the API rather than about the cost budget.
+An object with more than 256 references of one kind is a modelling mistake or a runaway
+generator, and refusing it at admission is more useful than storing it. A field with a
+narrower real-world maximum may of course be tighter — `NetBoxRefGrant.from` is 16 — but 256
+is what a to-many reference gets when nothing else argues for a number.
+
+The cost budget is nowhere near it. Measured against a real API server (Kubernetes 1.34,
+`envtest`) by installing CRDs carrying a list of the generated `ObjectRef` schema at
+successive bounds:
+
+| Shape | Largest `maxItems` accepted |
+| --- | --- |
+| one `[]ObjectRef` field | **57 803** |
+| three such fields on one Kind | 57 803 each |
+| five | 46 619 each |
+| ten | 23 309 each |
+
+The first three rows are capped by the **per-rule** budget; from five fields on it is the
+**whole-schema** budget that binds, and the ceiling falls roughly as one over the number of
+fields sharing it. So 256 leaves about 90× of headroom even for a Kind with ten to-many
+reference fields, which is enough that [#185](https://github.com/ricardomolendijk/netbox-operator/issues/185)
+adding rules to `ObjectRef`, or wrapping it, cannot quietly make 256 unaffordable.
+
+`MaxItems=32`, applied when this was first hit on `NetBoxVRF.importTargets`/`exportTargets`
+([#191](https://github.com/ricardomolendijk/netbox-operator/issues/191)), was a guess that
+cleared the budget with ~1800× to spare. It should be 256: a cluster with 40 route targets on
+one VRF was being refused by a validation-cost artefact rather than by anything true about
+NetBox.
+
+The generator ([NBO-042 (#66)](https://github.com/ricardomolendijk/netbox-operator/issues/66))
+must emit the marker on every `RefMany` field it produces. It emits ~90 Kinds, so one omitted
+bound is one unloadable CRD, and the check above is what fails if the emitter forgets.
+
 ## Ordering and convergence
 
 **Apply order does not matter.** A manifest applied backwards converges as fast as one
@@ -359,7 +506,10 @@ spec:
 
 - It applies **only when the object omits `tenantRef`** ([field ownership](field-ownership.md)
   is what tells an omitted field from a deliberately empty one). An object that sets
-  `tenantRef` overrides the default; an object that sets it *empty* has no tenant.
+  `tenantRef` overrides the default; an object that sets it *empty* has no tenant — which needs
+  `tenantRef` typed `OptionalRef`, the type
+  [#185](https://github.com/ricardomolendijk/netbox-operator/issues/185) added for exactly this opt-out. See
+  [An empty reference is a value](#an-empty-reference-is-a-value-when-the-field-says-so).
 - Nothing is implicit unless a cluster admin asked for it, per endpoint — which is the
   Kubernetes-normal shape for a default, rather than a convention nobody opted into.
 - **`status` records the tenant that was applied.** That is what keeps "the spec says what
@@ -735,10 +885,16 @@ reconcile. There is nothing to restart and no requeue to wait out.
 ## What the API server rejects
 
 Five CEL rules live on the `ObjectRef` type itself, so a new ref field cannot forget them.
+`OptionalRef` carries the same five with one relaxation, and only one — see
+[An empty reference is a value](#an-empty-reference-is-a-value-when-the-field-says-so).
+
+Those five rules are also why a list of references needs a `maxItems`: see
+[A list needs a bound](#a-list-needs-a-bound).
 
 | Rejected | Why |
 |---|---|
-| Two modes at once, or none | A reference that names two objects names neither. |
+| Two modes at once | A reference that names two objects names neither. |
+| No mode at all — unless the field is an `OptionalRef`, where it means explicitly none | A reference that names nothing resolves to nothing, and the field would be silently dropped. |
 | `{name: ""}` | Emptiness is checked, not merely presence — an empty string is not a name. |
 | `namespace` without `name` | Meaningless for the NetBox-side modes. |
 | `{id: 0}` | NetBox primary keys start at 1, so zero is never an object. `ID` is a pointer precisely so `0` is distinguishable from unset. |

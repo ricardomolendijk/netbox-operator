@@ -52,8 +52,12 @@ func TestVirtualMachineDescriptorIsRegisteredAndValid(t *testing.T) {
 	// Exactly one containment parent, and it is the cluster. `siteRef` is deliberately not a
 	// second: garbage collection waits for every owner, so two would turn "delete the
 	// cluster" into "delete the cluster and the site".
-	if d.ContainmentRef != "clusterRef" {
-		t.Errorf("ContainmentRef = %q, want clusterRef", d.ContainmentRef)
+	// Empty. Every FK a VM could be owned by is on_delete=PROTECT -- cluster, site, device,
+	// tenant -- so none cascades, and NBO-193 refuses a containment ref on a PROTECT-ed FK at
+	// boot. This asserted "clusterRef" until that check landed, and the check was right: an
+	// owner reference there would promise a cascade the server declines.
+	if d.ContainmentRef != "" {
+		t.Errorf("ContainmentRef = %q, want empty: no FK on a VM cascades", d.ContainmentRef)
 	}
 }
 

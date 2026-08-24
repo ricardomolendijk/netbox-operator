@@ -50,6 +50,12 @@ func virtualizationVMInterfaceDescriptor() Descriptor {
 			{
 				Spec: "virtualMachineRef", API: "virtual_machine", Class: ClassRefOne,
 				Target: netboxv1alpha1.VirtualMachineRef{}.TargetGVK(),
+				// virtualization.ComponentModel.virtual_machine is on_delete=CASCADE
+				// (docs/netbox-schema.md), so deleting the VM takes its interfaces and disks with it
+				// server-side -- which makes it a legal containment parent, and makes the owner
+				// reference load-bearing: without it the child CR outlives its row and the
+				// create-if-absent step recreates what NetBox deleted.
+				CascadeOnDelete: true,
 			},
 			{
 				Spec: "parentRef", API: "parent", Class: ClassRefOne,

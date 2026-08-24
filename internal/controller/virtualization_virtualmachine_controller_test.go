@@ -201,8 +201,13 @@ func TestVirtualMachineWaitsForAnUnavailableCluster(t *testing.T) {
 		vm.Spec.ClusterRef = &netboxv1alpha1.ClusterRef{Name: "proxmox-home"}
 	})
 
-	eventually(t, "the VM to report the unavailable Kind", func() bool {
-		return virtualMachineRefsReason(ns, "dns") == netboxv1alpha1.ReasonRefKindUnavailable
+	// NBO-028 landed the cluster Kinds while this branch was in flight, so `clusterRef` now
+	// has a Descriptor and no longer reports RefKindUnavailable. The property under test is
+	// unchanged and is the one that matters -- a declared reference the engine cannot resolve
+	// must not be guessed past -- so the reason is now RefNotFound: the Kind exists and the
+	// named cluster does not.
+	eventually(t, "the VM to report the unresolvable cluster", func() bool {
+		return virtualMachineRefsReason(ns, "dns") == netboxv1alpha1.ReasonRefNotFound
 	})
 
 	if virtualMachineIsReady(ns, "dns") {
@@ -261,7 +266,7 @@ func TestVirtualMachineCELRequiresAHost(t *testing.T) {
 			}
 			tc.mutate(&spec)
 
-			assertAdmission(t, &netboxv1alpha1.NetBoxVirtualMachine{
+			assertTypedAdmission(t, &netboxv1alpha1.NetBoxVirtualMachine{
 				ObjectMeta: metav1.ObjectMeta{Namespace: ns, GenerateName: "cel-"},
 				Spec:       spec,
 			}, tc.wantReject)
@@ -294,7 +299,7 @@ func TestVirtualMachineVCPUsMustBeADecimal(t *testing.T) {
 		{vcpus: "12345", wantReject: "decimal"},
 	} {
 		t.Run(tc.vcpus, func(t *testing.T) {
-			assertAdmission(t, &netboxv1alpha1.NetBoxVirtualMachine{
+			assertTypedAdmission(t, &netboxv1alpha1.NetBoxVirtualMachine{
 				ObjectMeta: metav1.ObjectMeta{Namespace: ns, GenerateName: "vcpus-"},
 				Spec: netboxv1alpha1.NetBoxVirtualMachineSpec{
 					NetBoxObjectSpec: netboxv1alpha1.NetBoxObjectSpec{EndpointRef: "homelab"},
@@ -320,7 +325,7 @@ func TestVMComponentsRequireTheirParentAndName(t *testing.T) {
 	ns := newNamespace(t)
 
 	t.Run("interface without a name", func(t *testing.T) {
-		assertAdmission(t, &netboxv1alpha1.NetBoxVMInterface{
+		assertTypedAdmission(t, &netboxv1alpha1.NetBoxVMInterface{
 			ObjectMeta: metav1.ObjectMeta{Namespace: ns, GenerateName: "vmif-"},
 			Spec: netboxv1alpha1.NetBoxVMInterfaceSpec{
 				NetBoxObjectSpec: netboxv1alpha1.NetBoxObjectSpec{EndpointRef: "homelab"},
@@ -332,7 +337,7 @@ func TestVMComponentsRequireTheirParentAndName(t *testing.T) {
 	})
 
 	t.Run("interface without a virtual machine", func(t *testing.T) {
-		assertAdmission(t, &netboxv1alpha1.NetBoxVMInterface{
+		assertTypedAdmission(t, &netboxv1alpha1.NetBoxVMInterface{
 			ObjectMeta: metav1.ObjectMeta{Namespace: ns, GenerateName: "vmif-"},
 			Spec: netboxv1alpha1.NetBoxVMInterfaceSpec{
 				NetBoxObjectSpec: netboxv1alpha1.NetBoxObjectSpec{EndpointRef: "homelab"},
@@ -342,7 +347,7 @@ func TestVMComponentsRequireTheirParentAndName(t *testing.T) {
 	})
 
 	t.Run("interface with both", func(t *testing.T) {
-		assertAdmission(t, &netboxv1alpha1.NetBoxVMInterface{
+		assertTypedAdmission(t, &netboxv1alpha1.NetBoxVMInterface{
 			ObjectMeta: metav1.ObjectMeta{Namespace: ns, GenerateName: "vmif-"},
 			Spec: netboxv1alpha1.NetBoxVMInterfaceSpec{
 				NetBoxObjectSpec:  netboxv1alpha1.NetBoxObjectSpec{EndpointRef: "homelab"},
@@ -381,7 +386,11 @@ func TestVMComponentsRequireTheirParentAndName(t *testing.T) {
 // assertAdmission creates obj as a server-side dry run, so admission -- schema, enums,
 // patterns, required fields, CEL -- runs in full and nothing is stored. An empty wantReject
 // means the object must be accepted.
-func assertAdmission(t *testing.T, obj client.Object, wantReject string) {
+// assertTypedAdmission is the typed sibling of objectref_test.go's assertAdmission, which
+// takes an *unstructured.Unstructured. Both landed the same day from different branches;
+// renamed rather than merged because a VM is applied as a typed object here and the CEL rules
+// under test are on the Go type.
+func assertTypedAdmission(t *testing.T, obj client.Object, wantReject string) {
 	t.Helper()
 
 	err := apiClient.Create(context.Background(), obj, client.DryRunAll)
@@ -414,5 +423,5 @@ func assertUnstructuredAdmission(t *testing.T, ns string, body map[string]any, w
 	obj.SetNamespace(ns)
 	obj.SetGenerateName("vdisk-")
 
-	assertAdmission(t, obj, wantReject)
+	assertTypedAdmission(t, obj, wantReject)
 }
