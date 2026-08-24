@@ -1,0 +1,17 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxClusterType
+metadata:
+  name: proxmox
+  namespace: default
+spec:
+  # The NetBoxEndpoint to write through, in this namespace. There is no cluster-wide
+  # default endpoint; see config/samples/netbox_v1alpha1_netboxendpoint.yaml.
+  endpointRef: homelab
+
+  # virtualization.ClusterType declares no columns of its own: name, slug and description
+  # all come from OrganizationalModel. `slug` is the natural key and is unique across the
+  # whole NetBox, so two namespaces cannot both own `proxmox`.
+  name: Proxmox VE
+  slug: proxmox
+
+  description: Debian-based hypervisor, KVM plus LXC
