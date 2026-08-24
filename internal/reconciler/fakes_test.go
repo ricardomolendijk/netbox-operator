@@ -24,6 +24,8 @@ var (
 	_ NetBoxClient = (*netbox.Client)(nil)
 	_ Recorder     = record.EventRecorder(nil)
 	_ Object       = (*fakeKind)(nil)
+	_ Endpoints    = fakeEndpoints{}
+	_ Endpoints    = (*blockingEndpoints)(nil)
 )
 
 var fakeGVK = schema.GroupVersionKind{Group: "netbox.kubeforge.org", Version: "v1alpha1", Kind: "NetBoxFake"}
@@ -271,8 +273,30 @@ type fakeEndpoints struct {
 	ready    bool
 }
 
-func (f fakeEndpoints) Endpoint(_, _ string) (Endpoint, bool) {
+func (f fakeEndpoints) Endpoint(_ context.Context, _, _ string) (Endpoint, bool) {
 	return f.endpoint, f.ready
+}
+
+// blockingEndpoints is an endpoint provider that does not answer until its context is
+// cancelled. It stands in for the only implementation this seam has ever wanted -- one that
+// reads Kubernetes objects -- with the informer cache taken away, which is the state a cold
+// cache or a direct API read puts it in.
+type blockingEndpoints struct {
+	// entered is closed once Endpoint has been called, so a test can cancel at the point the
+	// provider is actually blocked rather than racing it.
+	entered chan struct{}
+
+	// cancelled records that the provider observed the reconcile's cancellation. Before
+	// NBO-080 it could not: there was no context to observe.
+	cancelled bool
+}
+
+func (b *blockingEndpoints) Endpoint(ctx context.Context, _, _ string) (Endpoint, bool) {
+	close(b.entered)
+	<-ctx.Done()
+	b.cancelled = true
+
+	return Endpoint{}, false
 }
 
 // fakeDescriptors serves one descriptor for the fake kind.

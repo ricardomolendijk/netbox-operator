@@ -98,8 +98,21 @@ type Endpoint struct {
 
 // Endpoints hands out the client for one NetBoxEndpoint by namespace and name. A miss
 // means the endpoint is not Ready, which is a wait rather than a failure.
+//
+// The context is the reconcile's own: an implementation reads Kubernetes objects to answer,
+// so it needs the cancellation the reconcile worker is subject to and the request-scoped
+// logger everything else on this path logs through (CONTRIBUTING.md, "Logging"). Today's
+// implementation answers from an informer cache and cannot block, but a signature that
+// cannot be cancelled is one that makes a blocking read unnoticeable: the controller runs a
+// single worker by default, so one uncancellable read stalls every object of the kind
+// (NBO-080).
+//
+// Still (Endpoint, bool) rather than (Endpoint, error), because the engine has exactly two
+// things it can do -- use the endpoint, or wait for it -- and a third return it cannot act
+// on differently is a wider seam for no behaviour. An implementation that could not find
+// out says so in the log, with the context this now carries.
 type Endpoints interface {
-	Endpoint(namespace, name string) (Endpoint, bool)
+	Endpoint(ctx context.Context, namespace, name string) (Endpoint, bool)
 }
 
 // Descriptors is where per-kind facts come from.
@@ -197,7 +210,7 @@ func (e *Engine) Reconcile(ctx context.Context, obj Object) (ctrl.Result, error)
 		return ctrl.Result{}, err
 	}
 
-	endpoint, ok := e.Endpoints.Endpoint(obj.GetNamespace(), obj.NetBoxSpec().EndpointRef)
+	endpoint, ok := e.Endpoints.Endpoint(ctx, obj.GetNamespace(), obj.NetBoxSpec().EndpointRef)
 	if !ok {
 		return p.stop(ctx, fmt.Errorf("%w: netboxendpoint %q in namespace %q",
 			errEndpointNotReady, obj.NetBoxSpec().EndpointRef, obj.GetNamespace()))
@@ -490,15 +503,31 @@ func (p *pass) applyWrite(ctx context.Context, written netbox.Object, event, act
 
 	if netbox.Suppressed(written) {
 		out := p.suppression(event)
+		drift := p.uncorrected(detail)
 
 		// Debug, not info: a non-writing endpoint finds the same drift on every resync
 		// and writes nothing, so at info this is one identical line per object per resync
 		// forever. What changed is nothing; drift_detected_total and the DriftDetected
 		// condition are the signals that scale.
 		log.V(1).Info(out.what + ": netbox was not written")
-		p.engine.event(p.obj, out.event, "%s: would have written %s (%s)", out.what, p.desc.Endpoint, detail)
+
+		// On the transition only, for the reason the log line above was demoted -- an
+		// Event is the more expensive of the two, since it is an API object that costs
+		// etcd and evicts the Events somebody was watching for. driftMode: Report is meant
+		// to be left running for a week over a whole NetBox, which is standing drift on
+		// every object at once, so this is the path where a per-resync Event does the most
+		// damage (NBO-087).
+		if p.newDrift(out.synced, drift) {
+			p.engine.event(p.obj, out.event, "%s: would have written %s (%s)",
+				out.what, p.desc.Endpoint, detail)
+		}
+
+		// Both unguarded, and deliberately: the conditions are the standing state, which
+		// is precisely why the Event need not repeat, and p.result feeds reconcile_total,
+		// a count of reconciles rather than of changes. Do not "fix" either to match the
+		// Event.
 		p.condition(netboxv1alpha1.ConditionSynced, false, out.synced, out.why)
-		p.driftCondition(true, netboxv1alpha1.ReasonDriftDetected, p.uncorrected(detail))
+		p.driftCondition(true, netboxv1alpha1.ReasonDriftDetected, drift)
 		p.result = out.result
 
 		return p.pending(ctx, out.ready,

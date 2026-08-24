@@ -5,6 +5,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	netboxv1alpha1 "github.com/ricardomolendijk/netbox-operator/api/v1alpha1"
 	"github.com/ricardomolendijk/netbox-operator/internal/reconciler"
@@ -34,11 +35,15 @@ type endpointProvider struct {
 
 // Endpoint returns the client for one NetBoxEndpoint by namespace and name.
 //
-// Endpoints.Endpoint takes no context, so there is nothing to cancel a read against and
-// nothing to carry the reconcile's logger. That is survivable only because both reads are
-// in-memory: an informer cache lookup cannot block, and a blocking read behind this
-// signature would stall a reconcile worker with no way to interrupt it.
-func (p *endpointProvider) Endpoint(namespace, name string) (reconciler.Endpoint, bool) {
+// The context is the reconcile's own (NBO-080). Both reads are in-memory today -- the
+// client cache is a map and the CR comes from the manager's informer cache -- so neither
+// blocks. It is threaded anyway, because "cannot block" is a property of today's
+// implementation and not of the signature: the moment either read reaches the API server,
+// a pass whose context is already cancelled would go on waiting, and an object controller
+// runs a single worker by default, so one uninterruptible read stalls every object of the
+// kind. It also carries the logger, which is the only reason the read failure below is
+// reportable at all (CONTRIBUTING.md, "Logging": take the logger from the context).
+func (p *endpointProvider) Endpoint(ctx context.Context, namespace, name string) (reconciler.Endpoint, bool) {
 	nbClient, ok := p.clients.Lookup(namespace, name)
 	if !ok {
 		return reconciler.Endpoint{}, false
@@ -52,7 +57,7 @@ func (p *endpointProvider) Endpoint(namespace, name string) (reconciler.Endpoint
 	endpoint := reconciler.Endpoint{Client: nbClient}
 
 	cr := &netboxv1alpha1.NetBoxEndpoint{}
-	if err := p.reader.Get(context.Background(),
+	if err := p.reader.Get(ctx,
 		types.NamespacedName{Namespace: namespace, Name: name}, cr); err != nil {
 		// A cached client means the endpoint reconciled successfully and has not been
 		// forgotten, so this is the narrow window where the CR has gone but the cache has
@@ -60,7 +65,22 @@ func (p *endpointProvider) Endpoint(namespace, name string) (reconciler.Endpoint
 		// endpoint over it would stall every object in the namespace for a state that
 		// resolves itself in milliseconds. Endpoint.Resync of zero means the engine's own
 		// default, which is the same ten minutes the CRD defaults to, and an empty
-		// DriftMode means Correct, which is the CRD's default too.
+		// DriftMode means Correct, which is the CRD's default too -- and neither default can
+		// let this endpoint write when it should not, because DryRun and driftMode: Report
+		// are enforced by the client's own mode rather than by this struct (NBO-076).
+		//
+		// Logged rather than swallowed, and at debug rather than error: falling back on the
+		// defaults is the deliberate answer, so nobody has to act on it, and this is the
+		// periodic path for every object of every kind -- at error, an informer cache a
+		// minute behind is a flood (docs/concepts/reconciliation.md, the transition rule).
+		// Said at all because "the endpoint has no client yet" and "the endpoint could not
+		// be read" have different fixes, and this is the one place that can tell them apart.
+		//
+		// endpointRef rather than name, because the logger from the context already carries
+		// the object's own name and the two are not the same thing.
+		logf.FromContext(ctx).V(1).Info("could not read the netboxendpoint; using its defaults",
+			"endpointRef", name, "action", "endpoint", "err", err.Error())
+
 		return endpoint, true
 	}
 

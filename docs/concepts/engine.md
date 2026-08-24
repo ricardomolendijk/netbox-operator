@@ -229,6 +229,26 @@ to a client), `Descriptors` (per-kind facts), `RefResolver` (a reference to an i
 controller supplies them and does nothing else — a controller containing business logic has
 taken work that belongs to the engine.
 
+**Every collaborator that can touch the outside world takes the reconcile's `ctx` first.**
+`Endpoints.Endpoint` included, even though the adapter behind it answers from two in-memory
+caches and cannot block today: "cannot block" is a property of one implementation, not of a
+signature, and a signature that cannot be cancelled makes a blocking read unnoticeable. An
+object controller runs a single worker by default, so one uninterruptible read stalls every
+object of its kind, and manager shutdown, a leader-election handover and a per-reconcile
+deadline all arrive as a cancelled context and as nothing else. It is also what carries the
+request-scoped logger, without which an adapter cannot report anything it decides to
+tolerate (`internal/controller/endpointprovider.go`).
+
+`Endpoints.Endpoint` returns `(Endpoint, bool)` rather than `(Endpoint, error)` deliberately.
+The engine has exactly two responses available — use the endpoint, or wait for it — so a
+third return it could not act on differently would widen the seam for no behaviour. The
+adapter does distinguish the two states it can be in: no cached client is a miss and becomes
+`Ready=False/WaitingForEndpoint`, while a client it holds but a CR it could not read is *not*
+a miss — the client is proof the endpoint reconciled, and only the resync period and drift
+mode are missing, both of which have defaults matching the CRD's and neither of which can
+authorise a write, since `DryRun` and `driftMode: Report` are enforced by the client's own
+mode. That failure is reported in the log, at debug, rather than in the return type.
+
 Its CR embeds `NetBoxObjectSpec` and `NetBoxObjectStatus` and exposes them:
 
 ```go

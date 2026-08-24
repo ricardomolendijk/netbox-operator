@@ -110,7 +110,8 @@ func (p *pass) deleting(ctx context.Context) (ctrl.Result, error) {
 		return p.release(ctx, out)
 	}
 
-	endpoint, ok := p.engine.Endpoints.Endpoint(p.obj.GetNamespace(), p.obj.NetBoxSpec().EndpointRef)
+	endpoint, ok := p.engine.Endpoints.Endpoint(ctx,
+		p.obj.GetNamespace(), p.obj.NetBoxSpec().EndpointRef)
 	if !ok {
 		// Blocking rather than orphaning. The object is real, its id is known, and it will
 		// still be deletable when the endpoint comes back; dropping the finalizer here

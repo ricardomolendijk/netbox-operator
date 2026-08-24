@@ -294,8 +294,11 @@ NetBox-side edit is simply wrong ([ADR-0005](../decisions/0005-gitops-coexistenc
 
 `Report` detects drift and sends **nothing at all** — no `POST`, `PATCH` or `DELETE`,
 including the finalizer's delete. It sets `DriftDetected=True` with the field list, emits a
-`DriftDetected` Event, and moves `netbox_operator_drift_detected_total` without moving
-`netbox_operator_drift_corrected_total`. It is enforced by giving the endpoint a client that
+`DriftDetected` Event the first time it finds that drift and again whenever the drift
+changes, and moves `netbox_operator_drift_detected_total` on every pass without moving
+`netbox_operator_drift_corrected_total`. The condition and the counter carry the standing
+state, so the Event does not have to repeat every resync for a week
+([the transition rule](../concepts/reconciliation.md#an-event-or-an-error-log-on-a-repeating-state-is-keyed-on-the-transition)). It is enforced by giving the endpoint a client that
 cannot mutate, so it does not depend on every write path checking a flag: a half-mutating
 dry run teaches people to distrust the mode. Objects sit at
 `Ready=False, Reason=ReportPending` for as long as it is on, which is honest rather than a

@@ -135,6 +135,30 @@ func (p *pass) transitioned(condType string, status metav1.ConditionStatus, reas
 	return existing == nil || existing.Status != status || existing.Reason != reason
 }
 
+// newDrift reports whether the drift a suppressed write is leaving standing is worth
+// saying again, given the Synced reason and the field list this pass would report.
+//
+// Two questions, because either moves on its own. The Synced reason changes when the reason
+// nothing was sent changes -- an endpoint switched between DryRun and Report reports the
+// same drift for a different cause, and "would have updated" and "drift detected" do not
+// read alike in `kubectl describe`. The DriftDetected message changes when the drift itself
+// does, which is the case transitioned() alone would miss: a second field edited in NetBox
+// is new information about the same standing state.
+//
+// This is the one place a condition's message is part of the comparison, and it is not an
+// exception to transitioned()'s rule so much as the other side of it. There the message is
+// an error's own wording, which drifts without the state moving; here it is the list of
+// fields NetBox and the spec disagree on, which is the state.
+func (p *pass) newDrift(syncedReason, drift string) bool {
+	if p.transitioned(netboxv1alpha1.ConditionSynced, metav1.ConditionFalse, syncedReason) {
+		return true
+	}
+
+	existing := meta.FindStatusCondition(p.before.Conditions, netboxv1alpha1.ConditionDriftDetected)
+
+	return existing == nil || existing.Status != metav1.ConditionTrue || existing.Message != drift
+}
+
 // condition sets one condition, always stamping the generation it was observed at.
 func (p *pass) condition(condType string, ok bool, reason, message string) {
 	status := metav1.ConditionFalse
