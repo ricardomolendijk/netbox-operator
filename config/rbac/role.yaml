@@ -41,6 +41,9 @@ rules:
   - netboxtags/status
   - netboxtenantgroups/status
   - netboxtenants/status
+  - netboxvirtualdisks/status
+  - netboxvirtualmachines/status
+  - netboxvminterfaces/status
   - netboxvrfs/status
   verbs:
   - get
@@ -58,6 +61,9 @@ rules:
   - netboxtags
   - netboxtenantgroups
   - netboxtenants
+  - netboxvirtualdisks
+  - netboxvirtualmachines
+  - netboxvminterfaces
   - netboxvrfs
   verbs:
   - get
@@ -77,6 +83,9 @@ rules:
   - netboxtags/finalizers
   - netboxtenantgroups/finalizers
   - netboxtenants/finalizers
+  - netboxvirtualdisks/finalizers
+  - netboxvirtualmachines/finalizers
+  - netboxvminterfaces/finalizers
   - netboxvrfs/finalizers
   verbs:
   - update
