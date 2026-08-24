@@ -1,0 +1,5 @@
+# Shaped like netbox/release.yaml, which is where the version stamped on the IR comes from.
+# Deliberately not a real NetBox version: an IR labelled with the wrong one is worse than an
+# unlabelled one, because a version bump then produces a diff nobody can attribute.
+version: "0.0.0-fixture"
+edition: "Fixture"
