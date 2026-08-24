@@ -47,10 +47,17 @@ func TestVLANDescriptorIsRegisteredAndValid(t *testing.T) {
 		t.Errorf("UpdateStrategy = %q, want Patch", d.UpdateStrategy)
 	}
 
-	// docs/decisions/0003-ownership-and-references.md rule 4, and exactly one: two containment
-	// owners make garbage collection wait for both parents.
-	if d.ContainmentRef != "siteRef" {
-		t.Errorf("ContainmentRef = %q, want siteRef", d.ContainmentRef)
+	// No containment parent, and this is the interesting part of the descriptor.
+	// ADR-0003 rule 4 as amended by NBO-193: the containment parent is whichever FK the
+	// server cascades. Both of this kind's candidates -- `site` and `group` -- are
+	// `on_delete=PROTECT` (docs/netbox-schema.md -> ipam.VLAN), so neither does. An owner
+	// reference on a PROTECT-ed FK promises a cascade the server refuses, leaving the row
+	// alive after garbage collection has removed the CR.
+	//
+	// This test asserted `siteRef` when it was written, and Validate() refused the descriptor
+	// at boot once ErrContainmentNotCascade landed. That is the check working.
+	if d.ContainmentRef != "" {
+		t.Errorf("ContainmentRef = %q, want empty: neither site nor group cascades", d.ContainmentRef)
 	}
 }
 
@@ -232,6 +239,11 @@ func TestVLANGroupCarriesTheScopePairWithoutTheCaches(t *testing.T) {
 	// come from ScopeFK, so this asserts sameness rather than re-listing them.
 	shared := ScopeFK("scope")
 	shared.Cached = nil
+	// Set for the same reason the descriptor sets it: all four scope targets declare a
+	// `vlan_groups` GenericRelation, so the scope genuinely cascades. ScopeFK cannot default
+	// it, because a union's cascade is a fact about the referring model -- `clusters` exists
+	// on only two of the four targets.
+	shared.CascadeOnDelete = true
 
 	if !reflect.DeepEqual(pair, shared) {
 		t.Errorf("scope pair = %+v, want registry.ScopeFK(\"scope\") with Cached cleared: %+v", pair, shared)

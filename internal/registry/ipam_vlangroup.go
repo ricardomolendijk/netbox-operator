@@ -27,6 +27,13 @@ func init() { MustRegister(ipamVLANGroupDescriptor()) }
 // none of the four, so Cached is cleared below rather than the union being restated.
 func ipamVLANGroupDescriptor() Descriptor {
 	scope := ScopeFK("scope")
+	// The scope genuinely cascades, so it is a legal containment parent (NBO-193): every one
+	// of the four scope targets declares a `vlan_groups` GenericRelation -- dcim.Region,
+	// dcim.SiteGroup, dcim.Site and dcim.Location (docs/netbox-schema.md) -- so deleting any
+	// of them takes its VLAN groups with it. ScopeFK cannot default this: `clusters` and
+	// `wireless_lans` exist on only two of the four, so a union's cascade is a fact about the
+	// referring model rather than about the union.
+	scope.CascadeOnDelete = true
 
 	// The one difference from every other scoped kind, and the reason it is a mutation of the
 	// shared union rather than a copy of it: the members, the four permitted `app_label.model`

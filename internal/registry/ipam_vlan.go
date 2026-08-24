@@ -140,10 +140,12 @@ func ipamVLANDescriptor() Descriptor {
 
 		// docs/decisions/0003-ownership-and-references.md rule 4 names `siteRef` as a
 		// containment parent, so deleting the NetBoxSite a VLAN belongs to takes the VLAN with
-		// it -- when that is legal, meaning same namespace and resolved via a CR. Exactly one:
-		// `groupRef` and `tenantRef` are not containment references, and adding either would
-		// turn "delete the site and the VLAN goes" into "delete both", silently, because
-		// Kubernetes garbage collection waits for every owner.
-		ContainmentRef: "siteRef",
+		// No ContainmentRef. `ipam.VLAN.site` and `.group` are both `on_delete=PROTECT`
+		// (docs/netbox-schema.md -> ipam.VLAN), so neither cascades: NetBox refuses to delete a
+		// site that still has VLANs. An owner reference on a PROTECT-ed FK would promise a
+		// cluster-side cascade the server declines -- garbage collection removes the CR, the
+		// finalizer's DELETE is refused, and the row outlives the object. NBO-193 makes that a
+		// boot failure (ErrContainmentNotCascade) rather than a convention, which is what caught
+		// the `siteRef` this descriptor originally declared.
 	}
 }
