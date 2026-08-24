@@ -28,8 +28,8 @@ That last row is the whole of this page's complexity. Everything else follows fr
 *because* another CR does — a VM's inline interfaces, the `NetBoxIPAddress` a claim
 materialised — the child gets `controller: true, blockOwnerDeletion: true` pointing at its
 creator. Those are always in one namespace, because the operator puts them there, so this
-reference is always legal. Nothing in this build creates children yet; the materialiser is
-NBO-032.
+reference is always legal. What creates them is the child materialiser — see
+[inline children](inline-children.md).
 
 **A non-controller owner reference, on an object whose containment parent is a CR in the
 same namespace.** Each kind nominates exactly one containment parent, declared as
@@ -312,7 +312,8 @@ never-write-spec invariant is untouched. The operator's field manager *does* cla
 `f:metadata.ownerReferences`, deliberately: a GitOps tool that saw the field unowned would
 prune it on the next sync. See [field ownership](field-ownership.md).
 
-`blockOwnerDeletion` is **not** set on a containment reference. It only bites under
+`blockOwnerDeletion` **is** set on a controller reference and is **not** set on a containment
+reference. It only bites under
 foreground deletion, where it would let a hand-written object hold up
 `kubectl delete --cascade=foreground` on a shared parent — and it brings RBAC with it, since
 setting it requires `update` on the owner's `finalizers` subresource wherever the
@@ -359,4 +360,6 @@ see [when no foreign key qualifies](#when-no-foreign-key-qualifies).
 - [Deletion](deletion.md) — `deletionPolicy`, the finalizer, and `PROTECT`-blocked deletes
 - [References](references.md) — how a `parentRef` becomes a NetBox id
 - [Descriptor](descriptor.md) — where `ContainmentRef` is declared
+- [Inline children](inline-children.md) — the controller reference, where it comes from, and
+  what else a materialised child carries
 - [Field ownership](field-ownership.md) — why the operator claims the fields it writes
