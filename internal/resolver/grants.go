@@ -74,33 +74,49 @@ type GrantReader interface {
 // condition message is an existence oracle for somebody else's namespace -- and the cheaper
 // order happens to be the safe one.
 func (r *Resolver) authorise(ctx context.Context, req Request, key types.NamespacedName) error {
-	if key.Namespace == req.Referrer.Namespace {
-		return nil
-	}
-
-	if r.Grants == nil {
-		return fmt.Errorf("authorising %s -> %s: %w", req.Field.Spec, key, ErrNoGrantReader)
-	}
-
-	grants := &netboxv1alpha1.NetBoxRefGrantList{}
-	if err := r.Grants.List(ctx, grants, client.InNamespace(key.Namespace)); err != nil {
-		return fmt.Errorf("listing netboxrefgrants in %s: %w", key.Namespace, err)
-	}
-
-	check := &grantCheck{
-		reader: r.Grants, from: req.Referrer.Namespace, kind: req.Field.Target.Kind, name: key.Name,
-	}
-
-	allowed, err := check.allows(ctx, grants.Items)
+	permitted, check, err := r.permits(ctx, req.Referrer.Namespace, req.Field.Target.Kind, key)
 	if err != nil {
-		return err
+		return fmt.Errorf("authorising %s -> %s: %w", req.Field.Spec, key, err)
 	}
 
-	if allowed {
+	if permitted {
 		return nil
 	}
 
 	return req.blockedTarget(ErrRefDenied, key, check.detail(key))
+}
+
+// permits reports whether a reference made from namespace `from` to a `kind` object at key is
+// authorised, and, when it is not, the check that knows why.
+//
+// Shared by the two things that cross a namespace: resolution, which reports the denial as
+// ErrRefDenied, and the cycle walk, which stops at the edge (cycle.go). One check rather than
+// two, or authorise()'s carefully-ordered comment above would be true of only one of its
+// callers -- which is the gap NBO-092 closed.
+func (r *Resolver) permits(
+	ctx context.Context, from, kind string, key types.NamespacedName,
+) (bool, *grantCheck, error) {
+	if key.Namespace == from {
+		return true, nil, nil
+	}
+
+	if r.Grants == nil {
+		return false, nil, ErrNoGrantReader
+	}
+
+	grants := &netboxv1alpha1.NetBoxRefGrantList{}
+	if err := r.Grants.List(ctx, grants, client.InNamespace(key.Namespace)); err != nil {
+		return false, nil, fmt.Errorf("listing netboxrefgrants in %s: %w", key.Namespace, err)
+	}
+
+	check := &grantCheck{reader: r.Grants, from: from, kind: kind, name: key.Name}
+
+	permitted, err := check.allows(ctx, grants.Items)
+	if err != nil {
+		return false, nil, err
+	}
+
+	return permitted, check, nil
 }
 
 // grantCheck is one authorisation decision: the reference being made, and what was learned

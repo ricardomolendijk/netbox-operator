@@ -145,7 +145,8 @@ namespace in it is still free.
 **The grant is checked before the target is read.** A denied reference makes zero reads in
 the target namespace, so "denied" and "not found" cannot be told apart. Otherwise the
 condition message would be an existence oracle for a namespace the referrer has no access
-to.
+to. The [cycle walk](#a-cycle-through-a-namespace-you-may-not-reference) uses the same
+check, for the same reason and at the same point.
 
 **`NetBoxEndpoint` is never covered by an omitted `kinds` list.** A catalogue reference hands
 over an id; an `endpointRef` hands over use of another namespace's token Secret, which is a
@@ -354,6 +355,44 @@ created until it resolves.**
 | A `DeferIfUnresolved` field a natural key **does** match on — `parent` | **yes** | With it unresolved no candidate is applicable, so the engine refuses to create the object at all ([lookups](lookups.md)). It genuinely blocks. |
 | `slug`, `lookup`, `id` | no | Resolves in NetBox; no CR is waiting. |
 | A Kind with no descriptor, or no CRD installed | no | Outside the CR graph, and it costs no read. |
+
+### A cycle through a namespace you may not reference
+
+The walk consults the grant check **before it follows an edge**, exactly as resolution does
+before it reads a target. An edge into a namespace that grants the object being reconciled
+nothing is a **terminus**: not followed, and not named anywhere in what that object reports.
+
+Otherwise the ring itself is the oracle. A namespace with no grant into `netbox-catalog` could
+write a manifest closing a ring through `netboxregion/netbox-catalog/x` and read back out of
+its own condition message that `x` exists and points where it points — the very thing checking
+the grant before the read exists to prevent, reached by another path. The leak is narrow
+(existence and reference structure, never field values; it takes a deliberately-constructed
+ring; and the reference is denied regardless, so only the *message* was over-informative) and
+closing it is cheaper than arguing about it.
+
+What you see instead is the missing grant, which is the part you can act on:
+
+```console
+$ kubectl get netboxregion b -o jsonpath='{.status.conditions[?(@.type=="RefsResolved")]}'
+{"type":"RefsResolved","status":"False","reason":"RefDenied",
+ "message":"parentRef -> netboxregion/netbox-catalog/x: denied (namespace \"team-a\" is not
+            permitted to reference namespace \"netbox-catalog\": create a NetBoxRefGrant …)"}
+```
+
+The cost, stated plainly: **a cycle that exists only through an unauthorised edge is not
+reported as a cycle.** Nothing proceeds silently — the reference across that edge is denied, so
+the object is blocked either way — but the reason is `RefDenied` rather than `RefCycle`, and no
+message anywhere names the ring. Write the grant and the next reconcile reports the ring in
+full.
+
+Two consequences worth knowing:
+
+- A cycle wholly inside one namespace is unaffected, and costs nothing: a same-namespace edge
+  is authorised without reading a grant, so the walk on the overwhelmingly common shape reads
+  no `NetBoxRefGrant` at all.
+- Edges are authorised from the perspective of **the object being reconciled**, because that
+  object's condition is what carries the path. A path it prints can only name objects it could
+  have referenced itself.
 
 ### The depth limit
 

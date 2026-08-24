@@ -613,7 +613,9 @@ func TestTruncatedLookupCreatesNothing(t *testing.T) {
 	}
 
 	obj := fakeObject()
-	if _, err := engine.Reconcile(context.Background(), obj); err != nil {
+
+	result, err := engine.Reconcile(context.Background(), obj)
+	if err != nil {
 		t.Fatalf("Reconcile() = %v; a NetBox failure is a condition, not a returned error", err)
 	}
 
@@ -622,6 +624,15 @@ func TestTruncatedLookupCreatesNothing(t *testing.T) {
 	if !mentions(obj, "truncated") {
 		t.Errorf("no condition mentions the truncation; conditions = %v", obj.NetBoxStatus().Conditions)
 	}
+
+	// The reporting half (NBO-090). Its own reason, because "the lookup paginated past the
+	// cap" and "NetBox is down" are not the same problem and do not have the same fix, and a
+	// requeue long enough not to poll a query that cannot succeed.
+	if got := conditionOf(obj, netboxv1alpha1.ConditionReady).Reason; got != netboxv1alpha1.ReasonTruncated {
+		t.Errorf("Ready reason = %q, want %q", got, netboxv1alpha1.ReasonTruncated)
+	}
+
+	assertRequeue(t, result.RequeueAfter, truncatedRetry)
 	// The assertion that matters: no write of any kind.
 	for _, method := range client.methods() {
 		if method == "POST" || method == "PATCH" || method == "DELETE" {

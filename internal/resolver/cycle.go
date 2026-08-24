@@ -105,6 +105,10 @@ func (p RefPath) String() string {
 // decision has been made, which is where ResolveAll calls it and where NBO-044's admission
 // webhook will.
 //
+// An edge into a namespace this object has no NetBoxRefGrant into is not followed and not
+// reported past -- the walk uses the same grant check resolution does, so the path it prints
+// can only name objects the reader was permitted to reference (see follow).
+//
 // Only `name`-mode references are followed, and this is what bounds the whole problem: a
 // `slug`, a `lookup` or an `id` terminates in NetBox, where there is no CR to wait for and
 // therefore no Kubernetes deadlock to be in. A cycle needs every edge to be a CR waiting on
@@ -139,7 +143,12 @@ func (r *Resolver) checkFrom(
 		seen: map[RefNode]bool{start: true}, from: map[RefNode]RefNode{},
 	}
 
-	return walk.run(ctx, blockingHops(start, d, refs, nil))
+	frontier, err := walk.follow(ctx, blockingHops(start, d, refs, nil))
+	if err != nil {
+		return err
+	}
+
+	return walk.run(ctx, frontier)
 }
 
 // hop is one edge of the walk: the object it arrives at, where it came from, and the field on
@@ -264,7 +273,48 @@ func (w *cycleWalk) expand(ctx context.Context, edge hop) ([]hop, error) {
 		return nil, err
 	}
 
-	return blockingHops(edge.node, target, refs, &edge.head), nil
+	return w.follow(ctx, blockingHops(edge.node, target, refs, &edge.head))
+}
+
+// follow keeps the edges this walk is allowed to follow and drops the rest, so that every hop
+// the walk ever holds has been authorised.
+//
+// The one choke point, and it is why it filters edges rather than checking them where they are
+// used: an unauthorised object must not be followed *or* named, and the walk names an object in
+// three places -- the cycle path, the chain beyond the depth cap, and the object the visit cap
+// stopped at. Filtering here is what makes all three safe at once.
+//
+// Without it the walk was an existence oracle for a namespace the referrer has no grant into.
+// It reads CRs directly rather than through authorise(), so a namespace could close a ring
+// through an object it may not reference and read that object's name back out of its own
+// condition message -- precisely what authorise()'s ordering exists to prevent, reached by
+// another path (NBO-092). An unauthorised edge is now a terminus: the cycle through it is not
+// reported as a cycle, and the reference across it is still denied as RefDenied, which is the
+// half the reader can act on.
+//
+// Authorised from the perspective of the object being reconciled, because that object's
+// condition is what carries the path. Its own edges are therefore checked exactly as
+// resolution checks them, and no node the walk reports is one the reader could not have
+// referenced itself.
+func (w *cycleWalk) follow(ctx context.Context, edges []hop) ([]hop, error) {
+	kept := make([]hop, 0, len(edges))
+
+	for _, edge := range edges {
+		permitted, _, err := w.resolver.permits(
+			ctx, w.start.Key.Namespace, edge.node.GVK.Kind, edge.node.Key)
+		if err != nil {
+			return nil, fmt.Errorf("authorising %s -> %s while checking for a reference cycle: %w",
+				edge.from, edge.node, err)
+		}
+
+		if !permitted {
+			continue
+		}
+
+		kept = append(kept, edge)
+	}
+
+	return kept, nil
 }
 
 // blockingHops turns one object's references into the edges the walk follows: the blocking

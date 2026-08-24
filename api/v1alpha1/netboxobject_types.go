@@ -98,6 +98,15 @@ const (
 	// ReasonAPIError is on Ready: NetBox was unreachable, rate limiting, or failing.
 	ReasonAPIError = "APIError"
 
+	// ReasonTruncated is on Ready: a lookup paginated past the client's page cap, so the
+	// engine cannot tell whether the object exists and writes nothing.
+	//
+	// Distinct from ReasonAPIError, which is the reason a truncated list would otherwise
+	// fall into: "the query was wrong, or the endpoint is enormous" and "NetBox is down"
+	// look nothing alike from the outside and are fixed differently -- one narrows a filter
+	// or raises MaxPages, the other waits (docs/concepts/errors-and-retries.md).
+	ReasonTruncated = "Truncated"
+
 	// ReasonDryRunPending is on Ready: the endpoint is in DryRun, so the write that would
 	// make this object correct was reported and not sent.
 	ReasonDryRunPending = "DryRunPending"

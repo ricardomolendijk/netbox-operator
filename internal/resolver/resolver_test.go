@@ -545,6 +545,45 @@ func TestResolveAllFailsOnACorruptSpec(t *testing.T) {
 	}
 }
 
+// TestPassResolverCarriesEveryCollaborator is the guard for the bug NBO-092 was found
+// through: ResolveAll built its per-pass resolver as a struct literal and dropped `Grants`, so
+// every cross-namespace reference failed with ErrNoGrantReader instead of being denied --
+// because both authorise() and the cycle walk read the collaborator off the pass resolver and
+// not off the outer one.
+//
+// Asserted by reflection rather than field by field, because a field-by-field test is the same
+// literal written twice and goes stale the same way. This one fails on a field added to
+// Resolver and not carried into forPass, which is the shape the bug will take again.
+func TestPassResolverCarriesEveryCollaborator(t *testing.T) {
+	outer := &Resolver{Objects: &fakeReader{}, Kinds: kinds(), Grants: &fakeGrants{}}
+	pass := outer.forPass()
+
+	before, after := reflect.ValueOf(*outer), reflect.ValueOf(*pass)
+
+	for i := range after.NumField() {
+		name := after.Type().Field(i).Name
+
+		if before.Field(i).IsZero() {
+			t.Fatalf("Resolver.%s is unset on this test's own fixture, so the assertion below "+
+				"would pass vacuously: set it here as well as in forPass", name)
+		}
+
+		if after.Field(i).IsZero() {
+			t.Errorf("pass resolver dropped Resolver.%s: carry it in forPass()", name)
+		}
+	}
+
+	// Objects is the one field forPass transforms rather than copies: one pass is one snapshot,
+	// which is what stops the cycle walk and the resolution behind it reading everything twice.
+	if _, wrapped := pass.Objects.(*passReader); !wrapped {
+		t.Errorf("pass resolver Objects = %T, want a *passReader over the outer reader", pass.Objects)
+	}
+
+	if !reflect.DeepEqual(pass.Kinds, outer.Kinds) || pass.Grants != outer.Grants {
+		t.Error("pass resolver carries a different Kinds or Grants than the resolver it came from")
+	}
+}
+
 // TestResolveAllUsesTheRegistryByDefault is what makes the production wiring one line: a
 // resolver with no descriptor source reads the package-level registry every kind's init()
 // filled, so NetBoxRegion's own parentRef resolves with nothing configured.
