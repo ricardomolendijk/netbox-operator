@@ -23,6 +23,15 @@ var nestedGroups = []struct {
 	// containment is the spec field whose target gets an owner reference, empty for a kind
 	// with no containment parent.
 	containment string
+
+	// otherKeyFields are the spec fields this kind's natural keys read besides `parentRef`
+	// and `name` -- `siteRef` on a location, nothing on the two group kinds.
+	//
+	// Deliberately separate from containment, which they coincide with only on
+	// NetBoxLocation. Reusing containment here broke when NetBoxRegion gained
+	// `ContainmentRef: "parentRef"`: `parentRef` landed in the always-resolved base and the
+	// "undeclared parent" case stopped being undeclared.
+	otherKeyFields []string
 }{
 	{
 		kind: "NetBoxRegion", endpoint: "dcim/regions", objectType: "dcim.region",
@@ -75,7 +84,8 @@ var nestedGroups = []struct {
 				NullFields: []NullField{{Filter: "parent_id", Spec: "parentRef"}},
 			},
 		},
-		containment: "siteRef",
+		containment:    "siteRef",
+		otherKeyFields: []string{"siteRef"},
 	},
 }
 
@@ -155,10 +165,7 @@ func TestNestedGroupKeySelectionFollowsTheParent(t *testing.T) {
 			// Every field this kind's keys read other than `parentRef`: `name` always,
 			// `siteRef` on a location. They resolve in all three cases below, so the only
 			// variable is the parent.
-			base := []string{"name"}
-			if tc.containment != "" {
-				base = append(base, tc.containment)
-			}
+			base := slices.Concat([]string{"name"}, tc.otherKeyFields)
 			// slices.Concat and not append: two appends to one base would write the same
 			// backing array and the second would silently overwrite the first.
 			withParent := slices.Concat(base, []string{"parentRef"})
