@@ -17,7 +17,9 @@ knowing what it is *not*. `extras.Tag` has no foreign keys at all — no site, n
 parent — so a `NetBoxTag` reaches `Ready` without any reference resolution, and everything
 on this page is the engine's ordinary behaviour rather than anything specific to tags.
 Applying this tag *to* another object is a different thing entirely: that is a `tags` field
-on the other kind, and it does not exist yet (NBO-011, NBO-073).
+on the other kind, and it does not exist yet: NBO-073 put `tags` in
+[the schema reference](../netbox-schema.md) — an M2M onto `extras.Tag`, written as a list of
+ids — but naming a `NetBoxTag` from another CR needs the reference system (NBO-011).
 
 ## Minimal example
 

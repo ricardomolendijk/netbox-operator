@@ -1,10 +1,11 @@
-"""Regression test for the schema extraction pipeline (NBO-067, NBO-070, NBO-071).
+"""Regression test for the schema extraction pipeline (NBO-067, NBO-070, NBO-071, NBO-073).
 
 Runs extract-netbox-schema.py, digest-netbox-schema.py, extract-netbox-endpoints.py and
 classify-scope.py over test/fixtures/netbox-models -- a hand-written miniature of a NetBox
 source tree -- and asserts each of the five NBO-067 defects stays fixed, plus NBO-070 (a
 model's inherited columns are merged in and attributed, and no model's meta.constraints names
-a column absent from its own field list) and the six NBO-071 defects. The two NBO-071 defects
+a column absent from its own field list), the six NBO-071 defects, and NBO-073 (`tags` is
+reported for every model inheriting TagsMixin, as a non-column M2M). The two NBO-071 defects
 that now stop the run get their own deliberately-broken tree, test/fixtures/netbox-models-bad.
 It deliberately does not need a NetBox checkout, which is what makes it runnable in CI:
 
@@ -123,8 +124,9 @@ for name in ('description', 'comments'):
 # A generic-FK pair that arrives entirely by inheritance still gets its REQ derived, not guessed.
 assert declaring(digest, 'ipam.VLANGroup', 'scope_type') == 'CachedScopeMixin'
 assert ' REQ' not in field(digest, 'ipam.VLANGroup', 'scope'), 'inherited GenericForeignKey over a nullable pair marked REQ'
-# TagsMixin declares a TaggableManager, not a column: nothing to merge, and nothing invented.
-assert not any(f['name'] == 'tags' for v in schema.values() for f in v['fields']), 'a through-table manager was merged as a column'
+# TagsMixin declares a TaggableManager, not a column: nothing to merge as one (NBO-073).
+assert not any(f['name'] == 'tags' and not f.get('not_a_column')
+               for v in schema.values() for f in v['fields']), 'a through-table manager was merged as a column'
 # Every attribution names a class the run actually saw.
 classes = {v['name'] for v in schema.values()}
 for key, v in schema.items():
@@ -164,6 +166,28 @@ for key, v in sorted(schema.items()):
         assert not missing, f"{key}.meta.{meta_key} names {missing}, absent from its own field list"
         checked += 1
 assert checked >= 4, f"only {checked} Meta constraint blocks in the fixture: the invariant is barely exercised"
+
+# --- NBO-073: `tags` is a REST field the column walk can never see ----------------------
+# TagsMixin declares `tags = TaggableManager(through=...)`, which is a manager rather than a
+# model field, so the walk attributed no column from it -- correctly -- and `tags` appeared
+# nowhere in the digest, for any kind. It is a writable REST field on every PrimaryModel and
+# OrganizationalModel all the same, so the entry has to show it, marked as what it is.
+for name in ('dcim.Manufacturer', 'dcim.RackGroup', 'dcim.Rack', 'ipam.VLAN'):
+    row = field(digest, name, 'tags')
+    assert declaring(digest, name, 'tags') == 'TagsMixin', f"{name}.tags not attributed to TagsMixin"
+    assert 'M2M' in row and '-> extras.Tag' in row, f"{name}.tags does not read as an M2M onto the tag model: {row}"
+    assert 'not a column' in row, f"{name}.tags is not marked a non-column: {row}"
+    assert ' REQ' not in row, f"{name}.tags marked REQ: a manager has no NOT NULL to violate"
+# The through table is the only thing the source names, so it is what the entry cites.
+assert [f for f in schema['netbox.TagsMixin']['fields']
+        if f['name'] == 'tags'][0]['through'] == 'extras.TaggedItem'
+# An ordinary Django manager is a queryset accessor, not an API field: mptt's TreeManager is
+# a call assigned in a class body exactly like the TaggableManager, and must stay out.
+assert not any(f['name'] == 'objects' for v in schema.values() for f in v['fields']), 'a queryset manager became a field'
+# A CounterCacheField is a real column that the REST API returns read-only, and its
+# `default=0` / `editable=False` live inside the field class: the AST sees no default= at
+# all, and marked all 35 real rows REQ -- demanding a counter NetBox maintains itself.
+assert ' REQ' not in field(digest, 'dcim.DeviceType', 'interface_template_count'), 'a counter cache is marked required'
 
 # --- NBO-071 defect 1: an M2M and a GenericRelation are not columns, so never REQ --------
 # An M2M has no NOT NULL column and Django ignores null= on it. Nine real rows carried a
@@ -254,6 +278,6 @@ assert ' REQ' in field(digest, 'dcim.Rack', 'role'), 'blank=True suppressed REQ 
 assert ' REQ' not in field(digest, 'dcim.Site', 'facility'), 'blank=True stopped meaning optional on a CharField'
 assert ' REQ' not in field(digest, 'ipam.VLAN', 'site'), 'a null=True FK became required'
 
-print(f"ok: 5/5 NBO-067 defects + NBO-070 inherited columns + 6/6 NBO-071 defects covered over "
+print(f"ok: 5/5 NBO-067 defects + NBO-070 inherited columns + 6/6 NBO-071 defects + NBO-073 tags covered over "
       f"{len(schema)} fixture models, {len(endpoints.splitlines())} endpoints, "
       f"{checked} Meta constraint blocks")

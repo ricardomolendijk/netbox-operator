@@ -2,8 +2,14 @@ import json,re,sys,textwrap
 d=json.load(open(sys.argv[1]))
 want=sys.argv[2].split(',') if len(sys.argv)>2 else None
 GENERIC_FK=('GenericForeignKey','RestrictedGenericForeignKey')
-# Not columns: nothing here has a NOT NULL to violate, so nothing here can be REQ.
+# Not columns: nothing here has a NOT NULL to violate, so nothing here can be REQ. A
+# TaggableManager is not even a field, so it arrives flagged `not_a_column` rather than
+# being named here.
 NOT_A_COLUMN=('GenericRelation','ManyToManyField')
+# A CounterCacheField *is* a column, but its `default=0` and `editable=False` are set inside
+# the field class rather than at the declaration -- so the AST sees neither, and all 35 of
+# them came out REQ: a denormalised counter the API returns read-only, demanded on create.
+NEVER_REQ=('CounterCacheField',)
 # Columns that hold a reference and nothing else -- no empty value to fall back on.
 RELATIONS=('ForeignKey','OneToOneField','TreeForeignKey')
 MODULE_PREFIX=re.compile(r'^[\w.]*\.')  # models.PROTECT -> PROTECT, models.SET(x) -> SET(x)
@@ -18,7 +24,7 @@ def req(f,by_name,seen=()):
     # to violate and Django ignores null= on it entirely. `REQ` there makes the CRD demand a
     # value the user has no way to supply -- dcim.Interface.vdcs, where a VDC assignment is
     # optional, is one of nine such rows.
-    if f['type'] in NOT_A_COLUMN: return False
+    if f['type'] in NOT_A_COLUMN or f['type'] in NEVER_REQ or f.get('not_a_column'): return False
     if f['type'] in GENERIC_FK:
         ct=by_name.get(f.get('ct_field'))
         if ct is None or ct['name'] in seen: return False
@@ -54,7 +60,12 @@ for k,v in sorted(d.items()):
         # but a CRD author needs to know it is not declared here.
         label=f"{f['name']} ({f['declared_by']})" if f.get('declared_by') else f['name']
         extra=[]
+        # A TaggableManager declares no column at all, so `tags` -- writable over REST on
+        # every PrimaryModel and OrganizationalModel -- appeared in no entry. Say what it is
+        # and that it is not a column, or a reader goes looking for a column that is not there.
+        if f.get('not_a_column'): extra.append('M2M')
         if f.get('to'): extra.append(f"-> {sym(f,'to')}")
+        if f.get('not_a_column'): extra.append(f"(via {f['through'].split('.')[-1]}, not a column)" if f.get('through') else '(not a column)')
         if f.get('on_delete'): extra.append(f"on_delete={MODULE_PREFIX.sub('',str(f['on_delete']))}")
         if f.get('unique'): extra.append('UNIQUE')
         if f.get('max_length'): extra.append(f"len={sym(f,'max_length')}")

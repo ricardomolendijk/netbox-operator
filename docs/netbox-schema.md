@@ -25,6 +25,9 @@ How to read an entry:
   it is *not* the string it happens to spell.
 - A `ManyToManyField` is a through table, not a column on this model: it has no `NOT NULL` to
   violate, Django ignores `null=` on it, and it therefore never carries `REQ`.
+- `M2M -> extras.Tag (via TaggedItem, not a column)` — a `TaggableManager`. It is not a field
+  at all, so there is no column anywhere for it, but it *is* a writable REST field: see the
+  next section.
 - `blank=True` is a form-level flag, not SQL. It stands in for optional on a `CharField`,
   whose `NOT NULL` column takes `''` instead — but a `ForeignKey(null=False, blank=True)`
   column has no such empty value and really must be supplied, so it is marked `REQ`.
@@ -45,10 +48,64 @@ How to read an entry:
 - Fields prefixed `_` (e.g. `_site`, `_depth`, `_children`) and every `CounterCacheField`
   are denormalised caches maintained by NetBox itself — read-only, never write them.
 
+## This is the database, and a CRD is derived from the API
+
+The walk above reads Django models, so every entry below describes a **column**. Every CRD is
+derived from the **REST API**. The two lists differ in both directions, and neither contains
+the other: an entry below is evidence about a column, not proof that the field is writable —
+and a field's absence below is not proof that the API does not take it.
+
+**In the API, not a column** (so emitted only where the walk can see the declaration at all):
+
+- `tags` — declared as `TaggableManager(through='extras.TaggedItem')`, a through-table manager
+  rather than a model field, so it contributes no column. It is nonetheless writable on every
+  `PrimaryModel`, `OrganizationalModel` and `NestedGroupModel`, as a list of `extras.Tag`
+  **ids**. It is emitted from the mixin that declares it, marked as what it is:
+  `tags (TagsMixin)   TaggableManager   M2M -> extras.Tag (via TaggedItem, not a column)`.
+- `custom_fields` — the *column* is `custom_field_data`, a `JSONField` defaulting to `{}`.
+  The *API field* is `custom_fields`, and the shapes differ: a map keyed by custom-field
+  **name**, validated against `extras.CustomField`. Never write `custom_field_data`.
+- `id` — Django's implicit `AutoField` primary key is declared nowhere, so no entry below
+  lists it (the one `id` row that appears, `extras.CachedValue`, is an explicitly declared
+  `UUIDField`). It is in every API response, and it is what the operator stores as
+  `status.id`.
+- `url`, `display` and the other serializer-computed fields — read-only, and no part of any
+  model. (`url` is what the operator stores as `status.url`.)
+
+**A column, but never writable:**
+
+- `_`-prefixed columns — `_site`, `_location`, `_rack`, `_region`, `_site_group`, `_device`,
+  `_path`, `_depth`, `_children`, `_abs_length`, and the `NaturalOrderingField` `_name`:
+  denormalised caches NetBox maintains itself.
+- every `CounterCacheField` (`interface_count`, `device_count`, the 35 `*_count` rows) — the
+  API returns them and refuses to accept them. Their `default=0` and `editable=False` are set
+  inside the field class rather than at the declaration, so the AST sees neither: they are
+  *not* required, whatever an entry produced before NBO-073 says.
+- `created` / `last_updated` (`auto_now_add` / `auto_now`) — returned, never accepted.
+
+**A model attribute, and no API field at all:**
+
+- `GenericRelation` rows (`prefixes`, `ip_addresses`, `l2vpn_terminations`,
+  `cable_terminations`, `services`, `group_assignments`, …) are reverse relations: not a
+  column on this model, and not writable. Most are not serialized at all.
+- the accessor half of a `GenericForeignKey` (`scope`, `assigned_object`) is not a column
+  either; the API writes the `*_type` / `*_id` pair.
+- managers other than the `TaggableManager` (`objects = TreeManager()`,
+  `RestrictedQuerySet.as_manager()`) are queryset accessors, deliberately not emitted.
+
+**A column in Postgres, absent below:** mptt's `lft`, `rght`, `tree_id` and `level` on every
+nested group model. `MPTTModel` lives outside the ten scanned apps, so the walk never sees
+them; they are maintained by mptt and are not API fields.
+
+Where the two disagree, the REST API wins — the operator talks to the API, not to Postgres
+(`docs/regenerating.md`). This list is curated by hand, which is the honest cost of deriving
+the document from the source instead of from the OpenAPI schema; NBO-041's ingest is what
+would make it derived.
+
 Regenerate with `hack/extract-netbox-schema.py` (see `docs/regenerating.md`).
 
-> **This body has not been regenerated since NBO-067, NBO-070 and NBO-071 fixed the
-> extractors.**
+> **This body has not been regenerated since NBO-067, NBO-070, NBO-071 and NBO-073 fixed
+> the extractors.**
 > It is the output of the pre-fix scripts, so — until someone re-runs them against a NetBox
 > 4.6.8 checkout — **no entry below lists a single inherited column**: `name`, `slug`,
 > `parent`, `description`, `comments`, `scope_type`/`scope_id`, `weight`/`weight_unit` and
@@ -75,6 +132,11 @@ Regenerate with `hack/extract-netbox-schema.py` (see `docs/regenerating.md`).
 > be either a real literal or a symbol such as `VLANStatusChoices.STATUS_ACTIVE`, which the
 > pre-fix digest quoted identically. Conversely, a `ForeignKey(null=False, blank=True)` row
 > below is missing its `REQ`.
+>
+> And still pre-NBO-073: **no entry below carries a `tags` row**, for any kind, even though
+> `tags` is writable on all of them — the section above says what the regenerated rows will
+> look like. The 35 `CounterCacheField` rows below are marked `REQ` and are not required at
+> all; do not make a CRD demand a counter NetBox maintains.
 
 ## API endpoint -> model map
 

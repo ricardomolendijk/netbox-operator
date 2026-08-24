@@ -68,7 +68,7 @@ Any fix to an extractor belongs with a fixture declaration that reproduces the b
 The fixture is not a copy of NetBox and should stay small; `test/fixtures/netbox-models/README.md`
 lists what each declaration is there to pin.
 
-> **The committed `docs/netbox-schema.md` predates NBO-067, NBO-070 and NBO-071.** It was produced
+> **The committed `docs/netbox-schema.md` predates NBO-067, NBO-070, NBO-071 and NBO-073.** It was produced
 > by the pre-fix scripts, so it lists no inherited column at all (no `name`, `slug`,
 > `parent`, `description`, `comments`, `scope_*`, `weight*`, `custom_field_data` on any
 > model that inherits them), truncates `meta.constraints` at 400 characters, carries
@@ -77,7 +77,8 @@ lists what each declaration is there to pin.
 > `ManyToManyField` rows `REQ` that are not required, leaves thirteen FK targets unqualified
 > and six reading `-> self`, drops the precision of all fourteen `DecimalField` rows, quotes
 > symbolic defaults as though they were string literals, and lets `blank=True` suppress `REQ`
-> on `NOT NULL` foreign keys. Re-running the commands above against a
+> on `NOT NULL` foreign keys. Pre-NBO-073 it also lists no `tags` row on any kind, and marks
+> all 35 `CounterCacheField` rows `REQ`. Re-running the commands above against a
 > NetBox 4.6.8 checkout is what refreshes it.
 >
 > The regenerated body will also gain `netbox.*` entries for the abstract bases themselves

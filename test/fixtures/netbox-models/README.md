@@ -11,7 +11,7 @@ There is a sibling tree, `../netbox-models-bad/`, for the two defects whose fix 
 the run**: a script cannot both succeed over the good tree and fail over the same declaration,
 so the deliberately-broken ones live apart.
 
-What each piece is here for (all five NBO-067 defects, then NBO-070, then NBO-071):
+What each piece is here for (all five NBO-067 defects, then NBO-070, NBO-071, NBO-073):
 
 | Fixture | Pins |
 |---|---|
@@ -22,7 +22,10 @@ What each piece is here for (all five NBO-067 defects, then NBO-070, then NBO-07
 | `dcim/models/sites.py` — `Manufacturer`, `RackGroup` | a column-less `OrganizationalModel` / `NestedGroupModel` subclass still gets a Models entry |
 | `netbox/models/__init__.py` — `OrganizationalModel`, `NestedGroupModel`, `PrimaryModel` | the shared abstract bases the extractor never scanned: `name`, `slug`, `parent`, `description`, `comments` are inherited, and must appear on the subclass attributed to the class declaring them |
 | `netbox/models/__init__.py` — `BASE_NAME_MAX_LENGTH`, `NetBoxModel` | an inherited column arrives with its `max_length` already resolved, and attribution survives two hops (`Manufacturer` -> `OrganizationalModel` -> `NetBoxModel` -> `CustomFieldsMixin`) |
-| `netbox/models/features.py` — `CustomFieldsMixin`, `TagsMixin` | a mixin column (`custom_field_data`) is merged; a `TaggableManager` is not a column and must not be invented as one |
+| `netbox/models/features.py` — `CustomFieldsMixin`, `TagsMixin` | a mixin column (`custom_field_data`) is merged; a `TaggableManager` declares no column, and must not be invented as one |
+| `netbox/models/features.py` — `TagsMixin.tags` | **NBO-073**: `tags` is a writable REST field on every kind and no column at all, so it appeared in no entry. Emitted from the mixin that declares it, as an M2M onto `extras.Tag` through `extras.TaggedItem`, marked as not a column — and never `REQ` |
+| `netbox/models/__init__.py` — `NestedGroupModel.objects` | a manager that is *not* an API field: mptt's `TreeManager()` is a call assigned in a class body exactly like the `TaggableManager`, and must stay out of the field list |
+| `dcim/models/racks.py` — `DeviceType.interface_template_count` | a `CounterCacheField`, whose `default=0` and `editable=False` live inside the field class: the AST sees no `default=`, and all 35 real rows came out `REQ` — a counter the API returns read-only, demanded on create |
 | `netbox/models/mixins.py` + `ipam/models/vlans.py` — `VLANGroup` | `CachedScopeMixin`'s `scope_type`/`scope_id`/`scope` merged, with the generic FK's requiredness still derived from a `scope_type` that also arrives by inheritance |
 | `dcim/models/mixins.py` + `dcim/models/racks.py` — `DeviceType` | `WeightMixin`'s `weight`/`weight_unit`: an app-local mixin that was always extracted but never merged |
 | `dcim/models/racks.py` — `RackRole` | the entry that listed only `color`, with `name`/`slug`/`description` inherited |

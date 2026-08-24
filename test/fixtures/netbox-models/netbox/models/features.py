@@ -15,7 +15,9 @@ class CustomFieldsMixin(models.Model):
 
 
 class TagsMixin(models.Model):
-    """No column of its own: tags live in a through table, so nothing must be merged."""
+    """No column of its own: tags live in a through table, so no *column* must be merged —
+    but `tags` is a writable REST field on every kind that inherits this, so the entry has to
+    show it, marked as the M2M-through-a-through-table it is."""
     tags = TaggableManager(
         through='extras.TaggedItem',
         related_name='%(app_label)s_%(class)s_related',

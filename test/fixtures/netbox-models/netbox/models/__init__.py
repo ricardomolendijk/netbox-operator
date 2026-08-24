@@ -4,6 +4,7 @@ These are the abstract models nearly every NetBox kind inherits its columns from
 extractor used to skip this package entirely, so those columns appeared nowhere (NBO-070).
 """
 from django.db import models
+from mptt.managers import TreeManager
 from mptt.models import MPTTModel, TreeForeignKey
 
 from netbox.models.features import CustomFieldsMixin, TagsMixin
@@ -79,6 +80,10 @@ class NestedGroupModel(CustomFieldsMixin, TagsMixin, ChangeLoggedModel, MPTTMode
         max_length=200,
         blank=True,
     )
+
+    # A manager, not a field: a queryset accessor is no part of the REST API, and must not be
+    # emitted the way `tags` is just because it is a call assigned in a class body.
+    objects = TreeManager()
 
     class Meta:
         abstract = True
