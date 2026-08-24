@@ -21,12 +21,12 @@ metadata:
     # Required. The operator reads Secrets through a label-scoped informer, so an
     # unlabelled Secret is invisible to it and the endpoint reports SecretMissing even
     # though `kubectl get secret` shows it. See docs/operations/rbac.md.
-    netbox.populator.io/endpoint-credential: "true"
+    netbox.kubeforge.org/endpoint-credential: "true"
 type: Opaque
 stringData:
   token: "0123456789abcdef0123456789abcdef01234567"
 ---
-apiVersion: netbox.populator.io/v1alpha1
+apiVersion: netbox.kubeforge.org/v1alpha1
 kind: NetBoxEndpoint
 metadata:
   name: homelab
@@ -37,7 +37,7 @@ spec:
     name: netbox-token
   mode: Apply
 ---
-apiVersion: netbox.populator.io/v1alpha1
+apiVersion: netbox.kubeforge.org/v1alpha1
 kind: NetBoxSite
 metadata:
   name: home
@@ -54,7 +54,7 @@ spec:
 ---
 # A second site with no optional fields set. Everything the spec does not mention is left
 # exactly as NetBox has it, which is what lets the operator share an object with a human.
-apiVersion: netbox.populator.io/v1alpha1
+apiVersion: netbox.kubeforge.org/v1alpha1
 kind: NetBoxSite
 metadata:
   name: office

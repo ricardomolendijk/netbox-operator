@@ -4,9 +4,9 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.19.0
-  name: netboxendpoints.netbox.populator.io
+  name: netboxendpoints.netbox.kubeforge.org
 spec:
-  group: netbox.populator.io
+  group: netbox.kubeforge.org
   names:
     kind: NetBoxEndpoint
     listKind: NetBoxEndpointList
@@ -114,7 +114,7 @@ spec:
                   caBundleSecretRef:
                     description: |-
                       CABundleSecretRef holds additional trusted roots, PEM-encoded. That Secret must be
-                      labelled netbox.populator.io/endpoint-credential: "true" or the operator cannot
+                      labelled netbox.kubeforge.org/endpoint-credential: "true" or the operator cannot
                       read it; see docs/operations/rbac.md.
                     properties:
                       key:
@@ -142,7 +142,7 @@ spec:
               tokenSecretRef:
                 description: |-
                   TokenSecretRef names the Secret holding the API token. That Secret must be
-                  labelled netbox.populator.io/endpoint-credential: "true" or the operator cannot
+                  labelled netbox.kubeforge.org/endpoint-credential: "true" or the operator cannot
                   read it; see docs/operations/rbac.md.
                 properties:
                   key:

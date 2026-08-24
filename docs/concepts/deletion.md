@@ -46,7 +46,7 @@ field would not fail — it would just quietly travel over the wire forever.
 
 ## The finalizer, and why the order is that way round
 
-The finalizer is `netbox.populator.io/finalizer`.
+The finalizer is `netbox.kubeforge.org/finalizer`.
 
 **It is added, and persisted by a real API write, before the engine writes anything to
 NetBox** — before the endpoint is even resolved. **It is removed only after the NetBox side
@@ -76,7 +76,7 @@ unreachable**. An escape hatch that only works when it is not needed is not an e
 
 | # | Condition | Action |
 |---|---|---|
-| 1 | The `netbox.populator.io/skip-finalizer=true` annotation | Drop the finalizer, `Warning`/`FinalizerSkipped`. No NetBox call. |
+| 1 | The `netbox.kubeforge.org/skip-finalizer=true` annotation | Drop the finalizer, `Warning`/`FinalizerSkipped`. No NetBox call. |
 | 2 | `spec.deletionPolicy: Retain` | Drop the finalizer, `Normal`/`Retained`. No NetBox call. |
 | 3 | `status.id == 0` | Drop the finalizer, `Normal`/`NothingToDelete`. No NetBox call. |
 | 4 | The endpoint is not `Ready` | `Deleting=False, Reason=WaitingForEndpoint`. Keep the finalizer, requeue in 30s. |
@@ -142,7 +142,7 @@ hatch in its own message:
 Deleting   False   WaitingForEndpoint
   cannot delete netbox extras/tags/9: netboxendpoint "homelab" in namespace "team-a" has
   no ready client; the finalizer stays on rather than leaving the object behind. Set the
-  annotation netbox.populator.io/skip-finalizer=true to drop it and accept the orphan
+  annotation netbox.kubeforge.org/skip-finalizer=true to drop it and accept the orphan
 ```
 
 Note where this sits in the table: **after** `Retain` and after `status.id == 0`. Neither of
@@ -222,11 +222,11 @@ In order of preference:
    next pass: the finalizer comes off and the NetBox object stays. It is the gentle way out —
    you keep the object rather than force anything, and you keep the record of having decided
    to.
-3. **Break glass.** The annotation `netbox.populator.io/skip-finalizer=true` drops the
+3. **Break glass.** The annotation `netbox.kubeforge.org/skip-finalizer=true` drops the
    finalizer without calling NetBox at all, and overrides every other step in the sequence.
 
 ```sh
-kubectl annotate netboxprefix lab-net netbox.populator.io/skip-finalizer=true
+kubectl annotate netboxprefix lab-net netbox.kubeforge.org/skip-finalizer=true
 ```
 
 The annotation exists because a finalizer that is added and never removed makes a namespace

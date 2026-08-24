@@ -68,7 +68,7 @@ metadata:
     app.kubernetes.io/managed-by: netbox-operator
   annotations:
     argocd.argoproj.io/compare-options: IgnoreExtraneous
-    netbox.populator.io/generated-by: netboxipaddressclaim/homelab/dns-eth0
+    netbox.kubeforge.org/generated-by: netboxipaddressclaim/homelab/dns-eth0
 ```
 
 `IgnoreExtraneous` is Argo CD's own mechanism for exactly this case: a resource
@@ -87,7 +87,7 @@ Git and every claim re-allocates, handing out different addresses.
 Fixed by making the idempotency key **deterministic** rather than random:
 
 ```
-netbox.populator.io/allocation-identity = sha256(endpoint.url + namespace + kind + name)[:16]
+netbox.kubeforge.org/allocation-identity = sha256(endpoint.url + namespace + kind + name)[:16]
 ```
 
 written to a NetBox custom field (or a tag, if custom fields are unavailable) on the

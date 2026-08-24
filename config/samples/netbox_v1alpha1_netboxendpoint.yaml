@@ -7,14 +7,14 @@ metadata:
     # Required. The operator's Secret cache selects on this label, so a Secret without
     # it is invisible to the operator even when the name is right. See
     # docs/operations/rbac.md.
-    netbox.populator.io/endpoint-credential: "true"
+    netbox.kubeforge.org/endpoint-credential: "true"
 type: Opaque
 stringData:
   # A NetBox API token with write access to the object types the operator manages.
   # Human accounts should be read-only; see docs/decisions/0005-gitops-coexistence.md.
   token: "0123456789abcdef0123456789abcdef01234567"
 ---
-apiVersion: netbox.populator.io/v1alpha1
+apiVersion: netbox.kubeforge.org/v1alpha1
 kind: NetBoxEndpoint
 metadata:
   name: homelab

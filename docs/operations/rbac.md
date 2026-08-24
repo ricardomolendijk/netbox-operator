@@ -10,8 +10,8 @@ The generated `ClusterRole` (`config/rbac/role.yaml`) is the whole of it:
 
 | API group | Resource | Verbs | Why |
 |---|---|---|---|
-| `netbox.populator.io` | `netboxendpoints` | `get`, `list`, `watch` | Its own kind. |
-| `netbox.populator.io` | `netboxendpoints/status` | `get`, `update`, `patch` | Conditions. |
+| `netbox.kubeforge.org` | `netboxendpoints` | `get`, `list`, `watch` | Its own kind. |
+| `netbox.kubeforge.org` | `netboxendpoints/status` | `get`, `update`, `patch` | Conditions. |
 | `""` | `events` | `create`, `patch` | Events on the objects it reconciles. |
 | `""` | `secrets` | `get`, `list`, `watch` | The API token, and optionally a CA bundle, per endpoint. |
 
@@ -42,7 +42,7 @@ Every Secret a `NetBoxEndpoint` references — `spec.tokenSecretRef` and
 ```yaml
 metadata:
   labels:
-    netbox.populator.io/endpoint-credential: "true"
+    netbox.kubeforge.org/endpoint-credential: "true"
 ```
 
 The manager configures `cache.Options.ByObject` with that label selector, so its Secret
@@ -58,7 +58,7 @@ labels them.
 Labelling an existing Secret:
 
 ```sh
-kubectl label secret netbox-token -n default netbox.populator.io/endpoint-credential=true
+kubectl label secret netbox-token -n default netbox.kubeforge.org/endpoint-credential=true
 ```
 
 ## The failure mode when you forget
@@ -71,7 +71,7 @@ the label:
 ```
 reading token secret default/netbox-token: secrets "netbox-token" not found; the secret
 may exist but be invisible to the operator, which reads only Secrets labelled
-netbox.populator.io/endpoint-credential=true (see docs/operations/rbac.md)
+netbox.kubeforge.org/endpoint-credential=true (see docs/operations/rbac.md)
 ```
 
 ```sh

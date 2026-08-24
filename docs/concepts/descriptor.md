@@ -6,7 +6,7 @@ adding a kind is three new files and zero edits to shared code.
 
 ```go
 registry.MustRegister(registry.Descriptor{
-    GVK:             schema.GroupVersionKind{Group: "netbox.populator.io", Version: "v1alpha1", Kind: "NetBoxTag"},
+    GVK:             schema.GroupVersionKind{Group: "netbox.kubeforge.org", Version: "v1alpha1", Kind: "NetBoxTag"},
     Endpoint:        "extras/tags",
     ObjectType:      "extras.tag",
     Scope:           apiextensionsv1.NamespaceScoped,
@@ -41,7 +41,7 @@ golden output contains no `{{if eq .Model "…"}}`.
 
 | Field | Type | What it is | Example |
 |---|---|---|---|
-| `GVK` | `schema.GroupVersionKind` | The Kubernetes kind this descriptor drives. | `netbox.populator.io/v1alpha1, Kind=NetBoxIPAddress` |
+| `GVK` | `schema.GroupVersionKind` | The Kubernetes kind this descriptor drives. | `netbox.kubeforge.org/v1alpha1, Kind=NetBoxIPAddress` |
 | `Endpoint` | `string` | REST path relative to `/api`. Looked up, never derived by pluralising. | `ipam/ip-addresses` |
 | `ObjectType` | `string` | The Django `app_label.model` spelling other kinds use to point at this one through a generic FK. One source for it. | `ipam.ipaddress` |
 | `Scope` | `apiextensionsv1.ResourceScope` | The CRD scope. | `Namespaced` |

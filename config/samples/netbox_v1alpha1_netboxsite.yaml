@@ -1,4 +1,4 @@
-apiVersion: netbox.populator.io/v1alpha1
+apiVersion: netbox.kubeforge.org/v1alpha1
 kind: NetBoxSite
 metadata:
   name: home

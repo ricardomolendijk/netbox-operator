@@ -17,7 +17,7 @@ the resource kind:
 A claim resolves into a real resource CR, owned by the claim:
 
 ```yaml
-apiVersion: netbox.populator.io/v1alpha1
+apiVersion: netbox.kubeforge.org/v1alpha1
 kind: NetBoxIPAddressClaim
 metadata: {name: dns-eth0, namespace: homelab}
 spec:

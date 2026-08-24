@@ -19,13 +19,13 @@ metadata:
   labels:
     # Required. The operator's Secret cache selects on this label, so a Secret without it
     # is invisible even when the name on the endpoint is right. See docs/operations/rbac.md.
-    netbox.populator.io/endpoint-credential: "true"
+    netbox.kubeforge.org/endpoint-credential: "true"
 type: Opaque
 stringData:
   # A NetBox API token with write access to extras.tag.
   token: "0123456789abcdef0123456789abcdef01234567"
 ---
-apiVersion: netbox.populator.io/v1alpha1
+apiVersion: netbox.kubeforge.org/v1alpha1
 kind: NetBoxEndpoint
 metadata:
   name: homelab
@@ -39,7 +39,7 @@ spec:
   # Switch to DryRun to see what the operator would write without writing it.
   mode: Apply
 ---
-apiVersion: netbox.populator.io/v1alpha1
+apiVersion: netbox.kubeforge.org/v1alpha1
 kind: NetBoxTag
 metadata:
   name: managed
@@ -64,7 +64,7 @@ spec:
     - virtualization.virtualmachine
 ---
 # A second tag, showing the two fields that decide what happens to somebody else's data.
-apiVersion: netbox.populator.io/v1alpha1
+apiVersion: netbox.kubeforge.org/v1alpha1
 kind: NetBoxTag
 metadata:
   name: deprecated

@@ -43,8 +43,8 @@ type NetBoxEndpointReconciler struct {
 	Recorder record.EventRecorder
 }
 
-// +kubebuilder:rbac:groups=netbox.populator.io,resources=netboxendpoints,verbs=get;list;watch
-// +kubebuilder:rbac:groups=netbox.populator.io,resources=netboxendpoints/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=netbox.kubeforge.org,resources=netboxendpoints,verbs=get;list;watch
+// +kubebuilder:rbac:groups=netbox.kubeforge.org,resources=netboxendpoints/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 
 // All three Secret verbs are load-bearing under the label-selected cache: a selected

@@ -67,7 +67,7 @@ It is skipped, with a `CascadeUnavailable` condition explaining why, when:
 Guard clause, not a best effort: the operator either sets a legal owner reference or
 says out loud that deleting the parent will not clean up this child.
 
-Opt out per object with `netbox.populator.io/parent-ownership: "false"`, or per
+Opt out per object with `netbox.kubeforge.org/parent-ownership: "false"`, or per
 endpoint with `spec.parentOwnership: false`. Default is on, because "delete the site,
 its prefixes go too" is the behaviour people expect and the alternative is silent
 orphans in NetBox.

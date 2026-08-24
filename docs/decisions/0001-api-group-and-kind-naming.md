@@ -1,10 +1,26 @@
 # 0001 — API group and kind naming
 
-**Status:** Accepted · 2026-08-21
+**Status:** Accepted · 2026-08-21 · **domain amended 2026-08-24**
 
 ## Decision
 
-- API group **`netbox.populator.io`**, version `v1alpha1`.
+- API group **`netbox.kubeforge.org`**, version `v1alpha1`.
+
+> **Amended 2026-08-24 (issue #16).** The domain was originally `populator.io`, inherited
+> from the `netbox-populator` CLI this operator succeeds and owned by nobody. It is now
+> `kubeforge.org` — Kubeforge being a non-profit open-source organisation, with a possible
+> CNCF donation later, so the group carries a domain that is actually owned.
+>
+> The reasoning below is unchanged and still load-bearing: the point was never the specific
+> domain, it was **not** `netbox.dev` (which upstream uses, and which would make the two CRD
+> sets mutually un-installable) and **not** unprefixed Kind names.
+>
+> Done early rather than at `v1beta1` (issue #19) for two reasons. The group appears in the
+> `apiVersion` of every manifest a user ever writes, so the cost grows with adoption and with
+> every doc page and example added. And the `Finalizer` key prefix moved with it — changing
+> that key leaves any object already carrying the old one **undeletable**, because the
+> controller looks for a finalizer it no longer recognises. Free while nothing is deployed;
+> a support incident afterwards.
 - Kind names are **prefixed with `NetBox`**: `NetBoxSite`, `NetBoxPrefix`,
   `NetBoxIPAddress`, `NetBoxVirtualMachine`.
 
@@ -33,7 +49,7 @@ The unprefixed names collide with kinds people already have installed:
 Kubernetes resolves a short name to the first match in discovery order, so an
 unprefixed `Service` kind means every `kubectl get svc` in the cluster is a coin
 flip away from confusion, and every script has to write
-`services.netbox.populator.io`. Prefixing costs verbosity once, in the type name,
+`services.netbox.kubeforge.org`. Prefixing costs verbosity once, in the type name,
 and buys unambiguous short names everywhere else: `kubectl get netboxprefix`,
 `kubectl get nbip`.
 

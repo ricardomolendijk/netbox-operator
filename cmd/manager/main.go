@@ -81,7 +81,7 @@ func run() error {
 		},
 		HealthProbeBindAddress: opts.probeAddr,
 		LeaderElection:         opts.enableLeaderElection,
-		LeaderElectionID:       "netbox-operator.populator.io",
+		LeaderElectionID:       "netbox-operator.kubeforge.org",
 		// Secrets are the operator's only cluster-wide read, and an unscoped informer
 		// would cache every one of them.
 		Cache: cache.Options{ByObject: controller.SecretCacheOptions()},

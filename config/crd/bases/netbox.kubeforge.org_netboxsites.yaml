@@ -4,24 +4,24 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.19.0
-  name: netboxtags.netbox.populator.io
+  name: netboxsites.netbox.kubeforge.org
 spec:
-  group: netbox.populator.io
+  group: netbox.kubeforge.org
   names:
-    kind: NetBoxTag
-    listKind: NetBoxTagList
-    plural: netboxtags
+    kind: NetBoxSite
+    listKind: NetBoxSiteList
+    plural: netboxsites
     shortNames:
-    - nbtag
-    singular: netboxtag
+    - nbsite
+    singular: netboxsite
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
     - jsonPath: .spec.slug
       name: Slug
       type: string
-    - jsonPath: .spec.color
-      name: Color
+    - jsonPath: .spec.status
+      name: Status
       type: string
     - jsonPath: .status.id
       name: ID
@@ -36,12 +36,11 @@ spec:
     schema:
       openAPIV3Schema:
         description: |-
-          NetBoxTag is one extras.Tag in NetBox.
+          NetBoxSite is one dcim.Site in NetBox.
 
-          Namespaced like every kind in v1alpha1 (docs/decisions/0002-crd-scoping.md). Tags are
-          catalogue-shaped, so the convention is that they live in a shared namespace and are
-          referenced from team namespaces -- which makes a slug collision across namespaces a
-          routine case rather than a curiosity.
+          Namespaced like every kind in v1alpha1 (docs/decisions/0002-crd-scoping.md), which is
+          what makes a cross-namespace `slug` collision possible: NetBox's uniqueness on the column
+          is global and a namespace boundary does not partition it.
         properties:
           apiVersion:
             description: |-
@@ -62,23 +61,27 @@ spec:
             type: object
           spec:
             description: |-
-              NetBoxTagSpec describes one extras.Tag.
+              NetBoxSiteSpec describes one dcim.Site.
 
               NetBoxObjectSpec is inline, so endpointRef, onConflict and deletionPolicy are ordinary
               spec fields that a user writes alongside the rest -- and the engine excludes exactly
-              those from the NetBox payload by reflecting over that struct, so an addition to the
-              envelope cannot leak into NetBox as an unknown column.
-            properties:
-              color:
-                default: 9e9e9e
-                description: |-
-                  Color is the tag's colour as six hexadecimal digits, without a leading `#`.
+              those from the NetBox payload by reflecting over that struct.
 
-                  Defaulted to NetBox's own default so the operator manages the field from the first
-                  reconcile: a defaulted field that never reaches a payload is a field the operator
-                  can never correct (docs/netbox-schema.md -> extras.Tag,
-                  `color ColorField def='ColorChoices.COLOR_GREY'`, which is `9e9e9e`).
-                pattern: ^[0-9a-f]{6}$
+              Every optional foreign key dcim.Site has -- `region`, `group`, `tenant` and the `asns`
+              many-to-many (docs/netbox-schema.md -> dcim.Site) -- is deliberately absent rather than
+              declared and ignored. A reference becomes an id only in internal/resolver, which does not
+              exist until NBO-012, and a field that is accepted and does nothing is worse than a field
+              that is not there: `kubectl apply` reports success and NetBox never sees the value. They
+              arrive with the reference system in M2 (NBO-011, NBO-012) and M3 (NBO-021 for `tenant`).
+              `tags` is absent for the same reason -- it is a reference to a NetBoxTag, which is
+              NBO-011 -- and additionally has no entry in the digest to cite at all (NBO-073).
+            properties:
+              comments:
+                description: |-
+                  Comments is the site's long-form notes field.
+
+                  Also inherited from PrimaryModel, and a TextField rather than a CharField: it has no
+                  max_length, so there is no MaxLength marker to derive.
                 type: string
               deletionPolicy:
                 default: Delete
@@ -93,7 +96,12 @@ spec:
                 - Retain
                 type: string
               description:
-                description: Description is free text shown next to the tag.
+                description: |-
+                  Description is free text shown next to the site.
+
+                  Declared on PrimaryModel rather than on dcim.Site, so docs/netbox-schema.md does not
+                  list it under `dcim.Site` -- see that file's preamble on inherited columns, which are
+                  as required and as writable as declared ones.
                 maxLength: 200
                 type: string
               endpointRef:
@@ -103,33 +111,56 @@ spec:
                   reference cannot be resolved into one.
                 minLength: 1
                 type: string
+              facility:
+                description: |-
+                  Facility is the data-centre or campus designation within the site
+                  (docs/netbox-schema.md -> dcim.Site, `facility CharField len=50`).
+                maxLength: 50
+                type: string
+              latitude:
+                description: |-
+                  Latitude is the site's GPS latitude in decimal degrees, as a string.
+
+                  A string and not a float64: NetBox stores it as a DecimalField and returns it as a
+                  string, and an OpenAPI `number` round-trips through IEEE-754 on its way in and out of
+                  the API server, so the sixth decimal place -- roughly a tenth of a metre -- is not
+                  reliably what was written. The engine compares it numerically
+                  (internal/netbox/drift.go, scalarEqual), so `"51.9244"` and NetBox's `"51.924400"`
+                  are the same value and produce no PATCH.
+
+                  The pattern caps the fraction at six digits, which is dcim.Site's `decimal_places`.
+                  docs/netbox-schema.md shows no precision for any DecimalField -- that is the
+                  pre-NBO-071 defect its own preamble names, `latitude` included -- so the six comes
+                  from NBO-009 and the two integer digits from the -90..90 range CEL enforces.
+                pattern: ^-?[0-9]{1,2}(\.[0-9]{1,6})?$
+                type: string
+                x-kubernetes-validations:
+                - message: latitude must be between -90 and 90 degrees
+                  rule: double(self) >= -90.0 && double(self) <= 90.0
+              longitude:
+                description: |-
+                  Longitude is the site's GPS longitude in decimal degrees, as a string. A string for
+                  the same reason as Latitude.
+
+                  Three integer digits, not two: longitude runs to +-180. NBO-009 states both columns
+                  as `decimal(8,6)`, which would cap this at 99.999999 and reject every longitude east
+                  of Taipei; docs/netbox-schema.md records no precision either way (NBO-071), so the
+                  permissive reading is taken deliberately. If NetBox really does refuse three integer
+                  digits here it says so, and the site reports Ready=False, Reason=Invalid carrying
+                  NetBox's own message -- which is a great deal easier to diagnose than an admission
+                  rejection of a correct value.
+                pattern: ^-?[0-9]{1,3}(\.[0-9]{1,6})?$
+                type: string
+                x-kubernetes-validations:
+                - message: longitude must be between -180 and 180 degrees
+                  rule: double(self) >= -180.0 && double(self) <= 180.0
               name:
                 description: |-
-                  Name is the tag's label in the NetBox UI. Unique across NetBox.
-
-                  Declared on django-taggit's TagBase rather than on extras.Tag, so
-                  docs/netbox-schema.md does not list it under `extras.Tag` -- see that file's
-                  preamble on inherited columns, which are as required and as writable as declared
-                  ones.
+                  Name is the site's label in the NetBox UI. Column-unique across NetBox
+                  (docs/netbox-schema.md -> dcim.Site, `name CharField REQ UNIQUE len=100`).
                 maxLength: 100
                 minLength: 1
                 type: string
-              objectTypes:
-                description: |-
-                  ObjectTypes restricts the NetBox models this tag may be applied to. Empty means
-                  every model that can carry tags.
-
-                  The values are Django ContentType strings (`dcim.device`), not references to other
-                  CRs: object_types is a ManyToManyField onto contenttypes.ContentType
-                  (docs/netbox-schema.md -> extras.Tag), so there is no NetBox object behind an entry
-                  and nothing for the resolver to resolve. The descriptor therefore declares it an
-                  ObjectTypeList rather than an M2M. The item pattern is the REST spelling: lowercased
-                  and unpunctuated, so `dcim.device` and never `dcim.Device`.
-                items:
-                  maxLength: 100
-                  pattern: ^[a-z_]+\.[a-z0-9_]+$
-                  type: string
-                type: array
               onConflict:
                 default: Fail
                 description: OnConflict is what to do when NetBox already holds a
@@ -139,31 +170,45 @@ spec:
                 - Adopt
                 - AdoptOnly
                 type: string
+              physicalAddress:
+                description: |-
+                  PhysicalAddress is the site's street address
+                  (docs/netbox-schema.md -> dcim.Site, `physical_address CharField len=200`).
+                maxLength: 200
+                type: string
+              shippingAddress:
+                description: |-
+                  ShippingAddress is where equipment for this site is delivered
+                  (docs/netbox-schema.md -> dcim.Site, `shipping_address CharField len=200`).
+                maxLength: 200
+                type: string
               slug:
                 description: |-
-                  Slug is the tag's URL-safe identifier, and this kind's natural key.
+                  Slug is the site's URL-safe identifier, and this kind's natural key.
 
-                  NetBox enforces uniqueness on it globally while this CRD is namespaced
-                  (docs/decisions/0002-crd-scoping.md), so two NetBoxTags in different namespaces
-                  claiming one slug is one tag and a Conflict -- not two tags. Also inherited from
-                  TagBase.
+                  NetBox enforces uniqueness on it globally (docs/netbox-schema.md -> dcim.Site,
+                  `slug SlugField REQ UNIQUE len=100`) while this CRD is namespaced
+                  (docs/decisions/0002-crd-scoping.md), so two NetBoxSites in different namespaces
+                  claiming one slug is one site and a Conflict -- not two sites.
                 maxLength: 100
                 minLength: 1
                 pattern: ^[-a-zA-Z0-9_]+$
                 type: string
-              weight:
-                default: 1000
+              status:
+                default: active
                 description: |-
-                  Weight orders tags in NetBox's UI, lowest first
-                  (docs/netbox-schema.md -> extras.Tag, `meta.ordering: ('weight', 'name')`).
+                  Status is the site's lifecycle state.
 
-                  A pointer with an explicit default rather than a plain integer, for the same reason
-                  as Color: NetBox defaults it to 1000, and `omitempty` on a plain int32 would drop a
-                  deliberate `weight: 0` -- a value the column permits -- out of the payload.
-                format: int32
-                maximum: 32767
-                minimum: 0
-                type: integer
+                  Defaulted to NetBox's own default so the operator manages the field from the first
+                  reconcile: a defaulted field that never reaches a payload is a field the operator can
+                  never correct.
+                enum:
+                - planned
+                - staging
+                - active
+                - decommissioning
+                - retired
+                type: string
             required:
             - endpointRef
             - name

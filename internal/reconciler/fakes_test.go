@@ -26,7 +26,7 @@ var (
 	_ Object       = (*fakeKind)(nil)
 )
 
-var fakeGVK = schema.GroupVersionKind{Group: "netbox.populator.io", Version: "v1alpha1", Kind: "NetBoxFake"}
+var fakeGVK = schema.GroupVersionKind{Group: "netbox.kubeforge.org", Version: "v1alpha1", Kind: "NetBoxFake"}
 
 // fakeRef stands in for the ObjectRef that NBO-011 defines. Its only job here is to be a
 // spec value the engine cannot render into a payload.

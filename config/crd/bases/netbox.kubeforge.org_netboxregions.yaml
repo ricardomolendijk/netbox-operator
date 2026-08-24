@@ -4,24 +4,24 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.19.0
-  name: netboxsites.netbox.populator.io
+  name: netboxregions.netbox.kubeforge.org
 spec:
-  group: netbox.populator.io
+  group: netbox.kubeforge.org
   names:
-    kind: NetBoxSite
-    listKind: NetBoxSiteList
-    plural: netboxsites
+    kind: NetBoxRegion
+    listKind: NetBoxRegionList
+    plural: netboxregions
     shortNames:
-    - nbsite
-    singular: netboxsite
+    - nbregion
+    singular: netboxregion
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
     - jsonPath: .spec.slug
       name: Slug
       type: string
-    - jsonPath: .spec.status
-      name: Status
+    - jsonPath: .spec.parentRef.name
+      name: Parent
       type: string
     - jsonPath: .status.id
       name: ID
@@ -36,11 +36,9 @@ spec:
     schema:
       openAPIV3Schema:
         description: |-
-          NetBoxSite is one dcim.Site in NetBox.
+          NetBoxRegion is one dcim.Region in NetBox.
 
-          Namespaced like every kind in v1alpha1 (docs/decisions/0002-crd-scoping.md), which is
-          what makes a cross-namespace `slug` collision possible: NetBox's uniqueness on the column
-          is global and a namespace boundary does not partition it.
+          Namespaced like every kind in v1alpha1 (docs/decisions/0002-crd-scoping.md).
         properties:
           apiVersion:
             description: |-
@@ -61,28 +59,15 @@ spec:
             type: object
           spec:
             description: |-
-              NetBoxSiteSpec describes one dcim.Site.
+              NetBoxRegionSpec describes one dcim.Region.
 
-              NetBoxObjectSpec is inline, so endpointRef, onConflict and deletionPolicy are ordinary
-              spec fields that a user writes alongside the rest -- and the engine excludes exactly
-              those from the NetBox payload by reflecting over that struct.
-
-              Every optional foreign key dcim.Site has -- `region`, `group`, `tenant` and the `asns`
-              many-to-many (docs/netbox-schema.md -> dcim.Site) -- is deliberately absent rather than
-              declared and ignored. A reference becomes an id only in internal/resolver, which does not
-              exist until NBO-012, and a field that is accepted and does nothing is worse than a field
-              that is not there: `kubectl apply` reports success and NetBox never sees the value. They
-              arrive with the reference system in M2 (NBO-011, NBO-012) and M3 (NBO-021 for `tenant`).
-              `tags` is absent for the same reason -- it is a reference to a NetBoxTag, which is
-              NBO-011 -- and additionally has no entry in the digest to cite at all (NBO-073).
+              Every column here is inherited rather than declared on the model, so
+              docs/netbox-schema.md lists none of them under `dcim.Region` -- that body predates the
+              NBO-070 extractor fix and its own preamble says not to derive a CRD's fields from an
+              entry without reading the model's bases. The bases are the source:
+              `OrganizationalModel` gives `name`, `slug` and `description`, and `NestedGroupModel`
+              adds `parent` (docs/netbox-schema.md, preamble on inherited columns).
             properties:
-              comments:
-                description: |-
-                  Comments is the site's long-form notes field.
-
-                  Also inherited from PrimaryModel, and a TextField rather than a CharField: it has no
-                  max_length, so there is no MaxLength marker to derive.
-                type: string
               deletionPolicy:
                 default: Delete
                 description: |-
@@ -96,12 +81,7 @@ spec:
                 - Retain
                 type: string
               description:
-                description: |-
-                  Description is free text shown next to the site.
-
-                  Declared on PrimaryModel rather than on dcim.Site, so docs/netbox-schema.md does not
-                  list it under `dcim.Site` -- see that file's preamble on inherited columns, which are
-                  as required and as writable as declared ones.
+                description: Description is free text shown next to the region.
                 maxLength: 200
                 type: string
               endpointRef:
@@ -111,53 +91,13 @@ spec:
                   reference cannot be resolved into one.
                 minLength: 1
                 type: string
-              facility:
-                description: |-
-                  Facility is the data-centre or campus designation within the site
-                  (docs/netbox-schema.md -> dcim.Site, `facility CharField len=50`).
-                maxLength: 50
-                type: string
-              latitude:
-                description: |-
-                  Latitude is the site's GPS latitude in decimal degrees, as a string.
-
-                  A string and not a float64: NetBox stores it as a DecimalField and returns it as a
-                  string, and an OpenAPI `number` round-trips through IEEE-754 on its way in and out of
-                  the API server, so the sixth decimal place -- roughly a tenth of a metre -- is not
-                  reliably what was written. The engine compares it numerically
-                  (internal/netbox/drift.go, scalarEqual), so `"51.9244"` and NetBox's `"51.924400"`
-                  are the same value and produce no PATCH.
-
-                  The pattern caps the fraction at six digits, which is dcim.Site's `decimal_places`.
-                  docs/netbox-schema.md shows no precision for any DecimalField -- that is the
-                  pre-NBO-071 defect its own preamble names, `latitude` included -- so the six comes
-                  from NBO-009 and the two integer digits from the -90..90 range CEL enforces.
-                pattern: ^-?[0-9]{1,2}(\.[0-9]{1,6})?$
-                type: string
-                x-kubernetes-validations:
-                - message: latitude must be between -90 and 90 degrees
-                  rule: double(self) >= -90.0 && double(self) <= 90.0
-              longitude:
-                description: |-
-                  Longitude is the site's GPS longitude in decimal degrees, as a string. A string for
-                  the same reason as Latitude.
-
-                  Three integer digits, not two: longitude runs to +-180. NBO-009 states both columns
-                  as `decimal(8,6)`, which would cap this at 99.999999 and reject every longitude east
-                  of Taipei; docs/netbox-schema.md records no precision either way (NBO-071), so the
-                  permissive reading is taken deliberately. If NetBox really does refuse three integer
-                  digits here it says so, and the site reports Ready=False, Reason=Invalid carrying
-                  NetBox's own message -- which is a great deal easier to diagnose than an admission
-                  rejection of a correct value.
-                pattern: ^-?[0-9]{1,3}(\.[0-9]{1,6})?$
-                type: string
-                x-kubernetes-validations:
-                - message: longitude must be between -180 and 180 degrees
-                  rule: double(self) >= -180.0 && double(self) <= 180.0
               name:
                 description: |-
-                  Name is the site's label in the NetBox UI. Column-unique across NetBox
-                  (docs/netbox-schema.md -> dcim.Site, `name CharField REQ UNIQUE len=100`).
+                  Name is the region's name.
+
+                  Not globally unique, unlike a Site's: `dcim.Region.meta.constraints` makes it unique
+                  per parent, plus a separate constraint for top-level regions. That is why this kind
+                  has two natural-key candidates rather than one.
                 maxLength: 100
                 minLength: 1
                 type: string
@@ -170,44 +110,96 @@ spec:
                 - Adopt
                 - AdoptOnly
                 type: string
-              physicalAddress:
+              parentRef:
                 description: |-
-                  PhysicalAddress is the site's street address
-                  (docs/netbox-schema.md -> dcim.Site, `physical_address CharField len=200`).
-                maxLength: 200
-                type: string
-              shippingAddress:
-                description: |-
-                  ShippingAddress is where equipment for this site is delivered
-                  (docs/netbox-schema.md -> dcim.Site, `shipping_address CharField len=200`).
-                maxLength: 200
-                type: string
-              slug:
-                description: |-
-                  Slug is the site's URL-safe identifier, and this kind's natural key.
+                  ParentRef nests this region under another one.
 
-                  NetBox enforces uniqueness on it globally (docs/netbox-schema.md -> dcim.Site,
-                  `slug SlugField REQ UNIQUE len=100`) while this CRD is namespaced
-                  (docs/decisions/0002-crd-scoping.md), so two NetBoxSites in different namespaces
-                  claiming one slug is one site and a Conflict -- not two sites.
+                  Self-referential (`parent -> self`), and the reason this is the kind M2 is tested
+                  against: it is the smallest case where identity depends on a reference. Leaving it
+                  unset makes a top-level region, which is a different natural key rather than the
+                  same key with a field omitted -- see docs/concepts/lookups.md on why a null filter
+                  is pinned.
+
+                  Declared, not resolved. Resolution is NBO-012; until then the engine reports the
+                  reference unresolved and leaves `parent` out of the payload.
+                properties:
+                  id:
+                    description: |-
+                      ID is a literal NetBox primary key: the escape hatch, and the only place in the API
+                      where a raw id is accepted.
+
+                      A pointer so that `id: 0` is distinguishable from unset. NetBox primary keys start
+                      at 1, so zero is never a real object and has to be rejected rather than silently
+                      treated as "no id".
+                    format: int64
+                    minimum: 1
+                    type: integer
+                  lookup:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      Lookup is a raw NetBox API filter, for an object no slug identifies -- a VLAN is
+                      `{vid: "20", site: "home"}` because its identity is a pair.
+
+                      `q` is rejected by the CEL rules along with the pagination and formatting
+                      parameters. It is NetBox's fuzzy search, and a fuzzy filter behind a reference that
+                      must identify exactly one object would make ambiguity the normal case rather than
+                      an error.
+                    maxProperties: 8
+                    type: object
+                  name:
+                    description: |-
+                      Name of a CR of the target Kind, resolved through that CR's `.status.id`.
+
+                      This is the mode to prefer: it is the only one that expresses a dependency the
+                      operator can wait on, which is what lets a graph applied in any order converge.
+                    maxLength: 253
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                    type: string
+                  namespace:
+                    description: |-
+                      Namespace of that CR. Defaults to the referring object's namespace.
+
+                      Load-bearing on the common path rather than an edge case: every Kind is namespaced
+                      in v1alpha1 (docs/decisions/0002-crd-scoping.md), so a team namespace pointing at a
+                      shared catalogue namespace is the normal shape. Crossing a namespace requires a
+                      NetBoxRefGrant in the target namespace (NBO-014).
+                    maxLength: 63
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                    type: string
+                  slug:
+                    description: |-
+                      Slug looks the object up in NetBox directly, for objects the operator does not
+                      manage. No CR needs to exist.
+
+                      Bounded at 100 characters because that is what NetBox's own column allows:
+                      `slug SlugField len=100` on every OrganizationalModel, NestedGroupModel and
+                      PrimaryModel (docs/netbox-schema.md -> dcim.Site, dcim.Region, extras.Tag).
+                    maxLength: 100
+                    pattern: ^[-a-zA-Z0-9_]+$
+                    type: string
+                type: object
+                x-kubernetes-validations:
+                - message: exactly one of name, slug, lookup or id must be set
+                  rule: '[has(self.name) && size(self.name) > 0, has(self.slug) &&
+                    size(self.slug) > 0, has(self.lookup) && size(self.lookup) > 0,
+                    has(self.id)].filter(x, x).size() == 1'
+                - message: namespace may only be set together with name
+                  rule: '!has(self.namespace) || (has(self.name) && size(self.name)
+                    > 0)'
+                - message: lookup keys must be lowercase NetBox filter names
+                  rule: '!has(self.lookup) || self.lookup.all(k, k.matches(''^[a-z][a-z0-9_]*$''))'
+                - message: lookup may not set pagination, formatting or fuzzy-search
+                    parameters
+                  rule: '!has(self.lookup) || self.lookup.all(k, !(k in [''limit'',''offset'',''format'',''brief'',''ordering'',''q'']))'
+                - message: lookup values are limited to 200 characters
+                  rule: '!has(self.lookup) || self.lookup.all(k, size(self.lookup[k])
+                    <= 200)'
+              slug:
+                description: Slug is the region's URL-safe identifier.
                 maxLength: 100
                 minLength: 1
                 pattern: ^[-a-zA-Z0-9_]+$
-                type: string
-              status:
-                default: active
-                description: |-
-                  Status is the site's lifecycle state.
-
-                  Defaulted to NetBox's own default so the operator manages the field from the first
-                  reconcile: a defaulted field that never reaches a payload is a field the operator can
-                  never correct.
-                enum:
-                - planned
-                - staging
-                - active
-                - decommissioning
-                - retired
                 type: string
             required:
             - endpointRef

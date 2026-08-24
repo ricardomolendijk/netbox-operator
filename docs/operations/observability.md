@@ -295,7 +295,7 @@ reason is the condition reason, so the two vocabularies cannot drift apart.
 | `Ready` | Normal | The endpoint becomes usable: token accepted, version in range, client cached. |
 | `AuthError` | Warning | NetBox returned 401 or 403 for the status probe. |
 | `TokenMissing` | Warning | The Secret exists but has no value under the referenced key. |
-| `SecretMissing` | Warning | The token or CA-bundle Secret is not readable — often because it is not labelled `netbox.populator.io/endpoint-credential=true`. |
+| `SecretMissing` | Warning | The token or CA-bundle Secret is not readable — often because it is not labelled `netbox.kubeforge.org/endpoint-credential=true`. |
 | `CABundleMissing` | Warning | `spec.tlsConfig.caBundleSecretRef` points at a Secret that is not there. |
 | `ProbeFailed` | Warning | NetBox was unreachable, timed out, or answered something unusable. |
 | `VersionUnsupported` | Warning | NetBox is outside `>=4.2, <5.0`. |
