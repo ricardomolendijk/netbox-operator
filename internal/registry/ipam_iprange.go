@@ -98,7 +98,7 @@ func ipamIPRangeDescriptor() Descriptor {
 					{Filter: "start_address", Spec: "startAddress"},
 					{Filter: "end_address", Spec: "endAddress"},
 				},
-				NullFields: []NullField{{Filter: "vrf_id", Spec: "vrfRef"}},
+				NullFields: []NullField{{Filter: "vrf_id", Spec: "vrfRef", Column: NullColumnRef}},
 			},
 		},
 
