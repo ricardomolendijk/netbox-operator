@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/ricardomolendijk/netbox-operator/internal/netbox"
-	"github.com/ricardomolendijk/netbox-operator/internal/provenance"
 )
 
 // Duplicate handling: what a natural-key lookup means on a kind where NetBox may hold
@@ -98,7 +97,7 @@ func (p *pass) claimStamped(matches []netbox.Object) (match, error) {
 	unstamped := make([]netbox.Object, 0, len(matches))
 
 	for _, obj := range matches {
-		stamped := stampedUID(obj, field)
+		stamped := p.endpoint.Provenance.Read(obj).UID
 
 		if stamped == uid {
 			mine = append(mine, obj)
@@ -204,19 +203,6 @@ func matchedObjects(live netbox.Object, err error) []netbox.Object {
 	}
 
 	return nil
-}
-
-// stampedUID reads the provenance uid off one live object, and returns empty when it carries
-// none.
-func stampedUID(obj netbox.Object, field string) string {
-	fields, ok := obj[provenance.CustomFieldsField].(map[string]any)
-	if !ok {
-		return ""
-	}
-
-	uid, _ := fields[field].(string)
-
-	return uid
 }
 
 // renderMatches names the objects, in the spelling netbox.AmbiguousError uses: `id 11

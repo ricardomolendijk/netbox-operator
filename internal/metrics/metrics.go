@@ -141,6 +141,32 @@ var DriftCorrected = factory.NewCounterVec(prometheus.CounterOpts{
 	Help: "Fields written back to NetBox to correct drift.",
 }, []string{"kind", "field"})
 
+// Conflicts counts reconciles that found another writer's provenance stamp on the NetBox
+// object they were about to write to, and wrote to it anyway (NBO-047).
+//
+// A counter and not a gauge, which is the one place this deviates from what NBO-047 sketched.
+// A gauge of "objects currently in conflict" has to be decremented when a conflict clears,
+// and the only thing that knows a given object's conflict cleared is that object's own
+// reconcile -- so keeping it accurate needs a series per object, which is a label carrying a
+// namespace and a name and is exactly what TestNoUnboundedLabels forbids. A counter needs no
+// such bookkeeping: `increase(netbox_operator_conflicts_total[1h]) > 0` is the "somebody must
+// look" alert, it goes flat by itself when the overlap is fixed, and the per-object standing
+// state is on the object as `status.conflict` where it can carry names.
+//
+// Deliberately *not* labelled by the other writer's cluster id either. That value is read out
+// of a NetBox custom field, so it is user input by way of a third party: a garbage or hostile
+// value there would mint a series per value. Who the other writer is lives in the condition,
+// the Event and `status.conflict`; "how many objects does cluster X claim on this NetBox" is a
+// question NetBox itself answers, with `?cf_k8s_cluster=X`
+// (docs/operations/multi-writer.md).
+//
+// Cardinality: kind (~120) x reason (2, the Conflict condition's reasons, closed in code) =
+// ~240 series worst case, and no series at all on a cluster with one writer.
+var Conflicts = factory.NewCounterVec(prometheus.CounterOpts{
+	Name: "netbox_operator_conflicts_total",
+	Help: "Reconciles that found another cluster's or another CR's stamp on the NetBox object.",
+}, []string{"kind", "reason"})
+
 // APIRequests counts NetBox HTTP round trips by REST path, method and response class.
 //
 // One increment per attempt, so a retried request counts more than once -- that is

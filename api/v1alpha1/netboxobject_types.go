@@ -60,6 +60,28 @@ const (
 	// settled, so a True would describe a CR that no longer exists to carry it; the
 	// Reason is therefore always what is holding the deletion up.
 	ConditionDeleting = "Deleting"
+
+	// ConditionConflict is true when the NetBox object this CR manages carries somebody
+	// else's provenance stamp: another cluster's, or another CR's in this one (NBO-047).
+	//
+	// It is a report and not a gate. The operator does not serialise writes between
+	// clusters and will not start -- decided in issue #18, with the reasoning in
+	// docs/operations/provenance.md -- so this condition being True means the write went
+	// ahead anyway and the other writer's next reconcile will undo it. Ready is
+	// deliberately unaffected: the object does match its spec, for as long as it takes the
+	// other side to write again, and failing it here would turn every `kubectl wait` in a
+	// deliberately overlapping setup into a timeout while changing nothing about the
+	// overlap.
+	//
+	// A standing condition rather than only an Event for the reason ParentOwned is one: an
+	// Event ages out of the namespace within the hour and this state lasts until somebody
+	// changes one of the two manifests. `status.conflict` carries who, since when, and how
+	// many reconciles running -- see docs/operations/multi-writer.md.
+	//
+	// Removed, not set to False, once the stamp is this cluster's again. Every object of
+	// every kind carrying a `Conflict: False` would be a page of conditions saying nothing;
+	// its absence is the normal state.
+	ConditionConflict = "Conflict"
 )
 
 // Finalizer is what keeps a CR alive until its NetBox object has been dealt with.
@@ -293,6 +315,25 @@ const (
 	// object has to go first -- so it is a backed-off requeue rather than a fast retry,
 	// and the message names what NetBox said is in the way.
 	ReasonProtected = "Protected"
+
+	// ReasonForeignCluster is on Conflict: the live NetBox object's cluster stamp names a
+	// cluster that is not this one, so two operators are managing one object and each undoes
+	// the other (NBO-047, case 1).
+	//
+	// The loudest of the two, and checked first: two clusters cannot see each other's CRs, so
+	// nothing inside either cluster can detect this except the stamp.
+	ReasonForeignCluster = "ForeignCluster"
+
+	// ReasonForeignOwner is on Conflict: the cluster stamp is this cluster's and the owner
+	// stamp names a different CR -- another namespace claiming the same natural key
+	// (NBO-047, case 2), or two CRs in one namespace that both resolved to one NetBox object.
+	//
+	// One reason for both, because the fix is the same shape -- one of the two manifests has
+	// to stop describing this object -- and the message names which CR it is. A same-namespace
+	// collision on the natural key is refused at admission (NBO-044); this is what catches the
+	// cross-namespace case, which cannot be refused there without leaking what exists in a
+	// namespace the applier may not read (ADR-0002).
+	ReasonForeignOwner = "ForeignOwner"
 )
 
 // Event reasons emitted by the engine. Events are the audit trail of what changed in
@@ -336,6 +377,17 @@ const (
 	// EventFinalizerSkipped is the break-glass annotation being honoured, which leaves an
 	// object behind in NetBox.
 	EventFinalizerSkipped = "FinalizerSkipped"
+
+	// EventConflictSustained is a conflict that has survived several consecutive reconciles
+	// with the same claimant, which is what tells a two-writer fight apart from a flap
+	// (NBO-047).
+	//
+	// A second Event reason rather than a repeat of Conflict, and emitted exactly once, at
+	// the threshold: a migration, a `TakeOver` by hand in the NetBox UI or a cluster being
+	// rebuilt all produce one or two conflicting reconciles and then stop, and waking somebody
+	// for those is how a signal becomes noise. `status.conflict.observations` carries the
+	// count either way.
+	EventConflictSustained = "ConflictSustained"
 )
 
 // ConflictPolicy is what the engine does when a NetBox object already matches this CR's
@@ -410,6 +462,59 @@ type ProvenanceStatus struct {
 	// spec.customFields (docs/concepts/field-ownership.md, #196).
 	// +optional
 	CustomFields map[string]string `json:"customFields,omitempty"`
+}
+
+// ConflictStatus is another writer's claim on the NetBox object behind one CR: what its
+// provenance stamp said, and for how long it has been saying it (NBO-047).
+//
+// It is on the CR's status rather than only in a condition message because the two questions
+// an operator asks are "who else is writing this" and "is this still happening", and neither
+// is answerable from a sentence: `kubectl get nbprefix -A -o
+// jsonpath='{..status.conflict.owner}'` lists every disputed object in the cluster, a
+// condition message does not. It is on the *CR* rather than in a report object of its own
+// because every conflict already has a CR, and that CR is one of the two manifests somebody
+// has to edit -- so there is nothing for a separate object to name that this one does not.
+//
+// Unset when the object's stamp is this cluster's own, which includes the ordinary case of no
+// stamp at all.
+type ConflictStatus struct {
+	// Reason is ForeignCluster or ForeignOwner -- the same value as the Conflict condition's
+	// reason, repeated here so a single `-o jsonpath` over `status.conflict` is a complete
+	// answer.
+	Reason string `json:"reason"`
+
+	// ClusterID is the other writer's cluster stamp, verbatim. Empty when the live object
+	// carries none, which is what an endpoint whose clusterField is switched off writes.
+	// +optional
+	ClusterID string `json:"clusterID,omitempty"`
+
+	// Owner is the other writer's CR, as `<lowercased kind>/<namespace>/<name>` -- the
+	// manifest to go and edit, in the same spelling `status.provenance` and the
+	// netbox.kubeforge.org/generated-by annotation use. Empty when the live object carries no
+	// owner stamp.
+	//
+	// It names a CR in *another* cluster when Reason is ForeignCluster, so it is a lead rather
+	// than a resolvable reference: nothing in this cluster can look it up, and that is the
+	// point -- otherwise the only record of the other writer would be in a cluster you may not
+	// have.
+	// +optional
+	Owner string `json:"owner,omitempty"`
+
+	// Observations is how many consecutive reconciles have found this same claimant. One is a
+	// flap -- a migration, a hand edit, a cluster mid-rebuild; a number that keeps climbing is
+	// two writers taking turns, and only the second is worth waking somebody for.
+	//
+	// Consecutive reconciles rather than a duration, because a reconcile is when the operator
+	// can observe anything at all: multiply by the endpoint's resyncPeriod for the wall-clock
+	// answer, or read firstObserved. It resets to one when the claimant changes, since a
+	// different writer is a different fight.
+	// +optional
+	Observations int32 `json:"observations,omitempty"`
+
+	// FirstObserved is when this claimant was first seen on this object. Preserved across
+	// reconciles for as long as the claimant does not change.
+	// +optional
+	FirstObserved *metav1.Time `json:"firstObserved,omitempty"`
 }
 
 // NetBoxObjectSpec is the part of every object CR's spec that the engine owns. Kinds embed
@@ -525,6 +630,12 @@ type NetBoxObjectStatus struct {
 	// (NBO-046) reports and never deletes; see docs/operations/provenance.md.
 	// +optional
 	Provenance *ProvenanceStatus `json:"provenance,omitempty"`
+
+	// Conflict is the other writer this object's NetBox counterpart says it belongs to, when
+	// its stamp names one (NBO-047). The write went ahead regardless -- see
+	// ConditionConflict and docs/operations/multi-writer.md.
+	// +optional
+	Conflict *ConflictStatus `json:"conflict,omitempty"`
 
 	// LastAppliedHash is a digest of the last payload NetBox accepted. NetBox
 	// canonicalises some values on write, so the request and the response legitimately

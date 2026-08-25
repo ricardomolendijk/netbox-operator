@@ -46,6 +46,7 @@ func TestMetricsAreOnTheControllerRuntimeRegistry(t *testing.T) {
 		"netbox_operator_api_request_duration_seconds",
 		"netbox_operator_api_requests_total",
 		"netbox_operator_client_cache_size",
+		"netbox_operator_conflicts_total",
 		"netbox_operator_drift_corrected_total",
 		"netbox_operator_drift_detected_total",
 		"netbox_operator_endpoint_reconcile_total",
@@ -72,8 +73,11 @@ func TestNoUnboundedLabels(t *testing.T) {
 	forbidden := []string{"name", "namespace", "object", "url", "uid", "id", "message"}
 	// targetKind and referrerKind are Kind names off a Descriptor, exactly like `kind`: the
 	// pair is one edge of NetBox's foreign-key graph, and neither half is user input.
+	// reason is a Conflict condition's reason: two values, both constants in api/v1alpha1.
+	// Notably not the other writer's cluster id, which is a NetBox custom field's contents and
+	// so unbounded -- see metrics.Conflicts.
 	allowed := []string{"kind", "result", "endpoint", "method", "code", "field",
-		"targetKind", "referrerKind"}
+		"targetKind", "referrerKind", "reason"}
 
 	for name, family := range gathered(t) {
 		for _, label := range labelsOf(family) {
@@ -132,6 +136,7 @@ func TestMain(m *testing.M) {
 	DriftCorrected.WithLabelValues("NetBoxFake", "name").Inc()
 	EndpointReconcileTotal.WithLabelValues("Ready").Inc()
 	RefEnqueueTotal.WithLabelValues("NetBoxFake", "NetBoxFake").Inc()
+	Conflicts.WithLabelValues("NetBoxFake", "ForeignCluster").Inc()
 	ClientCacheSize.Set(0)
 
 	os.Exit(m.Run())
