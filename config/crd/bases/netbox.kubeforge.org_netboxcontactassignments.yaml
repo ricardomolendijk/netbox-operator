@@ -1237,6 +1237,47 @@ spec:
                 description: Adopted reports that the engine took over an object it
                   did not create.
                 type: boolean
+              children:
+                description: |-
+                  Children are the child CRs this object's inline lists materialised, one entry per
+                  declared child (NBO-032).
+
+                  A status field rather than only a label query, so that `kubectl describe` answers
+                  "what did this VM create" without one. It is also what lets the pruner know which
+                  *kinds* to list after every inline entry has been removed: with an empty inline list
+                  there is no desired child left to read a GVK off, and the children recorded here are
+                  the only remaining record of what to go looking for.
+                items:
+                  description: ChildStatus is one child CR a parent's inline list
+                    materialised.
+                  properties:
+                    kind:
+                      description: Kind is the child's Kind, in this API group.
+                      type: string
+                    name:
+                      description: Name is the child CR's name, derived from the parent's
+                        metadata.name and Path.
+                      type: string
+                    path:
+                      description: |-
+                        Path is the key-based spec path that declared this child, the same string as the
+                        OwnedByPathAnnotation on the child itself: `spec.interfaces[eth0]`. The map key,
+                        because it is the child's identity within the parent -- the name is derived from it.
+                      type: string
+                    ready:
+                      description: |-
+                        Ready is the child's own Ready condition, as of this pass. False includes "the child
+                        was only just created", which is why the parent requeues rather than settling.
+                      type: boolean
+                  required:
+                  - kind
+                  - name
+                  - path
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - path
+                x-kubernetes-list-type: map
               conditions:
                 description: Conditions follow the standard Kubernetes vocabulary.
                 items:
@@ -1297,6 +1338,56 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              conflict:
+                description: |-
+                  Conflict is the other writer this object's NetBox counterpart says it belongs to, when
+                  its stamp names one (NBO-047). The write went ahead regardless -- see
+                  ConditionConflict and docs/operations/multi-writer.md.
+                properties:
+                  clusterID:
+                    description: |-
+                      ClusterID is the other writer's cluster stamp, verbatim. Empty when the live object
+                      carries none, which is what an endpoint whose clusterField is switched off writes.
+                    type: string
+                  firstObserved:
+                    description: |-
+                      FirstObserved is when this claimant was first seen on this object. Preserved across
+                      reconciles for as long as the claimant does not change.
+                    format: date-time
+                    type: string
+                  observations:
+                    description: |-
+                      Observations is how many consecutive reconciles have found this same claimant. One is a
+                      flap -- a migration, a hand edit, a cluster mid-rebuild; a number that keeps climbing is
+                      two writers taking turns, and only the second is worth waking somebody for.
+
+                      Consecutive reconciles rather than a duration, because a reconcile is when the operator
+                      can observe anything at all: multiply by the endpoint's resyncPeriod for the wall-clock
+                      answer, or read firstObserved. It resets to one when the claimant changes, since a
+                      different writer is a different fight.
+                    format: int32
+                    type: integer
+                  owner:
+                    description: |-
+                      Owner is the other writer's CR, as `<lowercased kind>/<namespace>/<name>` -- the
+                      manifest to go and edit, in the same spelling `status.provenance` and the
+                      netbox.kubeforge.org/generated-by annotation use. Empty when the live object carries no
+                      owner stamp.
+
+                      It names a CR in *another* cluster when Reason is ForeignCluster, so it is a lead rather
+                      than a resolvable reference: nothing in this cluster can look it up, and that is the
+                      point -- otherwise the only record of the other writer would be in a cluster you may not
+                      have.
+                    type: string
+                  reason:
+                    description: |-
+                      Reason is ForeignCluster or ForeignOwner -- the same value as the Conflict condition's
+                      reason, repeated here so a single `-o jsonpath` over `status.conflict` is a complete
+                      answer.
+                    type: string
+                required:
+                - reason
+                type: object
               deferredPending:
                 description: |-
                   DeferredPending are the CR spec fields the engine has declared deferred and has not
