@@ -1,0 +1,22 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+- manifests.yaml
+- service.yaml
+
+# The CA injection annotation, which controller-gen has no marker for.
+#
+# The names are written out rather than derived, and they follow config/base's `namePrefix`
+# and `namespace`. kubebuilder's alternative is a ~60-line `replacements:` block computing
+# them from the Certificate object; two literal strings and this comment are the same
+# guarantee at a twentieth of the size. Change the prefix or the namespace in config/base and
+# this string and config/certmanager/certificate.yaml both have to follow.
+patches:
+- target:
+    kind: ValidatingWebhookConfiguration
+  patch: |-
+    - op: add
+      path: /metadata/annotations
+      value:
+        cert-manager.io/inject-ca-from: netbox-operator-system/netbox-operator-serving-cert

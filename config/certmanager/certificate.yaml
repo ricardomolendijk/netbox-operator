@@ -1,0 +1,38 @@
+# The webhook's serving certificate, issued by cert-manager.
+#
+# cert-manager is the only supported path, and NBO-044's self-signed fallback is deliberately
+# not implemented: it would need `update` and `patch` on validatingwebhookconfigurations --
+# which is patching cluster-wide admission -- plus a CA rotation that publishes the new CA
+# before serving the new leaf. cert-manager already does all of that, correctly, and a cluster
+# without it can run the operator with `--enable-webhooks=false` and lose only the layer-2
+# warnings and the two denials, every one of which has a reconcile-time backstop. See
+# docs/operations/admission-webhooks.md.
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: selfsigned-issuer
+  namespace: system
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: serving-cert
+  namespace: system
+spec:
+  # These have to match the webhook Service's final name. See the note in
+  # config/webhook/kustomization.yaml about why they are literals.
+  dnsNames:
+  - netbox-operator-webhook-service.netbox-operator-system.svc
+  - netbox-operator-webhook-service.netbox-operator-system.svc.cluster.local
+  issuerRef:
+    kind: Issuer
+    name: selfsigned-issuer
+  secretName: webhook-server-cert
+  # Renewed at two thirds of its lifetime, which is the rotation NBO-044 specifies. Left to
+  # cert-manager because the hard half of rotation -- the new CA in the bundle before the new
+  # leaf is served -- is what its CA injector does, and getting it wrong makes every rotation
+  # a brief total outage of admission.
+  duration: 8760h
+  renewBefore: 2920h

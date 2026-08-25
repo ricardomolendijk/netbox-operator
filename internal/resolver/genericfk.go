@@ -144,7 +144,7 @@ func genericFKsOf(obj client.Object, d registry.Descriptor) ([]declaredGeneric, 
 		return nil, nil
 	}
 
-	spec, err := specMapOf(obj)
+	spec, err := SpecMap(obj)
 	if err != nil {
 		return nil, err
 	}
