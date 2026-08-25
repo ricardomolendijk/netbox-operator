@@ -143,12 +143,27 @@ func TestUnionCELShapes(t *testing.T) {
 // celRule extracts every `XValidation:rule=` from a Go source file.
 var celRule = regexp.MustCompile(`XValidation:rule="([^"]*)"`)
 
+// celRuleOnType is celRule keyed by the type the marker block sits on, for the files that
+// declare more than one: api/v1alpha1/genericref.go carries IPAssignment, FHRPInterface and
+// ServiceParent since NBO-055, so "the only rule in the file" stopped identifying anything.
+//
+// One rule per type, which is what makes the non-greedy match safe: it consumes up to the
+// `type X struct` that follows, so a type carrying *two* rules would hide the second. That is
+// checked rather than assumed -- a missing type is a Fatal in the caller.
+var celRuleOnType = regexp.MustCompile(`XValidation:rule="([^"]*)"[\s\S]*?\ntype (\w+) struct`)
+
 // TestUnionCELRuleMatchesTheAPIType keeps the fixture honest.
 //
-// The fixture exists only because no CRD embeds these unions yet, so it is standing in for
+// The fixture exists because the union shapes had no CRD to live in, so it is standing in for
 // rules it does not own. A fixture that drifted from its type would prove the API server
 // enforces something the API does not ask for -- which is worse than no test, because it reads
 // as coverage.
+//
+// Two of the three shapes now have a real carrier as well: NBO-055's `NetBoxService.spec.parent`
+// is the `== 1` shape on a three-member union and `NetBoxFHRPGroupAssignment.spec.interface` is
+// it on a two-member one, both dry-run through real admission by docs/examples/ipam-remainder.yaml
+// (shippedManifests). The fixture rows below stay because `nullablePair` and `scopePair` still
+// have none.
 //
 // One row per union, and the comparison is on the rule *string*: the point is that the bytes
 // the API server compiled are the bytes the marker on the Go type carries.
@@ -167,14 +182,20 @@ func TestUnionCELRuleMatchesTheAPIType(t *testing.T) {
 				t.Fatalf("reading the union's Go source: %v", err)
 			}
 
-			rules := celRule.FindAllStringSubmatch(string(body), -1)
-			if len(rules) != 1 {
-				t.Fatalf("%s declares %d CEL rules, want the one on %s", tc.source, len(rules), tc.goType)
+			rules := map[string]string{}
+			for _, match := range celRuleOnType.FindAllStringSubmatch(string(body), -1) {
+				rules[match[2]] = match[1]
 			}
 
-			if got := fixtureRule(t, tc.union); got != rules[0][1] {
+			want, ok := rules[tc.goType]
+			if !ok {
+				t.Fatalf("%s declares no CEL rule on %s; it declares them on %v",
+					tc.source, tc.goType, rules)
+			}
+
+			if got := fixtureRule(t, tc.union); got != want {
 				t.Errorf("the fixture's %s rule is\n  %s\nand %s's is\n  %s",
-					tc.union, got, tc.goType, rules[0][1])
+					tc.union, got, tc.goType, want)
 			}
 		})
 	}
