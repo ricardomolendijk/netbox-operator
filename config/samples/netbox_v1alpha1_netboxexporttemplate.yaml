@@ -1,0 +1,26 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxExportTemplate
+metadata:
+  name: vm-inventory-csv
+  namespace: default
+spec:
+  endpointRef: homelab
+
+  # The natural key -- and NetBox does *not* enforce uniqueness on it, so two templates
+  # with this name make the lookup ambiguous and report Conflict rather than picking one.
+  # `table` is a reserved name NetBox refuses.
+  name: vm-inventory-csv
+  description: One row per virtual machine
+
+  objectTypes:
+    - virtualization.virtualmachine
+
+  templateCode: |
+    name,status,vcpus,memory
+    {% for vm in queryset %}{{ vm.name }},{{ vm.status }},{{ vm.vcpus }},{{ vm.memory }}
+    {% endfor %}
+
+  mimeType: text/csv
+  fileName: vm-inventory
+  fileExtension: csv
+  asAttachment: true

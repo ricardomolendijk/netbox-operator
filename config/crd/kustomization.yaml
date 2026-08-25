@@ -37,3 +37,9 @@ resources:
 - bases/netbox.kubeforge.org_netboxcontactroles.yaml
 - bases/netbox.kubeforge.org_netboxcontacts.yaml
 - bases/netbox.kubeforge.org_netboxcontactassignments.yaml
+- bases/netbox.kubeforge.org_netboxcustomfieldchoicesets.yaml
+- bases/netbox.kubeforge.org_netboxcustomfields.yaml
+- bases/netbox.kubeforge.org_netboxcustomlinks.yaml
+- bases/netbox.kubeforge.org_netboxsavedfilters.yaml
+- bases/netbox.kubeforge.org_netboxexporttemplates.yaml
+- bases/netbox.kubeforge.org_netboxconfigtemplates.yaml

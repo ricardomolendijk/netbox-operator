@@ -1,0 +1,44 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxCustomField
+metadata:
+  name: service-tier
+  namespace: default
+spec:
+  # The NetBoxEndpoint to write through, in this namespace. There is no cluster-wide
+  # default endpoint; see config/samples/netbox_v1alpha1_netboxendpoint.yaml.
+  endpointRef: homelab
+
+  # The natural key, and the key `spec.customFields` on other kinds writes. Lowercase,
+  # digits and single underscores only.
+  #
+  # A name the endpoint's spec.managedBy reserves -- k8s_uid, k8s_cluster, k8s_owner,
+  # k8s_allocation_identity by default -- is refused with Reason=ReservedByOperator and
+  # nothing is written. The operator is already the writer of those; see
+  # docs/custom-fields.md.
+  name: service_tier
+
+  # Required by NetBox, and Django ContentType strings rather than references to CRs. A
+  # type this operator has no Kind for is fine; a type NetBox does not have is a 400.
+  objectTypes:
+    - virtualization.virtualmachine
+
+  # Immutable: NetBox refuses to change the type of an existing custom field, so the API
+  # server rejects the edit rather than letting it 400 forever.
+  type: select
+  choiceSetRef:
+    name: service-tier
+
+  label: Service tier
+  groupName: Platform
+  description: Which support tier this workload is on
+
+  # `exact` because this field is a label to filter on precisely. `loose` -- NetBox's own
+  # default -- makes ?cf_service_tier=gold a substring match.
+  filterLogic: exact
+
+  # A field a program owns should not be editable by hand in the UI: an edit there is
+  # drift the next reconcile reverts.
+  uiEditable: "no"
+
+  # A JSON *value*, so a string default has to be a quoted JSON string.
+  default: '"bronze"'

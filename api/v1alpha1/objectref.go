@@ -258,6 +258,21 @@ type (
 	// VRFRef points at a NetBoxVRF (ipam.VRF, ipam/vrfs).
 	VRFRef ObjectRef
 
+	// CustomFieldChoiceSetRef points at a NetBoxCustomFieldChoiceSet
+	// (extras.CustomFieldChoiceSet, extras/custom-field-choice-sets -- the endpoint is
+	// looked up, never pluralised).
+	//
+	// The only reference in this API whose target is NetBox's *schema* rather than its data:
+	// a `select` custom field draws its legal values from one
+	// (`netbox/extras/models/customfields.py:236-243`). Nothing about resolving it is
+	// different for that -- the same four modes, the same grant check -- which is the point
+	// of not giving schema kinds their own reference mechanism.
+	CustomFieldChoiceSetRef ObjectRef
+
+	// ConfigTemplateRef points at a NetBoxConfigTemplate (extras.ConfigTemplate,
+	// extras/config-templates).
+	ConfigTemplateRef ObjectRef
+
 	// ClusterRef points at a NetBoxCluster (virtualization.Cluster,
 	// virtualization/clusters).
 	//
@@ -453,6 +468,22 @@ func (r VRFRef) TargetGVK() schema.GroupVersionKind { return GroupVersion.WithKi
 func (r VRFRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
 
 // TargetGVK reports the Kind this reference resolves against.
+func (r CustomFieldChoiceSetRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxCustomFieldChoiceSet")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r CustomFieldChoiceSetRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r ConfigTemplateRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxConfigTemplate")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r ConfigTemplateRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
 func (r ClusterRef) TargetGVK() schema.GroupVersionKind {
 	return GroupVersion.WithKind("NetBoxCluster")
 }
@@ -551,6 +582,8 @@ var (
 	_ RefTarget = VRFRef{}
 	_ RefTarget = IPAddressRef{}
 	_ RefTarget = PrefixRef{}
+	_ RefTarget = CustomFieldChoiceSetRef{}
+	_ RefTarget = ConfigTemplateRef{}
 	_ RefTarget = VirtualMachineRef{}
 	_ RefTarget = DeviceRef{}
 	_ RefTarget = DeviceRoleRef{}

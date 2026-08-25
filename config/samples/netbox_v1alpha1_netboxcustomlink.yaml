@@ -1,0 +1,22 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxCustomLink
+metadata:
+  name: grafana
+  namespace: default
+spec:
+  endpointRef: homelab
+
+  # The natural key; unique across NetBox.
+  name: Grafana dashboard
+
+  objectTypes:
+    - virtualization.virtualmachine
+
+  # Jinja2, rendered with the NetBox object as `object`.
+  linkText: "Grafana: {{ object.name }}"
+  linkUrl: "https://grafana.example.com/d/vm?var-host={{ object.name }}"
+
+  groupName: Observability
+  buttonClass: blue
+  newWindow: true
+  weight: 100

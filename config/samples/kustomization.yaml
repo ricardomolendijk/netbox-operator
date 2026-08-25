@@ -33,3 +33,9 @@ resources:
 - netbox_v1alpha1_netboxiprange.yaml
 - netbox_v1alpha1_netboxprefixclaim.yaml
 - netbox_v1alpha1_netboxiprangeclaim.yaml
+- netbox_v1alpha1_netboxcustomfieldchoiceset.yaml
+- netbox_v1alpha1_netboxcustomfield.yaml
+- netbox_v1alpha1_netboxcustomlink.yaml
+- netbox_v1alpha1_netboxsavedfilter.yaml
+- netbox_v1alpha1_netboxexporttemplate.yaml
+- netbox_v1alpha1_netboxconfigtemplate.yaml
