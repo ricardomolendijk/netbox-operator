@@ -183,6 +183,41 @@ at the next reconcile — immediately on upgrade, and within one `resyncPeriod` 
 the token cannot widen it, the **endpoint** fails with `BootstrapFailed` rather than the new
 kind failing one object at a time.
 
+### The definitions are reserved: a CR cannot claim one
+
+`NetBoxCustomField` and `NetBoxTag` both exist, so the objects this bootstrap creates are
+objects a user could also declare. They cannot, and the refusal is deliberate.
+
+A CR whose natural key matches one of this endpoint's provenance definitions — the tag's slug,
+or any of the four custom-field names — reports `Ready=False, Reason=ReservedByOperator` and
+**nothing is written**. Not created, not adopted, not PATCHed; `status.id` stays empty, so
+deleting the CR afterwards deletes nothing either.
+
+```console
+Message: this netbox object is written by the operator's own provenance bootstrap: name
+         "k8s_uid" is configured on netboxendpoint "homelab" as part of spec.managedBy, so
+         the operator writes it and this object writes nothing; rename it, or switch that
+         provenance field off with the empty string
+```
+
+The reason is step 3 above. `object_types` on `k8s_uid` is *derived* and grows with every kind
+added; a CR states it as a literal list. The two would fight on every resync, and the loser is
+not the CR — removing a type from a custom field makes NetBox strip that field's stored value
+from every object of the type removed. One apply of a manifest a release out of date would
+unstamp a whole class of objects. `docs/custom-fields.md` has the full argument.
+
+It is scoped to *this endpoint's* configuration rather than to a list of names, so all three of
+these work:
+
+| Endpoint | `NetBoxCustomField` for `k8s_uid` |
+|---|---|
+| no `spec.managedBy` | ordinary object — there is no other writer |
+| `uidField: k8s_id` | ordinary object — `k8s_id` is the reserved one |
+| `uidField: ""` | ordinary object — nothing is bootstrapped under that name |
+
+That last row is the supported way to take a provenance field over yourself: switch the
+operator's off, then declare your own.
+
 ### NetBox permissions
 
 The token needs, in addition to whatever the objects themselves require:
@@ -386,3 +421,5 @@ independent.
   shapes, what the operator reports when two writers overlap, and what to do about it
 - [Drift detection](../concepts/drift.md) — why `tags` is compared as an unordered id set and
   `custom_fields` only on the keys the operator sets
+- [Custom fields](../custom-fields.md) — the `NetBoxCustomField` kind, why a CR for `k8s_uid`
+  is refused, and the data-loss guard on deleting one

@@ -940,13 +940,24 @@ and the resolver reads it from the *type* rather than from a switch on the field
 | `TenantGroupRef` | `NetBoxTenantGroup` | `tenancy.TenantGroup` | `tenancy/tenant-groups` |
 | `DeviceRef` | `NetBoxDevice` | `dcim.Device` | `dcim/devices` |
 | `InterfaceRef` | `NetBoxInterface` | `dcim.Interface` | `dcim/interfaces` |
+| `CustomFieldChoiceSetRef` | `NetBoxCustomFieldChoiceSet` | `extras.CustomFieldChoiceSet` | `extras/custom-field-choice-sets` |
+| `ConfigTemplateRef` | `NetBoxConfigTemplate` | `extras.ConfigTemplate` | `extras/config-templates` |
 
 Model and endpoint spellings are from `docs/netbox-schema.md` and its endpoint map.
 `NetBoxTag`, `NetBoxSite`, `NetBoxRegion`, `NetBoxSiteGroup`, `NetBoxLocation`, `NetBoxTenant`,
-`NetBoxTenantGroup`, `NetBoxClusterType`, `NetBoxClusterGroup`, `NetBoxCluster`, `NetBoxDevice`
-and `NetBoxInterface` exist as Kinds so far; the remaining aliases are declared ahead of
-their Kinds because a reference is declarable before its target is implemented, and the
-remaining ~40 arrive with the generator
+`NetBoxTenantGroup`, `NetBoxClusterType`, `NetBoxClusterGroup`, `NetBoxCluster`, `NetBoxDevice`,
+`NetBoxInterface`, `NetBoxCustomFieldChoiceSet` and `NetBoxConfigTemplate` exist as Kinds so
+far.
+
+`CustomFieldChoiceSetRef` is the only one whose target is NetBox's *schema* rather than its
+data — a `select` custom field draws its legal values from a choice set — and nothing about
+resolving it is different for that, which is the point of not giving schema kinds a reference
+mechanism of their own. `ConfigTemplateRef` is declared with its Kind and used by nothing yet:
+`config_template` on a device and a virtual machine is not a spec field, so the alias exists so
+that adding it later is a field on a spec rather than a second change to `objectref.go`.
+
+The remaining aliases are declared ahead of their Kinds because a reference is declarable
+before its target is implemented, and the remaining ~40 arrive with the generator
 ([NBO-042 (#66)](https://github.com/ricardomolendijk/netbox-operator/issues/66)).
 
 Each alias implements `RefTarget`:

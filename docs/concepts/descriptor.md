@@ -57,6 +57,15 @@ golden output contains no `{{if eq .Model "…"}}`.
 | `Fields` | `[]Field` | The spec-to-API map, and the field classes. See [field classes](#field-classes). | `{Spec: "importTargets", API: "import_targets", Class: RefMany, Target: …}` |
 | `GenericFKs` | `[]GenericFKSpec` | The polymorphic `*_type` / `*_id` column pairs on this kind. | `registry.ScopeFK("scope")` |
 | `ContainmentRef` | `string` | The one spec ref whose target gets a non-controller owner reference — whichever ref the server cascades. Empty for a catalogue kind, and for any kind whose refs are all `PROTECT`. | `siteRef` |
+| `DataLossOnDelete` | `bool` | A `DELETE` of this kind's object destroys data held on *other* objects, and NetBox performs it without complaint. The finalizer then refuses by default. Set on `NetBoxCustomField` and nothing else. | `true` |
+| `ReservedKeySpec` | `string` | The CR spec field holding the key the provenance bootstrap looks *its own* objects up by, on the two kinds whose NetBox model the operator also writes. A CR whose key is reserved on its endpoint is refused with `ReservedByOperator` and never sent. | `name` on `NetBoxCustomField`, `slug` on `NetBoxTag` |
+
+`DataLossOnDelete` and `ReservedKeySpec` are both statements about the operator being an
+unusual kind of writer, and both are data here for the reason everything else is: the
+alternative is a branch on Kind in `internal/reconciler`, which `forbidigo` refuses. The
+values each one is compared against are *not* here — the reserved names are the endpoint's
+resolved `spec.managedBy`, per endpoint, so a Kind declares only *which field could collide*
+and never *with what* ([custom fields](../custom-fields.md)).
 
 `GenericFKSpec` is six fields. `TypeField` and `IDField` are the two columns; `Spec` is the
 one CR field they are both written from — declared here rather than in `Fields`, because a
@@ -360,11 +369,12 @@ is compared.
 | `RefMany` | a list of `ObjectRef` | a list of NetBox ids — `[1, 2]` | one resolution per element | ID set, order-independent |
 | `ObjectTypeList` | a list of strings | the same strings — `["dcim.device"]` | nothing; the strings *are* the value | string set, order-independent |
 | `Array` | a list of scalars | the same list — `[80, 443]` | — | order-**sensitive** |
+| `JSON` | any JSON document | the document, unchanged | — | whole-document, after canonicalising |
 
 `Value` is the zero value, so a plain column stays a spec name and an API name.
 
 The comparison sets `netbox.Drift` needs are **derived** from these classes —
-`Descriptor.M2MFields()`, `ObjectTypeListFields()`, `ArrayFields()` — rather than declared
+`Descriptor.M2MFields()`, `ObjectTypeListFields()`, `ArrayFields()`, `JSONFields()` — rather than declared
 beside the field map. That is not tidying. Before
 [NBO-088](https://github.com/ricardomolendijk/netbox-operator/issues/141) a reference was a
 bool, `Ref: true`, which said *that* a field was a reference and nothing about how many; a
@@ -395,6 +405,29 @@ whose order is data. Comparing an array order-independently misses a reordering 
 asked for; comparing an M2M order-sensitively PATCHes forever, because NetBox does not
 preserve M2M order. The comparison rules are rules 3, 5 and 8 in
 [drift detection](drift.md).
+
+### `JSON` is not `Value`, and the reason is `unwrapNested`
+
+A `JSONField`'s value is a document rather than a scalar, and the scalar comparison would
+corrupt it. `netbox.unwrapNested` reduces any JSON object carrying an `id` or a `value` key to
+that key, because that is how NetBox renders a foreign key and a choice on read — and a
+document may perfectly well contain either. `parameters: {"id": ["3"]}` is an ordinary
+`extras.SavedFilter`; compared as a scalar the live side reads as `["3"]`, differs from the
+whole document forever, and gets PATCHed on every reconcile.
+
+`Array` is no good either. A document is not a list, and the array rule compares element by
+element with the same scalar rule underneath.
+
+So `JSON` is its own class, compared by canonicalising both sides and comparing the encoded
+bytes — the same normalisation `netbox.Hash` applies, which sorts map keys and widens numbers,
+so `{"a":1,"b":2}` equals `{"b":2,"a":1}` and an `int` from a CRD equals the `float64` NetBox's
+response body decodes to. The columns that need it: `extras.SavedFilter.parameters`,
+`extras.CustomField.default` / `.related_object_filter` / `.validation_schema`,
+`extras.CustomFieldChoiceSet.choice_colors`, and `environment_params` on both template kinds.
+
+Their spec type is `*JSONDocument` — an alias for `apiextensions.JSON` — always a pointer and
+always `omitempty`, which is what keeps absent, `{}` and `null` three distinguishable
+instructions ([field ownership](field-ownership.md)).
 
 ### A `RefMany` field's CRD needs `MaxItems`
 
@@ -473,7 +506,7 @@ by matching a message.
 | `ErrUnknownDeferMode` | a `Mode` other than `Always` or `IfUnresolved` |
 | `ErrUnknownUpdateStrategy` | an `UpdateStrategy` other than `Patch` or `Recreate`, the empty string included |
 | `ErrRecreateOnWithoutRecreate` | `RecreateOn` set on a kind whose strategy is `Patch` |
-| `ErrUnknownFieldClass` | a `Field.Class` other than `Value`, `RefOne`, `RefMany`, `ObjectTypeList` or `Array` |
+| `ErrUnknownFieldClass` | a `Field.Class` other than `Value`, `RefOne`, `RefMany`, `ObjectTypeList`, `Array` or `JSON` |
 | `ErrTargetNotRef` | a `Target` on a field whose class is not `RefOne` or `RefMany` |
 | `ErrToManyNaturalKey` | a natural-key candidate that matches on, or pins to null, a `RefMany` field |
 | `ErrContainmentToMany` | a `ContainmentRef` naming a `RefMany` field |
