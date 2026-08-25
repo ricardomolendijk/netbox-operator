@@ -29,6 +29,20 @@ type FieldRules struct {
 	// Compared as an order-independent string set. extras.Tag.object_types is the case.
 	ObjectTypeLists map[string]bool
 
+	// JSON fields are Postgres JSONFields whose value is a whole document rather than a
+	// scalar: extras.SavedFilter.parameters, extras.CustomField.default and
+	// .validation_schema, extras.CustomFieldChoiceSet.choice_colors
+	// (docs/netbox-schema.md).
+	//
+	// They need a rule of their own because the *scalar* rule would corrupt them.
+	// unwrapNested reduces any JSON object carrying an `id` or a `value` key to that key,
+	// since that is how NetBox renders a foreign key and a choice on read -- so a
+	// `parameters: {"id": ["3"]}`, which is a perfectly ordinary NetBox filter, would be
+	// compared as the string `[3]` against the whole document and never settle. The
+	// operator would PATCH the same value forever, which is the hot loop
+	// docs/concepts/drift.md opens by warning about.
+	JSON map[string]bool
+
 	// GenericFKs are (type, id) column pairs that form one logical reference and must be
 	// diffed together. Examples: (scope_type, scope_id) on Prefix, Cluster, WirelessLAN
 	// and VLANGroup; (assigned_object_type, assigned_object_id) on IPAddress.
@@ -113,6 +127,9 @@ func fieldEqual(field string, have, want any, rules FieldRules) bool {
 	}
 	if rules.Arrays[field] {
 		return sameOrderedList(have, want)
+	}
+	if rules.JSON[field] {
+		return sameJSON(have, want)
 	}
 	return scalarEqual(unwrapNested(have), want)
 }
@@ -264,6 +281,26 @@ func sameStringSet(have, want any) bool {
 		}
 	}
 	return true
+}
+
+// sameJSON compares a JSONField document: the value NetBox returns against the value the
+// spec supplies, without unwrapping either.
+//
+// Canonicalise-then-marshal rather than reflect.DeepEqual, because the two sides do not
+// arrive as the same Go types even when they hold the same document: a CRD `x-kubernetes-
+// preserve-unknown-fields` value round-trips through encoding/json exactly as NetBox's
+// response body does, but an integer written in YAML can reach here as either an int64 or a
+// float64 depending on which decoder saw it. canonicalise already sorts map keys and widens
+// numbers for Hash, so this is the same normalisation applied to one field.
+//
+// A marshal failure compares unequal rather than equal. Unequal costs one PATCH that NetBox
+// either accepts or rejects with a reason; equal would silently declare a field synced that
+// the operator could not even read.
+func sameJSON(have, want any) bool {
+	haveJSON, haveErr := json.Marshal(canonicalise(have))
+	wantJSON, wantErr := json.Marshal(canonicalise(want))
+
+	return haveErr == nil && wantErr == nil && string(haveJSON) == string(wantJSON)
 }
 
 // sameOrderedList compares an ArrayField, order-sensitively: for vid_ranges and ports

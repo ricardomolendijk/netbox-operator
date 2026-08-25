@@ -280,6 +280,7 @@ func fieldRules(d registry.Descriptor) netbox.FieldRules {
 		M2M:             m2m,
 		ObjectTypeLists: set(d.ObjectTypeListFields()),
 		Arrays:          set(d.ArrayFields()),
+		JSON:            set(d.JSONFields()),
 		GenericFKs:      make([]netbox.GenericFK, 0, len(d.GenericFKs)),
 	}
 

@@ -136,12 +136,24 @@ const (
 	// array order-independently misses a reordering the user asked for, and comparing an
 	// M2M order-sensitively PATCHes forever.
 	ClassArray FieldClass = "Array"
+
+	// ClassJSON is a Postgres JSONField whose value is a whole document:
+	// extras.SavedFilter.parameters, extras.CustomField.default and .validation_schema,
+	// extras.CustomFieldChoiceSet.choice_colors (docs/netbox-schema.md).
+	//
+	// It cannot be ClassValue, and that is not a nicety. The scalar comparison unwraps any
+	// JSON object carrying an `id` or a `value` key, because that is how NetBox renders a
+	// foreign key and a choice on read -- so `parameters: {"id": ["3"]}`, an ordinary NetBox
+	// filter, would be compared as `[3]` against the whole document, never settle, and PATCH
+	// forever (netbox.FieldRules.JSON). It cannot be ClassArray either: a document is not a
+	// list, and the array rule compares element by element with the same scalar rule.
+	ClassJSON FieldClass = "JSON"
 )
 
 // fieldClasses is the closed set, with ClassValue in it: Validate rejects anything else, so
 // a class invented in a descriptor fails the boot rather than being treated as a scalar.
 var fieldClasses = []FieldClass{
-	ClassValue, ClassRefOne, ClassRefMany, ClassObjectTypeList, ClassArray,
+	ClassValue, ClassRefOne, ClassRefMany, ClassObjectTypeList, ClassArray, ClassJSON,
 }
 
 // Ref reports whether this class is a reference internal/resolver turns into an id.
@@ -277,6 +289,12 @@ func (d Descriptor) ObjectTypeListFields() []string {
 // ArrayField the order is data.
 func (d Descriptor) ArrayFields() []string {
 	return d.apiFieldsOf(ClassArray)
+}
+
+// JSONFields are the NetBox columns compared as whole JSON documents, without the
+// nested-object unwrapping the scalar rule applies.
+func (d Descriptor) JSONFields() []string {
+	return d.apiFieldsOf(ClassJSON)
 }
 
 // apiFieldsOf is the NetBox columns of every field in one class, in descriptor order.
@@ -503,6 +521,10 @@ func (d Descriptor) validateSpecReferences() error {
 				errs = append(errs, fmt.Errorf("%w: natural key %d pins %s", ErrUnknownSpecField, i, field.Spec))
 			}
 		}
+	}
+
+	if d.ReservedKeySpec != "" && !d.declaresSpecField(d.ReservedKeySpec) {
+		errs = append(errs, fmt.Errorf("%w: reserved key %s", ErrUnknownSpecField, d.ReservedKeySpec))
 	}
 
 	return errors.Join(append(errs, d.validateContainment())...)
