@@ -33,27 +33,13 @@ rules:
   - netboxipaddresses
   - netboxiprangeclaims
   - netboxipranges
-  - netboxlocations
   - netboxmanufacturers
   - netboxplatforms
   - netboxprefixclaims
-  - netboxprefixes
-  - netboxregions
-  - netboxroutetargets
-  - netboxsitegroups
-  - netboxsites
-  - netboxtags
-  - netboxtenantgroups
-  - netboxtenants
   - netboxvirtualdisks
   - netboxvirtualmachines
-  - netboxvlangroups
-  - netboxvlans
   - netboxvminterfaces
-  - netboxvrfs
   verbs:
-  - create
-  - delete
   - get
   - list
   - patch
@@ -140,4 +126,27 @@ rules:
   verbs:
   - get
   - list
+  - watch
+- apiGroups:
+  - netbox.kubeforge.org
+  resources:
+  - netboxlocations
+  - netboxprefixes
+  - netboxregions
+  - netboxroutetargets
+  - netboxsitegroups
+  - netboxsites
+  - netboxtags
+  - netboxtenantgroups
+  - netboxtenants
+  - netboxvlangroups
+  - netboxvlans
+  - netboxvrfs
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
   - watch

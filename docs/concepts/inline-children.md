@@ -64,7 +64,7 @@ spec:
 object*; `owned-by-path` says *which entry of it*. Every child of one VM carries the identical
 `generated-by`, so it cannot tell two inline entries apart — and telling them apart is exactly
 what pruning has to do. See
-[ADR-0005 §2](../decisions/0005-gitops-coexistence.md#2-objects-the-operator-creates-are-labelled-as-nots-gits).
+[ADR-0005 §2](../decisions/0005-gitops-coexistence.md#2-objects-the-operator-creates-are-labelled-as-not-gits).
 
 The `owner-uid` is a **label** rather than an annotation for one reason: pruning has to *list*
 our children, and label selectors are indexed server-side while annotations are not.

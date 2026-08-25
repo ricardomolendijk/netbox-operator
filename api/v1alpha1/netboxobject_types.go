@@ -643,6 +643,7 @@ type ConflictStatus struct {
 	// reconciles for as long as the claimant does not change.
 	// +optional
 	FirstObserved *metav1.Time `json:"firstObserved,omitempty"`
+}
 
 // ChildStatus is one child CR a parent's inline list materialised.
 type ChildStatus struct {
