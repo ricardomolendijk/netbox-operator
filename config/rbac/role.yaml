@@ -22,23 +22,21 @@ rules:
 - apiGroups:
   - netbox.kubeforge.org
   resources:
+  - netboxaggregates
+  - netboxasnranges
+  - netboxasns
   - netboxclustergroups
   - netboxclusters
   - netboxclustertypes
-  - netboxconfigcontextprofiles
-  - netboxconfigcontexts
-  - netboxconfigtemplates
   - netboxcontactassignments
   - netboxcontactgroups
   - netboxcontactroles
   - netboxcontacts
-  - netboxcustomfieldchoicesets
-  - netboxcustomfields
-  - netboxcustomlinks
   - netboxdeviceroles
   - netboxdevices
   - netboxdevicetypes
-  - netboxexporttemplates
+  - netboxfhrpgroupassignments
+  - netboxfhrpgroups
   - netboxinterfaces
   - netboxipaddressclaims
   - netboxipaddresses
@@ -47,7 +45,10 @@ rules:
   - netboxmanufacturers
   - netboxplatforms
   - netboxprefixclaims
-  - netboxsavedfilters
+  - netboxrirs
+  - netboxroles
+  - netboxservices
+  - netboxservicetemplates
   - netboxvirtualdisks
   - netboxvirtualmachines
   - netboxvminterfaces
@@ -60,23 +61,21 @@ rules:
 - apiGroups:
   - netbox.kubeforge.org
   resources:
+  - netboxaggregates/finalizers
+  - netboxasnranges/finalizers
+  - netboxasns/finalizers
   - netboxclustergroups/finalizers
   - netboxclusters/finalizers
   - netboxclustertypes/finalizers
-  - netboxconfigcontextprofiles/finalizers
-  - netboxconfigcontexts/finalizers
-  - netboxconfigtemplates/finalizers
   - netboxcontactassignments/finalizers
   - netboxcontactgroups/finalizers
   - netboxcontactroles/finalizers
   - netboxcontacts/finalizers
-  - netboxcustomfieldchoicesets/finalizers
-  - netboxcustomfields/finalizers
-  - netboxcustomlinks/finalizers
   - netboxdeviceroles/finalizers
   - netboxdevices/finalizers
   - netboxdevicetypes/finalizers
-  - netboxexporttemplates/finalizers
+  - netboxfhrpgroupassignments/finalizers
+  - netboxfhrpgroups/finalizers
   - netboxinterfaces/finalizers
   - netboxipaddressclaims/finalizers
   - netboxipaddresses/finalizers
@@ -88,8 +87,11 @@ rules:
   - netboxprefixclaims/finalizers
   - netboxprefixes/finalizers
   - netboxregions/finalizers
+  - netboxrirs/finalizers
+  - netboxroles/finalizers
   - netboxroutetargets/finalizers
-  - netboxsavedfilters/finalizers
+  - netboxservices/finalizers
+  - netboxservicetemplates/finalizers
   - netboxsitegroups/finalizers
   - netboxsites/finalizers
   - netboxtags/finalizers
@@ -106,24 +108,22 @@ rules:
 - apiGroups:
   - netbox.kubeforge.org
   resources:
+  - netboxaggregates/status
+  - netboxasnranges/status
+  - netboxasns/status
   - netboxclustergroups/status
   - netboxclusters/status
   - netboxclustertypes/status
-  - netboxconfigcontextprofiles/status
-  - netboxconfigcontexts/status
-  - netboxconfigtemplates/status
   - netboxcontactassignments/status
   - netboxcontactgroups/status
   - netboxcontactroles/status
   - netboxcontacts/status
-  - netboxcustomfieldchoicesets/status
-  - netboxcustomfields/status
-  - netboxcustomlinks/status
   - netboxdeviceroles/status
   - netboxdevices/status
   - netboxdevicetypes/status
   - netboxendpoints/status
-  - netboxexporttemplates/status
+  - netboxfhrpgroupassignments/status
+  - netboxfhrpgroups/status
   - netboxinterfaces/status
   - netboxipaddressclaims/status
   - netboxipaddresses/status
@@ -135,8 +135,11 @@ rules:
   - netboxprefixclaims/status
   - netboxprefixes/status
   - netboxregions/status
+  - netboxrirs/status
+  - netboxroles/status
   - netboxroutetargets/status
-  - netboxsavedfilters/status
+  - netboxservices/status
+  - netboxservicetemplates/status
   - netboxsitegroups/status
   - netboxsites/status
   - netboxsweeps/status
