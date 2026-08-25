@@ -186,6 +186,8 @@ make help                      # list every target
 make build                     # generate, manifests, fmt, vet, then build bin/manager
 make lint test                 # golangci-lint, then unit tests + envtest
 make verify                    # fail if generated output is not committed
+make docs-check                # every relative link and anchor under docs/ resolves
+make docs-serve                # preview the docs site on :8000 (make docs-tools first)
 make test-e2e                  # kind + a real NetBox (harness lands with NBO-017)
 make run                       # run against the current kubeconfig
 ```

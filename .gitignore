@@ -43,3 +43,7 @@ kubeconfig
 
 # Agent worktrees and local Claude Code state.
 /.claude/
+
+# Docs site build output. Not committed, and so deliberately not in the Makefile's
+# GENERATED_PATHS: `make docs-build` regenerates it from docs/ in under two seconds.
+/site/

@@ -162,8 +162,8 @@ The URL-safe identifier. `slug SlugField REQ len=100` on `ipam.VLANGroup`
 **This contradicts how every other `OrganizationalModel` in the API behaves, and it is worth
 reading twice.** `extras.Tag`, `dcim.Site` and `tenancy.TenantGroup` all carry `UNIQUE` on the
 slug column, which is what makes `?slug=<x>` a one-object lookup on
-[`NetBoxTag`](netboxtag.md#natural-keys) and friends. `ipam.VLANGroup` carries none. Its
-`meta.constraints` are
+[`NetBoxTag`](netboxtag.md#a-slug-is-global-and-this-crd-is-not) and friends.
+`ipam.VLANGroup` carries none. Its `meta.constraints` are
 
 ```
 meta.constraints: (models.UniqueConstraint(fields=('scope_type', 'scope_id', 'name'),

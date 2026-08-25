@@ -15,6 +15,9 @@ KUSTOMIZE_VERSION        ?= v5.5.0
 GOLANGCI_LINT_VERSION    ?= v2.6.1
 ENVTEST_VERSION          ?= release-0.22
 ENVTEST_K8S_VERSION      ?= 1.34.0
+# Pulls mkdocs itself as a transitive pin, so a mkdocs release cannot change the site.
+MKDOCS_MATERIAL_VERSION  ?= 9.7.7
+MKDOCS                   ?= mkdocs
 
 LOCALBIN ?= $(shell pwd)/bin
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
@@ -135,6 +138,36 @@ verify: manifests generate ## Fail if generated output is not committed.
 		echo "Generated output is stale. Run 'make manifests generate' and commit the result."; \
 		exit 1; }
 
+##@ Documentation
+
+# The docs site is built from docs/ and nothing else -- see the allowlist note in
+# mkdocs.yml. Its output (site/) is gitignored and never committed, so it is deliberately
+# absent from GENERATED_PATHS: there is no checked-in artefact for `make verify` to police,
+# and no generated navigation file that could drift from docs/README.md.
+
+.PHONY: docs-tools
+docs-tools: ## Install the pinned docs site toolchain into the active Python environment.
+	python3 -m pip install "mkdocs-material==$(MKDOCS_MATERIAL_VERSION)"
+
+.PHONY: docs-check
+docs-check: ## Check every relative link and heading anchor under docs/ resolves.
+	python3 hack/check-docs-links.py
+
+.PHONY: docs-build
+docs-build: ## Build the docs site into site/, then assert what it published.
+	@command -v $(MKDOCS) >/dev/null || { \
+		echo "mkdocs not found. Run 'make docs-tools' (mkdocs-material==$(MKDOCS_MATERIAL_VERSION))."; \
+		exit 1; }
+	@# --strict turns MkDocs' link and anchor warnings into errors, so a relative link that
+	@# resolves on GitHub but not in the site fails the build instead of shipping a 404.
+	$(MKDOCS) build --strict
+	@# The acceptance criterion: nothing outside docs/ reached the output.
+	python3 hack/check-docs-links.py --site site
+
+.PHONY: docs-serve
+docs-serve: ## Serve the docs site locally on :8000 with live reload.
+	$(MKDOCS) serve
+
 ##@ Build
 
 .PHONY: build
@@ -157,7 +190,7 @@ docker-build: ## Build the manager image.
 clean: ## Remove build output.
 	@# envtest installs its binaries read-only, so make them writable before removing.
 	-chmod -R u+w $(LOCALBIN) 2>/dev/null
-	rm -rf $(LOCALBIN) cover.out cover.html
+	rm -rf $(LOCALBIN) cover.out cover.html site
 
 ##@ Deployment
 
