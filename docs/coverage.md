@@ -16,16 +16,16 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 | | count |
 |---|--:|
 | NetBox REST endpoints | 138 |
-| — implemented as a Kind | 26 |
+| — implemented as a Kind | 30 |
 | — excluded, with a reason | 26 |
-| — **not implemented** | 86 |
+| — **not implemented** | 82 |
 | in scope (endpoints − excluded) | 112 |
 | | |
-| writable columns on the implemented Kinds | 312 |
-| — written by a spec field, or engine-owned | 218 |
+| writable columns on the implemented Kinds | 342 |
+| — written by a spec field, or engine-owned | 241 |
 | — deliberately omitted, with a reason | 6 |
-| — blocked: a reference whose target model has no Kind | 40 |
-| — **MISSING**: nothing declares it and nothing blocks it | 48 |
+| — blocked: a reference whose target model has no Kind | 43 |
+| — **MISSING**: nothing declares it and nothing blocks it | 52 |
 | — of those, required on create (fails the audit) | 0 |
 | | |
 | natural-key candidates the IR calls unusable | 21 |
@@ -39,8 +39,8 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 
 | column | status | Kinds | detail |
 |---|---|--:|---|
-| `owner` | blocked | 25 | `users.Owner` is an excluded endpoint, so nothing will ever write this |
-| `tags` | MISSING | 25 | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
+| `tags` | MISSING | 29 | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
+| `owner` | blocked | 28 | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `comments` | excluded | 6 | organisational kinds map name/slug/description only (api/v1alpha1/virtualization_clustertype.go) |
 | `tenant` | MISSING | 6 | deferred to NetBoxTenant (NBO-021), which now ships -- nothing blocks it any more |
 | `config_template` | blocked | 4 | waits on a Kind for `extras.ConfigTemplate` |
@@ -111,6 +111,9 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 | `ipam.VLAN` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `ipam.VLANGroup` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `ipam.VRF` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `tenancy.Contact` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `tenancy.ContactGroup` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `tenancy.ContactRole` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `tenancy.Tenant` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `tenancy.TenantGroup` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `virtualization.Cluster` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
@@ -142,6 +145,10 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 | `ipam.VLAN` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `ipam.VLANGroup` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `ipam.VRF` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
+| `tenancy.Contact` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
+| `tenancy.ContactAssignment` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
+| `tenancy.ContactGroup` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
+| `tenancy.ContactRole` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `tenancy.Tenant` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `tenancy.TenantGroup` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `virtualization.Cluster` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
@@ -308,10 +315,10 @@ each pinned column's class rather than from the IR's reason string.
 | `ipam/vlan-translation-rules` | `ipam.VLANTranslationRule` | — | MISSING | — |
 | `ipam/vlans` | `ipam.VLAN` | `NetBoxVLAN` | implemented | — |
 | `ipam/vrfs` | `ipam.VRF` | `NetBoxVRF` | implemented | — |
-| `tenancy/contact-assignments` | `tenancy.ContactAssignment` | — | MISSING | — |
-| `tenancy/contact-groups` | `tenancy.ContactGroup` | — | MISSING | — |
-| `tenancy/contact-roles` | `tenancy.ContactRole` | — | MISSING | — |
-| `tenancy/contacts` | `tenancy.Contact` | — | MISSING | — |
+| `tenancy/contact-assignments` | `tenancy.ContactAssignment` | `NetBoxContactAssignment` | implemented | — |
+| `tenancy/contact-groups` | `tenancy.ContactGroup` | `NetBoxContactGroup` | implemented | — |
+| `tenancy/contact-roles` | `tenancy.ContactRole` | `NetBoxContactRole` | implemented | — |
+| `tenancy/contacts` | `tenancy.Contact` | `NetBoxContact` | implemented | — |
 | `tenancy/tenant-groups` | `tenancy.TenantGroup` | `NetBoxTenantGroup` | implemented | — |
 | `tenancy/tenants` | `tenancy.Tenant` | `NetBoxTenant` | implemented | — |
 | `users/config` | `users.UserConfig` | — | excluded | out of scope; per-user UI preferences (plan.md 8) |

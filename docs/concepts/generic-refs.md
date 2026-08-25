@@ -5,12 +5,15 @@ new one is added without touching the engine.
 
 > **Status.** The mechanism is built (NBO-019): the union pattern, CEL validation of the
 > one-of-N shape, resolution to an `(object type, id)` pair, paired drift detection, and
-> ref watches over every allowed target. Two unions ship, both through that one mechanism:
+> ref watches over every allowed target. Three unions ship, all through that one mechanism:
 > [`IPAssignment`](../reference/genericref.md), now on a real CRD as
 > [`NetBoxIPAddress.spec.assignedObject`](../reference/netboxipaddress.md#assignedobject)
-> ([NBO-025](https://github.com/ricardomolendijk/netbox-operator/issues/37)), and
+> ([NBO-025](https://github.com/ricardomolendijk/netbox-operator/issues/37));
 > [`ScopeRef`](#the-scope-pair) — NetBox's `(scope_type, scope_id)`
-> ([NBO-018](https://github.com/ricardomolendijk/netbox-operator/issues/30)). Several of
+> ([NBO-018](https://github.com/ricardomolendijk/netbox-operator/issues/30)); and
+> [`ContactAssignmentTarget`](../reference/netboxcontactassignment.md#objectref) — the widest
+> of the three at 11 members, and the first on a **`REQ`** pair
+> ([NBO-056](https://github.com/ricardomolendijk/netbox-operator/issues/57)). Several of
 > their target Kinds arrive in M4, so until then those members are reported
 > `RefKindUnavailable` in all four modes. See [Kinds that do not exist
 > yet](#kinds-that-do-not-exist-yet).
@@ -106,7 +109,10 @@ Both shapes are proved against a real API server by `TestUnionCELShapes`, over a
 CRD in `internal/controller/testdata/crd/`. The fixture came first, because a CEL rule no CRD
 carries is compiled by nothing and `IPAssignment` was on no shipped CRD until
 [`NetBoxIPAddress`](../reference/netboxipaddress.md) landed; it stays, because it is the only
-place the `== 1` shape is exercised at all -- no shipped Kind has a `REQ` pair yet.
+place the `== 1` shape is exercised over *its own* members.
+[`NetBoxContactAssignment.spec.objectRef`](../reference/netboxcontactassignment.md#objectref) is
+now a real `REQ` pair on a shipped CRD (NBO-056), so the shape no longer exists only as a
+fixture -- but the fixture's members are not that union's, so the two are not interchangeable.
 `TestUnionCELRuleMatchesTheAPIType` asserts the fixture's rule is byte-identical to the one on
 the Go type, so it cannot drift away from what it stands in for.
 
@@ -319,8 +325,16 @@ every member of this union now has a Descriptor —
 edge if and only if the referrer *cannot be created* until that edge resolves. Every union
 that ships today sits on a nullable pair, so the object is created with the columns unset
 and the reference PATCHed in later — it never blocks, and a ring through it is not a
-deadlock. A `REQ` pair does block, and the first one to ship (`ipam.Service`'s
-`parent_object_*`) has to declare that in its Descriptor for the walk to follow it.
+deadlock.
+
+A `REQ` pair does block, and the first one has now shipped:
+[`tenancy.ContactAssignment.object_*`](../reference/netboxcontactassignment.md). It still is not
+walked, and that is a fact about *that* pair rather than a gap left open --
+**nothing in NetBox points at a ContactAssignment**, so there is no `contactAssignmentRef`
+anywhere in this API and the object is a leaf in the reference graph. A ring through it is
+unconstructible rather than unchecked. The Descriptor flag that makes the walk follow a blocking
+pair is therefore still unwritten, and the union that needs it is `ipam.Service`'s
+`parent_object_*`, whose targets *are* pointed at by other Kinds.
 
 **It contributes an owner reference exactly as a typed reference does.**
 [ADR-0003](../decisions/0003-ownership-and-references.md) rule 4 has a containment generic FK

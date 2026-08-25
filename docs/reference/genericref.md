@@ -10,9 +10,9 @@ schema digest, how the pair is kept atomic and how a new union is added — see
 | | |
 |---|---|
 | API version | `netbox.kubeforge.org/v1alpha1` |
-| Go types | `IPAssignment`, `ScopeRef` |
-| Milestone | M3 (NBO-018, NBO-019) |
-| Status | The mechanism is built. Two unions ship; several of the Kinds they target arrive in M4. |
+| Go types | `IPAssignment`, `ScopeRef`, `ContactAssignmentTarget` |
+| Milestone | M3 (NBO-018, NBO-019); `ContactAssignmentTarget` M10 (NBO-056) |
+| Status | The mechanism is built. Three unions ship; several of the Kinds they target arrive in M4. |
 
 ## The shape
 
@@ -65,7 +65,7 @@ Some NetBox pairs are nullable and some are not, and the union follows the colum
 |---|---|---|---|
 | `IPAssignment` (`ipam.IPAddress.assigned_object_*`) | nullable | at most one | legal — the address is unassigned |
 | `ScopeRef` (`CachedScopeMixin.scope_*`) | nullable | at most one | legal — the object is globally scoped |
-| *a `REQ` pair, e.g. `ipam.Service.parent_object_*`* | `REQ` | **exactly** one | rejected at admission, and the field itself is required |
+| `ContactAssignmentTarget` (`tenancy.ContactAssignment.object_*`) | `REQ` | **exactly** one | rejected at admission, and the field itself is required |
 
 ## The unions
 
@@ -164,6 +164,45 @@ descriptor listing a cache column without marking it read-only fails the manager
 `GET /api/ipam/prefixes/?scope_id__empty=true` is the query that tells you how much of it
 silently did nothing.
 
+### `ContactAssignmentTarget`
+
+`spec.objectRef` on [`NetBoxContactAssignment`](netboxcontactassignment.md) — what a contact is
+assigned to. The widest union in the catalogue, and the only one on a `REQ` pair.
+
+```yaml
+spec:
+  objectRef:
+    siteRef:
+      name: rtm1
+```
+
+| | |
+|---|---|
+| Pair | `object_type` / `object_id`, both `REQ` |
+| Rule | `== 1`, and the field itself is required |
+| Members | `regionRef`, `siteGroupRef`, `siteRef`, `locationRef`, `deviceRef`, `prefixRef`, `ipAddressRef`, `tenantRef`, `clusterRef`, `clusterGroupRef`, `virtualMachineRef` |
+| Allowed types | 25 — every model mixing in `ContactsMixin` in NetBox 4.6.8 |
+| Cached columns | none |
+| Containment | yes; every member cascades |
+
+Two things about it are unlike the other two unions.
+
+**`AllowedTypes` is wider than the member list, and deliberately so.** NetBox accepts 25 object
+types in this column and the CRD offers 11 — the ones whose target Kind has a typed alias to
+write it down on. The two lists are independent statements, which is what gives the boot
+cross-check something to say: a member pointing at a type NetBox would reject fails the boot
+rather than shipping. `IPAssignment` and `ScopeRef` happen to have the two lists coincide because
+their columns are narrow, not because either is derived from the other. The remaining fourteen
+arrive one `Members` entry at a time, with the Kinds they name.
+
+**The empty union is not an instruction.** On a nullable pair `assignedObject: {}` writes both
+columns `null`. Here the columns are `NOT NULL`, so there is nothing to clear and the `== 1` rule
+rejects `{}` at admission.
+
+`deviceRef` is the union's one unresolvable member: `dcim.device` carries `ContactsMixin` and
+`NetBoxDevice` lands in M4, so until then the member is admissible and reported as
+[`RefKindUnavailable`](#conditions) in all four modes.
+
 ### Unions that are not written yet
 
 Deliberately absent rather than stubbed. Each is three lines of Descriptor data plus a
@@ -173,7 +212,6 @@ struct, and each lands with the Kind that needs it:
 |---|---|---|---|
 | `ServiceParent` | `ipam.Service.parent_object_*` | `== 1` | `NetBoxService` |
 | `FHRPInterfaceTarget` | `ipam.FHRPGroupAssignment.interface_*` | `== 1` | `NetBoxFHRPGroupAssignment` |
-| `ContactAssignmentTarget` | `tenancy.ContactAssignment.object_*` | `== 1` | NBO-056 |
 | `CableTerminationTarget` | `dcim.CableTermination.termination_*` | `== 1` | NBO-049 |
 
 ## Conditions
@@ -214,3 +252,5 @@ same point, before the target is read.
 - [References](../concepts/references.md) — the four modes, grants, cycles, watches
 - [The Descriptor](../concepts/descriptor.md) — `GenericFKSpec`, `Cached`, `registry.ScopeFK`
 - [`NetBoxRefGrant`](netboxrefgrant.md) — authorising a cross-namespace member
+- [`NetBoxContactAssignment`](netboxcontactassignment.md) — the `REQ` pair in use, and an
+  identity built from one

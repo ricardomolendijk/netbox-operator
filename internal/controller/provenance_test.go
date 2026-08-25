@@ -31,7 +31,9 @@ var stampedObjectTypes = []string{
 	// because the range it creates needs the identity custom field to exist first.
 	"ipam.iprange", "ipam.prefix",
 	"ipam.routetarget", "ipam.vlan", "ipam.vlangroup", "ipam.vrf",
-	"tenancy.tenant", "tenancy.tenantgroup", "virtualization.cluster", "virtualization.clustergroup",
+	"tenancy.contact", "tenancy.contactassignment", "tenancy.contactgroup",
+	"tenancy.contactrole", "tenancy.tenant", "tenancy.tenantgroup",
+	"virtualization.cluster", "virtualization.clustergroup",
 	"virtualization.clustertype", "virtualization.virtualdisk", "virtualization.virtualmachine", "virtualization.vminterface",
 }
 

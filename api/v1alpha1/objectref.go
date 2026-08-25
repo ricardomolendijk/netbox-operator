@@ -202,6 +202,17 @@ type (
 	// tenancy/tenant-groups).
 	TenantGroupRef ObjectRef
 
+	// ContactRef points at a NetBoxContact (tenancy.Contact, tenancy/contacts).
+	ContactRef ObjectRef
+
+	// ContactRoleRef points at a NetBoxContactRole (tenancy.ContactRole,
+	// tenancy/contact-roles).
+	ContactRoleRef ObjectRef
+
+	// ContactGroupRef points at a NetBoxContactGroup (tenancy.ContactGroup,
+	// tenancy/contact-groups).
+	ContactGroupRef ObjectRef
+
 	// InterfaceRef points at a NetBoxInterface (dcim.Interface, dcim/interfaces).
 	//
 	// A member of IPAssignment (genericref.go). Declared before the Kind exists, which is
@@ -360,6 +371,30 @@ func (r TenantGroupRef) TargetGVK() schema.GroupVersionKind {
 func (r TenantGroupRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
 
 // TargetGVK reports the Kind this reference resolves against.
+func (r ContactRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxContact")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r ContactRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r ContactRoleRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxContactRole")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r ContactRoleRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r ContactGroupRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxContactGroup")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r ContactGroupRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
 func (r InterfaceRef) TargetGVK() schema.GroupVersionKind {
 	return GroupVersion.WithKind("NetBoxInterface")
 }
@@ -499,6 +534,9 @@ var (
 	_ RefTarget = LocationRef{}
 	_ RefTarget = TenantRef{}
 	_ RefTarget = TenantGroupRef{}
+	_ RefTarget = ContactRef{}
+	_ RefTarget = ContactRoleRef{}
+	_ RefTarget = ContactGroupRef{}
 	_ RefTarget = InterfaceRef{}
 	_ RefTarget = VMInterfaceRef{}
 	_ RefTarget = FHRPGroupRef{}
