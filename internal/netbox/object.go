@@ -61,6 +61,14 @@ func asString(v any) string {
 	return s
 }
 
+// IntOf returns v as an int, false when it is not a number.
+//
+// Exported for the allocation engine, which reads an integer out of a payload it built from a
+// CR spec: the value arrives as whatever encoding/json produced -- a float64 -- and a caller
+// re-deriving that coercion outside this package would be a second answer to what a NetBox
+// number is.
+func IntOf(v any) (int, bool) { return asInt(v) }
+
 // asInt returns v as an int. JSON numbers decode to float64, and NetBox ids also arrive
 // as strings in a few nested representations, so both are accepted.
 func asInt(v any) (int, bool) {

@@ -30,3 +30,6 @@ resources:
 - bases/netbox.kubeforge.org_netboxdevices.yaml
 - bases/netbox.kubeforge.org_netboxinterfaces.yaml
 - bases/netbox.kubeforge.org_netboxsweeps.yaml
+- bases/netbox.kubeforge.org_netboxipranges.yaml
+- bases/netbox.kubeforge.org_netboxprefixclaims.yaml
+- bases/netbox.kubeforge.org_netboxiprangeclaims.yaml

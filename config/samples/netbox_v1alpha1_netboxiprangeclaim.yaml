@@ -1,0 +1,31 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxIPRangeClaim
+metadata:
+  name: dhcp-pool
+  namespace: default
+spec:
+  endpointRef: homelab
+
+  # The prefix to reserve inside. Immutable -- and repointing it while keeping this name is
+  # exactly the mistake the ReclaimedOutsidePool guard reports rather than papering over.
+  parentPrefixRef:
+    name: home-lan
+
+  # How many consecutive addresses, counted inclusively. Immutable: growing a range is not
+  # this claim doing more of what it did, because the addresses above it may not be free.
+  size: 64
+
+  # Where in the parent's free space the block may start. PowerOfTwo makes the result
+  # expressible as a CIDR in a downstream DHCP config -- 10.0.30.64 rather than 10.0.30.13
+  # -- which is what most people mean by "a pool of 64 addresses". Any packs instead.
+  alignment: PowerOfTwo
+
+  # Stop NetBox creating ipam.IPAddress objects inside the reserved block: its leases
+  # belong to whatever hands them out.
+  markPopulated: true
+
+# This is the one claim kind NetBox does not serialise: there is no available-ranges
+# endpoint, so the placement is computed here and NetBox arbitrates by refusing to save an
+# overlapping range. Two claims racing for the same gap is therefore ordinary, and the
+# loser recomputes -- see docs/concepts/claims.md#locked-and-unlocked-allocation. That is
+# also why this kind can report AllocationContended and the other two cannot.

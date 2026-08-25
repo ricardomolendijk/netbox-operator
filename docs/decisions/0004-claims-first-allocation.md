@@ -257,6 +257,33 @@ the Event and counter #182 introduced.
 
 Degrading to the outcome that already shipped is no worse than what shipped. Wedging a namespace
 would have been a new failure mode, and a better default is not allowed to cost that.
+### Amendment (NBO-064): one of the three kinds has no locked endpoint
+
+The three endpoints above are the three this ADR knew about, and the list is complete — which is
+the problem. **None of them places an ip-range inside a prefix.** The third one allocates an
+address *out of* a range, which is the opposite operation, and NetBox 4.6.8 has no
+`available-ranges` view: `netbox/ipam/api/urls.py` offers exactly these three.
+
+So `NetBoxIPRangeClaim` cannot be built on the paragraph above, and this ADR's
+"correctness under concurrency" argument does not cover it. What was implemented instead, and
+what this amendment records as the standing rule:
+
+- Placement is computed client-side, from the other **ranges** in the parent's VRF — never from
+  the addresses inside them, which an IPv6 `/64` makes both impossible and pointless.
+- The range is created with a plain `POST /api/ipam/ip-ranges/`, taking no lock.
+- **The server is still the arbiter.** `IPRange.clean()` rejects a range overlapping another in
+  the same VRF (`netbox/ipam/models/ip.py`), and every API write runs it because NetBox's
+  `ValidatedModelSerializer.validate()` calls `full_clean()` before saving. A collision is a 400
+  that proves nothing was created, so the loser recomputes and retries — five times, jittered —
+  and then reports `AllocationContended`, which is deliberately not `PoolExhausted`.
+
+The rule this generalises to, and the one a future claim kind is held to: **every claim kind must
+name which server-side guarantee it relies on — an advisory lock, or a validation rejection — and
+a kind that can name neither does not ship.** Neither answer is ever a client-side mutex, because
+the other writer may be another cluster or a human in the UI.
+
+The three-endpoint list also means the *other* two claim kinds are unaffected: `available-prefixes`
+is locked exactly as `available-ips` is, so `NetBoxPrefixClaim` inherits this section unchanged.
 
 ## Exhaustion
 

@@ -33,11 +33,20 @@ var (
 	ErrUnknownPoolSubPath = errors.New("unknown allocation sub-path")
 )
 
-// knownPoolSubPaths is the closed set of NetBox's advisory-locked allocation views. Spelled
-// as netbox's own constants would be, but not imported: internal/registry deliberately
-// depends on nothing but the API types, so that a Descriptor stays data a generator can
-// emit.
-var knownPoolSubPaths = []string{"available-ips", "available-prefixes"}
+// knownPoolSubPaths is the closed set of allocation mechanisms a claim kind may name.
+//
+// The first two are NetBox's advisory-locked views. The third is not a NetBox URL at all: at
+// 4.6.8 there is no `available-ranges` endpoint, so placing an ip-range inside a prefix is
+// computed client-side and committed with a plain POST, whose safety comes from
+// `ipam.IPRange.clean()` rejecting an overlap rather than from a lock (netbox.PlaceRange).
+//
+// The set is closed either way, and that is the property worth keeping: a claim kind must name
+// which server-side guarantee it relies on -- a lock, or a rejection -- and a kind that can
+// name neither does not boot.
+//
+// Spelled as netbox's own constants would be, but not imported: internal/registry deliberately
+// depends on nothing but the API types, so that a Descriptor stays data a generator can emit.
+var knownPoolSubPaths = []string{"available-ips", "available-prefixes", "place-ip-range"}
 
 // ClaimDescriptor is everything the allocation engine needs to reconcile one claim kind, as
 // data.
@@ -105,8 +114,59 @@ type ClaimDescriptor struct {
 	// so the same value is a refusal for one claim kind and a precondition for the next.
 	PoolForbiddenStatus []string
 
+	// RequestLengthField is the API name of the RequestFields entry carrying a mask length
+	// that has to be *longer* than the pool's own: `prefix_length` on a prefix claim.
+	//
+	// Data because the check needs the resolved pool -- CEL cannot see it, so the CRD can only
+	// bound the value statically -- and because the two things it catches are the two mistakes
+	// a mask length can be. A length shorter than the parent's cannot fit inside it and NetBox
+	// answers 409, which reads as an exhausted pool and sends the reader to look at
+	// utilisation. A length *equal* to the parent's is worse: NetBox's `available-prefixes`
+	// happily hands out the whole parent, so `prefixLength: 16` on a /16 creates a second /16
+	// object identical to the first, in the same VRF, and reports success
+	// (`GetAvailablePrefixesMixin.get_available_prefixes` subtracts child prefixes, and there
+	// are none). A length wider than the address family -- 64 on an IPv4 parent -- is the third,
+	// and the same comparison catches it.
+	//
+	// Empty for a claim kind whose request carries no mask length, which is both of the others.
+	RequestLengthField string
+
+	// PoolExpectedStatus are the values of the pool's `status` column this claim kind expects,
+	// and allocating out of anything else is unusual enough to say so.
+	//
+	// Data rather than a rule, exactly like PoolForbiddenStatus, and the pair is where the
+	// asymmetry between the claim kinds is written down: `container` is a *refusal* for an
+	// address claim, because a container's free space is subdivided by child prefixes rather
+	// than populated by addresses, and a *precondition* for a prefix claim, which subdivides
+	// it. Neither is a rule shared code could hold.
+	//
+	// Unlike PoolForbiddenStatus this does not refuse. Carving a child prefix out of an
+	// `active` prefix is unusual and legitimate -- somebody is subdividing a network that is
+	// already in service -- so the allocation proceeds and a Warning Event records that the
+	// operator noticed. Empty means "any status is ordinary", which is what an address claim
+	// says: it lists its one refusal and expects everything else.
+	PoolExpectedStatus []string
+
 	// ResultField is the allocated object's field lifted into `status`: `address`.
 	ResultField string
+
+	// RequestFields are the claim spec fields copied into the allocating POST's body.
+	//
+	// The allocation *parameters*, as opposed to the provenance the engine adds itself: a
+	// prefix claim has to say `prefix_length`, and a range claim has to say how many addresses
+	// it wants and how they should be aligned. An address claim has none, which is why NBO-036
+	// did not need this and why it is a list rather than a field.
+	//
+	// registry.Field for the same reason Pool is one: the spec name and the wire name are
+	// declared once, in the table every other field of every other kind is declared in, so a
+	// `prefixLength` sent verbatim -- which NetBox would accept and ignore -- is a boot failure
+	// rather than a prefix of the wrong size. Scalars only: a reference here would need
+	// resolving, and a claim resolves exactly one reference (its pool).
+	//
+	// An API name may be a placement input rather than a NetBox column
+	// (netbox.PlacementSize), which is what the `@` prefix on those marks. Nothing in this
+	// package decides that; the client is what removes them from the body.
+	RequestFields []Field
 
 	// Taggable and CustomFieldable report which of the two provenance columns the
 	// *allocated* model carries, exactly as they do on Descriptor and for the same reason:
@@ -166,6 +226,8 @@ func (c ClaimDescriptor) Validate() error {
 			ErrIncompleteClaim))
 	}
 
+	errs = append(errs, c.validateRequestFields()...)
+
 	if c.PoolSubPath != "" && !slices.Contains(knownPoolSubPaths, c.PoolSubPath) {
 		errs = append(errs, fmt.Errorf("%w: %q, known are %v",
 			ErrUnknownPoolSubPath, c.PoolSubPath, knownPoolSubPaths))
@@ -176,6 +238,33 @@ func (c ClaimDescriptor) Validate() error {
 	}
 
 	return nil
+}
+
+// validateRequestFields reports every malformed allocation parameter.
+//
+// Its own function because Validate is at the complexity limit, and this is the part of it
+// that reads as a list rather than as a sequence of conditions.
+func (c ClaimDescriptor) validateRequestFields() []error {
+	errs := make([]error, 0, len(c.RequestFields))
+
+	for _, field := range c.RequestFields {
+		if field.Spec == "" || field.API == "" {
+			errs = append(errs, fmt.Errorf("%w: requestFields entry %+v has no spec or api name",
+				ErrIncompleteClaim, field))
+
+			continue
+		}
+
+		// A reference would have to be resolved to a NetBox id, and the engine resolves exactly
+		// one reference per claim: its pool. Anything else here is a scalar the spec already
+		// holds in the shape NetBox wants.
+		if field.Class != ClassValue {
+			errs = append(errs, fmt.Errorf("%w: requestFields entry %s is %q, want a scalar",
+				ErrIncompleteClaim, field.Spec, field.Class))
+		}
+	}
+
+	return errs
 }
 
 // RefDescriptor is this claim kind as a Descriptor carrying nothing but its pool reference.

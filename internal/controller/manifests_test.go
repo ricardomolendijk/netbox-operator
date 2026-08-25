@@ -21,6 +21,9 @@ var shippedManifests = []string{
 	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxtag.yaml"),
 	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxrefgrant.yaml"),
 	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxipaddressclaim.yaml"),
+	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxiprange.yaml"),
+	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxprefixclaim.yaml"),
+	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxiprangeclaim.yaml"),
 	filepath.Join("..", "..", "docs", "examples", "tag.yaml"),
 }
 
@@ -89,8 +92,15 @@ const triStateNote = "Omit it to leave NetBox's own value alone"
 // (docs/reference/netboxipaddressclaim.md). The fields a NetBox address actually has --
 // dnsName, role, description -- live on NetBoxIPAddress, which is the kind that can maintain
 // them (NBO-025).
+// NBO-064's two claim kinds are the same argument with two more fields. A prefix claim's
+// `prefixLength` and a range claim's `size` are required, its `alignment` is defaulted and
+// changes nothing in NetBox, and its two `mark*` booleans are tri-state through a pointer
+// rather than through an empty string -- there is no empty value for a boolean to document.
+// The fields a NetBox range actually has live on NetBoxIPRange, which does carry the note.
 var noClearableFields = map[string]bool{
 	"netbox.kubeforge.org_netboxipaddressclaims.yaml": true,
+	"netbox.kubeforge.org_netboxprefixclaims.yaml":    true,
+	"netbox.kubeforge.org_netboxiprangeclaims.yaml":   true,
 }
 
 // TestClearableFieldsDocumentBothStatesInTheSchema is NBO-079's third acceptance criterion:

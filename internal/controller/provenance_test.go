@@ -25,7 +25,11 @@ import (
 var stampedObjectTypes = []string{
 	"dcim.device", "dcim.devicerole", "dcim.devicetype", "dcim.interface",
 	"dcim.location", "dcim.manufacturer", "dcim.platform", "dcim.region",
-	"dcim.site", "dcim.sitegroup", "ipam.ipaddress", "ipam.prefix",
+	"dcim.site", "dcim.sitegroup", "ipam.ipaddress",
+	// ipam.iprange comes from both directions and has to be in the set once: NetBoxIPRange's
+	// own Descriptor supplies it, and NetBoxIPRangeClaim's ClaimDescriptor supplies it again
+	// because the range it creates needs the identity custom field to exist first.
+	"ipam.iprange", "ipam.prefix",
 	"ipam.routetarget", "ipam.vlan", "ipam.vlangroup", "ipam.vrf",
 	"tenancy.tenant", "tenancy.tenantgroup", "virtualization.cluster", "virtualization.clustergroup",
 	"virtualization.clustertype", "virtualization.virtualdisk", "virtualization.virtualmachine", "virtualization.vminterface",

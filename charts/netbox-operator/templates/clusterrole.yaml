@@ -41,9 +41,12 @@ rules:
   - netboxinterfaces
   - netboxipaddressclaims
   - netboxipaddresses
+  - netboxiprangeclaims
+  - netboxipranges
   - netboxlocations
   - netboxmanufacturers
   - netboxplatforms
+  - netboxprefixclaims
   - netboxprefixes
   - netboxregions
   - netboxroutetargets
@@ -76,9 +79,12 @@ rules:
   - netboxinterfaces/finalizers
   - netboxipaddressclaims/finalizers
   - netboxipaddresses/finalizers
+  - netboxiprangeclaims/finalizers
+  - netboxipranges/finalizers
   - netboxlocations/finalizers
   - netboxmanufacturers/finalizers
   - netboxplatforms/finalizers
+  - netboxprefixclaims/finalizers
   - netboxprefixes/finalizers
   - netboxregions/finalizers
   - netboxroutetargets/finalizers
@@ -108,9 +114,12 @@ rules:
   - netboxinterfaces/status
   - netboxipaddressclaims/status
   - netboxipaddresses/status
+  - netboxiprangeclaims/status
+  - netboxipranges/status
   - netboxlocations/status
   - netboxmanufacturers/status
   - netboxplatforms/status
+  - netboxprefixclaims/status
   - netboxprefixes/status
   - netboxregions/status
   - netboxroutetargets/status

@@ -127,6 +127,25 @@ func TestClaimDescriptorValidate(t *testing.T) {
 			mutate: func(c *ClaimDescriptor) { c.PoolSubPath = "available-everything" },
 			want:   ErrUnknownPoolSubPath,
 		},
+		"the unlocked placement path is known": {
+			mutate: func(c *ClaimDescriptor) { c.PoolSubPath = "place-ip-range" },
+			want:   nil,
+		},
+		"request field with no api name": {
+			mutate: func(c *ClaimDescriptor) {
+				c.RequestFields = []Field{{Spec: "prefixLength"}}
+			},
+			want: ErrIncompleteClaim,
+		},
+		"request field that is a reference": {
+			mutate: func(c *ClaimDescriptor) {
+				c.RequestFields = []Field{{
+					Spec: "vrfRef", API: "vrf", Class: ClassRefOne,
+					Target: netboxv1alpha1.VRFRef{}.TargetGVK(),
+				}}
+			},
+			want: ErrIncompleteClaim,
+		},
 	}
 
 	for name, tc := range cases {
@@ -249,4 +268,117 @@ func sorted(values []string) bool {
 	}
 
 	return true
+}
+
+// TestPrefixClaimDescriptor is the asymmetry NBO-064 exists for, asserted rather than assumed.
+//
+// `status: container` is in the address claim's PoolForbiddenStatus and in the prefix claim's
+// PoolExpectedStatus, and those are two lists of *data* rather than two branches -- which is
+// the property that lets one value be a refusal for one kind and a precondition for the next.
+func TestPrefixClaimDescriptor(t *testing.T) {
+	desc, ok := Claim(netboxv1alpha1.GroupVersion.WithKind("NetBoxPrefixClaim"))
+	if !ok {
+		t.Fatal("NetBoxPrefixClaim is not registered")
+	}
+
+	if desc.Endpoint != "ipam/prefixes" || desc.ObjectType != "ipam.prefix" {
+		t.Errorf("endpoint/objectType = %s/%s, want ipam/prefixes and ipam.prefix",
+			desc.Endpoint, desc.ObjectType)
+	}
+
+	if desc.PoolSubPath != "available-prefixes" || desc.ResultField != "prefix" {
+		t.Errorf("subPath/resultField = %s/%s, want available-prefixes and prefix",
+			desc.PoolSubPath, desc.ResultField)
+	}
+
+	if contains(desc.PoolForbiddenStatus, "container") {
+		t.Error("status: container is refused, and it is what this kind expects to find:" +
+			" carving a child prefix is exactly what a container is for")
+	}
+
+	if !contains(desc.PoolExpectedStatus, "container") {
+		t.Error("status: container is not expected, so allocating out of an active prefix" +
+			" would pass unremarked")
+	}
+
+	if len(desc.RequestFields) != 1 || desc.RequestFields[0].API != "prefix_length" {
+		t.Errorf("requestFields = %+v, want one entry writing prefix_length", desc.RequestFields)
+	}
+
+	if desc.RequestLengthField != "prefix_length" {
+		t.Errorf("requestLengthField = %q; without it a /16 asked for out of a /16 is accepted"+
+			" by netbox and duplicates the container", desc.RequestLengthField)
+	}
+}
+
+// TestIPRangeClaimDescriptor pins the kind whose allocation NetBox does not serialise.
+//
+// Two assertions matter beyond the wiring. Its sub-path is not a NetBox URL, which is how a
+// reader learns that this kind's safety argument is the overlap rejection rather than a lock.
+// And both its request fields are `@`-prefixed placement inputs: `size` is derived by NetBox
+// and `alignment` is not a NetBox concept, so neither may ever be sent as a column.
+func TestIPRangeClaimDescriptor(t *testing.T) {
+	desc, ok := Claim(netboxv1alpha1.GroupVersion.WithKind("NetBoxIPRangeClaim"))
+	if !ok {
+		t.Fatal("NetBoxIPRangeClaim is not registered")
+	}
+
+	if desc.Endpoint != "ipam/ip-ranges" || desc.ObjectType != "ipam.iprange" {
+		t.Errorf("endpoint/objectType = %s/%s, want ipam/ip-ranges and ipam.iprange",
+			desc.Endpoint, desc.ObjectType)
+	}
+
+	if desc.Pool.Spec != "parentPrefixRef" || desc.Pool.Target.Kind != "NetBoxPrefix" {
+		t.Errorf("pool = %s -> %s, want parentPrefixRef -> NetBoxPrefix",
+			desc.Pool.Spec, desc.Pool.Target.Kind)
+	}
+
+	if desc.PoolSubPath != "place-ip-range" || desc.ResultField != "start_address" {
+		t.Errorf("subPath/resultField = %s/%s, want place-ip-range and start_address",
+			desc.PoolSubPath, desc.ResultField)
+	}
+
+	if len(desc.RequestFields) != 2 {
+		t.Fatalf("requestFields = %+v, want size and alignment", desc.RequestFields)
+	}
+
+	for _, field := range desc.RequestFields {
+		if !strings.HasPrefix(field.API, "@") {
+			t.Errorf("requestField %s writes %q as a netbox column; size is derived and"+
+				" alignment is not a netbox concept", field.Spec, field.API)
+		}
+	}
+
+	if desc.RequestLengthField != "" {
+		t.Errorf("requestLengthField = %q, and a range request carries no mask length",
+			desc.RequestLengthField)
+	}
+}
+
+// TestIPRangeDescriptorNeverWritesSize is the one thing about NetBoxIPRange that is easy to get
+// wrong and impossible to notice.
+//
+// `ipam.IPRange.size` is `editable=False` and set in `save()` from the two endpoints, so a
+// `size` in a payload is dropped without complaint -- and a `size` in a diff would be a PATCH
+// that changes nothing, computed again on every resync, forever.
+func TestIPRangeDescriptorNeverWritesSize(t *testing.T) {
+	desc, ok := Get(netboxv1alpha1.GroupVersion.WithKind("NetBoxIPRange"))
+	if !ok {
+		t.Fatal("NetBoxIPRange is not registered")
+	}
+
+	for _, field := range desc.Fields {
+		if field.API == "size" {
+			t.Errorf("field %s writes `size`, which netbox derives", field.Spec)
+		}
+	}
+
+	if !contains(desc.ReadOnly, "size") {
+		t.Error("`size` is not read-only, so a drift comparison would try to correct it")
+	}
+
+	if len(desc.NaturalKeys) != 2 {
+		t.Fatalf("%d natural-key candidates, want two: a range in a VRF and the same addresses"+
+			" in the global table are different objects", len(desc.NaturalKeys))
+	}
 }

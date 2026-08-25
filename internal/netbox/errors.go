@@ -216,6 +216,36 @@ func (e *TruncatedError) Error() string {
 		e.Endpoint, e.MaxPages, e.Collected)
 }
 
+// ContendedError is a placement that lost the race, repeatedly.
+//
+// Its own type beside ExhaustedError, and the distinction is the whole reason it exists:
+// exhausted means the pool is full and only widening it or freeing something helps, contended
+// means the space is there and somebody else took this attempt's candidate. Reporting one as
+// the other sends a human looking for space that exists, or waiting for space that does not.
+//
+// It is only ever produced by the unlocked placement path (see PlaceRange). The advisory-locked
+// endpoints cannot contend: NetBox serialises them, so a loser there is told the pool is
+// exhausted or is handed a different object.
+type ContendedError struct {
+	// Endpoint is the REST path the range would have been created at.
+	Endpoint string
+
+	// Pool is the parent prefix the placement was computed inside.
+	Pool string
+
+	// Attempts is how many placements were computed and rejected.
+	Attempts int
+
+	// Body is what NetBox said about the last one, verbatim.
+	Body string
+}
+
+func (e *ContendedError) Error() string {
+	return fmt.Sprintf(
+		"%d placements in %s were each rejected as overlapping a range created between the read and"+
+			" the write; nothing was created: %s", e.Attempts, e.Pool, e.Body)
+}
+
 // Retryable reports whether err is worth retrying without any change to the request.
 // Only transient failures and rate limits qualify; a 400 or a 409 will fail identically
 // every time, and retrying them inside the client hides the failure from the engine.
