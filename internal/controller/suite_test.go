@@ -122,6 +122,18 @@ func startManager(cfg *rest.Config) (func(), error) {
 		return nil, fmt.Errorf("claim controllers: %w", err)
 	}
 
+	// The sweep takes the manager's plain client: it reads NetBox and the CRs of every kind it
+	// is asked about, and writes to neither (NBO-046).
+	sweeps := &NetBoxSweepReconciler{
+		Client:   mgr.GetClient(),
+		Clients:  clients,
+		Scheme:   mgr.GetScheme(),
+		Recorder: mgr.GetEventRecorderFor("netboxsweep-controller"),
+	}
+	if err := sweeps.SetupWithManager(mgr); err != nil {
+		return nil, fmt.Errorf("sweep controller: %w", err)
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		if err := mgr.Start(ctx); err != nil {

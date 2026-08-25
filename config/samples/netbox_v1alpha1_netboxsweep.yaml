@@ -1,0 +1,36 @@
+# A NetBoxSweep reports NetBox objects that this namespace's CRs left behind. It never
+# deletes one -- a leaked object is visible in NetBox and reclaimable by hand, where one
+# freed by mistake may already have been handed to somebody else.
+#
+# The first sweep is the shape almost every cluster wants: one endpoint, the handful of
+# kinds whose objects actually leak, and every other field left on its default. The second
+# spells every field out, defaults included.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxSweep
+metadata:
+  name: nightly
+  namespace: homelab
+spec:
+  endpointRef: homelab
+  # Required, and there is no wildcard: scanning a kind is an explicit act, because one run
+  # lists every object of it that carries this cluster's stamp.
+  kinds:
+    - NetBoxPrefix
+    - NetBoxVLAN
+---
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxSweep
+metadata:
+  name: every-field
+  namespace: homelab
+spec:
+  endpointRef: homelab
+  kinds:
+    - NetBoxPrefix
+    - NetBoxVLAN
+    - NetBoxVRF
+  interval: 24h            # default -- a leak is counted daily, not every resync
+  gracePeriod: 1h          # default -- a CR mid-recreation looks like an orphan for a moment
+  maxFindings: 100         # default -- beyond it status.findingsTruncated is set
+  timeout: 10m             # default -- exceeding it is a refused run, never a partial one
+  suspend: false           # default -- true stops the schedule and keeps the findings

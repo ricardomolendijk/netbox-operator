@@ -327,3 +327,43 @@ var RefEnqueueTotal = factory.NewCounterVec(prometheus.CounterOpts{
 	Name: "netbox_operator_ref_enqueue_total",
 	Help: "Referrer reconciles enqueued by an event on a reference target.",
 }, []string{"targetKind", "referrerKind"})
+
+// SweepFindings is how many NetBox objects the last NetBoxSweep run could not match to a
+// live CR, by kind and by why.
+//
+// A gauge rather than a counter, because the question is "how many are outstanding right
+// now", not "how many have ever been seen": the same orphan is found again by every run,
+// and a counter would turn one leaked address into a rising line forever. Every scanned
+// kind is set on every completed run, zeros included, so an orphan that gets adopted or
+// deleted by hand is visible as the series returning to zero.
+//
+// A **refused** run does not touch it. Zeroing on refusal would report "no orphans" for the
+// one state where the sweep could not see anything, which is the failure mode this whole
+// feature is shaped around; the freshness signal is SweepRuns and the sweep's own
+// `Ready` condition instead.
+//
+// Cardinality: kind (~120) x reason (3) = ~360 series worst case, both label sets bounded
+// by the code. Deliberately **not** labelled by the sweep's namespace or name, which is
+// user input -- with the consequence that two sweeps covering one kind in two namespaces
+// write the same series and the last run wins. That is a real limitation and the reason
+// `status.findings` and not this metric is the authoritative record; one sweep per kind per
+// cluster is the configuration that makes the metric mean what it says
+// (docs/operations/sweeps.md).
+var SweepFindings = factory.NewGaugeVec(prometheus.GaugeOpts{
+	Name: "netbox_operator_sweep_findings",
+	Help: "NetBox objects the last completed sweep could not match to a live CR, by kind and reason.",
+}, []string{"kind", "reason"})
+
+// SweepRuns counts NetBoxSweep runs by the condition reason they settled on: `Complete`,
+// or one of the refusal reasons in api/v1alpha1 (Truncated, EndpointDryRun, DriftOff, ...).
+//
+// It is the freshness half of SweepFindings. A findings gauge sitting at zero is either a
+// clean cluster or a sweep that has been refused since the last time it could see anything,
+// and the only way to tell from metrics alone is that `Complete` here has stopped
+// increasing.
+//
+// Cardinality: result (10) = 10 series, whatever the cluster does.
+var SweepRuns = factory.NewCounterVec(prometheus.CounterOpts{
+	Name: "netbox_operator_sweep_runs_total",
+	Help: "NetBoxSweep runs by the condition reason they settled on.",
+}, []string{"result"})

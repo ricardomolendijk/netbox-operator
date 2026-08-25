@@ -29,3 +29,4 @@ resources:
 - bases/netbox.kubeforge.org_netboxplatforms.yaml
 - bases/netbox.kubeforge.org_netboxdevices.yaml
 - bases/netbox.kubeforge.org_netboxinterfaces.yaml
+- bases/netbox.kubeforge.org_netboxsweeps.yaml
