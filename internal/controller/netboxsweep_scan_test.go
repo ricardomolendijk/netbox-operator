@@ -275,8 +275,11 @@ func TestSweepDescriptors(t *testing.T) {
 	}{
 		{name: "registered and stampable", kinds: []string{"NetBoxSite", "NetBoxPrefix"}},
 		{
+			// NetBoxNotAKind, not a real-but-unimplemented Kind name: this used to say
+			// NetBoxDevice, which NBO-030 then shipped, and the test started asserting that a
+			// registered Kind is unknown. A name no ticket will ever claim cannot go stale.
 			name:       "a kind this build does not carry",
-			kinds:      []string{"NetBoxSite", "NetBoxDevice"},
+			kinds:      []string{"NetBoxSite", "NetBoxNotAKind"},
 			wantReason: netboxv1alpha1.ReasonSweepUnknownKind,
 		},
 		{

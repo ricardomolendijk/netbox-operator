@@ -471,8 +471,10 @@ func TestSweepRefusesAnUnknownKind(t *testing.T) {
 		kinds []string
 		want  string
 	}{{
+		// NetBoxNotAKind rather than a real-but-unimplemented name -- the previous
+		// choice, NetBoxDevice, was shipped by NBO-030 and turned this case green-by-accident.
 		name:  "a kind this build does not carry",
-		kinds: []string{"NetBoxSite", "NetBoxDevice"},
+		kinds: []string{"NetBoxSite", "NetBoxNotAKind"},
 		want:  netboxv1alpha1.ReasonSweepUnknownKind,
 	}, {
 		name:  "a kind that cannot be stamped",

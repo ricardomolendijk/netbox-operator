@@ -27,4 +27,6 @@ resources:
 - bases/netbox.kubeforge.org_netboxdeviceroles.yaml
 - bases/netbox.kubeforge.org_netboxdevicetypes.yaml
 - bases/netbox.kubeforge.org_netboxplatforms.yaml
+- bases/netbox.kubeforge.org_netboxdevices.yaml
+- bases/netbox.kubeforge.org_netboxinterfaces.yaml
 - bases/netbox.kubeforge.org_netboxsweeps.yaml

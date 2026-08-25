@@ -1,0 +1,92 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxInterface
+metadata:
+  # A DNS-1123 label. `spec.name` below is the NetBox interface name, matched
+  # case-SENSITIVELY -- dcim.ComponentModel's constraint has no Lower(), so `Eth0` and
+  # `eth0` are two interfaces on one device.
+  name: rtmrpi0001-eth0
+  namespace: default
+spec:
+  # The NetBoxEndpoint to write through, in this namespace.
+  endpointRef: homelab
+
+  # Required, half the identity, and the containment parent. `on_delete=CASCADE` on
+  # dcim.ComponentModel.device is what makes it all three: NetBox deletes the interface with
+  # the device, so in one namespace `kubectl delete nbdev rtmrpi0001` takes this CR too.
+  deviceRef:
+    name: rtmrpi0001
+
+  # Required. `(device, name)` is unique per device, so a lookup without device_id would
+  # adopt another device's eth0 on the first reconcile.
+  name: eth0
+
+  # Required, and validated at admission: one of 207 values from InterfaceTypeChoices, so an
+  # invalid type is rejected by `kubectl apply` with no controller involved.
+  type: 1000base-t
+
+  # def=True in NetBox, so a pointer in the spec: omitting it leaves NetBox's value alone,
+  # `false` writes false. Adopting an interface a human had disabled must not re-enable it.
+  enabled: true
+
+  label: LAN
+  mtu: 1500
+
+  # kbps. A PositiveBigIntegerField in NetBox.
+  speed: 1000000
+
+  # half, full or auto.
+  duplex: full
+
+  # access, tagged, tagged-all or q-in-q. Not defaulted: an unset mode is a real state.
+  mode: access
+
+  # A real foreign key to ipam.VLAN.
+  # untaggedVLANRef:
+  #   name: vlan-1-mgmt-default
+
+  # A to-many reference with three states: omitted leaves NetBox's list alone, `[]` clears
+  # it, a list replaces it. Order is not data -- NetBox does not preserve it -- so the ids
+  # are sent sorted and deduplicated. Bounded at 256 because the API server costs
+  # ObjectRef's five CEL rules at the list's maximum length.
+  # taggedVLANs:
+  #   - name: vlan-20-guest
+  #   - name: vlan-30-iot
+
+  # The three self-references, each deferred when it does not resolve and only then. A
+  # sibling interface applied in the same batch is the case that needs it; a parent that
+  # already exists is included in the create, because unconditional deferral would make
+  # every ordinary sub-interface two writes with a visible top-level intermediate state.
+  #
+  # NetBox's own clean() refuses an interface that is its own parent/LAG/bridge, and refuses
+  # a LAG member on a different device than its LAG unless they share a virtual chassis.
+  # Both surface as Ready=False/Invalid carrying NetBox's message.
+  # lagRef:
+  #   name: rtmrpi0001-bond0
+  # parentRef:
+  #   name: rtmrpi0001-eth0
+  # bridgeRef:
+  #   name: rtmrpi0001-br0
+
+  # Deferred for the neighbouring reason: NetBox cross-validates it against `mode: q-in-q`.
+  # qinqSVLANRef:
+  #   name: vlan-4000-svlan
+
+  # vrfRef:
+  #   name: house-rtm
+
+  # Wireless and PoE, both unset here. `rfChannel` is one of 197 values from
+  # WirelessChannelChoices and encodes band, channel, centre frequency and width:
+  # `2.4g-1-2412-22` is channel 1 at 2412 MHz, 22 MHz wide.
+  # rfRole: ap
+  # rfChannel: 2.4g-1-2412-22
+  # rfChannelFrequency: "2412"
+  # rfChannelWidth: "22"
+  # txPower: 20
+  # poeMode: pse
+  # poeType: type2-ieee802.3at
+
+  # mgmtOnly: false
+  # markConnected: false
+  # wwn: "20:00:00:25:b5:00:00:01"
+
+  description: Onboard gigabit Ethernet.

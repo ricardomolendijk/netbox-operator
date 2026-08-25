@@ -1,0 +1,85 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxDevice
+metadata:
+  # A DNS-1123 label. `spec.name` below is the NetBox device name, matched
+  # case-insensitively; the two happen to agree here and need not.
+  name: rtmrpi0001
+  namespace: default
+spec:
+  # The NetBoxEndpoint to write through, in this namespace. There is no cluster-wide
+  # default endpoint; see config/samples/netbox_v1alpha1_netboxendpoint.yaml.
+  endpointRef: homelab
+
+  # Required in this CRD even though NetBox's column is nullable. An unnamed device has no
+  # natural key -- every constraint on dcim.Device is over Lower('name') or over a rack
+  # position -- so it could not be looked up, adopted or reconciled idempotently. See
+  # docs/reference/netboxdevice.md.
+  name: rtmrpi0001
+
+  # The three required references. dcim.DeviceType, dcim.DeviceRole and dcim.Site are all
+  # PROTECT, so none of them is this Kind's containment parent -- dcim.Device has no
+  # cascading foreign key at all and therefore no containment parent.
+  #
+  # `slug` mode rather than `name` mode on the first two deliberately: NetBoxDeviceType and
+  # NetBoxDeviceRole are NBO-027, so a name-mode ref reports RefKindUnavailable today while
+  # `slug`, `lookup` and `id` resolve against NetBox now.
+  deviceTypeRef:
+    slug: raspberry-pi-4b
+  roleRef:
+    slug: server
+
+  # Half the identity: device names are unique per site, not globally, so this filter is
+  # never omitted from a lookup.
+  siteRef:
+    name: home
+
+  # Globally unique, which makes it the strongest natural key this Kind has and the first
+  # one tried. Two CRs in two namespaces claiming one asset tag are one device, and the
+  # loser reports Conflict naming the winner.
+  assetTag: RTM-0001
+
+  serial: 10000000abcdef01
+
+  # offline, active, planned, staged, failed, inventory or decommissioning. Defaulted to
+  # NetBox's own default, so the operator manages the column from the first reconcile.
+  status: active
+
+  # front-to-rear, rear-to-front, left-to-right, right-to-left, side-to-rear, rear-to-side,
+  # bottom-to-top, top-to-bottom, passive or mixed. Not defaulted: an unset airflow is a
+  # real state in NetBox.
+  # airflow: passive
+
+  # DecimalFields, so strings: an OpenAPI `number` round-trips through IEEE-754 and the
+  # sixth decimal place is roughly a tenth of a metre. Compared numerically, so "51.9244"
+  # and NetBox's "51.924400" produce no PATCH.
+  latitude: "51.9244"
+  longitude: "4.4777"
+
+  # The three deferred one-to-ones. The ring is Device -> IPAddress -> Interface -> Device,
+  # so no apply order satisfies them: all three are stripped from the POST and applied by a
+  # follow-up PATCH, with Ready=False/DeferredFieldPending in between. NetBoxIPAddress is
+  # #199, so these are commented out until it lands.
+  # primaryIP4Ref:
+  #   name: rtmrpi0001-eth0
+  # primaryIP6Ref:
+  #   name: rtmrpi0001-eth0-v6
+  # oobIPRef:
+  #   name: rtmrpi0001-oob
+
+  # A containment-shaped reference that is deliberately not a containment parent:
+  # on_delete=SET_NULL leaves the device row alive with the column cleared, so an owner
+  # reference here would garbage-collect a CR whose NetBox object still exists.
+  # clusterRef:
+  #   name: homelab-k3s
+
+  # on_delete=PROTECT, and part of the identity when it is set: two tenants sharing a site
+  # may each have an `sw1`.
+  # tenantRef:
+  #   name: donkerslootstraat
+
+  # dcim.Platform is NBO-027, so slug mode until it lands.
+  # platformRef:
+  #   slug: debian-12
+
+  description: Raspberry Pi 4B, house RTM
+  comments: Managed by netbox-operator.
