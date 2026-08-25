@@ -310,9 +310,35 @@ removing an optional field that nobody set is a no-op, and children already mate
 survive their parent losing its sugar, because the marker — not the parent's spec — is
 what identifies them.
 
-Not built yet; the materialisation ticket is NBO-032
-([#45](https://github.com/ricardomolendijk/netbox-operator/issues/45)), tracked in
-[object lifecycle](../concepts/object-lifecycle.md).
+### How rule 5 is implemented
+
+Built in `api/v1alpha1/inline_children.go` and `internal/reconciler/children.go`
+([#45](https://github.com/ricardomolendijk/netbox-operator/issues/45)); the mechanism is
+documented in [inline children](../concepts/inline-children.md). What the prose above left
+open, settled by the implementation:
+
+- **A capability, not a Descriptor field.** A parent Kind implements
+  `InlineParent.InlineChildren()` next to its spec struct, and the engine's entire per-kind
+  knowledge of children is one type assertion. A Kind that has none answers by not
+  implementing the method, and reconciles exactly as it did before the materialiser existed.
+- **The name is derived, deterministic, and from `metadata.name`.**
+  `slugify(parent + discriminator + key)` per level, truncated to 246 characters plus six hex
+  characters of the untruncated slug's SHA-256 when it would exceed the 253-character limit on
+  a CR name. Two declared children deriving one name is reported as a `Conflict` and **nothing
+  is written**, because two entries applying one name in turn would flap forever.
+- **Pruning needs three facts and requires all three**: the `owned-by-path` annotation, a
+  controller owner reference to *this* parent, and a path absent from the parent's current
+  spec. On top of that there is a hard cap — a prune set larger than the declared set plus a
+  small margin sets `PruneBlocked` and deletes nothing.
+- **Convergence is server-side apply under its own field manager**,
+  `netbox-operator/children`, so the fields the materialiser sets are reverted on the next
+  reconcile and the fields it never sets are left alone. The apply is made *unforced first*:
+  the API server's refusal is what names the fields, which is how they reach the
+  `ChildFieldReverted` Event.
+- **`kubectl wait` on a parent means the parent and its children.** `ChildrenReady` is a
+  condition in its own right, and a `Ready=True` is downgraded while any declared child is not
+  Ready — but a `Ready=False` a step already set for its own reason is left alone, because it
+  is the more specific answer.
 
 ## Why not make the parent ref the *controller* reference
 

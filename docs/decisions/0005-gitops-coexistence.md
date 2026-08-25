@@ -9,6 +9,9 @@ just `generated-by` ([#166](https://github.com/ricardomolendijk/netbox-operator/
 **Amended:** 2026-08-24 — §1 now says where a *mutating admission webhook* sits against this
 rule, and why the operator ships none
 ([#68](https://github.com/ricardomolendijk/netbox-operator/issues/68)).
+**Amended:** 2026-08-24 — §2 built: what writes the markers, and the field manager that keeps §1
+checkable while the operator converges a child's spec
+([#45](https://github.com/ricardomolendijk/netbox-operator/issues/45)).
 
 ## The governing principle
 
@@ -133,7 +136,31 @@ parent's current spec. Two of those three are redundant by construction; requiri
 is what keeps a bug in any one of them from deleting somebody's data.
 
 The annotation set is **configurable, and every entry can be disabled**, because
-annotating for a tool you do not run is noise. See §5.
+annotating for a tool you do not run is noise. See §5. The `managed-by` label and the
+`generated-by` annotation are the exceptions and are not configurable: they are how the
+operator recognises its own output.
+
+### What writes them, and how §1 survives it
+
+The child materialiser (NBO-032, `internal/reconciler/children.go`) writes every marker above,
+under its own server-side-apply field manager: **`netbox-operator/children`**, distinct from
+the `netbox-operator` that §1 pins.
+
+That separation is what keeps §1 checkable rather than merely stated. §1's rule is not "the
+operator never writes a spec" — it is "the operator never writes the spec of a CR it did not
+create", and converging a materialised child's spec is the operator writing its *own* output,
+which nothing reverts. Two managers make the difference readable from outside:
+
+| `metadata.managedFields` shows | Means |
+|---|---|
+| `f:spec` under `netbox-operator/children` | the materialiser converging a child it created. Expected. |
+| `f:spec` under `netbox-operator` | §1 has been broken. |
+
+The guard in front of the write is a `GET` on the target name before anything is sent: an
+object that does not carry **both** the `owner-uid` label for this parent and a controller
+owner reference to it is not written to at all, and the parent reports `Conflict`
+([ADR-0003 rule 5](0003-ownership-and-references.md)). `specGuard` is the backstop behind that,
+keyed on the same controller owner reference.
 
 ### 3. Allocations survive a cluster rebuild, without writing to Git
 

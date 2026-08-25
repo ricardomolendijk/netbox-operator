@@ -165,8 +165,18 @@ func newObjectController(mgr ctrl.Manager, endpoints reconciler.Endpoints, kind 
 			Status:     statusWriter{writer},
 			Finalizers: finalizerWriter{writer},
 			Owners:     ownerWriter{writer},
-			Events:     mgr.GetEventRecorderFor(kind.name),
-			Scheme:     mgr.GetScheme(),
+
+			// Through specGuard like everything else, and it passes for a reason rather
+			// than by accident: specGuard.generated() keys on the *controller* owner
+			// reference, and every object handed to this writer carries one naming the
+			// parent that built it. A hand-written CR does not, which is why the guard is
+			// still a real backstop on this path -- if the non-hijacking check in
+			// children.go were ever removed, the write would be refused here.
+			Children: childWriter{writer},
+			GitOps:   gitOpsDefaults(),
+
+			Events: mgr.GetEventRecorderFor(kind.name),
+			Scheme: mgr.GetScheme(),
 			// Descriptors is left nil deliberately: the engine then reads the
 			// package-level registry, which is the one every kind's init() filled.
 		},
@@ -304,6 +314,49 @@ type ownerWriter struct{ client.Client }
 // from a stale read is rejected outright rather than applied over a concurrent addition.
 func (w ownerWriter) UpdateOwnerReferences(ctx context.Context, obj client.Object) error {
 	return patchMetadata(ctx, w.Client, obj, "ownerReferences", obj.GetOwnerReferences())
+}
+
+// childWriter creates, updates and deletes the child CRs a parent's inline lists declare.
+//
+// The one writer in this file that is not narrowed to a single metadata field, because
+// materialising a child means bringing a whole object into existence and there is no smaller
+// shape that does it. What keeps ADR-0005 §1 intact is not the interface here but what the
+// materialiser hands it: every object carries a controller owner reference naming the parent
+// that built it, so it is the operator's own output rather than Git's input -- and specGuard,
+// which this is wrapped in, refuses anything that is not.
+//
+// The `create` and `delete` this needs are granted by each kind's own RBAC marker, in its own
+// controller file, rather than by one rule here: controller-gen does not accept a wildcard
+// resource, so the alternative is a hand-maintained list of every kind -- exactly the thing
+// that goes stale when a kind is added.
+type childWriter struct{ client.Client }
+
+// Apply server-side-applies obj under reconciler.ChildFieldManager.
+//
+// A field manager of its own, overriding the one on the wrapped client: server-side apply
+// records ownership per field per manager, so the separate name is what lets the materialiser
+// own the fields it sets on a child and leave the rest to whoever set them. It also keeps the
+// invariant readable from outside -- `f:spec` under netbox-operator/children is the
+// materialiser's own output, `f:spec` under netbox-operator would be a broken promise.
+func (w childWriter) Apply(ctx context.Context, obj client.Object, opts ...client.PatchOption) error {
+	opts = append(opts, client.FieldOwner(reconciler.ChildFieldManager))
+
+	if err := w.Patch(ctx, obj, client.Apply, opts...); err != nil {
+		return fmt.Errorf("applying %s/%s: %w", obj.GetNamespace(), obj.GetName(), err)
+	}
+
+	return nil
+}
+
+// gitOpsDefaults is the GitOps annotation set the shipped manager uses.
+//
+// A function rather than a package variable, so that two controllers cannot end up sharing --
+// and one of them mutating -- a single Extra map. The chart values that will populate it are
+// NBO-061; until then this is ADR-0005 §5's documented default, Argo CD on and Flux off.
+func gitOpsDefaults() *reconciler.GitOps {
+	defaults := reconciler.DefaultGitOps()
+
+	return &defaults
 }
 
 // patchMetadata writes one field of obj's metadata and nothing else.

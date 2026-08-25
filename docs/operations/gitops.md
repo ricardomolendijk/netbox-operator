@@ -116,6 +116,36 @@ The generation stays at `1` through any number of reconciles. It moves only when
 That is what `TestStatusOnlyReconcileNeverBumpsGeneration` asserts against a real API
 server, so the manual check is a confirmation rather than the only evidence.
 
+### Objects the operator generates, which are not in Git
+
+`ignoreDifferences` covers the CRs Git *does* contain. The other case is a CR Git does not
+contain at all: a child materialised from a parent's inline list, or the resource a claim
+allocated. Argo treats a live resource with no counterpart in the manifest set as
+**extraneous** and reports `OutOfSync` for it — permanently, since nothing will ever add it to
+Git.
+
+The operator handles this itself. Every object it generates carries Argo's own mechanism for
+exactly this case:
+
+```yaml
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: netbox-operator
+    netbox.kubeforge.org/owner-uid: 8f1c…
+  annotations:
+    argocd.argoproj.io/compare-options: IgnoreExtraneous
+    netbox.kubeforge.org/generated-by: netboxvirtualmachine/homelab/dns
+    netbox.kubeforge.org/owned-by-path: spec.interfaces[eth0]
+```
+
+Nothing to configure for the default case; the annotation is on unless you switch it off. What
+each marker is for, and why there are two of them, is in
+[inline children](../concepts/inline-children.md#what-a-materialised-child-carries).
+
+**Do not add `prune: false` or an exclusion for these kinds to work around an `OutOfSync`.**
+If a generated child is showing as extraneous, the annotation is missing — check whether
+`gitops.argocd.enabled` was turned off in the chart values.
+
 ## Flux
 
 Flux prunes by inventory and ignores `status`, so a `Kustomization` needs nothing special:
@@ -149,6 +179,15 @@ condition.
 One Flux-specific note: `spec.force` is for immutable fields and there are none here, so
 leave it off. A forced apply is a delete-and-recreate of the CR, which takes the finalizer
 path and deletes the NetBox object on the way through.
+
+### Objects the operator generates
+
+Flux prunes by its own inventory: a resource it did not apply is not in the `Kustomization`'s
+inventory, so it is neither pruned nor diffed, and a materialised child needs nothing. That is
+why the Flux annotation ships **disabled** and the Argo one does not.
+
+`kustomize.toolkit.fluxcd.io/reconcile: disabled` exists for the narrower case of wanting the
+child excluded from `flux diff` output too. Enable it with `gitops.flux.enabled: true`.
 
 ## Rebuilding a cluster from Git
 

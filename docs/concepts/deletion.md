@@ -197,11 +197,12 @@ unreachable**. An escape hatch that only works when it is not needed is not an e
 | 1 | The `netbox.kubeforge.org/skip-finalizer=true` annotation | Drop the finalizer, `Warning`/`FinalizerSkipped`. No NetBox call. |
 | 2 | `spec.deletionPolicy: Retain` | Drop the finalizer, `Normal`/`Retained`. No NetBox call. |
 | 3 | `status.id == 0` | Drop the finalizer, `Normal`/`NothingToDelete`. No NetBox call. |
-| 4 | The endpoint is not `Ready` | `Deleting=False, Reason=WaitingForEndpoint`. Keep the finalizer, requeue in 30s. |
-| 5 | `DELETE` returns success | Drop the finalizer, `Normal`/`Deleted`. |
-| 6 | `DELETE` returns 404 | Drop the finalizer, `Normal`/`Deleted`. Already gone is the end state that was asked for. |
-| 7 | `DELETE` returns 409, or a body naming a protected relation | `Deleting=False, Reason=Protected`, NetBox's message verbatim. Keep the finalizer, requeue with capped backoff. |
-| 8 | Anything else | `Deleting=False`, reason and interval from the [error table](errors-and-retries.md). Keep the finalizer. |
+| 4 | A child CR this object [materialised](inline-children.md) is still in the cluster | `Deleting=False, Reason=PendingDependents` naming it. Keep the finalizer, requeue in 15s. **This is what orders the NetBox deletes**, not `blockOwnerDeletion` — see below. |
+| 5 | The endpoint is not `Ready` | `Deleting=False, Reason=WaitingForEndpoint`. Keep the finalizer, requeue in 30s. |
+| 6 | `DELETE` returns success | Drop the finalizer, `Normal`/`Deleted`. |
+| 7 | `DELETE` returns 404 | Drop the finalizer, `Normal`/`Deleted`. Already gone is the end state that was asked for. |
+| 8 | `DELETE` returns 409, or a body naming a protected relation | `Deleting=False, Reason=Protected`, NetBox's message verbatim. Keep the finalizer, requeue with capped backoff. |
+| 9 | Anything else | `Deleting=False`, reason and interval from the [error table](errors-and-retries.md). Keep the finalizer. |
 
 A CR that carries no finalizer of ours is left alone entirely: something else is holding it
 open, and requeueing against that would be a busy loop.
@@ -211,6 +212,18 @@ over `status.netboxID` instead of `status.id` and reporting `AddressRetained` wh
 reports `Retained` — with one difference: steps 4, 7 and 8 are bounded, and the eighth attempt
 releases the finalizer rather than keeping it
 ([the claim reference](../reference/netboxipaddressclaim.md#it-still-cannot-make-a-namespace-undeletable)).
+
+**Step 4 is why a cascade comes out in the right order.** `blockOwnerDeletion: true` is on
+every materialised child, but it bites only under *foreground* propagation and `kubectl delete`
+defaults to background — so under the default the garbage collector removes the parent and its
+children at the same time. Step 4 is what makes the children's NetBox objects go first and the
+parent's last, under both policies. Without it the end state would still be correct, because
+NetBox refuses to delete a VM that still has interfaces, but it would be reached through a
+queue of 409s and a `Protected` condition pointing at the wrong cause.
+
+A child whose own NetBox delete is permanently `PROTECT`-refused therefore leaves the parent
+permanently in `PendingDependents`. That is the correct outcome, and infinitely preferable to a
+force-delete that orphans a NetBox object nobody is tracking any more.
 
 The `Deleting` condition is only ever `False`. The finalizer comes off the instant the NetBox
 side settles, so a `True` would have to sit on a CR that no longer exists to carry it. The

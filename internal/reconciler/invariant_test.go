@@ -4,6 +4,7 @@ import (
 	"context"
 	"maps"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -290,6 +291,23 @@ func TestStatusWriterIsTheOnlyObjectWriter(t *testing.T) {
 		"Owners":      true,
 		"Events":      true,
 		"Scheme":      true,
+
+		// Children is the one entry on this list that *can* write a spec, and it is here
+		// deliberately (NBO-032). The invariant is not "the operator never writes a spec" --
+		// it is "the operator never writes the spec of a CR it did not create"
+		// (ADR-0005 §1). A materialised child is the operator's own output, so Git has no
+		// opinion about its spec and nothing reverts it; that is what makes convergence
+		// possible at all. What keeps the invariant is not this interface's shape but the
+		// guard in front of every write: children.go GETs the target name first and refuses
+		// to touch anything that does not carry both of its markers, and specGuard --
+		// which the shipped implementation is wrapped in -- refuses anything with no
+		// controller owner reference of ours. Widening this further still means editing
+		// this list.
+		"Children": true,
+
+		// GitOps is configuration, not a collaborator: a struct of booleans and a map of
+		// annotation strings, with no route to the API server at all.
+		"GitOps": true,
 	}
 
 	engine := reflect.TypeFor[Engine]()
@@ -329,6 +347,21 @@ func TestStatusWriterIsTheOnlyObjectWriter(t *testing.T) {
 		if writer.typ.NumMethod() != 1 || writer.typ.Method(0).Name != writer.method {
 			t.Errorf("%s has %d methods, want only %s", writer.name, writer.typ.NumMethod(), writer.method)
 		}
+	}
+
+	// ChildWriter cannot be narrowed to one field -- materialising a child is bringing a whole
+	// object into existence -- so what is pinned instead is the method *set*. These four are
+	// what converging a set of children needs: read the name, write the object, list the
+	// candidates, delete the ones no longer declared. A fifth is a capability nobody reviewed.
+	children := reflect.TypeFor[ChildWriter]()
+
+	methods := make([]string, 0, children.NumMethod())
+	for i := range children.NumMethod() {
+		methods = append(methods, children.Method(i).Name)
+	}
+
+	if want := []string{"Apply", "Delete", "Get", "List"}; !slices.Equal(methods, want) {
+		t.Errorf("ChildWriter has %v, want exactly %v", methods, want)
 	}
 }
 

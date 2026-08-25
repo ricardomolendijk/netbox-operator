@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
@@ -121,6 +124,16 @@ func (p *pass) deleting(ctx context.Context) (ctrl.Result, error) {
 		return p.release(ctx, out)
 	}
 
+	// After the no-NetBox-call cases and before the endpoint, because it needs neither: a
+	// Retain migration still completes with NetBox unreachable, and a parent whose children
+	// are still here does not need a client to know it has to wait.
+	if dependents, waiting := p.pendingDependents(ctx); waiting {
+		return p.blocked(ctx, netboxv1alpha1.ReasonPendingDependents, childRetry, fmt.Sprintf(
+			"cannot delete netbox %s/%d yet: the child CRs this object materialised still exist "+
+				"(%s), and their own finalizers have to remove their netbox objects first",
+			p.desc.Endpoint, p.obj.NetBoxStatus().ID, dependents))
+	}
+
 	endpoint, ok := p.engine.Endpoints.Endpoint(ctx,
 		p.obj.GetNamespace(), p.obj.NetBoxSpec().EndpointRef)
 	if !ok {
@@ -139,6 +152,54 @@ func (p *pass) deleting(ctx context.Context) (ctrl.Result, error) {
 	p.endpoint = endpoint
 
 	return p.deleteObject(ctx)
+}
+
+// pendingDependents names the child CRs this object materialised that are still in the
+// cluster, and whether to keep the finalizer on for them.
+//
+// **This is what orders a cascade**, not blockOwnerDeletion. That flag takes effect only
+// under *foreground* propagation and `kubectl delete` defaults to background, so under the
+// default the garbage collector removes the parent and its children concurrently. Without
+// this wait the parent's NetBox object would often be deleted first, which NetBox refuses
+// with PROTECT while its interfaces still exist: the right end state, reached through a
+// queue of 409s and a Deleting condition pointing at the wrong cause.
+//
+// Read off status.children rather than by listing every kind in the group. That is the record
+// of what this object materialised, written by the pass that materialised it, and a kind that
+// materialised nothing has an empty list and takes no API call at all.
+//
+// A read that *failed* counts as a child that is still here. Waiting is the reversible
+// answer; deleting the parent's NetBox object because a list call timed out is not.
+func (p *pass) pendingDependents(ctx context.Context) (string, bool) {
+	children := p.obj.NetBoxStatus().Children
+	if len(children) == 0 || p.engine.Children == nil {
+		return "", false
+	}
+
+	alive := make([]string, 0, len(children))
+
+	for _, child := range children {
+		live := &unstructured.Unstructured{}
+		live.SetGroupVersionKind(netboxv1alpha1.GroupVersion.WithKind(child.Kind))
+
+		err := p.engine.Children.Get(ctx,
+			client.ObjectKey{Namespace: p.obj.GetNamespace(), Name: child.Name}, live)
+
+		switch {
+		case apierrors.IsNotFound(err):
+			continue
+		case err != nil:
+			alive = append(alive, fmt.Sprintf("%s %s (unreadable: %v)", child.Kind, child.Name, err))
+		default:
+			alive = append(alive, child.Kind+" "+child.Name)
+		}
+	}
+
+	if len(alive) == 0 {
+		return "", false
+	}
+
+	return strings.Join(alive, ", "), true
 }
 
 // release is the finalizer coming off, and why.

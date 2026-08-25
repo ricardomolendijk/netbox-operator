@@ -194,6 +194,17 @@ type Engine struct {
 	// reconcile loudly, instead of silently never cascading (owners.go).
 	Owners OwnerWriter
 
+	// Children creates, updates and prunes the child CRs a parent's inline lists declare
+	// (ADR-0003 rule 5, children.go). Nil is a wiring bug rather than a mode, for the same
+	// reason a nil Owners is: a kind that implements InlineParent then reports it on the
+	// object instead of quietly materialising nothing.
+	Children ChildWriter
+
+	// GitOps is the annotation set every materialised child carries so a GitOps tool does
+	// not treat it as drift. Nil means DefaultGitOps -- Argo CD on, Flux off -- so an engine
+	// wired without an opinion gets the documented default rather than a silent nothing.
+	GitOps *GitOps
+
 	// Events records what changed in NetBox. Optional.
 	Events Recorder
 

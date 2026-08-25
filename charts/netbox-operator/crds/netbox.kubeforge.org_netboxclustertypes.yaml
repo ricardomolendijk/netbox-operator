@@ -204,6 +204,47 @@ spec:
                 description: Adopted reports that the engine took over an object it
                   did not create.
                 type: boolean
+              children:
+                description: |-
+                  Children are the child CRs this object's inline lists materialised, one entry per
+                  declared child (NBO-032).
+
+                  A status field rather than only a label query, so that `kubectl describe` answers
+                  "what did this VM create" without one. It is also what lets the pruner know which
+                  *kinds* to list after every inline entry has been removed: with an empty inline list
+                  there is no desired child left to read a GVK off, and the children recorded here are
+                  the only remaining record of what to go looking for.
+                items:
+                  description: ChildStatus is one child CR a parent's inline list
+                    materialised.
+                  properties:
+                    kind:
+                      description: Kind is the child's Kind, in this API group.
+                      type: string
+                    name:
+                      description: Name is the child CR's name, derived from the parent's
+                        metadata.name and Path.
+                      type: string
+                    path:
+                      description: |-
+                        Path is the key-based spec path that declared this child, the same string as the
+                        OwnedByPathAnnotation on the child itself: `spec.interfaces[eth0]`. The map key,
+                        because it is the child's identity within the parent -- the name is derived from it.
+                      type: string
+                    ready:
+                      description: |-
+                        Ready is the child's own Ready condition, as of this pass. False includes "the child
+                        was only just created", which is why the parent requeues rather than settling.
+                      type: boolean
+                  required:
+                  - kind
+                  - name
+                  - path
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - path
+                x-kubernetes-list-type: map
               conditions:
                 description: Conditions follow the standard Kubernetes vocabulary.
                 items:
