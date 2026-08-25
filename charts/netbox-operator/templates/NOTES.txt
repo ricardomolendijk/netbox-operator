@@ -1,0 +1,42 @@
+netbox-operator {{ .Chart.AppVersion }} is installed in namespace {{ .Release.Namespace }}.
+
+  kubectl -n {{ .Release.Namespace }} rollout status deploy/{{ include "netbox-operator.fullname" . }}
+
+Secret access is namespaced. The operator may read Secrets labelled
+netbox.kubeforge.org/endpoint-credential=true in exactly these namespaces:
+
+  {{ include "netbox-operator.credentialNamespaces" . }}
+
+An endpoint anywhere else reports Ready=False/SecretMissing. Widen it with
+--set credentialNamespaces={a,b} and note that a chart upgrade does not delete the Roles
+it no longer renders (docs/operations/rbac.md).
+
+CRDs: Helm installs charts/netbox-operator/crds/ once and never upgrades them. After
+upgrading this release, upgrade the CRDs yourself:
+
+  make upgrade-crds        # or: kubectl apply --server-side -f <chart>/crds/
+
+`helm uninstall` deliberately leaves them, because deleting a CRD deletes every CR of that
+kind and their finalizers would then delete the NetBox objects. docs/install.md.
+{{- if .Values.metrics.enabled }}
+
+Metrics: {{ if .Values.metrics.secure }}https{{ else }}http{{ end }}://{{ include "netbox-operator.fullname" . }}-metrics.{{ .Release.Namespace }}:{{ .Values.metrics.port }}/metrics
+{{- if .Values.metrics.secure }} (self-signed certificate, no authn filter -- a scraper
+needs insecureSkipVerify and the port must not leave the cluster).
+{{- end }}
+{{- if and .Values.metrics.serviceMonitor.enabled (not (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1")) }}
+
+WARNING: metrics.serviceMonitor.enabled is set but monitoring.coreos.com/v1 is not
+installed on this cluster, so no ServiceMonitor was created.
+{{- end }}
+{{- end }}
+{{- if not .Values.endpoint.enabled }}
+
+No NetBoxEndpoint was created. Apply one (docs/examples/) or set endpoint.enabled=true.
+{{- end }}
+{{- if eq .Values.drift.mode "Report" }}
+
+drift.mode is Report: the endpoint this chart renders writes NOTHING to NetBox and no
+object reaches Ready=True. That is migration time, not an operating mode -- move to
+Correct once you have read the drift it reports.
+{{- end }}

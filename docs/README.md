@@ -113,7 +113,8 @@ Dated records of decisions that are expensive to reverse. Index and status:
 
 | Page | Answers |
 |---|---|
-| [Coexisting with Flux and Argo CD](operations/gitops.md) | Why the operator never writes a `spec` and how that is enforced, the Argo CD `ignoreDifferences` and Flux `Kustomization` snippets that make it quiet, the three `driftMode` values, the cluster-rebuild and NetBox-restore walkthroughs, and the NetBox permission model |
+| [Installing](install.md) | Helm, `make deploy`, every chart value and what it reaches, which values are the chart's and which belong in a CR, what the chart deliberately does not expose, and why a chart upgrade does not upgrade the CRDs |
+| [Coexisting with Flux and Argo CD](operations/gitops.md) | Why the operator never writes a `spec` and how that is enforced, the Argo CD `ignoreDifferences` and Flux `Kustomization` snippets that make it quiet, the three `driftMode` values, the cluster-rebuild and NetBox-restore walkthroughs, the chart values that configure all of it and which of them are per-endpoint rather than per-install, and the NetBox permission model |
 | [Exporting a live NetBox](operations/exporting.md) | How `nbctl export` turns a live NetBox into manifests, why references are emitted by CR name and what that trades away, how a CR name is derived and what a collision looks like, why an operator-managed object is skipped, and why a truncated read fails the whole run |
 | [Provenance](operations/provenance.md) | What `spec.managedBy` writes into every NetBox object the operator manages, how the tag and custom-field definitions get bootstrapped, why stamping is not mandatory, what stops working when you turn it off, and why two clusters sharing one NetBox are never serialised |
 | [Observability](operations/observability.md) | Every metric with its labels, cardinality and what to alert on; which Events fire and when; the log levels and the stable key set, with `kubectl logs \| jq` recipes |

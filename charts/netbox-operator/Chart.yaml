@@ -1,0 +1,18 @@
+apiVersion: v2
+name: netbox-operator
+description: Turns NetBox into a declarative, continuously reconciled Kubernetes resource.
+type: application
+
+# The one source of truth for what this chart ships.
+#
+# `version` is the chart's, `appVersion` is the operator image tag. They are kept equal
+# and the release workflow refuses a tag that does not match `appVersion`, so there is no
+# second place to bump -- see .github/workflows/release.yaml and docs/install.md.
+version: 0.1.0
+appVersion: "0.1.0"
+
+home: https://github.com/ricardomolendijk/netbox-operator
+sources:
+- https://github.com/ricardomolendijk/netbox-operator
+keywords: [netbox, ipam, dcim, gitops]
+kubeVersion: ">=1.27.0-0"

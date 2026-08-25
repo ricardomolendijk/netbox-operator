@@ -1,0 +1,161 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "title": "netbox-operator chart values",
+  "description": "A typo in drift.mode fails at `helm install` rather than at controller startup. additionalProperties is false throughout for the same reason: `--set drift.mod=Report` is otherwise accepted and silently ignored.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["image", "credentialNamespaces", "drift", "gitops", "allocation", "metrics"],
+  "properties": {
+    "nameOverride": {"type": "string"},
+    "fullnameOverride": {"type": "string"},
+    "replicaCount": {"type": "integer", "minimum": 1},
+    "leaderElection": {"type": "boolean"},
+    "priorityClassName": {"type": "string"},
+    "terminationGracePeriodSeconds": {"type": "integer", "minimum": 0},
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository"],
+      "properties": {
+        "repository": {"type": "string", "minLength": 1},
+        "tag": {"type": "string", "description": "Empty means .Chart.AppVersion, which is the only place the version is written."},
+        "pullPolicy": {"enum": ["Always", "IfNotPresent", "Never"]}
+      }
+    },
+    "imagePullSecrets": {"type": "array", "items": {"type": "object"}},
+    "serviceAccount": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "create": {"type": "boolean"},
+        "name": {"type": "string"},
+        "annotations": {"type": "object"}
+      }
+    },
+    "credentialNamespaces": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Namespaces the operator may read credential Secrets in. Each becomes a Role and RoleBinding, and the list becomes NETBOX_CREDENTIAL_NAMESPACES. '*' is rejected: reading Secrets cluster-wide needs a cluster-wide grant this chart does not ship (docs/operations/rbac.md).",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
+        "maxLength": 63
+      }
+    },
+    "gitops": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "argocd": {"type": "object", "additionalProperties": false, "properties": {"enabled": {"type": "boolean"}}},
+        "flux": {"type": "object", "additionalProperties": false, "properties": {"enabled": {"type": "boolean"}}},
+        "extraAnnotations": {"type": "object", "additionalProperties": {"type": "string"}}
+      }
+    },
+    "drift": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "enum": ["Correct", "Report", "Off"],
+          "description": "Correct is the default and the intended steady state. Report writes nothing and is migration time, not an operating mode. Off drops the periodic resync only."
+        },
+        "resyncPeriod": {"type": "string", "pattern": "^[0-9]+(ns|us|ms|s|m|h)$"},
+        "webhookReceiver": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "enum": [false],
+              "description": "NBO-045 (#69), not implemented. Restricted to false so that asking for it is an install-time error naming the ticket, rather than a value that renders nothing."
+            }
+          }
+        }
+      }
+    },
+    "allocation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "identity": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "mode": {
+              "enum": ["Derived", "Explicit"],
+              "description": "Derived is the deterministic sha256 identity that makes a re-applied claim reclaim its address. Explicit means each claim carries spec.allocationIdentity itself, which is a manifest-authoring choice rather than operator configuration -- so this value documents the convention and renders nothing."
+            },
+            "customField": {"type": "string", "pattern": "^[a-z0-9_]*$", "maxLength": 50}
+          }
+        }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+        "secure": {"type": "boolean"},
+        "service": {"type": "object", "additionalProperties": false, "properties": {"annotations": {"type": "object"}}},
+        "serviceMonitor": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "interval": {"type": "string", "pattern": "^[0-9]+(ms|s|m|h)$"},
+            "scrapeTimeout": {"type": "string"},
+            "labels": {"type": "object"},
+            "relabelings": {"type": "array"},
+            "metricRelabelings": {"type": "array"}
+          }
+        }
+      }
+    },
+    "health": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {"port": {"type": "integer", "minimum": 1, "maximum": 65535}}
+    },
+    "endpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "name": {"type": "string", "minLength": 1},
+        "namespace": {"type": "string"},
+        "url": {"type": "string", "pattern": "^(https?://.*)?$"},
+        "token": {"type": "string"},
+        "existingSecret": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {"name": {"type": "string"}, "key": {"type": "string", "minLength": 1}}
+        },
+        "mode": {"enum": ["Apply", "DryRun"]},
+        "managedBy": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {"clusterID": {"type": "string"}}
+        },
+        "timeout": {"type": "string", "pattern": "^[0-9]+(ns|us|ms|s|m|h)$"},
+        "rateLimit": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "qps": {"type": "integer", "minimum": 0},
+            "burst": {"type": "integer", "minimum": 0}
+          }
+        }
+      }
+    },
+    "podAnnotations": {"type": "object"},
+    "podLabels": {"type": "object"},
+    "podSecurityContext": {"type": "object"},
+    "securityContext": {"type": "object"},
+    "resources": {"type": "object"},
+    "nodeSelector": {"type": "object"},
+    "tolerations": {"type": "array"},
+    "affinity": {"type": "object"},
+    "extraArgs": {"type": "array", "items": {"type": "string"}},
+    "extraEnv": {"type": "array", "items": {"type": "object"}}
+  }
+}

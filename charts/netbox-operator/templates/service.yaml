@@ -1,0 +1,28 @@
+{{- if .Values.metrics.enabled }}
+{{- /*
+One port and one scrape target: the operator's metrics are registered on
+controller-runtime's registry and served by the manager's own metrics server alongside the
+controller_runtime_*, workqueue_* and Go runtime metrics. There is no second endpoint.
+docs/operations/observability.md.
+*/ -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "netbox-operator.fullname" . }}-metrics
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "netbox-operator.labels" . | nindent 4 }}
+  {{- with .Values.metrics.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: ClusterIP
+  ports:
+  - name: {{ if .Values.metrics.secure }}https{{ else }}http{{ end }}
+    port: {{ .Values.metrics.port }}
+    targetPort: metrics
+    protocol: TCP
+  selector:
+    {{- include "netbox-operator.selectorLabels" . | nindent 4 }}
+{{- end }}

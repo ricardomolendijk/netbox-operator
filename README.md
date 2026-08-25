@@ -86,6 +86,20 @@ Full index: [`docs/README.md`](docs/README.md). Decisions and their rationale:
 operator can read and the label every credential Secret needs:
 [`docs/operations/rbac.md`](docs/operations/rbac.md).
 
+## Installing
+
+```sh
+helm install netbox-operator ./charts/netbox-operator \
+  --namespace netbox-operator-system --create-namespace \
+  --set credentialNamespaces={homelab}
+```
+
+Nothing is published yet, so the chart installs from a checkout. Full instructions,
+every value, and the one thing to know before you upgrade — Helm 3 installs CRDs once and
+never updates them — are in [`docs/install.md`](docs/install.md). The chart values that
+change GitOps and drift behaviour are documented alongside the behaviour, in
+[`docs/operations/gitops.md`](docs/operations/gitops.md#chart-values).
+
 ## Target NetBox version
 
 **NetBox 4.6.8.** Every CRD field is derived from the real Django models, not from

@@ -392,6 +392,118 @@ and commit, rather than a controller writing specs. It skips the objects the ope
 already manages, because those already have manifests in Git, and it never writes to Git
 itself -- you read the diff and you commit it.
 
+## Chart values
+
+The Helm chart is where all of this is configured at install time
+([installing](../install.md)). Two of the values look like operator settings and are not, so
+the distinction is worth stating before the list.
+
+```yaml
+gitops:
+  argocd:
+    enabled: true            # argocd.argoproj.io/compare-options: IgnoreExtraneous
+  flux:
+    enabled: false           # kustomize.toolkit.fluxcd.io/reconcile: disabled
+  extraAnnotations: {}
+
+drift:
+  mode: Correct              # Correct | Report | Off
+  resyncPeriod: 10m          # ignored under Off
+
+allocation:
+  identity:
+    mode: Derived            # Derived | Explicit
+    customField: k8s_allocation_identity
+```
+
+### `drift.*` is per endpoint, and the chart only renders one
+
+`driftMode` and `resyncPeriod` are fields of a `NetBoxEndpoint`, not settings of the manager.
+That is deliberate: two NetBoxes in one cluster can be at different stages of an adoption,
+one in `Correct` and one still in `Report`, and a single manager-wide switch could not
+express that.
+
+So `drift.mode` sets the field on the **optional** endpoint the chart renders with
+`endpoint.enabled=true` — the one-command demo install. An endpoint you keep in Git, which
+is what this page otherwise assumes, takes its value from its own manifest and the chart
+never sees it. `allocation.identity.customField` works the same way: it lands on that
+endpoint's `spec.managedBy.allocationIdentityField`.
+
+If you are managing endpoints in Git and wondering which value to set, the answer is
+neither — set `driftMode` in the manifest.
+
+`allocation.identity.mode` is the odd one out. `Explicit` means each claim carries its own
+`spec.allocationIdentity`, which is a choice about how you write manifests rather than
+something the operator can be configured to require. The value documents the convention and
+renders nothing.
+
+### `gitops.*` is manager-wide, and inert for now
+
+The annotation set is a property of the operator rather than of one NetBox, so it is one
+value for the install and it is rendered as `NETBOX_GENERATED_ANNOTATIONS` on the Deployment.
+Nothing materialises a child CR yet — that is
+[#45](https://github.com/ricardomolendijk/netbox-operator/issues/45) — so today the value is
+plumbed and unread. Said plainly, because a value that looks like it works and does not is
+worse than one that is missing.
+
+`gitops.flux.enabled` is off by default and it is the one to turn on if you run Flux:
+`kustomize.toolkit.fluxcd.io/reconcile: disabled` on a CR the operator generated is what
+stops Flux from pruning an object that was never in its inventory, in exactly the way
+`IgnoreExtraneous` stops Argo CD reporting one as extraneous. Turning on the annotations for
+a tool you do not run is noise, which is why neither is unconditional.
+
+### `drift.mode: Report` for the first week
+
+The documented adoption path, and the reason `Report` exists at all:
+
+```sh
+helm install netbox-operator ./charts/netbox-operator \
+  --namespace netbox-operator-system --create-namespace \
+  --set credentialNamespaces={homelab} \
+  --set endpoint.enabled=true --set endpoint.namespace=homelab \
+  --set endpoint.url=https://netbox.home.arpa \
+  --set drift.mode=Report
+```
+
+Then read what it would have changed — `kubectl describe`, the `DriftDetected` conditions,
+and the gap between `netbox_operator_drift_detected_total` and
+`netbox_operator_drift_corrected_total` — and when the reported drift is drift you agree
+with, `helm upgrade --set drift.mode=Correct`.
+
+Nothing converges while `Report` is on, and no object reaches `Ready=True`. `NOTES.txt`
+says so after every install that sets it, because a mode that quietly does nothing is the
+one people forget they left on.
+
+### CRDs, `--include-crds`, and Argo CD
+
+The chart ships its CRDs in `crds/`, which Helm installs once and never upgrades
+([installing](../install.md#crds-and-why-an-upgrade-does-not-touch-them)). For a GitOps
+install that is the wrong shape: the tool that owns the release should own the CRDs too, or
+a CRD change lands whenever somebody remembers to run `kubectl apply`.
+
+Template them in instead, and let Argo CD or Flux apply the whole render:
+
+```sh
+helm template netbox-operator ./charts/netbox-operator \
+  --namespace netbox-operator-system --include-crds \
+  -f values.yaml >netbox-operator.yaml
+```
+
+For an Argo CD `Application` with a Helm source, the equivalent is
+`spec.source.helm.skipCrds: false` (the default) plus `ServerSideApply=true` in
+`syncOptions` — the CRDs are large enough that client-side apply's
+`last-applied-configuration` annotation exceeds what the API server accepts:
+
+```yaml
+  syncPolicy:
+    syncOptions:
+      - ServerSideApply=true
+```
+
+And note the ordering the [installing](../install.md#crds-and-why-an-upgrade-does-not-touch-them)
+page states: CRDs before the manager, because a manager reconciling a field the old CRD
+prunes fails in a way that looks like an operator bug.
+
 ## NetBox permissions
 
 The recommended posture, and what to do on day one. It turns "do not edit NetBox by hand"
