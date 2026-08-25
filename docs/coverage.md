@@ -16,16 +16,16 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 | | count |
 |---|--:|
 | NetBox REST endpoints | 138 |
-| — implemented as a Kind | 19 |
+| — implemented as a Kind | 25 |
 | — excluded, with a reason | 26 |
-| — **not implemented** | 93 |
+| — **not implemented** | 87 |
 | in scope (endpoints − excluded) | 112 |
 | | |
-| writable columns on the implemented Kinds | 193 |
-| — written by a spec field, or engine-owned | 136 |
+| writable columns on the implemented Kinds | 299 |
+| — written by a spec field, or engine-owned | 207 |
 | — deliberately omitted, with a reason | 6 |
-| — blocked: a reference whose target model has no Kind | 23 |
-| — **MISSING**: nothing declares it and nothing blocks it | 28 |
+| — blocked: a reference whose target model has no Kind | 39 |
+| — **MISSING**: nothing declares it and nothing blocks it | 47 |
 | — of those, required on create (fails the audit) | 0 |
 | | |
 | natural-key candidates the IR calls unusable | 21 |
@@ -39,35 +39,68 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 
 | column | status | Kinds | detail |
 |---|---|--:|---|
-| `owner` | blocked | 18 | `users.Owner` is an excluded endpoint, so nothing will ever write this |
-| `tags` | MISSING | 18 | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
+| `owner` | blocked | 24 | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `tags` | MISSING | 24 | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `comments` | excluded | 6 | organisational kinds map name/slug/description only (api/v1alpha1/virtualization_clustertype.go) |
 | `tenant` | MISSING | 6 | deferred to NetBoxTenant (NBO-021), which now ships -- nothing blocks it any more |
+| `config_template` | blocked | 4 | waits on a Kind for `extras.ConfigTemplate` |
+| `comments` | MISSING | 3 | — |
+| `primary_mac_address` | blocked | 2 | waits on a Kind for `dcim.MACAddress` |
+| `vlan_translation_policy` | blocked | 2 | waits on a Kind for `ipam.VLANTranslationPolicy` |
 | `asns` | blocked | 1 | waits on a Kind for `ipam.ASN` |
-| `config_template` | blocked | 1 | waits on a Kind for `extras.ConfigTemplate` |
+| `face` | MISSING | 1 | — |
+| `front_image` | MISSING | 1 | — |
 | `group` | MISSING | 1 | deferred to NetBoxSiteGroup (NBO-066), which now ships -- nothing blocks it any more |
+| `local_context_data` | MISSING | 1 | — |
 | `local_context_data` | MISSING | 1 | NBO-059 owns it, with the rest of ConfigContextModel |
-| `primary_mac_address` | blocked | 1 | waits on a Kind for `dcim.MACAddress` |
+| `location` | MISSING | 1 | — |
+| `module` | blocked | 1 | waits on a Kind for `dcim.Module` |
+| `position` | MISSING | 1 | — |
+| `rack` | blocked | 1 | waits on a Kind for `dcim.Rack` |
+| `rear_image` | MISSING | 1 | — |
 | `region` | MISSING | 1 | deferred with dcim.Site's other optional foreign keys; NetBoxRegion now ships, so nothing blocks it any more (api/v1alpha1/dcim_site.go) |
 | `time_zone` | MISSING | 1 | no ticket and no citation anywhere in the tree: a plain TimeZoneField with no dependency on another Kind |
+| `vc_position` | MISSING | 1 | — |
+| `vc_priority` | MISSING | 1 | — |
+| `vdcs` | blocked | 1 | waits on a Kind for `dcim.VirtualDeviceContext` |
+| `virtual_chassis` | blocked | 1 | waits on a Kind for `dcim.VirtualChassis` |
 | `virtual_machine_type` | blocked | 1 | waits on a Kind for `virtualization.VirtualMachineType` |
-| `vlan_translation_policy` | blocked | 1 | waits on a Kind for `ipam.VLANTranslationPolicy` |
+| `weight` | MISSING | 1 | — |
+| `weight_unit` | MISSING | 1 | — |
+| `wireless_lans` | blocked | 1 | waits on a Kind for `wireless.WirelessLAN` |
 
 ## Uncovered columns, per Kind
 
 | model | column | class | required | status | detail |
 |---|---|---|---|---|---|
 | `dcim.Site` | `asns` | M2M | — | blocked | waits on a Kind for `ipam.ASN` |
+| `dcim.DeviceRole` | `comments` | Scalar | — | MISSING | — |
 | `dcim.Location` | `comments` | Scalar | — | excluded | organisational kinds map name/slug/description only (api/v1alpha1/virtualization_clustertype.go) |
+| `dcim.Manufacturer` | `comments` | Scalar | — | MISSING | — |
+| `dcim.Platform` | `comments` | Scalar | — | MISSING | — |
 | `dcim.Region` | `comments` | Scalar | — | excluded | organisational kinds map name/slug/description only (api/v1alpha1/virtualization_clustertype.go) |
 | `dcim.SiteGroup` | `comments` | Scalar | — | excluded | organisational kinds map name/slug/description only (api/v1alpha1/virtualization_clustertype.go) |
 | `tenancy.TenantGroup` | `comments` | Scalar | — | excluded | organisational kinds map name/slug/description only (api/v1alpha1/virtualization_clustertype.go) |
 | `virtualization.ClusterGroup` | `comments` | Scalar | — | excluded | organisational kinds map name/slug/description only (api/v1alpha1/virtualization_clustertype.go) |
 | `virtualization.ClusterType` | `comments` | Scalar | — | excluded | organisational kinds map name/slug/description only (api/v1alpha1/virtualization_clustertype.go) |
+| `dcim.Device` | `config_template` | Ref | — | blocked | waits on a Kind for `extras.ConfigTemplate` |
+| `dcim.DeviceRole` | `config_template` | Ref | — | blocked | waits on a Kind for `extras.ConfigTemplate` |
+| `dcim.Platform` | `config_template` | Ref | — | blocked | waits on a Kind for `extras.ConfigTemplate` |
 | `virtualization.VirtualMachine` | `config_template` | Ref | — | blocked | waits on a Kind for `extras.ConfigTemplate` |
+| `dcim.Device` | `face` | Enum | — | MISSING | — |
+| `dcim.DeviceType` | `front_image` | Scalar | — | MISSING | — |
 | `dcim.Site` | `group` | Ref | — | MISSING | deferred to NetBoxSiteGroup (NBO-066), which now ships -- nothing blocks it any more |
+| `dcim.Device` | `local_context_data` | JSON | — | MISSING | — |
 | `virtualization.VirtualMachine` | `local_context_data` | JSON | — | MISSING | NBO-059 owns it, with the rest of ConfigContextModel |
+| `dcim.Device` | `location` | Ref | — | MISSING | — |
+| `dcim.Interface` | `module` | Ref | — | blocked | waits on a Kind for `dcim.Module` |
+| `dcim.Device` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `dcim.DeviceRole` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `dcim.DeviceType` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `dcim.Interface` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `dcim.Location` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `dcim.Manufacturer` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `dcim.Platform` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `dcim.Region` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `dcim.Site` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `dcim.SiteGroup` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
@@ -85,9 +118,19 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 | `virtualization.VMInterface` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `virtualization.VirtualDisk` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `virtualization.VirtualMachine` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `dcim.Device` | `position` | Decimal | — | MISSING | — |
+| `dcim.Interface` | `primary_mac_address` | Ref | — | blocked | waits on a Kind for `dcim.MACAddress` |
 | `virtualization.VMInterface` | `primary_mac_address` | Ref | — | blocked | waits on a Kind for `dcim.MACAddress` |
+| `dcim.Device` | `rack` | Ref | — | blocked | waits on a Kind for `dcim.Rack` |
+| `dcim.DeviceType` | `rear_image` | Scalar | — | MISSING | — |
 | `dcim.Site` | `region` | Ref | — | MISSING | deferred with dcim.Site's other optional foreign keys; NetBoxRegion now ships, so nothing blocks it any more (api/v1alpha1/dcim_site.go) |
+| `dcim.Device` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
+| `dcim.DeviceRole` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
+| `dcim.DeviceType` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
+| `dcim.Interface` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `dcim.Location` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
+| `dcim.Manufacturer` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
+| `dcim.Platform` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `dcim.Region` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `dcim.Site` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `dcim.SiteGroup` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
@@ -112,8 +155,16 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 | `ipam.RouteTarget` | `tenant` | Ref | — | MISSING | deferred to NetBoxTenant (NBO-021), which now ships -- nothing blocks it any more |
 | `ipam.VRF` | `tenant` | Ref | — | MISSING | deferred to NetBoxTenant (NBO-021), which now ships -- nothing blocks it any more |
 | `dcim.Site` | `time_zone` | Scalar | — | MISSING | no ticket and no citation anywhere in the tree: a plain TimeZoneField with no dependency on another Kind |
+| `dcim.Device` | `vc_position` | Scalar | — | MISSING | — |
+| `dcim.Device` | `vc_priority` | Scalar | — | MISSING | — |
+| `dcim.Interface` | `vdcs` | M2M | — | blocked | waits on a Kind for `dcim.VirtualDeviceContext` |
+| `dcim.Device` | `virtual_chassis` | Ref | — | blocked | waits on a Kind for `dcim.VirtualChassis` |
 | `virtualization.VirtualMachine` | `virtual_machine_type` | Ref | — | blocked | waits on a Kind for `virtualization.VirtualMachineType` |
+| `dcim.Interface` | `vlan_translation_policy` | Ref | — | blocked | waits on a Kind for `ipam.VLANTranslationPolicy` |
 | `virtualization.VMInterface` | `vlan_translation_policy` | Ref | — | blocked | waits on a Kind for `ipam.VLANTranslationPolicy` |
+| `dcim.DeviceType` | `weight` | Decimal | — | MISSING | — |
+| `dcim.DeviceType` | `weight_unit` | Enum | — | MISSING | — |
+| `dcim.Interface` | `wireless_lans` | M2M | — | blocked | waits on a Kind for `wireless.WirelessLAN` |
 
 ## Natural-key candidates the IR calls unusable
 
@@ -126,13 +177,13 @@ each pinned column's class rather than from the IR's reason string.
 |---|---|---|---|---|
 | `circuits.ProviderAccount` | — | `%(app_label)s_%(class)s_unique_provider_name` | unusable | constraint condition is more than a null pin: ['name'] |
 | `dcim.CableTermination` | — | `%(app_label)s_%(class)s_unique_connector` | unusable | no registered filter parameter for column 'connector' (tried: connector, connector_id) |
-| `dcim.Device` | — | `%(app_label)s_%(class)s_unique_name_site` | usable via #216 | null pins are all foreign keys: `?<column>_id=null` (registry.NullColumnRef) |
-| `dcim.DeviceRole` | — | `%(app_label)s_%(class)s_name` | usable via #216 | null pins are all foreign keys: `?<column>_id=null` (registry.NullColumnRef) |
-| `dcim.DeviceRole` | — | `%(app_label)s_%(class)s_slug` | usable via #216 | null pins are all foreign keys: `?<column>_id=null` (registry.NullColumnRef) |
+| `dcim.Device` | yes | `%(app_label)s_%(class)s_unique_name_site` | usable via #216 | null pins are all foreign keys: `?<column>_id=null` (registry.NullColumnRef) |
+| `dcim.DeviceRole` | yes | `%(app_label)s_%(class)s_name` | usable via #216 | null pins are all foreign keys: `?<column>_id=null` (registry.NullColumnRef) |
+| `dcim.DeviceRole` | yes | `%(app_label)s_%(class)s_slug` | usable via #216 | null pins are all foreign keys: `?<column>_id=null` (registry.NullColumnRef) |
 | `dcim.Location` | yes | `%(app_label)s_%(class)s_name` | usable via #216 | null pins are all foreign keys: `?<column>_id=null` (registry.NullColumnRef) |
 | `dcim.Location` | yes | `%(app_label)s_%(class)s_slug` | usable via #216 | null pins are all foreign keys: `?<column>_id=null` (registry.NullColumnRef) |
-| `dcim.Platform` | — | `%(app_label)s_%(class)s_name` | usable via #216 | null pins are all foreign keys: `?<column>_id=null` (registry.NullColumnRef) |
-| `dcim.Platform` | — | `%(app_label)s_%(class)s_slug` | usable via #216 | null pins are all foreign keys: `?<column>_id=null` (registry.NullColumnRef) |
+| `dcim.Platform` | yes | `%(app_label)s_%(class)s_name` | usable via #216 | null pins are all foreign keys: `?<column>_id=null` (registry.NullColumnRef) |
+| `dcim.Platform` | yes | `%(app_label)s_%(class)s_slug` | usable via #216 | null pins are all foreign keys: `?<column>_id=null` (registry.NullColumnRef) |
 | `dcim.Region` | yes | `%(app_label)s_%(class)s_name` | usable via #216 | null pins are all foreign keys: `?<column>_id=null` (registry.NullColumnRef) |
 | `dcim.Region` | yes | `%(app_label)s_%(class)s_slug` | usable via #216 | null pins are all foreign keys: `?<column>_id=null` (registry.NullColumnRef) |
 | `dcim.SiteGroup` | yes | `%(app_label)s_%(class)s_name` | usable via #216 | null pins are all foreign keys: `?<column>_id=null` (registry.NullColumnRef) |
@@ -179,25 +230,25 @@ each pinned column's class rather than from the IR's reason string.
 | `dcim/console-server-ports` | `dcim.ConsoleServerPort` | — | MISSING | — |
 | `dcim/device-bay-templates` | `dcim.DeviceBayTemplate` | — | MISSING | — |
 | `dcim/device-bays` | `dcim.DeviceBay` | — | MISSING | — |
-| `dcim/device-roles` | `dcim.DeviceRole` | — | MISSING | — |
-| `dcim/device-types` | `dcim.DeviceType` | — | MISSING | — |
-| `dcim/devices` | `dcim.Device` | — | MISSING | — |
+| `dcim/device-roles` | `dcim.DeviceRole` | `NetBoxDeviceRole` | implemented | — |
+| `dcim/device-types` | `dcim.DeviceType` | `NetBoxDeviceType` | implemented | — |
+| `dcim/devices` | `dcim.Device` | `NetBoxDevice` | implemented | — |
 | `dcim/front-port-templates` | `dcim.FrontPortTemplate` | — | MISSING | — |
 | `dcim/front-ports` | `dcim.FrontPort` | — | MISSING | — |
 | `dcim/interface-templates` | `dcim.InterfaceTemplate` | — | MISSING | — |
-| `dcim/interfaces` | `dcim.Interface` | — | MISSING | — |
+| `dcim/interfaces` | `dcim.Interface` | `NetBoxInterface` | implemented | — |
 | `dcim/inventory-item-roles` | `dcim.InventoryItemRole` | — | MISSING | — |
 | `dcim/inventory-item-templates` | `dcim.InventoryItemTemplate` | — | MISSING | — |
 | `dcim/inventory-items` | `dcim.InventoryItem` | — | MISSING | — |
 | `dcim/locations` | `dcim.Location` | `NetBoxLocation` | implemented | — |
 | `dcim/mac-addresses` | `dcim.MACAddress` | — | MISSING | — |
-| `dcim/manufacturers` | `dcim.Manufacturer` | — | MISSING | — |
+| `dcim/manufacturers` | `dcim.Manufacturer` | `NetBoxManufacturer` | implemented | — |
 | `dcim/module-bay-templates` | `dcim.ModuleBayTemplate` | — | MISSING | — |
 | `dcim/module-bays` | `dcim.ModuleBay` | — | MISSING | — |
 | `dcim/module-type-profiles` | `dcim.ModuleTypeProfile` | — | MISSING | — |
 | `dcim/module-types` | `dcim.ModuleType` | — | MISSING | — |
 | `dcim/modules` | `dcim.Module` | — | MISSING | — |
-| `dcim/platforms` | `dcim.Platform` | — | MISSING | — |
+| `dcim/platforms` | `dcim.Platform` | `NetBoxPlatform` | implemented | — |
 | `dcim/power-feeds` | `dcim.PowerFeed` | — | MISSING | — |
 | `dcim/power-outlet-templates` | `dcim.PowerOutletTemplate` | — | MISSING | — |
 | `dcim/power-outlets` | `dcim.PowerOutlet` | — | MISSING | — |

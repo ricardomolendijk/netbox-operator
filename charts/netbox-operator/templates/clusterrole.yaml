@@ -35,9 +35,15 @@ rules:
   - netboxclustergroups
   - netboxclusters
   - netboxclustertypes
+  - netboxdeviceroles
+  - netboxdevices
+  - netboxdevicetypes
+  - netboxinterfaces
   - netboxipaddressclaims
   - netboxipaddresses
   - netboxlocations
+  - netboxmanufacturers
+  - netboxplatforms
   - netboxprefixes
   - netboxregions
   - netboxroutetargets
@@ -64,9 +70,15 @@ rules:
   - netboxclustergroups/finalizers
   - netboxclusters/finalizers
   - netboxclustertypes/finalizers
+  - netboxdeviceroles/finalizers
+  - netboxdevices/finalizers
+  - netboxdevicetypes/finalizers
+  - netboxinterfaces/finalizers
   - netboxipaddressclaims/finalizers
   - netboxipaddresses/finalizers
   - netboxlocations/finalizers
+  - netboxmanufacturers/finalizers
+  - netboxplatforms/finalizers
   - netboxprefixes/finalizers
   - netboxregions/finalizers
   - netboxroutetargets/finalizers
@@ -89,15 +101,22 @@ rules:
   - netboxclustergroups/status
   - netboxclusters/status
   - netboxclustertypes/status
+  - netboxdeviceroles/status
+  - netboxdevices/status
+  - netboxdevicetypes/status
   - netboxendpoints/status
+  - netboxinterfaces/status
   - netboxipaddressclaims/status
   - netboxipaddresses/status
   - netboxlocations/status
+  - netboxmanufacturers/status
+  - netboxplatforms/status
   - netboxprefixes/status
   - netboxregions/status
   - netboxroutetargets/status
   - netboxsitegroups/status
   - netboxsites/status
+  - netboxsweeps/status
   - netboxtags/status
   - netboxtenantgroups/status
   - netboxtenants/status
@@ -116,6 +135,7 @@ rules:
   resources:
   - netboxendpoints
   - netboxrefgrants
+  - netboxsweeps
   verbs:
   - get
   - list
