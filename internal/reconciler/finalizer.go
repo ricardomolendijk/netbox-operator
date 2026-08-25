@@ -124,6 +124,15 @@ func (p *pass) deleting(ctx context.Context) (ctrl.Result, error) {
 		return p.release(ctx, out)
 	}
 
+	// After releaseWithoutDeleting, so the two existing ways out still work: the break-glass
+	// annotation drops the finalizer without calling NetBox, and `deletionPolicy: Retain`
+	// deletes nothing, so neither needs a decision about data this delete is not going to
+	// destroy. Before the endpoint is resolved, because the refusal is the operator's and
+	// does not depend on NetBox being reachable.
+	if blocked, ok := p.dataLossBlocked(); ok {
+		return p.blocked(ctx, netboxv1alpha1.ReasonDataLossBlocked, p.resync(), blocked)
+	}
+
 	// After the no-NetBox-call cases and before the endpoint, because it needs neither: a
 	// Retain migration still completes with NetBox unreachable, and a parent whose children
 	// are still here does not need a client to know it has to wait.
@@ -261,6 +270,38 @@ func (p *pass) releaseWithoutDeleting() (release, bool) {
 	}
 
 	return release{}, false
+}
+
+// dataLossBlocked reports whether this delete is one the operator refuses to make, and why.
+//
+// The case is narrow and it is not "deleting this is inconvenient": that is RetainOnDelete,
+// which changes the default rather than refusing. This is a delete NetBox performs happily
+// and which destroys data on *other* objects, so the engine's usual safety net -- send the
+// DELETE, let NetBox refuse it with a `PROTECT`, report Protected and retry -- cannot fire.
+// extras.CustomField is the case: its values live in each object's own `custom_field_data`
+// JSON, so there are no rows to protect, and a `pre_delete` signal strips the key from every
+// object of every assigned type (netbox/extras/signals.py, handle_cf_deleted).
+//
+// The finalizer stays on, which is what makes this reversible: the CR is still here, the
+// NetBox object is still here, and either annotating the CR or switching it to
+// `deletionPolicy: Retain` finishes the deletion. Nothing about this state resolves on its
+// own, so it requeues at the endpoint's resync rather than fast -- and the CR change that
+// clears it wakes the controller anyway.
+func (p *pass) dataLossBlocked() (string, bool) {
+	if !p.desc.DataLossOnDelete {
+		return "", false
+	}
+
+	if p.obj.GetAnnotations()[netboxv1alpha1.AllowDataLossAnnotation] == "true" {
+		return "", false
+	}
+
+	return fmt.Sprintf(
+		"deleting netbox %s/%d destroys this field's stored value on every object in netbox that has "+
+			"one, and netbox does not refuse it; the finalizer stays on. Set the annotation %s=true to "+
+			"accept the loss, or spec.deletionPolicy: Retain to keep the netbox object "+
+			"(docs/concepts/deletion.md)",
+		p.desc.Endpoint, p.obj.NetBoxStatus().ID, netboxv1alpha1.AllowDataLossAnnotation), true
 }
 
 // lookedFor names the lookup that would have identified the object, when one was recorded.

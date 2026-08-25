@@ -451,6 +451,63 @@ type Descriptor struct {
 	// Kind whose union members disagree keeps its containment parent for the members that
 	// cascade instead of losing it for all of them (#214).
 	ContainmentRef string
+
+	// DataLossOnDelete says a DELETE of this kind's NetBox object destroys data held on
+	// *other* objects, irreversibly, and that NetBox performs it without complaint.
+	//
+	// It is not "deleting this is inconvenient" -- RetainOnDelete already covers that, and it
+	// covers it by changing the default rather than by refusing. This is the narrower and
+	// nastier case: deleting an extras.CustomField drops that field's stored value from every
+	// object in NetBox that has one, and no `PROTECT` stands in the way because the values
+	// live in each object's own `custom_field_data` JSON rather than in rows pointing back at
+	// the definition. NetBox does it on a `pre_delete` signal --
+	// `handle_cf_deleted -> instance.remove_stale_data(instance.object_types.all())`,
+	// netbox/extras/signals.py:59-68, which issues
+	// `custom_field_data = custom_field_data - <name>` over every object of every assigned
+	// type (netbox/extras/models/customfields.py:387-401). So the engine's usual safety net --
+	// issue the DELETE and let NetBox refuse it -- cannot fire, and the refusal has to be the
+	// operator's.
+	//
+	// A kind that declares it has its finalizer refuse by default:
+	// `Deleting=False, Reason=DataLossBlocked`, cleared by the
+	// `netbox.kubeforge.org/allow-data-loss: "true"` annotation on the CR. `deletionPolicy:
+	// Retain` is the other way out and stays -- both are checked before this, so a CR that
+	// never meant to delete anything is not blocked on a decision it does not need to make
+	// (reconciler/finalizer.go, docs/concepts/deletion.md).
+	//
+	// Data here rather than a marker on the CRD for the same reason RetainOnDelete is: the
+	// annotation is read from shared metadata, and whether a kind is destructive is a fact
+	// about the NetBox model.
+	DataLossOnDelete bool
+
+	// ReservedKeySpec is the CR spec field holding the key the provenance bootstrap looks
+	// *its own* NetBox objects up by, on the kinds whose NetBox model the bootstrap also
+	// writes.
+	//
+	// Two kinds have one, and both are collisions the operator creates for itself: the
+	// bootstrap creates an extras.Tag by `slug` and up to four extras.CustomFields by `name`
+	// before an endpoint reports Ready (internal/provenance/bootstrap.go). So NetBoxTag and
+	// NetBoxCustomField are the two kinds where a CR can name an object the operator is
+	// already the writer of -- and `k8s_uid` is the one every stamped object in the cluster
+	// depends on. A CR that narrowed its `objectTypes`, or deleted it, would take provenance
+	// away from every kind at once: NetBoxSweep stops finding anything, multi-writer
+	// detection goes blind, and a claim refuses to allocate.
+	//
+	// So such a CR is *refused*, not merged and not adopted: `Ready=False,
+	// Reason=ReservedByOperator`, zero writes of any kind, an Event naming the field and the
+	// endpoint's own `spec.managedBy` setting that reserved it. The engine has no way to be a
+	// safe second writer of an object it is already the first writer of, and the honest
+	// version of "two writers" here is one writer and a refusal.
+	//
+	// A spec field name rather than a bool, so the engine reads the key from the same JSON
+	// spec it builds the payload from and does not have to know that a tag is identified by
+	// `slug` and a custom field by `name`. Which *values* are reserved is not here at all: it
+	// is the endpoint's resolved provenance config, per endpoint, so an endpoint that renamed
+	// `uidField` reserves the name it actually uses and an endpoint with no `spec.managedBy`
+	// reserves nothing (provenance.Config.Reserved).
+	//
+	// Empty for every other kind, which is all but two of them.
+	ReservedKeySpec string
 }
 
 // Candidates are the natural keys usable for state, in priority order. The engine tries

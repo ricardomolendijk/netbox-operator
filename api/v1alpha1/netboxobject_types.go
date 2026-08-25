@@ -190,6 +190,21 @@ const (
 	FluxReconcileDisabled = "disabled"
 )
 
+// AllowDataLossAnnotation permits a deletion that destroys data NetBox will not warn about.
+//
+// It applies to the kinds whose descriptor declares DataLossOnDelete, which today is
+// NetBoxCustomField: deleting an extras.CustomField drops that field's stored value from
+// every object in NetBox that has one, irreversibly, and NetBox performs the delete without
+// complaint because the values live in each object's own JSON rather than in rows that could
+// be `PROTECT`-ed. Without this annotation the finalizer stays on and reports
+// `Deleting=False, Reason=DataLossBlocked`.
+//
+// Only "true" permits it. Anything else -- the annotation being absent included -- blocks,
+// so a typo is safe in the direction that keeps the data. `spec.deletionPolicy: Retain` is
+// the other way out and needs no annotation: it deletes nothing in NetBox at all
+// (docs/concepts/deletion.md).
+const AllowDataLossAnnotation = "netbox.kubeforge.org/allow-data-loss"
+
 // Condition reasons for an object CR. The vocabulary is deliberately small: a reason is
 // keyed on by tooling and by the docs, so a new one is a documented addition rather than
 // a phrase invented at the call site.
@@ -444,6 +459,32 @@ const (
 	// single most dangerous line in the materialiser. Refusing is not conservatism: the
 	// blocked state is recoverable and a wrong delete is not.
 	ReasonPruneBlocked = "PruneBlocked"
+	// ReasonDataLossBlocked is on Deleting: the delete would destroy data on other objects
+	// and nobody has said that is acceptable.
+	//
+	// Its own reason rather than Protected, because Protected is NetBox refusing and clears
+	// itself when the referring object goes -- this one is the *operator* refusing, and only
+	// a human clears it, by setting AllowDataLossAnnotation or switching
+	// spec.deletionPolicy to Retain. Reporting it as Protected would send whoever is paged
+	// looking through NetBox for a dependency that does not exist.
+	ReasonDataLossBlocked = "DataLossBlocked"
+
+	// ReasonReservedByOperator is on Ready: this CR names a NetBox object the operator is
+	// already the writer of, so nothing was written.
+	//
+	// The provenance bootstrap creates the `k8s-managed` tag and the `k8s_uid`,
+	// `k8s_cluster`, `k8s_owner` and `k8s_allocation_identity` custom fields before an
+	// endpoint reports Ready, and keeps their `object_types` in step with the kinds this
+	// build carries (docs/operations/provenance.md). A CR for one of those is a second writer
+	// of an object every stamped object in the cluster depends on, and the engine has no way
+	// to make that safe -- so it refuses rather than merging, and the message names the
+	// endpoint's own `spec.managedBy` field that reserved the name.
+	//
+	// Not Conflict and not Invalid. Conflict means NetBox holds an object this CR could take
+	// over with `onConflict: Adopt`, which is exactly what must not happen here; Invalid
+	// means the spec is malformed, and this spec is fine -- it is the name that is taken, by
+	// this operator, for this endpoint.
+	ReasonReservedByOperator = "ReservedByOperator"
 )
 
 // Event reasons emitted by the engine. Events are the audit trail of what changed in
