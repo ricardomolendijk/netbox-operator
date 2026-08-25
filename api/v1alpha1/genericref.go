@@ -44,3 +44,50 @@ type IPAssignment struct {
 	// +optional
 	FHRPGroupRef *FHRPGroupRef `json:"fhrpGroupRef,omitempty"`
 }
+
+// FHRPInterface selects the interface an ipam.FHRPGroupAssignment attaches to a group.
+//
+// Exactly one member must be set: `interface_type` and `interface_id` are both `REQ`
+// (docs/netbox-schema.md -> ipam.FHRPGroupAssignment), so an assignment with no interface is
+// not a thing NetBox stores. That is the `== 1` shape rather than IPAssignment's `<= 1`, and
+// the nullability is read off the two *columns* -- never off the `interface
+// GenericForeignKey` row, which is not a column and which the digest's extractor marks `REQ`
+// unconditionally.
+//
+// +kubebuilder:validation:XValidation:rule="[has(self.interfaceRef), has(self.vmInterfaceRef)].filter(x, x).size() == 1",message="exactly one of interfaceRef or vmInterfaceRef must be set"
+type FHRPInterface struct {
+	// InterfaceRef attaches the group to a device interface -> `dcim.interface`.
+	// +optional
+	InterfaceRef *InterfaceRef `json:"interfaceRef,omitempty"`
+
+	// VMInterfaceRef attaches the group to a virtual-machine interface ->
+	// `virtualization.vminterface`.
+	// +optional
+	VMInterfaceRef *VMInterfaceRef `json:"vmInterfaceRef,omitempty"`
+}
+
+// ServiceParent selects what an ipam.Service runs on.
+//
+// Exactly one member must be set: `parent_object_type` and `parent_object_id` are both `REQ`
+// (docs/netbox-schema.md -> ipam.Service), so a service with no parent is not a thing NetBox
+// stores.
+//
+// The three members are the three targets NetBox accepts, and the FHRP group is the one worth
+// noticing: a service can be parented to a redundancy group rather than to a box, which is
+// how a virtual address's listeners are recorded.
+//
+// +kubebuilder:validation:XValidation:rule="[has(self.deviceRef), has(self.virtualMachineRef), has(self.fhrpGroupRef)].filter(x, x).size() == 1",message="exactly one of deviceRef, virtualMachineRef or fhrpGroupRef must be set"
+type ServiceParent struct {
+	// DeviceRef parents the service to a physical device -> `dcim.device`.
+	// +optional
+	DeviceRef *DeviceRef `json:"deviceRef,omitempty"`
+
+	// VirtualMachineRef parents the service to a virtual machine ->
+	// `virtualization.virtualmachine`.
+	// +optional
+	VirtualMachineRef *VirtualMachineRef `json:"virtualMachineRef,omitempty"`
+
+	// FHRPGroupRef parents the service to a first-hop-redundancy group -> `ipam.fhrpgroup`.
+	// +optional
+	FHRPGroupRef *FHRPGroupRef `json:"fhrpGroupRef,omitempty"`
+}

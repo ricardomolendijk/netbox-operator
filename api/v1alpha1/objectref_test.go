@@ -39,6 +39,11 @@ func TestRefAliasTargets(t *testing.T) {
 		{"platform", PlatformRef{}, "NetBoxPlatform"},
 		{"cluster", ClusterRef{}, "NetBoxCluster"},
 		{"ipAddress", IPAddressRef{}, "NetBoxIPAddress"},
+		{"role", RoleRef{}, "NetBoxRole"},
+		{"rir", RIRRef{}, "NetBoxRIR"},
+		// The one target with no slug column: ipam.ASN is unique on `asn` alone
+		// (docs/netbox-schema.md), so a slug-mode ref matches nothing there.
+		{"asn", ASNRef{}, "NetBoxASN"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := tc.ref.TargetGVK()
