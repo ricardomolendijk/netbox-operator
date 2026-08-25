@@ -194,6 +194,20 @@ They are committed so the generator runs in CI with no NetBox checkout and no ne
 version bump produces a reviewable diff of the inputs first and of the IR second, rather than
 one opaque regeneration. Read one with `gzip -dc hack/testdata/ir-4.6.8.json.gz | jq .`
 
+### After a regeneration: re-run the coverage audit
+
+`make coverage` joins the new IR against `internal/registry` and rewrites `docs/coverage.md`
+(the audit is `TestCoverage` in `internal/registry/coverage_test.go`). Commit the result: the
+same test compares the committed document against a fresh run, so a NetBox release that adds
+a model, or a Kind that quietly left the registry, arrives as a reviewable diff rather than
+as a number nobody checked.
+
+Four things fail on their own, at any coverage level, and are worth reading before the diff:
+a column NetBox requires on create that no spec field writes, an entry in
+`hack/coverage-exclusions.yaml` the new schema no longer bears out, a Descriptor whose
+endpoint or object type the schema does not have, and a `Taggable`/`CustomFieldable` flag the
+new serializers contradict.
+
 ### What a live NetBox would still add
 
 Everything above is read from the source, so it is only as good as the reading. `/api/schema/`

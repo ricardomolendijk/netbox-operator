@@ -44,6 +44,11 @@ jobs:
       - name: Lint
         run: make lint
 
+      # This is also where the NBO-060 coverage audit runs: TestCoverage regenerates
+      # docs/coverage.md and fails when the committed copy is stale, so a Kind that leaves
+      # the registry, a column a field map stops mapping, and a NetBox release that adds a
+      # model all arrive as a diff somebody has to commit on purpose. No separate step: the
+      # audit reads the registry, so it has to run where the Go tests run.
       - name: Test
         run: make test
 

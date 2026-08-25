@@ -92,6 +92,9 @@ operator can read and the label every credential Secret needs:
 hand-reading the REST docs — see [`docs/netbox-schema.md`](docs/netbox-schema.md)
 (generated: 159 models, 138 API endpoints) and
 [`docs/regenerating.md`](docs/regenerating.md) to retarget a newer release.
+What of those 138 endpoints is implemented, deliberately excluded or still missing is
+audited on every run of the test suite and written to
+[`docs/coverage.md`](docs/coverage.md).
 
 ## Supported kinds
 
