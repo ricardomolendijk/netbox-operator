@@ -340,7 +340,7 @@ would make every adopted device drift towards a value nobody chose.
 
 GPS coordinates in decimal degrees, as strings.
 
-Strings and not numbers, for the reason [`NetBoxSite`](netboxsite.md#speclatitude--speclongitude)
+Strings and not numbers, for the reason [`NetBoxSite`](netboxsite.md#latitude-longitude)
 gives: NetBox stores them as `DecimalField`s and returns them as strings, and an OpenAPI
 `number` round-trips through IEEE-754 on the way in and out of the API server — the sixth
 decimal place is roughly a tenth of a metre. Compared numerically, so `"51.9244"` and NetBox's
@@ -445,7 +445,7 @@ Both reachable constraints are over `Lower('name')`, so `SW1` and `sw1` at one s
 and the create that followed would be answered with a `400` — a loop where the lookup and the
 write disagree about what exists. `?name__ie=` is the difference between adopting the existing
 device and failing forever
-([lookups](../concepts/lookups.md#why-nameie-exists)).
+([lookups](../concepts/lookups.md#why-case-insensitive-lookup-exists)).
 
 ### `site_id` is never omitted
 
