@@ -1,0 +1,24 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxFHRPGroupAssignment
+metadata:
+  name: dns-eth0-vrrp-10
+  namespace: default
+spec:
+  endpointRef: homelab
+  deletionPolicy: Retain
+
+  # Exactly one member: interface_type and interface_id are both REQ. interfaceRef ->
+  # dcim.interface is the other member, and its Kind has not shipped yet, so it resolves in
+  # slug, lookup or id mode only.
+  interface:
+    vmInterfaceRef:
+      name: dns-eth0
+
+  # The containment parent: ipam.FHRPGroupAssignment.group is on_delete=CASCADE, so
+  # deleting the group takes this row and this CR with it.
+  groupRef:
+    name: vrrp-10
+
+  # Highest priority is master. Required by the column, so there is no "leave NetBox's
+  # value alone" state for it.
+  priority: 200

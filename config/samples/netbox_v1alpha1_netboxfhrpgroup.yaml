@@ -1,0 +1,22 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxFHRPGroup
+metadata:
+  name: vrrp-10
+  namespace: default
+spec:
+  endpointRef: homelab
+  deletionPolicy: Retain
+
+  # ipam.FHRPGroup has no uniqueness constraint either: (protocol, group_id) is the lookup
+  # convention, so two groups agreeing on both give one Ready and one Conflict.
+  protocol: vrrp3
+  groupId: 10
+
+  name: Gateway VRRP
+
+  # There is deliberately no authKey field: plan.md 15 permits the key only as a Secret
+  # reference, and reading a Secret into a NetBox payload is not a capability the engine
+  # has yet. Set the key in NetBox by hand; the operator never writes or clears it.
+  authType: md5
+
+  description: Redundant default gateway for the lab VLAN

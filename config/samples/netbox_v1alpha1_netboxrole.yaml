@@ -1,0 +1,19 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxRole
+metadata:
+  name: management
+  namespace: default
+spec:
+  endpointRef: homelab
+  deletionPolicy: Retain
+
+  # ipam.Role, not dcim.DeviceRole: separate models, separate endpoints. This is the kind
+  # a NetBoxPrefix's, NetBoxVLAN's or NetBoxASN's `roleRef` points at.
+  name: Management
+  slug: management
+
+  # NetBox orders roles by (weight, name), lowest first. Omit it to leave NetBox's own
+  # value alone -- the column defaults to 1000.
+  weight: 100
+
+  description: Out-of-band and infrastructure management

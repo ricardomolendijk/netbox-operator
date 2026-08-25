@@ -1,0 +1,22 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxASNRange
+metadata:
+  name: private-16-bit
+  namespace: default
+spec:
+  endpointRef: homelab
+  deletionPolicy: Retain
+
+  # `slug` is the natural key. `name` is column-unique too and deliberately is not the
+  # identity: a rename should not orphan the object.
+  name: Private 16-bit
+  slug: private-16-bit
+
+  rirRef:
+    name: rfc-1918
+
+  # NetBox's own clean() rejects end < start, and reports it as a 400 on this object.
+  start: 64512
+  end: 65534
+
+  description: RFC 6996 private ASNs

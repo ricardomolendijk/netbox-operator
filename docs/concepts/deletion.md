@@ -83,6 +83,15 @@ the table, and there is no second one.
 | [`NetBoxIPRange`](../reference/netboxiprange.md) | `Retain` | Deleting frees every address in the block at once |
 | [`NetBoxVLAN`](../reference/netboxvlan.md) | `Retain` | Deleting takes every prefix scoped to it and every termination hanging off it, and a fresh VLAN with the same `vid` is a different object |
 | [`NetBoxVRF`](../reference/netboxvrf.md) | `Retain` | A VRF is the table its prefixes and addresses are unique *within*, so deleting one changes what every address inside it means |
+| [`NetBoxRIR`](../reference/netboxrir.md) | `Retain` | The root of the allocation registry every aggregate and ASN below it points at |
+| [`NetBoxAggregate`](../reference/netboxaggregate.md) | `Retain` | Deleting loses the record of which registry allocated the block, on a table with no uniqueness constraint to recover it from |
+| [`NetBoxASN`](../reference/netboxasn.md) | `Retain` | Frees the number for reallocation under the same registry |
+| [`NetBoxASNRange`](../reference/netboxasnrange.md) | `Retain` | Deleting loses the record of which range a member ASN was drawn from |
+| [`NetBoxRole`](../reference/netboxrole.md) | `Retain` | Every referrer's foreign key is `SET_NULL`, so deleting one silently un-roles every prefix, range and VLAN using it rather than being refused |
+| [`NetBoxFHRPGroup`](../reference/netboxfhrpgroup.md) | `Retain` | Deleting loses the `(protocol, group_id)` pairing nothing in the database enforces |
+| [`NetBoxFHRPGroupAssignment`](../reference/netboxfhrpgroupassignment.md) | `Retain` | The only record of which interface backs which group at which priority |
+| [`NetBoxService`](../reference/netboxservice.md) | `Retain` | Deleting loses which addresses and ports a service was actually bound to |
+| [`NetBoxServiceTemplate`](../reference/netboxservicetemplate.md) | `Retain` | Backs real `NetBoxService` objects created from it; deleting the template should not imply deleting what it stamped out |
 | [`NetBoxVLANGroup`](../reference/netboxvlangroup.md) | **`Delete`** | A container, not an allocation — [see below](#netboxvlangroup-is-a-container-not-an-allocation) |
 | [`NetBoxIPAddressClaim`](../reference/netboxipaddressclaim.md) | **`Delete`** | The claim's CR is the only record its allocation exists — [see below](#the-claim-is-the-exception-to-the-exception) |
 | [`NetBoxCustomField`](../reference/netboxcustomfield.md) | **`Delete`**, and refused | Deleting one destroys data and NetBox does not refuse it, so the *finalizer* does — [see below](#delete-and-refused-are-not-the-same-axis) |

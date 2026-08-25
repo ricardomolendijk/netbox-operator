@@ -132,6 +132,7 @@ power, modules, cabling), circuits and VPN deliberately last.
 | `dcim` | `NetBoxManufacturer`, `NetBoxDeviceRole`, `NetBoxDeviceType`, `NetBoxPlatform`, `NetBoxDevice`, `NetBoxInterface` | M4 |
 | Claims | [`NetBoxIPAddressClaim`](docs/reference/netboxipaddressclaim.md), [`NetBoxPrefixClaim`](docs/reference/netboxprefixclaim.md), [`NetBoxIPRangeClaim`](docs/reference/netboxiprangeclaim.md) | M6 |
 | `ipam`, with a claim kind that needs it | [`NetBoxIPRange`](docs/reference/netboxiprange.md) | M6, pulled forward from M10 |
+| `ipam` remainder | [`NetBoxRIR`](docs/reference/netboxrir.md), [`NetBoxAggregate`](docs/reference/netboxaggregate.md), [`NetBoxASN`](docs/reference/netboxasn.md), [`NetBoxASNRange`](docs/reference/netboxasnrange.md), [`NetBoxRole`](docs/reference/netboxrole.md), [`NetBoxFHRPGroup`](docs/reference/netboxfhrpgroup.md), [`NetBoxFHRPGroupAssignment`](docs/reference/netboxfhrpgroupassignment.md), [`NetBoxService`](docs/reference/netboxservice.md), [`NetBoxServiceTemplate`](docs/reference/netboxservicetemplate.md) | **Available** (M10) |
 | Physical plant, wireless, circuits, VPN | ~70 further kinds | M9–M10 |
 
 ## Migrating an existing NetBox

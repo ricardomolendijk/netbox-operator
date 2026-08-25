@@ -1,0 +1,19 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxServiceTemplate
+metadata:
+  name: ssh
+  namespace: default
+spec:
+  endpointRef: homelab
+  deletionPolicy: Retain
+
+  # `name` is column-unique, matched exactly rather than case-insensitively: the constraint
+  # is a plain unique=True, so `SSH` and `ssh` are two legal rows in NetBox.
+  name: ssh
+  protocol: tcp
+
+  # A Postgres ArrayField: order is data, and NetBox does not sort it on save.
+  ports:
+    - 22
+
+  description: Secure shell

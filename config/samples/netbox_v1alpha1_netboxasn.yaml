@@ -1,0 +1,18 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxASN
+metadata:
+  name: as64512
+  namespace: default
+spec:
+  endpointRef: homelab
+  deletionPolicy: Retain
+
+  # The number is the whole identity: ipam.ASN has no name column and no slug column, and
+  # `asn` is column-unique. 1 to 4294967295 (BGP_ASN_MIN/MAX).
+  asn: 64512
+
+  # Required, and PROTECT-ed: NetBox refuses to delete the RIR while this ASN exists.
+  rirRef:
+    name: rfc-1918
+
+  description: Private AS for the lab fabric

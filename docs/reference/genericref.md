@@ -10,9 +10,9 @@ schema digest, how the pair is kept atomic and how a new union is added — see
 | | |
 |---|---|
 | API version | `netbox.kubeforge.org/v1alpha1` |
-| Go types | `IPAssignment`, `ScopeRef`, `ContactAssignmentTarget` |
-| Milestone | M3 (NBO-018, NBO-019); `ContactAssignmentTarget` M10 (NBO-056) |
-| Status | The mechanism is built. Three unions ship; several of the Kinds they target arrive in M4. |
+| Go types | `IPAssignment`, `ScopeRef`, `ContactAssignmentTarget`, `FHRPInterface`, `ServiceParent` |
+| Milestone | M3 (NBO-018, NBO-019); `ContactAssignmentTarget` M10 (NBO-056); `FHRPInterface` and `ServiceParent` M10 (NBO-055) |
+| Status | The mechanism is built. Five unions ship, three of them with the `== 1` shape. |
 
 ## The shape
 
@@ -66,6 +66,8 @@ Some NetBox pairs are nullable and some are not, and the union follows the colum
 | `IPAssignment` (`ipam.IPAddress.assigned_object_*`) | nullable | at most one | legal — the address is unassigned |
 | `ScopeRef` (`CachedScopeMixin.scope_*`) | nullable | at most one | legal — the object is globally scoped |
 | `ContactAssignmentTarget` (`tenancy.ContactAssignment.object_*`) | `REQ` | **exactly** one | rejected at admission, and the field itself is required |
+| `FHRPInterface` (`ipam.FHRPGroupAssignment.interface_*`) | `REQ` | **exactly** one | rejected at admission, and the field itself is required |
+| `ServiceParent` (`ipam.Service.parent_object_*`) | `REQ` | **exactly** one | rejected at admission, and the field itself is required |
 
 ## The unions
 
@@ -203,6 +205,44 @@ rejects `{}` at admission.
 `NetBoxDevice` lands in M4, so until then the member is admissible and reported as
 [`RefKindUnavailable`](#conditions) in all four modes.
 
+### `FHRPInterface`
+
+Which interface an `ipam.FHRPGroupAssignment` enrols in a group. `interface_type` /
+`interface_id`, **both `REQ`**, so `== 1` — an assignment with no interface is not a thing
+NetBox stores.
+
+| Member | Target Kind | NetBox object type |
+|---|---|---|
+| `interfaceRef` | `NetBoxInterface` | `dcim.interface` |
+| `vmInterfaceRef` | `NetBoxVMInterface` | `virtualization.vminterface` |
+
+Both members resolve end to end: `NetBoxInterface` and `NetBoxVMInterface` both have
+Descriptors, so this is the first `== 1` union with no unresolvable member.
+
+**Both members cascade**, through an `fhrp_group_assignments` `GenericRelation` on each target
+model — and the union is still *not* that Kind's containment parent, because its `groupRef` is a
+declared `on_delete=CASCADE` foreign key and only one slot exists. See
+[`netboxfhrpgroupassignment.md`](netboxfhrpgroupassignment.md#ownership).
+
+### `ServiceParent`
+
+What an `ipam.Service` runs on. `parent_object_type` / `parent_object_id`, both `REQ`, so `== 1`.
+
+| Member | Target Kind | NetBox object type |
+|---|---|---|
+| `deviceRef` | `NetBoxDevice` | `dcim.device` |
+| `virtualMachineRef` | `NetBoxVirtualMachine` | `virtualization.virtualmachine` |
+| `fhrpGroupRef` | `NetBoxFHRPGroup` | `ipam.fhrpgroup` |
+
+The FHRP group is the member worth noticing: a service can be parented to a *redundancy group*
+rather than to a box. All three members resolve end to end.
+
+**Every member cascades** — `dcim.Device`, `virtualization.VirtualMachine` and `ipam.FHRPGroup`
+each declare a `services` `GenericRelation` — so this union *is*
+[`NetBoxService`](netboxservice.md#ownership)'s containment parent. Note that
+`parent_object_type` is `on_delete=PROTECT`: that is about the ContentType row, not about the
+parent object, and it is not the cascade that decides ownership.
+
 ### Unions that are not written yet
 
 Deliberately absent rather than stubbed. Each is three lines of Descriptor data plus a
@@ -210,8 +250,6 @@ struct, and each lands with the Kind that needs it:
 
 | Union | Pair | Shape | Lands with |
 |---|---|---|---|
-| `ServiceParent` | `ipam.Service.parent_object_*` | `== 1` | `NetBoxService` |
-| `FHRPInterfaceTarget` | `ipam.FHRPGroupAssignment.interface_*` | `== 1` | `NetBoxFHRPGroupAssignment` |
 | `CableTerminationTarget` | `dcim.CableTermination.termination_*` | `== 1` | NBO-049 |
 
 ## Conditions

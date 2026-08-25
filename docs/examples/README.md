@@ -17,6 +17,7 @@ Examples arrive with the milestone that makes them real:
 | `vm-and-device.yaml` — clusters, VMs, devices, interfaces | M4 |
 | `vm-inline.yaml` — one VM CR that materialises its interfaces and IPs | M5 |
 | `claims.yaml` — allocate addresses and prefixes instead of hardcoding them | M6 |
+| [`ipam-remainder.yaml`](ipam-remainder.yaml) — the allocation registry, an address role, an FHRP group with its assignment, and services | **available** (M10, NBO-055) |
 | `homelab.yaml` — a full real-world topology, end to end | M9 |
 
 Each one carries the `NetBoxEndpoint` and the credential Secret it needs, so it is a single
