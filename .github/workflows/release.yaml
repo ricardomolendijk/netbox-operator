@@ -216,15 +216,28 @@ jobs:
           path: dist/
           if-no-files-found: error
 
+      # Idempotent against a release already existing for this tag: `gh release create`
+      # cannot see a release someone made through the web UI (which creates the tag and the
+      # release together, racing this workflow's own trigger on the tag push) and fails
+      # outright rather than completing what that release is missing -- the assets, in
+      # every case observed so far. `gh release view` decides which of `edit`+`upload` or
+      # `create` runs, rather than reading a mixed-cause exit code from `edit` itself.
       - name: GitHub release
         if: steps.gate.outputs.publish == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create '${{ steps.version.outputs.tag }}' \
-            --title '${{ steps.version.outputs.tag }}' \
-            --notes-file dist/release-notes.md \
-            dist/*.tgz dist/*.spdx.json
+          set -euo pipefail
+          tag='${{ steps.version.outputs.tag }}'
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release edit "$tag" --title "$tag" --notes-file dist/release-notes.md
+            gh release upload "$tag" dist/*.tgz dist/*.spdx.json --clobber
+          else
+            gh release create "$tag" \
+              --title "$tag" \
+              --notes-file dist/release-notes.md \
+              dist/*.tgz dist/*.spdx.json
+          fi
 
       - name: Summary
         run: |
