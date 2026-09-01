@@ -21,7 +21,7 @@ neither `TagsMixin` nor `CustomFieldsMixin`, so:
 
 - there is **no `tags` column** and **no `custom_fields` column** on the model;
 - `Descriptor.Taggable` and `Descriptor.CustomFieldable` are both `false`;
-- the object carries **no [provenance stamp](../concepts/provenance.md)** — no
+- the object carries **no [provenance stamp](../operations/provenance.md)** — no
   `netbox.kubeforge.org/managed` tag, no UID custom field;
 - `ipam.fhrpgroupassignment` is absent from the `object_types` list the provenance bootstrap
   declares its custom fields for.

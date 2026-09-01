@@ -260,7 +260,7 @@ applies in full.
 | `Deleting` | never | while terminating and NetBox is not settled | `Protected`, `WaitingForEndpoint`, `APIError`, `Invalid` |
 
 A **partially resolvable** `ipAddresses` writes nothing at all, exactly as
-[`NetBoxVRF`](netboxvrf.md#specimporttargets-specexporttargets)'s target lists do: half a
+[`NetBoxVRF`](netboxvrf.md#specimporttargets-and-specexporttargets)'s target lists do: half a
 many-to-many is a different set, not a smaller one.
 
 ## Printer columns

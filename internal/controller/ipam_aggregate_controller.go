@@ -10,5 +10,7 @@ import (
 // +kubebuilder:rbac:groups=netbox.kubeforge.org,resources=netboxaggregates/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=netbox.kubeforge.org,resources=netboxaggregates/finalizers,verbs=update
 
-// NetBoxAggregate's controller is one line, the same one NetBoxTag's is. A kind with no uniqueness constraint at all, whose (prefix, rir) lookup is a convention and whose ambiguous match is a Conflict (internal/registry/ipam_aggregate.go).
+// NetBoxAggregate's controller is one line, the same one NetBoxTag's is. A kind with no
+// uniqueness constraint at all, whose (prefix, rir) lookup is a convention and whose
+// ambiguous match is a Conflict (internal/registry/ipam_aggregate.go).
 func init() { registerObjectKind(&netboxv1alpha1.NetBoxAggregate{}) }

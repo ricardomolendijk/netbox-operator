@@ -121,7 +121,7 @@ object.
 `date_added DateField` — nullable, and when the block was allocated to you.
 
 The pattern **admits the empty string on purpose**, and the reason is the same one
-[`NetBoxSite`'s coordinates](netboxsite.md#speclatitude-speclongitude) have: the column is
+[`NetBoxSite`'s coordinates](netboxsite.md#latitude-longitude) have: the column is
 nullable and a `DateField` rejects `""` outright, so an emptied value has to go over the wire
 as `null` to clear rather than to fail. The descriptor declares `EmptyIsNull` for exactly that.
 Without it, clearing the field would be a `400` on every reconcile, forever.
@@ -147,7 +147,7 @@ An aggregate whose RIR has not been created yet matches nothing and the engine w
 
 Because no constraint backs it, two `NetBoxAggregate` CRs with the same `(prefix, rir)` behave
 like this: the first creates the row, the second's lookup finds it, and whichever does not own
-the [provenance stamp](../concepts/provenance.md) reports `Ready=False, Reason=Conflict` naming
+the [provenance stamp](../operations/provenance.md) reports `Ready=False, Reason=Conflict` naming
 the id. One row in NetBox, one `Ready`, one `Conflict` — never two rows.
 
 ## Deletion

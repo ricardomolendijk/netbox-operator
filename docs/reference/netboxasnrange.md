@@ -137,7 +137,7 @@ failure mode in the whole design and is worth stating plainly:
 > reports `Deleting=False, Reason=Protected`, and the message names this range's namespace and
 > name — which may be a namespace the person deleting the tenant cannot see.
 
-See [`NetBoxTenant`](netboxtenant.md#deletion) for the same story from the other end.
+See [`NetBoxTenant`](netboxtenant.md#deleting-a-tenant-is-usually-refused) for the same story from the other end.
 
 ### `spec.description`, `spec.comments`
 

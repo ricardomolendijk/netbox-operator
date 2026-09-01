@@ -102,7 +102,7 @@ another namespace needs no CR here at all.
 
 `weight PositiveSmallIntegerField def=1000`, and `meta.ordering: ('weight', 'name')`.
 
-A **pointer**, for the reason [`NetBoxPrefix.spec.isPool`](netboxprefix.md#specispool) is one:
+A **pointer**, for the reason [`NetBoxPrefix.spec.isPool`](netboxprefix.md#specispool--specmarkutilized) is one:
 the column has a Django default, so a plain `int32` cannot tell "not managed" from "managed as
 0", and adopting a role a human had ordered would reset it to 0 on the first reconcile.
 

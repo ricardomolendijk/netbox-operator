@@ -47,10 +47,9 @@ func TestInterfaceDescriptorIsRegisteredAndValid(t *testing.T) {
 // the reverse index from it, and internal/resolver's RefTargets picks the Kind up as a watch
 // target from there (docs/concepts/generic-refs.md, NBO-019).
 //
-// The other two members are asserted too, and one of them deliberately fails to resolve. That
-// is the honest state of the union on this branch: `virtualization.vminterface` arrives with
-// NBO-029 and `ipam.fhrpgroup` has no ticket in M4 at all, so this Kind closes *one* of the
-// three and the test says which.
+// The other two members are asserted too. `virtualization.vminterface` arrived with NBO-029
+// and `ipam.fhrpgroup` with NBO-055, so all three members of the union now resolve and the
+// test says so rather than leaving the count to a pull-request description.
 func TestInterfaceClosesTheIPAssignmentUnionMember(t *testing.T) {
 	d, ok := ByObjectType("dcim.interface")
 	if !ok {
@@ -64,13 +63,13 @@ func TestInterfaceClosesTheIPAssignmentUnionMember(t *testing.T) {
 
 	// The rest of the union, so the count is a fact in the repository rather than a claim in
 	// a pull-request description.
+	// The table is written to be updated as each member arrives rather than to assert a
+	// moment. All three are in now: NBO-029 registered `virtualization.vminterface` and
+	// NBO-055 registered `ipam.fhrpgroup`.
 	for objectType, wantRegistered := range map[string]bool{
-		"dcim.interface": true,
-		// NBO-029 landed while this branch was in flight, so this one is true now too. The
-		// table is written to be updated as each member arrives rather than to assert a
-		// moment -- two of three, and `ipam.fhrpgroup` has no Kind and no M4 ticket.
+		"dcim.interface":             true,
 		"virtualization.vminterface": true,
-		"ipam.fhrpgroup":             false,
+		"ipam.fhrpgroup":             true,
 	} {
 		if _, got := ByObjectType(objectType); got != wantRegistered {
 			t.Errorf("ByObjectType(%q) registered = %v, want %v", objectType, got, wantRegistered)

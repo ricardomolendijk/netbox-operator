@@ -16,16 +16,16 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 | | count |
 |---|--:|
 | NetBox REST endpoints | 138 |
-| — implemented as a Kind | 38 |
+| — implemented as a Kind | 47 |
 | — excluded, with a reason | 26 |
-| — **not implemented** | 74 |
+| — **not implemented** | 65 |
 | in scope (endpoints − excluded) | 112 |
 | | |
-| writable columns on the implemented Kinds | 456 |
-| — written by a spec field, or engine-owned | 332 |
+| writable columns on the implemented Kinds | 526 |
+| — written by a spec field, or engine-owned | 385 |
 | — deliberately omitted, with a reason | 10 |
-| — blocked: a reference whose target model has no Kind | 55 |
-| — **MISSING**: nothing declares it and nothing blocks it | 59 |
+| — blocked: a reference whose target model has no Kind | 62 |
+| — **MISSING**: nothing declares it and nothing blocks it | 69 |
 | — of those, required on create (fails the audit) | 0 |
 | | |
 | natural-key candidates the IR calls unusable | 21 |
@@ -39,8 +39,8 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 
 | column | status | Kinds | detail |
 |---|---|--:|---|
-| `owner` | blocked | 36 | `users.Owner` is an excluded endpoint, so nothing will ever write this |
-| `tags` | MISSING | 31 | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
+| `owner` | blocked | 44 | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `tags` | MISSING | 39 | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `comments` | excluded | 6 | organisational kinds map name/slug/description only (api/v1alpha1/virtualization_clustertype.go) |
 | `tenant` | MISSING | 6 | deferred to NetBoxTenant (NBO-021), which now ships -- nothing blocks it any more |
 | `config_template` | MISSING | 4 | — |
@@ -50,7 +50,8 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 | `local_context_data` | MISSING | 2 | the ConfigContextModel column on dcim.Device and virtualization.VirtualMachine. NBO-059 added the ClassJSON field class it needs and stopped at the `extras` app; #241 adds the two spec fields, and nothing else blocks them |
 | `primary_mac_address` | blocked | 2 | waits on a Kind for `dcim.MACAddress` |
 | `vlan_translation_policy` | blocked | 2 | waits on a Kind for `ipam.VLANTranslationPolicy` |
-| `asns` | blocked | 1 | waits on a Kind for `ipam.ASN` |
+| `asns` | MISSING | 1 | deferred with dcim.Site's other optional foreign keys; NetBoxASN ships with NBO-055, so nothing blocks it any more (api/v1alpha1/dcim_site.go) |
+| `auth_key` | MISSING | 1 | a pre-shared key, permitted only as spec.authKeySecretRef (plan.md 15) and the engine has no FieldClass that reads a Secret into a payload, so the column is unmapped rather than inline; it is in internal/netbox/do.go's redaction set because NetBox returns it (api/v1alpha1/ipam_fhrpgroup.go, docs/reference/netboxfhrpgroup.md) |
 | `auto_sync_enabled` | MISSING | 1 | — |
 | `data_path` | excluded | 1 | NetBox owns the git-sync trio and overwrites `data` from it (api/v1alpha1/extras_configcontext.go) |
 | `data_path` | excluded | 1 | NetBox owns the git-sync trio and overwrites `schema` from it (api/v1alpha1/extras_configcontextprofile.go) |
@@ -80,7 +81,8 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 
 | model | column | class | required | status | detail |
 |---|---|---|---|---|---|
-| `dcim.Site` | `asns` | M2M | — | blocked | waits on a Kind for `ipam.ASN` |
+| `dcim.Site` | `asns` | M2M | — | MISSING | deferred with dcim.Site's other optional foreign keys; NetBoxASN ships with NBO-055, so nothing blocks it any more (api/v1alpha1/dcim_site.go) |
+| `ipam.FHRPGroup` | `auth_key` | Scalar | — | MISSING | a pre-shared key, permitted only as spec.authKeySecretRef (plan.md 15) and the engine has no FieldClass that reads a Secret into a payload, so the column is unmapped rather than inline; it is in internal/netbox/do.go's redaction set because NetBox returns it (api/v1alpha1/ipam_fhrpgroup.go, docs/reference/netboxfhrpgroup.md) |
 | `extras.ConfigTemplate` | `auto_sync_enabled` | Scalar | — | MISSING | — |
 | `dcim.DeviceRole` | `comments` | Scalar | — | MISSING | — |
 | `dcim.Location` | `comments` | Scalar | — | excluded | organisational kinds map name/slug/description only (api/v1alpha1/virtualization_clustertype.go) |
@@ -131,10 +133,18 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 | `extras.CustomLink` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `extras.ExportTemplate` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `extras.SavedFilter` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `ipam.ASN` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `ipam.ASNRange` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `ipam.Aggregate` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `ipam.FHRPGroup` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `ipam.IPAddress` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `ipam.IPRange` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `ipam.Prefix` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `ipam.RIR` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `ipam.Role` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `ipam.RouteTarget` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `ipam.Service` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `ipam.ServiceTemplate` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `ipam.VLAN` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `ipam.VLANGroup` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `ipam.VRF` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
@@ -167,10 +177,18 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 | `dcim.SiteGroup` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `extras.ConfigContextProfile` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `extras.ConfigTemplate` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
+| `ipam.ASN` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
+| `ipam.ASNRange` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
+| `ipam.Aggregate` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
+| `ipam.FHRPGroup` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `ipam.IPAddress` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `ipam.IPRange` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `ipam.Prefix` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
+| `ipam.RIR` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
+| `ipam.Role` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `ipam.RouteTarget` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
+| `ipam.Service` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
+| `ipam.ServiceTemplate` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `ipam.VLAN` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `ipam.VLANGroup` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `ipam.VRF` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
@@ -327,19 +345,19 @@ each pinned column's class rather than from the IR's reason string.
 | `extras/tagged-objects` | `extras.TaggedItem` | — | excluded | read-only view over the tag through-table; the writable side is each object's own tags (plan.md 8) |
 | `extras/tags` | `extras.Tag` | `NetBoxTag` | implemented | — |
 | `extras/webhooks` | `extras.Webhook` | — | MISSING | — |
-| `ipam/aggregates` | `ipam.Aggregate` | — | MISSING | — |
-| `ipam/asn-ranges` | `ipam.ASNRange` | — | MISSING | — |
-| `ipam/asns` | `ipam.ASN` | — | MISSING | — |
-| `ipam/fhrp-group-assignments` | `ipam.FHRPGroupAssignment` | — | MISSING | — |
-| `ipam/fhrp-groups` | `ipam.FHRPGroup` | — | MISSING | — |
+| `ipam/aggregates` | `ipam.Aggregate` | `NetBoxAggregate` | implemented | — |
+| `ipam/asn-ranges` | `ipam.ASNRange` | `NetBoxASNRange` | implemented | — |
+| `ipam/asns` | `ipam.ASN` | `NetBoxASN` | implemented | — |
+| `ipam/fhrp-group-assignments` | `ipam.FHRPGroupAssignment` | `NetBoxFHRPGroupAssignment` | implemented | — |
+| `ipam/fhrp-groups` | `ipam.FHRPGroup` | `NetBoxFHRPGroup` | implemented | — |
 | `ipam/ip-addresses` | `ipam.IPAddress` | `NetBoxIPAddress` | implemented | — |
 | `ipam/ip-ranges` | `ipam.IPRange` | `NetBoxIPRange` | implemented | — |
 | `ipam/prefixes` | `ipam.Prefix` | `NetBoxPrefix` | implemented | — |
-| `ipam/rirs` | `ipam.RIR` | — | MISSING | — |
-| `ipam/roles` | `ipam.Role` | — | MISSING | — |
+| `ipam/rirs` | `ipam.RIR` | `NetBoxRIR` | implemented | — |
+| `ipam/roles` | `ipam.Role` | `NetBoxRole` | implemented | — |
 | `ipam/route-targets` | `ipam.RouteTarget` | `NetBoxRouteTarget` | implemented | — |
-| `ipam/service-templates` | `ipam.ServiceTemplate` | — | MISSING | — |
-| `ipam/services` | `ipam.Service` | — | MISSING | — |
+| `ipam/service-templates` | `ipam.ServiceTemplate` | `NetBoxServiceTemplate` | implemented | — |
+| `ipam/services` | `ipam.Service` | `NetBoxService` | implemented | — |
 | `ipam/vlan-groups` | `ipam.VLANGroup` | `NetBoxVLANGroup` | implemented | — |
 | `ipam/vlan-translation-policies` | `ipam.VLANTranslationPolicy` | — | MISSING | — |
 | `ipam/vlan-translation-rules` | `ipam.VLANTranslationRule` | — | MISSING | — |

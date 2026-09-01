@@ -28,13 +28,20 @@ rules:
   - netboxclustergroups
   - netboxclusters
   - netboxclustertypes
+  - netboxconfigcontextprofiles
+  - netboxconfigcontexts
+  - netboxconfigtemplates
   - netboxcontactassignments
   - netboxcontactgroups
   - netboxcontactroles
   - netboxcontacts
+  - netboxcustomfieldchoicesets
+  - netboxcustomfields
+  - netboxcustomlinks
   - netboxdeviceroles
   - netboxdevices
   - netboxdevicetypes
+  - netboxexporttemplates
   - netboxfhrpgroupassignments
   - netboxfhrpgroups
   - netboxinterfaces
@@ -47,6 +54,7 @@ rules:
   - netboxprefixclaims
   - netboxrirs
   - netboxroles
+  - netboxsavedfilters
   - netboxservices
   - netboxservicetemplates
   - netboxvirtualdisks
@@ -67,13 +75,20 @@ rules:
   - netboxclustergroups/finalizers
   - netboxclusters/finalizers
   - netboxclustertypes/finalizers
+  - netboxconfigcontextprofiles/finalizers
+  - netboxconfigcontexts/finalizers
+  - netboxconfigtemplates/finalizers
   - netboxcontactassignments/finalizers
   - netboxcontactgroups/finalizers
   - netboxcontactroles/finalizers
   - netboxcontacts/finalizers
+  - netboxcustomfieldchoicesets/finalizers
+  - netboxcustomfields/finalizers
+  - netboxcustomlinks/finalizers
   - netboxdeviceroles/finalizers
   - netboxdevices/finalizers
   - netboxdevicetypes/finalizers
+  - netboxexporttemplates/finalizers
   - netboxfhrpgroupassignments/finalizers
   - netboxfhrpgroups/finalizers
   - netboxinterfaces/finalizers
@@ -90,6 +105,7 @@ rules:
   - netboxrirs/finalizers
   - netboxroles/finalizers
   - netboxroutetargets/finalizers
+  - netboxsavedfilters/finalizers
   - netboxservices/finalizers
   - netboxservicetemplates/finalizers
   - netboxsitegroups/finalizers
@@ -114,14 +130,21 @@ rules:
   - netboxclustergroups/status
   - netboxclusters/status
   - netboxclustertypes/status
+  - netboxconfigcontextprofiles/status
+  - netboxconfigcontexts/status
+  - netboxconfigtemplates/status
   - netboxcontactassignments/status
   - netboxcontactgroups/status
   - netboxcontactroles/status
   - netboxcontacts/status
+  - netboxcustomfieldchoicesets/status
+  - netboxcustomfields/status
+  - netboxcustomlinks/status
   - netboxdeviceroles/status
   - netboxdevices/status
   - netboxdevicetypes/status
   - netboxendpoints/status
+  - netboxexporttemplates/status
   - netboxfhrpgroupassignments/status
   - netboxfhrpgroups/status
   - netboxinterfaces/status
@@ -138,6 +161,7 @@ rules:
   - netboxrirs/status
   - netboxroles/status
   - netboxroutetargets/status
+  - netboxsavedfilters/status
   - netboxservices/status
   - netboxservicetemplates/status
   - netboxsitegroups/status

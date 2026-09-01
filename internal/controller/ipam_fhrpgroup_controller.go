@@ -10,5 +10,7 @@ import (
 // +kubebuilder:rbac:groups=netbox.kubeforge.org,resources=netboxfhrpgroups/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=netbox.kubeforge.org,resources=netboxfhrpgroups/finalizers,verbs=update
 
-// NetBoxFHRPGroup's controller is one line, the same one NetBoxTag's is. The kind IPAssignment.fhrpGroupRef has pointed at since NBO-025, with two closed choice enums and no auth_key field (internal/registry/ipam_fhrpgroup.go).
+// NetBoxFHRPGroup's controller is one line, the same one NetBoxTag's is. The kind
+// IPAssignment.fhrpGroupRef has pointed at since NBO-025, with two closed choice enums and
+// no auth_key field (internal/registry/ipam_fhrpgroup.go).
 func init() { registerObjectKind(&netboxv1alpha1.NetBoxFHRPGroup{}) }
