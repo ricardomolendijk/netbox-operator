@@ -414,10 +414,17 @@ type Descriptor struct {
 	//
 	// A spec field name like ContainmentRef, and *not* an entry in Fields: it configures the
 	// operator rather than describing a NetBox column, so internal/reconciler excludes it
-	// from the payload exactly as it excludes the envelope's own fields. A name that does not
-	// match the kind's real spec field is not checked at boot and does not need to be -- the
-	// real field is then unmapped, and the first object that sets it reports
-	// Ready=False, Reason=Invalid naming it.
+	// from the payload exactly as it excludes the envelope's own fields.
+	//
+	// The field it names stays per kind rather than moving onto NetBoxObjectSpec, which is
+	// decision #194: the engine already reads it generically from here, so giving a second
+	// kind duplicate handling is three additions and no shared edit, while a declaration on
+	// the envelope would offer it on ~120 kinds whose identity NetBox enforces.
+	//
+	// Not checked by Validate -- a boot check cannot see a CRD's spec properties, and the
+	// name it would have to be checked against is a JSON tag rather than anything in this
+	// package. TestDuplicateSpecNamesABooleanTheCRDDeclares does it against the generated
+	// CRD instead, together with the "duplicates are possible on this kind at all" half.
 	//
 	// Empty for every kind whose identity NetBox actually enforces, which is almost all of
 	// them.

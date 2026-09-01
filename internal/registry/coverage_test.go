@@ -60,6 +60,14 @@ type irRef struct {
 	Target string `json:"target"`
 }
 
+// irSQL is the subset of a column's Django field kwargs the audit reads.
+type irSQL struct {
+	// Unique is the column-level `unique=True`. It is the uniqueness `natural_keys` does not
+	// carry: that list is built from `meta.constraints` alone, so a model whose identity is
+	// one UNIQUE column -- every `OrganizationalModel.slug` -- has an empty one.
+	Unique bool `json:"unique"`
+}
+
 type irField struct {
 	Name        string `json:"name"`
 	Class       string `json:"class"`
@@ -68,6 +76,7 @@ type irField struct {
 	ReadOnly    bool   `json:"read_only"`
 	Required    bool   `json:"required"`
 	Ref         *irRef `json:"ref"`
+	SQL         irSQL  `json:"sql"`
 }
 
 // irNullField is one column a natural-key candidate pins to null.
