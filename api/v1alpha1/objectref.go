@@ -352,6 +352,46 @@ type (
 	// ManufacturerRef points at a NetBoxManufacturer (dcim.Manufacturer, dcim/manufacturers).
 	ManufacturerRef ObjectRef
 
+	// CableBundleRef points at a NetBoxCableBundle (dcim.CableBundle, dcim/cable-bundles).
+	CableBundleRef ObjectRef
+
+	// The eight aliases below are the rest of CableTerminationTarget's members: every model
+	// that mixes in `CabledObjectModel` other than dcim.Interface, which already has an alias
+	// (docs/netbox-schema.md -> dcim.CabledObjectModel, and the nine `bases:` lines naming
+	// it). Declared ahead of their Kinds for the reason InterfaceRef was: the alias is where
+	// the target Kind -- and therefore the `app_label.model` spelling the union writes -- is
+	// written down, and a union member the API accepts and silently drops would be worse than
+	// one that reports RefKindUnavailable and says so.
+
+	// ConsolePortRef points at a NetBoxConsolePort (dcim.ConsolePort, dcim/console-ports).
+	ConsolePortRef ObjectRef
+
+	// ConsoleServerPortRef points at a NetBoxConsoleServerPort (dcim.ConsoleServerPort,
+	// dcim/console-server-ports).
+	ConsoleServerPortRef ObjectRef
+
+	// PowerPortRef points at a NetBoxPowerPort (dcim.PowerPort, dcim/power-ports).
+	PowerPortRef ObjectRef
+
+	// PowerOutletRef points at a NetBoxPowerOutlet (dcim.PowerOutlet, dcim/power-outlets).
+	PowerOutletRef ObjectRef
+
+	// FrontPortRef points at a NetBoxFrontPort (dcim.FrontPort, dcim/front-ports).
+	FrontPortRef ObjectRef
+
+	// RearPortRef points at a NetBoxRearPort (dcim.RearPort, dcim/rear-ports).
+	RearPortRef ObjectRef
+
+	// PowerFeedRef points at a NetBoxPowerFeed (dcim.PowerFeed, dcim/power-feeds).
+	PowerFeedRef ObjectRef
+
+	// CircuitTerminationRef points at a NetBoxCircuitTermination
+	// (circuits.CircuitTermination, circuits/circuit-terminations).
+	//
+	// The one member of CableTerminationTarget outside `dcim`: a cable's far end may be the
+	// provider's circuit rather than another port.
+	CircuitTerminationRef ObjectRef
+
 	// IPAddressRef points at a NetBoxIPAddress (ipam.IPAddress, ipam/ip-addresses).
 	//
 )
@@ -637,6 +677,15 @@ var (
 	_ RefTarget = IPAddressRef{}
 	_ RefTarget = DeviceTypeRef{}
 	_ RefTarget = ManufacturerRef{}
+	_ RefTarget = CableBundleRef{}
+	_ RefTarget = ConsolePortRef{}
+	_ RefTarget = ConsoleServerPortRef{}
+	_ RefTarget = PowerPortRef{}
+	_ RefTarget = PowerOutletRef{}
+	_ RefTarget = FrontPortRef{}
+	_ RefTarget = RearPortRef{}
+	_ RefTarget = PowerFeedRef{}
+	_ RefTarget = CircuitTerminationRef{}
 )
 
 // TargetGVK reports the Kind this reference resolves against.
@@ -654,3 +703,75 @@ func (r ManufacturerRef) TargetGVK() schema.GroupVersionKind {
 
 // AsObjectRef returns the underlying reference.
 func (r ManufacturerRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r CableBundleRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxCableBundle")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r CableBundleRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r ConsolePortRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxConsolePort")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r ConsolePortRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r ConsoleServerPortRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxConsoleServerPort")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r ConsoleServerPortRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r PowerPortRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxPowerPort")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r PowerPortRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r PowerOutletRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxPowerOutlet")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r PowerOutletRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r FrontPortRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxFrontPort")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r FrontPortRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r RearPortRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxRearPort")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r RearPortRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r PowerFeedRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxPowerFeed")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r PowerFeedRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r CircuitTerminationRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxCircuitTermination")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r CircuitTerminationRef) AsObjectRef() ObjectRef { return ObjectRef(r) }

@@ -18,8 +18,8 @@
 
 # endpoints: NetBox REST endpoints the operator will not implement.
 #
-# The four groups are plan.md's, section 8. 26 entries against 138 endpoints, which is
-# what makes roadmap.md's "~120 CRDs" the checkable number 112.
+# The four groups are plan.md's, section 8. 27 entries against 138 endpoints, which is
+# what makes roadmap.md's "~120 CRDs" the checkable number 111.
 endpoints:
   # core/* -- read-only records NetBox writes itself, or deferred pending demand.
   - endpoint: core/jobs
@@ -39,9 +39,20 @@ endpoints:
   - endpoint: core/data-sources
     reason: deferred pending demand; a remote plus its credentials is deployment configuration (plan.md 8)
 
-  # dcim/* -- one read-only view.
+  # dcim/* -- one read-only view, and one read-only serializer over a real model.
   - endpoint: dcim/connected-device
     reason: not a model; a read-only lookup view over cable paths (plan.md 8)
+  - endpoint: dcim/cable-terminations
+    reason: >-
+      read-only: CableTerminationSerializer.Meta sets `read_only_fields = fields`
+      (netbox/dcim/api/serializers_/cables.py:71), so every one of its twelve fields --
+      `cable`, `cable_end`, `termination_type`, `termination_id`, `connector`, `positions`
+      included -- is refused on write. NBO-049 asked for a NetBoxCableTermination Kind;
+      there is nothing for one to write. A termination is created and destroyed by writing
+      dcim.Cable's own `a_terminations` / `b_terminations`, which NetBoxCable does, and
+      `connector` / `positions` are unreachable from the REST API in 4.6.8 at all --
+      GenericObjectSerializer carries only `{object_type, object_id}`
+      (netbox/netbox/api/serializers/generic.py:15)
 
   # extras/* -- non-declarative, binary, per-user or append-only.
   - endpoint: extras/scripts

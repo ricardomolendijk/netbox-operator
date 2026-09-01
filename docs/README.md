@@ -92,7 +92,7 @@ their pages.
 
 ### The shape of a reference page
 
-Around 112 CRDs will follow, so the shape is settled here rather than after twenty pages
+Around 111 CRDs will follow, so the shape is settled here rather than after twenty pages
 have diverged. [`reference/netboxendpoint.md`](reference/netboxendpoint.md) is the
 template — copy its headings in this order:
 
