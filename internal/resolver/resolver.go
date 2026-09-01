@@ -365,6 +365,10 @@ func (r *Resolver) ResolveAll(ctx context.Context, nb LookupClient, obj client.O
 // mode, its own target and therefore its own retry policy -- a missing CR is woken by an
 // event and a missing NetBox slug by nothing but a timer -- and Resolution already folds a
 // set of blockers into one reason, one message naming all of them, and the soonest retry.
+//
+// Each of those blockers is stamped with the element's position, which is the only place in
+// the operator that knows it: below here a Request holds one reference and has nothing to
+// count against, and above here the field has collapsed to a name (Error.Index).
 func (r *Resolver) resolveField(
 	ctx context.Context, nb LookupClient, referrer types.NamespacedName,
 	referrerGVK schema.GroupVersionKind, declared fieldRefs,
@@ -373,7 +377,7 @@ func (r *Resolver) resolveField(
 
 	var blocked []Blocker
 
-	for _, element := range declared.elements() {
+	for index, element := range declared.elements() {
 		result, err := r.Resolve(ctx, Request{
 			NetBox: nb, Referrer: referrer, ReferrerGVK: referrerGVK,
 			Field: element.field, Ref: element.ref,
@@ -384,13 +388,28 @@ func (r *Resolver) resolveField(
 		case err == nil:
 			resolved = append(resolved, result)
 		case errors.As(err, &refErr):
-			blocked = append(blocked, blockerFor(refErr))
+			blocked = append(blocked, blockerFor(atElement(refErr, declared.field, index)))
 		default:
 			return nil, nil, err
 		}
 	}
 
 	return resolved, blocked, nil
+}
+
+// atElement records which element of a to-many reference a refusal came from, so the message
+// names `importTargets[1]` rather than the field its twenty route targets share.
+//
+// A no-op on a to-one field: an index there would be a position invented for a field that has
+// exactly one value, and `parentRef[0]` reads like the first of several.
+func atElement(err *Error, field registry.Field, index int) *Error {
+	if !field.Class.ToMany() {
+		return err
+	}
+
+	err.Index = &index
+
+	return err
 }
 
 // forPass is the resolver one resolution pass uses: this one, over one snapshot of the

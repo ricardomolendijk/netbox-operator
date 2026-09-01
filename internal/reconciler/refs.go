@@ -212,16 +212,29 @@ func (p *pass) waitForRefs(ctx context.Context, blocked []string) (ctrl.Result, 
 // It still has to be *said*, though. A referrer reporting Ready=True over an id whose object
 // is unfinished is exactly what somebody debugging needs told, and RefsResolved is the
 // condition they are already reading.
-func unreadyTargets(spec string, refs resolver.FieldRefs) []string {
+//
+// toMany is what decides whether the note names the element or the field. A list of twenty
+// route targets with one unfinished member has to say which member (NBO-020), and a to-one
+// field must not grow a `[0]` for a value that has no position -- the same rule
+// resolver.Error.Index states for a refusal, which is why both spell the path through
+// resolver.ElementPath. A bool rather than the registry.Field it comes from because the
+// generic-FK call site has no Field: a polymorphic pair is one reference with two columns and
+// is never to-many.
+func unreadyTargets(spec string, toMany bool, refs resolver.FieldRefs) []string {
 	notes := make([]string, 0, len(refs))
 
-	for _, ref := range refs {
+	for index, ref := range refs {
 		if ref.TargetNotReady == "" {
 			continue
 		}
 
+		path := spec
+		if toMany {
+			path = resolver.ElementPath(spec, index)
+		}
+
 		notes = append(notes, fmt.Sprintf("%s -> %s: resolved, target not ready (%s)",
-			spec, ref.Target, ref.TargetNotReady))
+			path, ref.Target, ref.TargetNotReady))
 	}
 
 	return notes
@@ -275,7 +288,7 @@ func (p *pass) applyResolved(resolution resolver.Resolution) (resolved, notes []
 
 		p.applyRef(field, refs)
 		resolved = append(resolved, field.Spec)
-		notes = append(notes, unreadyTargets(field.Spec, refs)...)
+		notes = append(notes, unreadyTargets(field.Spec, field.Class.ToMany(), refs)...)
 	}
 
 	for _, pair := range p.desc.GenericFKs {
@@ -286,7 +299,7 @@ func (p *pass) applyResolved(resolution resolver.Resolution) (resolved, notes []
 
 		p.applyGenericFK(pair, refs)
 		resolved = append(resolved, pair.Spec)
-		notes = append(notes, unreadyTargets(pair.Spec, refs)...)
+		notes = append(notes, unreadyTargets(pair.Spec, false, refs)...)
 	}
 
 	return resolved, notes
