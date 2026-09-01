@@ -47,6 +47,23 @@ type GenericRequest struct {
 	// Union is the members the object set, keyed by JSON member name. Empty means the field
 	// is present and selects nothing, which clears both columns.
 	Union map[string]netboxv1alpha1.ObjectRef
+
+	// Index is which element of a to-many pair this union is. Ignored on a to-one pair,
+	// where there is only ever the one.
+	//
+	// It exists for the message rather than for the resolution: a cable end may carry
+	// several terminations, and "aTerminations: waiting for a reference" would not say which
+	// one.
+	Index int
+}
+
+// path is the spec field a refusal is reported against, indexed on a to-many pair.
+func (req GenericRequest) path() string {
+	if !req.Pair.ToMany() {
+		return req.Pair.Spec
+	}
+
+	return fmt.Sprintf("%s[%d]", req.Pair.Spec, req.Index)
 }
 
 // ResolveGenericFK resolves one union to the (object type, id) pair its columns are written
@@ -95,7 +112,8 @@ func (r *Resolver) resolveMember(
 	result, err := r.Resolve(ctx, Request{
 		NetBox: req.NetBox, Referrer: req.Referrer, ReferrerGVK: req.ReferrerGVK,
 		Field: registry.Field{
-			Spec: req.Pair.Spec + "." + member.Spec, Class: registry.ClassRefOne, Target: member.Target,
+			Spec:  memberPath(req.Pair, req.Index, member.Spec),
+			Class: registry.ClassRefOne, Target: member.Target,
 		},
 		Ref: req.Union[member.Spec],
 	})
@@ -120,13 +138,36 @@ func (r *Resolver) resolveMember(
 // refused builds the typed error for a union this request will not write, reported against
 // the union's own spec field so the condition names what the user typed.
 func (req GenericRequest) refused(cause error, detail string) *Error {
-	return &Error{Cause: cause, Field: req.Pair.Spec, Detail: detail}
+	return &Error{Cause: cause, Field: req.path(), Detail: detail}
 }
 
 // declaredGeneric is one polymorphic reference the descriptor declares and the object set.
 type declaredGeneric struct {
-	pair  registry.GenericFKSpec
-	union map[string]netboxv1alpha1.ObjectRef
+	pair registry.GenericFKSpec
+
+	// unions are the union values written under the pair's spec field: exactly one for a
+	// to-one pair, and one per list element for a to-many one, in the order the manifest
+	// listed them.
+	//
+	// A to-one pair written empty is one empty union, which is the instruction to clear both
+	// columns. A to-many pair written `[]` is *no* unions, which is the instruction to clear
+	// the whole list -- the same distinction one level out, and the reason this is a slice
+	// rather than an optional single value.
+	unions []map[string]netboxv1alpha1.ObjectRef
+}
+
+// memberPath is the spec path a union member is reported under, which is the spelling a
+// condition names and the spelling to grep a manifest for.
+//
+// Indexed on a to-many pair -- `aTerminations[1].interfaceRef` -- because "one of the
+// terminations did not resolve" is not an actionable message when a cable end may carry
+// several. Unindexed on a to-one pair, so no existing message changes.
+func memberPath(pair registry.GenericFKSpec, index int, member string) string {
+	if !pair.ToMany() {
+		return pair.Spec + "." + member
+	}
+
+	return fmt.Sprintf("%s[%d].%s", pair.Spec, index, member)
 }
 
 // genericFKsOf reads the polymorphic unions out of obj's spec, in descriptor order.
@@ -157,16 +198,53 @@ func genericFKsOf(obj client.Object, d registry.Descriptor) ([]declaredGeneric, 
 			continue
 		}
 
-		union, err := decodeUnion(raw)
+		unions, err := decodeUnions(pair, raw)
 		if err != nil {
 			return nil, fmt.Errorf("decoding %s of %s/%s: %w",
 				pair.Spec, obj.GetNamespace(), obj.GetName(), err)
 		}
 
-		generics = append(generics, declaredGeneric{pair: pair, union: union})
+		generics = append(generics, declaredGeneric{pair: pair, unions: unions})
 	}
 
 	return generics, nil
+}
+
+// decodeUnions decodes the pair's spec value into one union per polymorphic reference it
+// carries.
+//
+// This is the only place in the resolver that reads GenericFKSpec.List. Everything downstream
+// works a single union at a time, so a cable's list of terminations resolves through exactly
+// the code one prefix's scope does -- same four modes, same grant check, same typed errors.
+func decodeUnions(
+	pair registry.GenericFKSpec, raw json.RawMessage,
+) ([]map[string]netboxv1alpha1.ObjectRef, error) {
+	if !pair.ToMany() {
+		union, err := decodeUnion(raw)
+		if err != nil {
+			return nil, err
+		}
+
+		return []map[string]netboxv1alpha1.ObjectRef{union}, nil
+	}
+
+	var elements []json.RawMessage
+	if err := json.Unmarshal(raw, &elements); err != nil {
+		return nil, fmt.Errorf("reading the list of unions: %w", err)
+	}
+
+	unions := make([]map[string]netboxv1alpha1.ObjectRef, 0, len(elements))
+
+	for i, element := range elements {
+		union, err := decodeUnion(element)
+		if err != nil {
+			return nil, fmt.Errorf("reading element %d: %w", i, err)
+		}
+
+		unions = append(unions, union)
+	}
+
+	return unions, nil
 }
 
 // decodeUnion decodes one union, dropping the members that are present and null.
@@ -207,23 +285,27 @@ func genericMemberRefs(generics []declaredGeneric) []fieldRefs {
 	refs := make([]fieldRefs, 0, len(generics))
 
 	for _, generic := range generics {
-		for _, name := range slices.Sorted(maps.Keys(generic.union)) {
-			member, declared := generic.pair.MemberFor(name)
-			if !declared {
-				continue
-			}
+		for i, union := range generic.unions {
+			for _, name := range slices.Sorted(maps.Keys(union)) {
+				member, declared := generic.pair.MemberFor(name)
+				if !declared {
+					continue
+				}
 
-			// One reference under one field, always: a union selects one member, so
-			// ClassRefOne is the whole of its cardinality and FieldRefs.elements() yields
-			// exactly the single element the index keys on.
-			refs = append(refs, fieldRefs{
-				field: registry.Field{
-					Spec:   generic.pair.Spec + "." + member.Spec,
-					Class:  registry.ClassRefOne,
-					Target: member.Target,
-				},
-				refs: []netboxv1alpha1.ObjectRef{generic.union[name]},
-			})
+				// One reference under one field, always: a union selects one member, so
+				// ClassRefOne is the whole of its cardinality and FieldRefs.elements() yields
+				// exactly the single element the index keys on. A to-many pair is N such
+				// fields rather than one field carrying N, so every termination gets its own
+				// index key and any one of them wakes the cable.
+				refs = append(refs, fieldRefs{
+					field: registry.Field{
+						Spec:   memberPath(generic.pair, i, member.Spec),
+						Class:  registry.ClassRefOne,
+						Target: member.Target,
+					},
+					refs: []netboxv1alpha1.ObjectRef{union[name]},
+				})
+			}
 		}
 	}
 

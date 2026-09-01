@@ -335,11 +335,11 @@ func unionOf(members map[string]any) map[string]netboxv1alpha1.ObjectRef {
 		panic(err)
 	}
 
-	if len(generics) != 1 {
+	if len(generics) != 1 || len(generics[0].unions) != 1 {
 		panic("the fixture union did not decode")
 	}
 
-	return generics[0].union
+	return generics[0].unions[0]
 }
 
 // TestEveryAllowedTypeIsWatched walks the registry rather than naming kinds, so a descriptor
@@ -409,5 +409,211 @@ func TestUnavailableMemberKindIsReportedInEveryMode(t *testing.T) {
 				t.Errorf("netbox calls = %v, want none", nb.calls)
 			}
 		})
+	}
+}
+
+// A **to-many** polymorphic pair: one API field carrying a list of nested `(type, id)`
+// objects, which is what `dcim.Cable.a_terminations` is. Everything below is the second half
+// of NBO-049's finding -- that the union shape survives dcim.Cable on the CR side and not on
+// the descriptor side, so the pair grew a cardinality (registry.GenericFKList).
+//
+// The fixture reuses the scope pair's members rather than the cable's, deliberately: what these
+// cases are about is the cardinality, and the cable's own union is exercised end to end over
+// its real Descriptor in internal/reconciler/dcim_cable_test.go.
+
+// scopeListPair is scopePair as a to-many pair.
+func scopeListPair() registry.GenericFKSpec {
+	pair := scopePair()
+	pair.Spec = "scopes"
+	pair.List = &registry.GenericFKList{
+		APIField: "scope_list", TypeKey: "object_type", IDKey: "object_id",
+	}
+
+	return pair
+}
+
+// genericListDescriptor is a referrer carrying one to-many polymorphic pair and nothing else.
+func genericListDescriptor() registry.Descriptor {
+	d := genericDescriptor()
+	d.GenericFKs = []registry.GenericFKSpec{scopeListPair()}
+
+	return d
+}
+
+// TestDecodeUnionsReadsAToManyPairAsOnePerElement is the only place the resolver reads
+// GenericFKSpec.List: one union per element, in the order the manifest wrote them.
+//
+// The order is kept here and sorted later, by the engine, because the *message* a blocked
+// element produces has to name the index the user wrote -- `scopes[1]` -- while the *payload*
+// must not depend on it.
+func TestDecodeUnionsReadsAToManyPairAsOnePerElement(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		spec  any
+		want  int
+		first string
+	}{
+		{
+			name: "two elements",
+			spec: []any{
+				map[string]any{"regionRef": map[string]any{"name": "emea"}},
+				map[string]any{"siteRef": map[string]any{"name": "ams"}},
+			},
+			want: 2, first: "regionRef",
+		},
+		{
+			name: "one element",
+			spec: []any{map[string]any{"regionRef": map[string]any{"name": "emea"}}},
+			want: 1, first: "regionRef",
+		},
+		{
+			// The instruction to clear the whole list, which is distinct from an absent field:
+			// NetBox rebuilds the termination rows from what the field carries, so `[]` removes
+			// them and omitting the field leaves them alone.
+			name: "an empty list is declared and selects nothing",
+			spec: []any{},
+			want: 0,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			obj := referrer("cable", map[string]any{"scopes": tc.spec})
+
+			generics, err := genericFKsOf(obj, genericListDescriptor())
+			if err != nil {
+				t.Fatalf("genericFKsOf: %v", err)
+			}
+
+			if len(generics) != 1 {
+				t.Fatalf("genericFKsOf = %v, want one declared pair", generics)
+			}
+
+			if got := len(generics[0].unions); got != tc.want {
+				t.Fatalf("decoded %d unions, want %d", got, tc.want)
+			}
+
+			if tc.first == "" {
+				return
+			}
+
+			if _, set := generics[0].unions[0][tc.first]; !set {
+				t.Errorf("element 0 = %v, want %s set", generics[0].unions[0], tc.first)
+			}
+		})
+	}
+}
+
+// TestGenericFKsOfIgnoresAnAbsentToManyPair keeps "absent means do not manage" true one level
+// out: a field the spec never wrote is not a list to clear.
+func TestGenericFKsOfIgnoresAnAbsentToManyPair(t *testing.T) {
+	obj := referrer("cable", map[string]any{"name": "cable"})
+
+	generics, err := genericFKsOf(obj, genericListDescriptor())
+	if err != nil {
+		t.Fatalf("genericFKsOf: %v", err)
+	}
+
+	if len(generics) != 0 {
+		t.Errorf("genericFKsOf = %v, want none: an absent list is not an instruction", generics)
+	}
+}
+
+// TestResolveAllFilesEveryElementOfAToManyPair is the shape the engine reads: one FieldRefs
+// under the union's own spec field, carrying one Result per element.
+//
+// FieldRefs was already a slice, which is why the to-many pair needed no new carrier -- the
+// to-one case files a one-element one and this files N.
+func TestResolveAllFilesEveryElementOfAToManyPair(t *testing.T) {
+	r := &Resolver{
+		Objects: &fakeReader{objects: []target{
+			readyTarget(),
+			{
+				gvk: siteGVK, namespace: "team-a", name: "ams", id: 31,
+				ready: metav1.ConditionTrue, reason: netboxv1alpha1.ReasonSynced,
+			},
+		}},
+		Kinds: kinds(), Grants: &fakeGrants{},
+	}
+
+	obj := referrer("cable", map[string]any{"scopes": []any{
+		map[string]any{"regionRef": map[string]any{"name": "emea"}},
+		map[string]any{"siteRef": map[string]any{"name": "ams"}},
+	}})
+
+	resolution, err := r.ResolveAll(context.Background(), nil, obj, genericListDescriptor())
+	if err != nil {
+		t.Fatalf("ResolveAll: %v", err)
+	}
+
+	if len(resolution.Blocked) != 0 {
+		t.Fatalf("Blocked = %v, want none", resolution.Message())
+	}
+
+	got := resolution.ByField["scopes"]
+	if len(got) != 2 {
+		t.Fatalf("ByField[scopes] = %v, want two results", got)
+	}
+
+	if got[0].ObjectType != "dcim.region" || got[0].ID != 12 {
+		t.Errorf("element 0 = (%q, %d), want (dcim.region, 12)", got[0].ObjectType, got[0].ID)
+	}
+
+	if got[1].ObjectType != "dcim.site" || got[1].ID != 31 {
+		t.Errorf("element 1 = (%q, %d), want (dcim.site, 31)", got[1].ObjectType, got[1].ID)
+	}
+}
+
+// TestResolveAllIsAllOrNothingForAToManyPair is the precondition rule for a list NetBox
+// replaces wholesale.
+//
+// One of two elements resolving is worse than none: `a_terminations` is a full replacement, so
+// a half list is a cable connected at one end -- and on a Recreate kind, correcting that means
+// deleting and re-creating rather than PATCHing.
+func TestResolveAllIsAllOrNothingForAToManyPair(t *testing.T) {
+	r := &Resolver{
+		Objects: &fakeReader{objects: []target{readyTarget()}}, Kinds: kinds(), Grants: &fakeGrants{},
+	}
+
+	obj := referrer("cable", map[string]any{"scopes": []any{
+		map[string]any{"regionRef": map[string]any{"name": "emea"}},
+		map[string]any{"regionRef": map[string]any{"name": "apac"}},
+	}})
+
+	resolution, err := r.ResolveAll(context.Background(), nil, obj, genericListDescriptor())
+	if err != nil {
+		t.Fatalf("ResolveAll: %v", err)
+	}
+
+	if _, filed := resolution.ByField["scopes"]; filed {
+		t.Errorf("ByField[scopes] = %v, want nothing: one of two elements resolved",
+			resolution.ByField["scopes"])
+	}
+
+	// The message names the element by its index, because "scopes did not resolve" does not
+	// say which of several.
+	if want := "scopes[1].regionRef"; !strings.Contains(resolution.Message(), want) {
+		t.Errorf("Message() = %q, want it to name %s", resolution.Message(), want)
+	}
+}
+
+// TestEveryToManyElementIsIndexed proves the watch: an event on any one of the objects a list
+// points at wakes the referrer, rather than only the first.
+func TestEveryToManyElementIsIndexed(t *testing.T) {
+	obj := referrer("cable", map[string]any{"scopes": []any{
+		map[string]any{"regionRef": map[string]any{"name": "emea", "namespace": "catalogue"}},
+		map[string]any{"siteRef": map[string]any{"name": "ams"}},
+	}})
+
+	keys := refIndexer(genericListDescriptor())(obj)
+
+	want := []string{
+		IndexValue(regionGVK, "catalogue", "emea"),
+		IndexValue(siteGVK, "team-a", "ams"),
+	}
+
+	slices.Sort(keys)
+	slices.Sort(want)
+
+	if !slices.Equal(keys, want) {
+		t.Errorf("index keys = %v, want %v", keys, want)
 	}
 }

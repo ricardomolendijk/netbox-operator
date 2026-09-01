@@ -648,3 +648,151 @@ func read(defined []string, stored map[string]any) Object {
 
 	return Object{"custom_fields": fields}
 }
+
+// cableRules are the comparison rules internal/registry supplies for dcim.Cable: two to-many
+// polymorphic fields over GenericObjectSerializer's `{object_type, object_id}`.
+var cableRules = FieldRules{
+	M2M: map[string]bool{"tags": true},
+	GenericFKLists: map[string]GenericFKItem{
+		"a_terminations": {TypeKey: "object_type", IDKey: "object_id"},
+		"b_terminations": {TypeKey: "object_type", IDKey: "object_id"},
+	},
+}
+
+// termination is one element of `a_terminations` as NetBox returns it: the two written keys
+// plus the read-only `object` expansion GenericObjectSerializer adds
+// (netbox/netbox/api/serializers/generic.py:15).
+func termination(objectType string, id float64, expand bool) map[string]any {
+	element := map[string]any{"object_type": objectType, "object_id": id}
+	if expand {
+		element["object"] = map[string]any{"id": id, "name": "eth0"}
+	}
+
+	return element
+}
+
+// TestGenericFKListComparison is the rule that decides whether a cable survives a resync.
+//
+// Getting it wrong is worse here than anywhere else in this file: dcim.Cable is
+// `UpdateStrategy: Recreate` with both these fields in `RecreateOn`, so a diff that never
+// settles is not a PATCH loop but a cable deleted and re-created on every resync -- which
+// churns the changelog and rebuilds every CablePath through it each time.
+func TestGenericFKListComparison(t *testing.T) {
+	tests := []struct {
+		name    string
+		live    Object
+		desired Object
+		want    []string
+	}{
+		{
+			name:    "identical single termination produces no drift",
+			live:    Object{"a_terminations": []any{termination("dcim.interface", 41, true)}},
+			desired: Object{"a_terminations": []any{termination("dcim.interface", 41, false)}},
+			want:    nil,
+		},
+		{
+			name: "a reordered list is the same set",
+			live: Object{"a_terminations": []any{
+				termination("dcim.interface", 41, true), termination("dcim.interface", 17, true),
+			}},
+			desired: Object{"a_terminations": []any{
+				termination("dcim.interface", 17, false), termination("dcim.interface", 41, false),
+			}},
+			want: nil,
+		},
+		{
+			name: "an id the operator wrote as an int64 compares numerically",
+			live: Object{"a_terminations": []any{termination("dcim.interface", 41, true)}},
+			desired: Object{"a_terminations": []any{
+				map[string]any{"object_type": "dcim.interface", "object_id": int64(41)},
+			}},
+			want: nil,
+		},
+		{
+			name:    "a different endpoint drifts",
+			live:    Object{"a_terminations": []any{termination("dcim.interface", 41, true)}},
+			desired: Object{"a_terminations": []any{termination("dcim.interface", 42, false)}},
+			want:    []string{"a_terminations"},
+		},
+		{
+			name:    "the same id on a different model drifts",
+			live:    Object{"a_terminations": []any{termination("dcim.interface", 41, true)}},
+			desired: Object{"a_terminations": []any{termination("dcim.rearport", 41, false)}},
+			want:    []string{"a_terminations"},
+		},
+		{
+			name: "adding a termination drifts",
+			live: Object{"a_terminations": []any{termination("dcim.interface", 41, true)}},
+			desired: Object{"a_terminations": []any{
+				termination("dcim.interface", 41, false), termination("dcim.interface", 17, false),
+			}},
+			want: []string{"a_terminations"},
+		},
+		{
+			name:    "clearing the list drifts",
+			live:    Object{"a_terminations": []any{termination("dcim.interface", 41, true)}},
+			desired: Object{"a_terminations": []any{}},
+			want:    []string{"a_terminations"},
+		},
+		{
+			name:    "an already-empty list produces no drift",
+			live:    Object{"a_terminations": []any{}},
+			desired: Object{"a_terminations": []any{}},
+			want:    nil,
+		},
+		{
+			name: "the two ends are compared independently",
+			live: Object{
+				"a_terminations": []any{termination("dcim.interface", 41, true)},
+				"b_terminations": []any{termination("dcim.interface", 42, true)},
+			},
+			desired: Object{
+				"a_terminations": []any{termination("dcim.interface", 41, false)},
+				"b_terminations": []any{termination("dcim.interface", 18, false)},
+			},
+			want: []string{"b_terminations"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := Drift(tc.live, tc.desired, cableRules)
+
+			if len(got) != len(tc.want) {
+				t.Fatalf("Drift() = %v, want fields %v", got, tc.want)
+			}
+
+			for _, field := range tc.want {
+				if _, present := got[field]; !present {
+					t.Errorf("Drift() = %v, want it to carry %s", got, field)
+				}
+			}
+		})
+	}
+}
+
+// TestGenericFKListSurvivesAResync applies the payload, reads back the response NetBox would
+// send for it, and asserts the second pass writes nothing -- the same shape as
+// TestNoHotLoopOnRealResponses, for the rule this file's newest arm covers.
+func TestGenericFKListSurvivesAResync(t *testing.T) {
+	desired := Object{
+		"a_terminations": []any{
+			map[string]any{"object_type": "dcim.interface", "object_id": int64(17)},
+			map[string]any{"object_type": "dcim.interface", "object_id": int64(41)},
+		},
+		"label": "patch-14",
+	}
+
+	// NetBox's response: row order rather than the order it was sent, ids as JSON numbers, and
+	// the `object` expansion on each element.
+	live := Object{
+		"a_terminations": []any{
+			termination("dcim.interface", 41, true), termination("dcim.interface", 17, true),
+		},
+		"label": "patch-14",
+	}
+
+	if got := Drift(live, desired, cableRules); len(got) != 0 {
+		t.Fatalf("a second pass would write %v; the cable would be re-created every resync", got)
+	}
+}

@@ -329,27 +329,63 @@ func (r *Resolver) ResolveAll(ctx context.Context, nb LookupClient, obj client.O
 	}
 
 	for _, generic := range generics {
-		result, err := pass.ResolveGenericFK(ctx, GenericRequest{
-			NetBox: nb, Referrer: referrer, ReferrerGVK: d.GVK,
-			Pair: generic.pair, Union: generic.union,
+		resolved, blocked, err := pass.resolveGeneric(ctx, nb, referrer, d.GVK, generic)
+		if err != nil {
+			return Resolution{}, err
+		}
+
+		if len(blocked) > 0 {
+			resolution.Blocked = append(resolution.Blocked, blocked...)
+
+			continue
+		}
+
+		// Keyed on the union's own spec field and not on the member that resolved. A to-one
+		// pair files one Result, which is what the engine writes both columns from; a to-many
+		// pair files one per element, in the order the manifest listed them, and the engine
+		// renders the whole list from them.
+		resolution.ByField[generic.pair.Spec] = resolved
+	}
+
+	return resolution, nil
+}
+
+// resolveGeneric resolves every polymorphic reference one spec field carries, and reports the
+// field as resolved only when all of them are.
+//
+// All or nothing, for the reason resolveField is: `a_terminations` is written as a whole list
+// and NetBox replaces the CableTermination rows behind it wholesale, so a cable with one of
+// two ends resolved would be created connected at one end -- a half-cable nobody asked for,
+// on a kind where correcting it later means delete and recreate.
+//
+// One Blocker per unresolved element, each naming its own indexed path, because each has its
+// own mode, target and therefore retry policy.
+func (r *Resolver) resolveGeneric(
+	ctx context.Context, nb LookupClient, referrer types.NamespacedName,
+	referrerGVK schema.GroupVersionKind, generic declaredGeneric,
+) (FieldRefs, []Blocker, error) {
+	resolved := make(FieldRefs, 0, len(generic.unions))
+
+	var blocked []Blocker
+
+	for i, union := range generic.unions {
+		result, err := r.ResolveGenericFK(ctx, GenericRequest{
+			NetBox: nb, Referrer: referrer, ReferrerGVK: referrerGVK,
+			Pair: generic.pair, Union: union, Index: i,
 		})
 
 		var refErr *Error
 		switch {
 		case err == nil:
-			// One Result in a one-element FieldRefs, keyed on the union's own spec field and
-			// not on the member that resolved. A polymorphic pair is one reference with two
-			// halves -- the engine writes both columns from this one entry -- so there is no
-			// cardinality here to be all-or-nothing about.
-			resolution.ByField[generic.pair.Spec] = FieldRefs{result}
+			resolved = append(resolved, result)
 		case errors.As(err, &refErr):
-			resolution.Blocked = append(resolution.Blocked, blockerFor(refErr))
+			blocked = append(blocked, blockerFor(refErr))
 		default:
-			return Resolution{}, err
+			return nil, nil, err
 		}
 	}
 
-	return resolution, nil
+	return resolved, blocked, nil
 }
 
 // resolveField resolves every reference one spec field carries, and reports the field as

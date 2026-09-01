@@ -1,6 +1,7 @@
 package reconciler
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"slices"
@@ -330,6 +331,12 @@ func (p *pass) applyResolved(resolution resolver.Resolution) (resolved, notes []
 // the *null-pinned* candidate, and falling through to a value match on a column that holds
 // null would send `?scope_type=` and adopt every group sharing its slug.
 func (p *pass) applyGenericFK(pair registry.GenericFKSpec, refs resolver.FieldRefs) {
+	if pair.ToMany() {
+		p.applyGenericFKList(pair, refs)
+
+		return
+	}
+
 	objectType, id := genericFKValues(refs)
 	p.desired[pair.TypeField], p.desired[pair.IDField] = objectType, id
 	p.state.Resolved = append(p.state.Resolved, pair.Spec)
@@ -342,6 +349,87 @@ func (p *pass) applyGenericFK(pair registry.GenericFKSpec, refs resolver.FieldRe
 	// what filterValue renders; an int64 there would be dropped as unfilterable.
 	p.spec[pair.TypeField], p.spec[pair.IDField] = objectType, float64(refs[0].ID)
 	p.state.Resolved = append(p.state.Resolved, pair.TypeField, pair.IDField)
+}
+
+// applyGenericFKList writes a to-many polymorphic reference: one API field carrying a list of
+// nested (type, id) objects, and the representative element the natural key filters on.
+//
+// The list is **sorted and deduplicated**, which is the same argument resolver.FieldRefs.IDs
+// makes for an M2M one step further in. Order inside `a_terminations` is not data: NetBox
+// stores the elements as CableTermination rows and returns them in
+// `('cable', 'cable_end', 'connector', 'pk')` order (docs/netbox-schema.md ->
+// dcim.CableTermination, meta.ordering), so rendering the manifest's order into the payload
+// would invite a reader to believe an order the comparison ignores -- and on this kind, a
+// comparison that did not ignore it would delete and recreate the cable on every resync.
+// Duplicates collapse because `unique(termination_type, termination_id)` makes two rows on one
+// object impossible anyway.
+//
+// The representative element is the first after sorting, filed under the pair's TypeField and
+// IDField -- which on a to-many pair are *filter* names rather than columns
+// (registry.GenericFKList). That is what gives dcim.Cable a natural key at all: the model has
+// no `meta.constraints` whatsoever, and `?termination_a_type=&termination_a_id=` is the only
+// question NetBox answers about which cable is on a given endpoint. Sorted, so the question is
+// the same one on every pass regardless of the order the manifest listed the terminations in.
+func (p *pass) applyGenericFKList(pair registry.GenericFKSpec, refs resolver.FieldRefs) {
+	sorted := genericFKListValues(refs)
+
+	// []any of map[string]any rather than the narrower slice type, because netbox.pairSet
+	// reads both sides of the comparison the same way and the live side is whatever
+	// encoding/json produced. A []map[string]any desired value would fail that assertion,
+	// fall through to a scalar comparison, and drift forever.
+	elements := make([]any, 0, len(sorted))
+	for _, element := range sorted {
+		elements = append(elements, map[string]any{
+			pair.List.TypeKey: element.objectType,
+			pair.List.IDKey:   element.id,
+		})
+	}
+
+	p.desired[pair.List.APIField] = elements
+	p.state.Resolved = append(p.state.Resolved, pair.Spec)
+
+	if len(sorted) == 0 {
+		return
+	}
+
+	// float64 for the id, for the reason applyGenericFK uses one: every JSON number in a
+	// decoded spec is a float64, and payload.filterValue drops anything else as unfilterable.
+	p.spec[pair.TypeField] = sorted[0].objectType
+	p.spec[pair.IDField] = float64(sorted[0].id)
+	p.state.Resolved = append(p.state.Resolved, pair.TypeField, pair.IDField)
+}
+
+// genericFKTarget is one resolved element of a to-many polymorphic reference.
+type genericFKTarget struct {
+	objectType string
+	id         int64
+}
+
+// genericFKListValues is the resolved elements of a to-many pair, sorted by
+// `(object type, id)` and deduplicated.
+//
+// A cleared reference contributes nothing rather than a null element: the empty list is the
+// instruction, and a list of nulls is not a thing NetBox takes.
+func genericFKListValues(refs resolver.FieldRefs) []genericFKTarget {
+	targets := make([]genericFKTarget, 0, len(refs))
+
+	for _, ref := range refs {
+		if ref.ObjectType == "" {
+			continue
+		}
+
+		targets = append(targets, genericFKTarget{objectType: ref.ObjectType, id: ref.ID})
+	}
+
+	slices.SortFunc(targets, func(a, b genericFKTarget) int {
+		if by := strings.Compare(a.objectType, b.objectType); by != 0 {
+			return by
+		}
+
+		return cmp.Compare(a.id, b.id)
+	})
+
+	return slices.Compact(targets)
 }
 
 // genericFKValues renders one resolved polymorphic reference as its two column values.

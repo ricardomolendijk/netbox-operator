@@ -664,7 +664,15 @@ func (d Descriptor) validateGenericFKSpecFields() error {
 			errs = append(errs, fmt.Errorf("%w: %s is also an ordinary field", ErrGenericFKNotSpecField, generic.Spec))
 		}
 
-		for _, column := range []string{generic.TypeField, generic.IDField} {
+		columns := []string{generic.TypeField, generic.IDField}
+		if generic.ToMany() {
+			// The one field a to-many pair really does write, and the one an ordinary Field
+			// entry could collide with: TypeField and IDField are filter names on such a pair
+			// and reach no payload at all (GenericFKList).
+			columns = append(columns, generic.List.APIField)
+		}
+
+		for _, column := range columns {
 			if slices.ContainsFunc(d.Fields, func(f Field) bool { return f.API == column }) {
 				errs = append(errs, fmt.Errorf("%w: %s is also an ordinary field", ErrGenericFKNotSpecField, column))
 			}
