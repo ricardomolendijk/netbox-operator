@@ -50,9 +50,11 @@ resources:
 - netbox_v1alpha1_netboxfhrpgroupassignment.yaml
 - netbox_v1alpha1_netboxservice.yaml
 - netbox_v1alpha1_netboxservicetemplate.yaml
-- netbox_v1alpha1_netboxmacaddress.yaml- netbox_v1alpha1_netboxwirelesslangroup.yaml
+- netbox_v1alpha1_netboxmacaddress.yaml
+- netbox_v1alpha1_netboxwirelesslangroup.yaml
 - netbox_v1alpha1_netboxwirelesslan.yaml
-- netbox_v1alpha1_netboxwirelesslink.yaml- netbox_v1alpha1_netboxrackrole.yaml
+- netbox_v1alpha1_netboxwirelesslink.yaml
+- netbox_v1alpha1_netboxrackrole.yaml
 - netbox_v1alpha1_netboxracktype.yaml
 - netbox_v1alpha1_netboxrackgroup.yaml
 - netbox_v1alpha1_netboxrack.yaml
