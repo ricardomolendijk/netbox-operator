@@ -38,6 +38,8 @@ rules:
   - netboxaggregates
   - netboxasnranges
   - netboxasns
+  - netboxcablebundles
+  - netboxcables
   - netboxclustergroups
   - netboxclusters
   - netboxclustertypes
@@ -83,6 +85,8 @@ rules:
   - netboxaggregates/finalizers
   - netboxasnranges/finalizers
   - netboxasns/finalizers
+  - netboxcablebundles/finalizers
+  - netboxcables/finalizers
   - netboxclustergroups/finalizers
   - netboxclusters/finalizers
   - netboxclustertypes/finalizers
@@ -138,6 +142,8 @@ rules:
   - netboxaggregates/status
   - netboxasnranges/status
   - netboxasns/status
+  - netboxcablebundles/status
+  - netboxcables/status
   - netboxclustergroups/status
   - netboxclusters/status
   - netboxclustertypes/status
@@ -364,6 +370,8 @@ rules:
   - netboxaggregates
   - netboxasnranges
   - netboxasns
+  - netboxcablebundles
+  - netboxcables
   - netboxclustergroups
   - netboxclusters
   - netboxclustertypes
@@ -409,6 +417,8 @@ rules:
   - netboxaggregates/finalizers
   - netboxasnranges/finalizers
   - netboxasns/finalizers
+  - netboxcablebundles/finalizers
+  - netboxcables/finalizers
   - netboxclustergroups/finalizers
   - netboxclusters/finalizers
   - netboxclustertypes/finalizers
@@ -464,6 +474,8 @@ rules:
   - netboxaggregates/status
   - netboxasnranges/status
   - netboxasns/status
+  - netboxcablebundles/status
+  - netboxcables/status
   - netboxclustergroups/status
   - netboxclusters/status
   - netboxclustertypes/status

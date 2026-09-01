@@ -244,6 +244,7 @@ each declare a `services` `GenericRelation` — so this union *is*
 [`NetBoxService`](netboxservice.md#ownership)'s containment parent. Note that
 `parent_object_type` is `on_delete=PROTECT`: that is about the ContentType row, not about the
 parent object, and it is not the cascade that decides ownership.
+
 ### `CableTerminationTarget`
 
 `spec.aTerminations` and `spec.bTerminations` on [`NetBoxCable`](netboxcable.md) — what each
