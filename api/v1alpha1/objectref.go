@@ -385,8 +385,7 @@ type (
 	// PowerFeedRef points at a NetBoxPowerFeed (dcim.PowerFeed, dcim/power-feeds).
 	PowerFeedRef ObjectRef
 
-	// CircuitTerminationRef points at a NetBoxCircuitTermination
-	// (circuits.CircuitTermination, circuits/circuit-terminations).	// RackRoleRef points at a NetBoxRackRole (dcim.RackRole, dcim/rack-roles).
+	// RackRoleRef points at a NetBoxRackRole (dcim.RackRole, dcim/rack-roles).
 	RackRoleRef ObjectRef
 
 	// RackTypeRef points at a NetBoxRackType (dcim.RackType, dcim/rack-types).
@@ -406,13 +405,16 @@ type (
 	// RackRef points at a NetBoxRack (dcim.Rack, dcim/racks).
 	RackRef ObjectRef
 
-	// IPAddressRef points at a NetBoxIPAddress (ipam.IPAddress, ipam/ip-addresses).	//
+	// CircuitTerminationRef points at a NetBoxCircuitTermination
+	// (circuits.CircuitTermination, circuits/circuit-terminations).
+	//
 	// The one member of CableTerminationTarget outside `dcim`: a cable's far end may be the
 	// provider's circuit rather than another port.
 	CircuitTerminationRef ObjectRef
 
-	// IPAddressRef points at a NetBoxIPAddress (ipam.IPAddress, ipam/ip-addresses).	// WirelessLANGroupRef points at a NetBoxWirelessLANGroup (wireless.WirelessLANGroup,
-	// wireless/wireless-lan-groups).	//
+	// WirelessLANGroupRef points at a NetBoxWirelessLANGroup (wireless.WirelessLANGroup,
+	// wireless/wireless-lan-groups).
+	//
 	// Self-referential, like every NestedGroupModel's alias, and also what
 	// `wireless.WirelessLAN.group` points at -- so one alias serves both the tree edge and
 	// the SSID's group.

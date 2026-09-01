@@ -564,6 +564,14 @@ var deletionDefaults = map[string]netboxv1alpha1.DeletionPolicy{
 	// the rule the table turns on puts it with the configuration kinds.
 	"NetBoxVLANGroup": netboxv1alpha1.DeletionDelete,
 
+	// NBO-051: racks are configuration a manifest recreates, not allocated state -- see each
+	// kind's own RetainOnDelete comment in internal/registry/dcim_rack*.go.
+	"NetBoxRack":            netboxv1alpha1.DeletionDelete,
+	"NetBoxRackGroup":       netboxv1alpha1.DeletionDelete,
+	"NetBoxRackReservation": netboxv1alpha1.DeletionDelete,
+	"NetBoxRackRole":        netboxv1alpha1.DeletionDelete,
+	"NetBoxRackType":        netboxv1alpha1.DeletionDelete,
+
 	// Configuration: cheap to delete, cheap to recreate, and mostly PROTECT-refused while
 	// anything still points at it.
 	"NetBoxRouteTarget":       netboxv1alpha1.DeletionDelete,
