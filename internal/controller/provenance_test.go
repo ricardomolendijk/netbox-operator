@@ -25,16 +25,15 @@ import (
 var stampedObjectTypes = []string{
 	"dcim.cable", "dcim.cablebundle",
 	"dcim.device", "dcim.devicerole", "dcim.devicetype", "dcim.interface",
-	"dcim.location", "dcim.macaddress", "dcim.manufacturer", "dcim.platform", "dcim.region",
-	"dcim.site", "dcim.sitegroup",
+	"dcim.location", "dcim.macaddress", "dcim.manufacturer", "dcim.platform",
+	"dcim.rack", "dcim.rackgroup", "dcim.rackreservation", "dcim.rackrole", "dcim.racktype",
+	"dcim.region", "dcim.site", "dcim.sitegroup",
 	// ipam.fhrpgroupassignment is deliberately absent: ipam.FHRPGroupAssignment's model is a
 	// bare ChangeLoggedModel (docs/netbox-schema.md), which mixes in neither TagsMixin nor
 	// CustomFieldsMixin, so it is the one object Kind that carries no provenance stamp.
 	"ipam.aggregate", "ipam.asn", "ipam.asnrange", "ipam.fhrpgroup",
-	"ipam.ipaddress", "dcim.location", "dcim.manufacturer", "dcim.platform",
-	"dcim.rack", "dcim.rackgroup", "dcim.rackreservation", "dcim.rackrole", "dcim.racktype",
-	"dcim.region",
-	"dcim.site", "dcim.sitegroup", "ipam.ipaddress", // ipam.iprange comes from both directions and has to be in the set once: NetBoxIPRange's
+	"ipam.ipaddress",
+	// ipam.iprange comes from both directions and has to be in the set once: NetBoxIPRange's
 	// own Descriptor supplies it, and NetBoxIPRangeClaim's ClaimDescriptor supplies it again
 	// because the range it creates needs the identity custom field to exist first.
 	"ipam.iprange", "ipam.prefix", "ipam.rir", "ipam.role",
