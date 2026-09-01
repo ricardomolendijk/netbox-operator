@@ -197,7 +197,9 @@ notes:
       interface it is assigned to -- and the reverse half is a deferred field on the two
       BaseInterface component specs, because modelling both directions as required
       references is the unresolvable cycle NBO-016 rejects
-      (api/v1alpha1/dcim_macaddress.go)    column: auth_psk
+      (api/v1alpha1/dcim_macaddress.go)
+  - kind: "*"
+    column: auth_psk
     reason: >-
       deliberately unmapped on both wireless kinds and NOT excused: a pre-shared key may
       never be inline in a spec, so the field has to be `authPSKSecretRef` -> a Secret key,

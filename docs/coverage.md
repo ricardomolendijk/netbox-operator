@@ -16,16 +16,16 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 | | count |
 |---|--:|
 | NetBox REST endpoints | 138 |
-| — implemented as a Kind | 50 |
+| — implemented as a Kind | 53 |
 | — excluded, with a reason | 27 |
-| — **not implemented** | 61 |
+| — **not implemented** | 58 |
 | in scope (endpoints − excluded) | 111 |
 | | |
-| writable columns on the implemented Kinds | 551 |
-| — written by a spec field, or engine-owned | 404 |
+| writable columns on the implemented Kinds | 586 |
+| — written by a spec field, or engine-owned | 431 |
 | — deliberately omitted, with a reason | 10 |
-| — blocked: a reference whose target model has no Kind | 63 |
-| — **MISSING**: nothing declares it and nothing blocks it | 74 |
+| — blocked: a reference whose target model has no Kind | 65 |
+| — **MISSING**: nothing declares it and nothing blocks it | 80 |
 | — of those, required on create (fails the audit) | 0 |
 | | |
 | natural-key candidates the IR calls unusable | 21 |
@@ -39,14 +39,15 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 
 | column | status | Kinds | detail |
 |---|---|--:|---|
-| `owner` | blocked | 47 | `users.Owner` is an excluded endpoint, so nothing will ever write this |
-| `tags` | MISSING | 42 | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
+| `owner` | blocked | 50 | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `tags` | MISSING | 45 | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `comments` | excluded | 6 | organisational kinds map name/slug/description only (api/v1alpha1/virtualization_clustertype.go) |
 | `tenant` | MISSING | 6 | deferred to NetBoxTenant (NBO-021), which now ships -- nothing blocks it any more |
 | `config_template` | MISSING | 4 | — |
 | `data_source` | blocked | 4 | `core.DataSource` is an excluded endpoint, so nothing will ever write this |
 | `comments` | MISSING | 3 | — |
 | `data_file` | blocked | 3 | `core.DataFile` is an excluded endpoint, so nothing will ever write this |
+| `auth_psk` | MISSING | 2 | deliberately unmapped on both wireless kinds and NOT excused: a pre-shared key may never be inline in a spec, so the field has to be `authPSKSecretRef` -> a Secret key, which needs a Secret read in the payload path and a Secret informer scoped to the object's own namespace. That is shared machinery and an RBAC decision (NBO-072), so it owes its own ticket rather than riding along with the kinds (api/v1alpha1/wireless_auth.go) |
 | `local_context_data` | MISSING | 2 | the ConfigContextModel column on dcim.Device and virtualization.VirtualMachine. NBO-059 added the ClassJSON field class it needs and stopped at the `extras` app; #241 adds the two spec fields, and nothing else blocks them |
 | `primary_mac_address` | MISSING | 2 | NBO-053 owns it. NBO-048 ships the forward half -- a NetBoxMACAddress names the interface it is assigned to -- and the reverse half is a deferred field on the two BaseInterface component specs, because modelling both directions as required references is the unresolvable cycle NBO-016 rejects (api/v1alpha1/dcim_macaddress.go) |
 | `vlan_translation_policy` | blocked | 2 | waits on a Kind for `ipam.VLANTranslationPolicy` |
@@ -75,7 +76,7 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 | `virtual_machine_type` | blocked | 1 | waits on a Kind for `virtualization.VirtualMachineType` |
 | `weight` | MISSING | 1 | — |
 | `weight_unit` | MISSING | 1 | — |
-| `wireless_lans` | blocked | 1 | waits on a Kind for `wireless.WirelessLAN` |
+| `wireless_lans` | MISSING | 1 | NBO-053 owns it, with the rest of dcim.Interface's component fields. NBO-050 ships wireless.WirelessLAN, so the column is no longer blocked -- only unwritten |
 
 ## Uncovered columns, per Kind
 
@@ -83,6 +84,8 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 |---|---|---|---|---|---|
 | `dcim.Site` | `asns` | M2M | — | MISSING | deferred with dcim.Site's other optional foreign keys; NetBoxASN ships with NBO-055, so nothing blocks it any more (api/v1alpha1/dcim_site.go) |
 | `ipam.FHRPGroup` | `auth_key` | Scalar | — | MISSING | a pre-shared key, permitted only as spec.authKeySecretRef (plan.md 15) and the engine has no FieldClass that reads a Secret into a payload, so the column is unmapped rather than inline; it is in internal/netbox/do.go's redaction set because NetBox returns it (api/v1alpha1/ipam_fhrpgroup.go, docs/reference/netboxfhrpgroup.md) |
+| `wireless.WirelessLAN` | `auth_psk` | Scalar | — | MISSING | deliberately unmapped on both wireless kinds and NOT excused: a pre-shared key may never be inline in a spec, so the field has to be `authPSKSecretRef` -> a Secret key, which needs a Secret read in the payload path and a Secret informer scoped to the object's own namespace. That is shared machinery and an RBAC decision (NBO-072), so it owes its own ticket rather than riding along with the kinds (api/v1alpha1/wireless_auth.go) |
+| `wireless.WirelessLink` | `auth_psk` | Scalar | — | MISSING | deliberately unmapped on both wireless kinds and NOT excused: a pre-shared key may never be inline in a spec, so the field has to be `authPSKSecretRef` -> a Secret key, which needs a Secret read in the payload path and a Secret informer scoped to the object's own namespace. That is shared machinery and an RBAC decision (NBO-072), so it owes its own ticket rather than riding along with the kinds (api/v1alpha1/wireless_auth.go) |
 | `extras.ConfigTemplate` | `auto_sync_enabled` | Scalar | — | MISSING | — |
 | `dcim.DeviceRole` | `comments` | Scalar | — | MISSING | — |
 | `dcim.Location` | `comments` | Scalar | — | excluded | organisational kinds map name/slug/description only (api/v1alpha1/virtualization_clustertype.go) |
@@ -162,6 +165,9 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 | `virtualization.VMInterface` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `virtualization.VirtualDisk` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `virtualization.VirtualMachine` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `wireless.WirelessLAN` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `wireless.WirelessLANGroup` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `wireless.WirelessLink` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `dcim.Device` | `position` | Decimal | — | MISSING | — |
 | `dcim.Interface` | `primary_mac_address` | Ref | — | MISSING | NBO-053 owns it. NBO-048 ships the forward half -- a NetBoxMACAddress names the interface it is assigned to -- and the reverse half is a deferred field on the two BaseInterface component specs, because modelling both directions as required references is the unresolvable cycle NBO-016 rejects (api/v1alpha1/dcim_macaddress.go) |
 | `virtualization.VMInterface` | `primary_mac_address` | Ref | — | MISSING | NBO-053 owns it. NBO-048 ships the forward half -- a NetBoxMACAddress names the interface it is assigned to -- and the reverse half is a deferred field on the two BaseInterface component specs, because modelling both directions as required references is the unresolvable cycle NBO-016 rejects (api/v1alpha1/dcim_macaddress.go) |
@@ -210,6 +216,9 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 | `virtualization.VMInterface` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `virtualization.VirtualDisk` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `virtualization.VirtualMachine` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
+| `wireless.WirelessLAN` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
+| `wireless.WirelessLANGroup` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
+| `wireless.WirelessLink` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `dcim.Location` | `tenant` | Ref | — | MISSING | deferred to NetBoxTenant (NBO-021), which now ships -- nothing blocks it any more |
 | `dcim.Site` | `tenant` | Ref | — | MISSING | deferred to NetBoxTenant (NBO-021), which now ships -- nothing blocks it any more |
 | `ipam.IPAddress` | `tenant` | Ref | — | MISSING | deferred to NetBoxTenant (NBO-021), which now ships -- nothing blocks it any more |
@@ -227,7 +236,7 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 | `virtualization.VMInterface` | `vlan_translation_policy` | Ref | — | blocked | waits on a Kind for `ipam.VLANTranslationPolicy` |
 | `dcim.DeviceType` | `weight` | Decimal | — | MISSING | — |
 | `dcim.DeviceType` | `weight_unit` | Enum | — | MISSING | — |
-| `dcim.Interface` | `wireless_lans` | M2M | — | blocked | waits on a Kind for `wireless.WirelessLAN` |
+| `dcim.Interface` | `wireless_lans` | M2M | — | MISSING | NBO-053 owns it, with the rest of dcim.Interface's component fields. NBO-050 ships wireless.WirelessLAN, so the column is no longer blocked -- only unwritten |
 
 ## Natural-key candidates the IR calls unusable
 
@@ -399,6 +408,6 @@ each pinned column's class rather than from the IR's reason string.
 | `vpn/tunnel-groups` | `vpn.TunnelGroup` | — | MISSING | — |
 | `vpn/tunnel-terminations` | `vpn.TunnelTermination` | — | MISSING | — |
 | `vpn/tunnels` | `vpn.Tunnel` | — | MISSING | — |
-| `wireless/wireless-lan-groups` | `wireless.WirelessLANGroup` | — | MISSING | — |
-| `wireless/wireless-lans` | `wireless.WirelessLAN` | — | MISSING | — |
-| `wireless/wireless-links` | `wireless.WirelessLink` | — | MISSING | — |
+| `wireless/wireless-lan-groups` | `wireless.WirelessLANGroup` | `NetBoxWirelessLANGroup` | implemented | — |
+| `wireless/wireless-lans` | `wireless.WirelessLAN` | `NetBoxWirelessLAN` | implemented | — |
+| `wireless/wireless-links` | `wireless.WirelessLink` | `NetBoxWirelessLink` | implemented | — |
