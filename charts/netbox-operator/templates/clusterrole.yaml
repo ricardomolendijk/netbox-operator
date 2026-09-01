@@ -32,9 +32,6 @@ rules:
 - apiGroups:
   - netbox.kubeforge.org
   resources:
-  - netboxaggregates
-  - netboxasnranges
-  - netboxasns
   - netboxclustergroups
   - netboxclusters
   - netboxclustertypes
@@ -52,21 +49,13 @@ rules:
   - netboxdevices
   - netboxdevicetypes
   - netboxexporttemplates
-  - netboxfhrpgroupassignments
-  - netboxfhrpgroups
-  - netboxinterfaces
   - netboxipaddressclaims
-  - netboxipaddresses
   - netboxiprangeclaims
   - netboxipranges
   - netboxmanufacturers
   - netboxplatforms
   - netboxprefixclaims
-  - netboxrirs
-  - netboxroles
   - netboxsavedfilters
-  - netboxservices
-  - netboxservicetemplates
   - netboxvirtualdisks
   - netboxvirtualmachines
   - netboxvminterfaces
@@ -79,9 +68,6 @@ rules:
 - apiGroups:
   - netbox.kubeforge.org
   resources:
-  - netboxaggregates/finalizers
-  - netboxasnranges/finalizers
-  - netboxasns/finalizers
   - netboxclustergroups/finalizers
   - netboxclusters/finalizers
   - netboxclustertypes/finalizers
@@ -99,8 +85,6 @@ rules:
   - netboxdevices/finalizers
   - netboxdevicetypes/finalizers
   - netboxexporttemplates/finalizers
-  - netboxfhrpgroupassignments/finalizers
-  - netboxfhrpgroups/finalizers
   - netboxinterfaces/finalizers
   - netboxipaddressclaims/finalizers
   - netboxipaddresses/finalizers
@@ -112,12 +96,8 @@ rules:
   - netboxprefixclaims/finalizers
   - netboxprefixes/finalizers
   - netboxregions/finalizers
-  - netboxrirs/finalizers
-  - netboxroles/finalizers
   - netboxroutetargets/finalizers
   - netboxsavedfilters/finalizers
-  - netboxservices/finalizers
-  - netboxservicetemplates/finalizers
   - netboxsitegroups/finalizers
   - netboxsites/finalizers
   - netboxtags/finalizers
@@ -134,9 +114,6 @@ rules:
 - apiGroups:
   - netbox.kubeforge.org
   resources:
-  - netboxaggregates/status
-  - netboxasnranges/status
-  - netboxasns/status
   - netboxclustergroups/status
   - netboxclusters/status
   - netboxclustertypes/status
@@ -155,8 +132,6 @@ rules:
   - netboxdevicetypes/status
   - netboxendpoints/status
   - netboxexporttemplates/status
-  - netboxfhrpgroupassignments/status
-  - netboxfhrpgroups/status
   - netboxinterfaces/status
   - netboxipaddressclaims/status
   - netboxipaddresses/status
@@ -168,12 +143,8 @@ rules:
   - netboxprefixclaims/status
   - netboxprefixes/status
   - netboxregions/status
-  - netboxrirs/status
-  - netboxroles/status
   - netboxroutetargets/status
   - netboxsavedfilters/status
-  - netboxservices/status
-  - netboxservicetemplates/status
   - netboxsitegroups/status
   - netboxsites/status
   - netboxsweeps/status
@@ -203,6 +174,8 @@ rules:
 - apiGroups:
   - netbox.kubeforge.org
   resources:
+  - netboxinterfaces
+  - netboxipaddresses
   - netboxlocations
   - netboxprefixes
   - netboxregions

@@ -118,6 +118,15 @@ func dcimDeviceDescriptor() Descriptor {
 // NBO-059 own the Kinds behind them, and a field that is accepted and writes nothing is worse
 // than a field that is not there.
 //
+// `spec.interfaces` is absent for a different reason, and it is the one absence here that is
+// not a "not yet": there is no `interfaces` column on dcim.Device to map it to. The foreign
+// key points the other way -- `dcim.Interface.device` -- so the inline list produces child CRs
+// that each write their own NetBox object, and nothing about it reaches this payload
+// (NBO-034, api/v1alpha1/dcim_device_inline.go). The engine excludes it from the payload from
+// the parent's own InlineChildren() rather than from a list here, so this descriptor states
+// the fact once, by not mentioning it (internal/reconciler/payload.go,
+// dropInlineChildren).
+//
 // CascadeOnDelete is false on every reference here, which is the fact the doc comment turns
 // on. It is declared by omission rather than written out ten times because false is the zero
 // value; the flag being *absent* on every FK of this kind is the same statement as the flag

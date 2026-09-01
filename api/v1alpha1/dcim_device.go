@@ -276,6 +276,39 @@ type NetBoxDeviceSpec struct {
 	// (docs/concepts/field-ownership.md).
 	// +optional
 	Comments string `json:"comments,omitempty"`
+
+	// Interfaces are this device's dcim.Interface components, declared inline and
+	// materialised as real NetBoxInterface CRs -- with their addresses as real
+	// NetBoxIPAddress CRs under them (ADR-0003 rule 5, docs/concepts/inline-children.md).
+	//
+	// **Not a NetBox column, and the only field on this spec that is not.** `dcim.Device` has
+	// no `interfaces` column: the foreign key points the other way, from each interface at
+	// its device, so nothing here reaches the device's own payload and the field is
+	// deliberately absent from the descriptor's field map
+	// (internal/registry/dcim_device.go). What it produces is child CRs, each of which
+	// writes its own NetBox object -- the device never writes NetBox on a child's behalf.
+	//
+	// **Sugar, and optional, which is the term on which it is in v1alpha1 at all**
+	// (ADR-0003 rule 5). Every entry is equally expressible as a NetBoxInterface with a
+	// `deviceRef` naming this device, the longhand kind stays the complete one -- an inline
+	// entry offers a subset of its fields -- and the two coexist on one device: a
+	// hand-written NetBoxInterface pointing at this device is never pruned, never adopted and
+	// absent from `status.children`.
+	//
+	// **Omitting it and writing `[]` are the same instruction**, unlike every other optional
+	// field on this spec. There is no NetBox value to leave alone, so there is no third
+	// state: both mean "declare no children", and both prune the children a previous spec
+	// declared. Removing one entry prunes exactly that entry's child and its addresses.
+	//
+	// A list with a key rather than an ordered one, so the API server rejects two entries
+	// named the same, and so reordering the list changes no child's name, path or
+	// resourceVersion -- identity is the key, never the index
+	// (docs/concepts/inline-children.md).
+	// +kubebuilder:validation:MaxItems=128
+	// +listType=map
+	// +listMapKey=name
+	// +optional
+	Interfaces []InlineInterface `json:"interfaces,omitempty"`
 }
 
 // NetBoxDevice is one dcim.Device in NetBox.
