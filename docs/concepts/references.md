@@ -942,17 +942,19 @@ and the resolver reads it from the *type* rather than from a switch on the field
 | `InterfaceRef` | `NetBoxInterface` | `dcim.Interface` | `dcim/interfaces` |
 | `CustomFieldChoiceSetRef` | `NetBoxCustomFieldChoiceSet` | `extras.CustomFieldChoiceSet` | `extras/custom-field-choice-sets` |
 | `ConfigTemplateRef` | `NetBoxConfigTemplate` | `extras.ConfigTemplate` | `extras/config-templates` |
+| `ConfigContextProfileRef` | `NetBoxConfigContextProfile` | `extras.ConfigContextProfile` | `extras/config-context-profiles` |
 
 Model and endpoint spellings are from `docs/netbox-schema.md` and its endpoint map.
 `NetBoxTag`, `NetBoxSite`, `NetBoxRegion`, `NetBoxSiteGroup`, `NetBoxLocation`, `NetBoxTenant`,
 `NetBoxTenantGroup`, `NetBoxClusterType`, `NetBoxClusterGroup`, `NetBoxCluster`, `NetBoxDevice`,
-`NetBoxInterface`, `NetBoxCustomFieldChoiceSet` and `NetBoxConfigTemplate` exist as Kinds so
-far.
+`NetBoxInterface`, `NetBoxCustomFieldChoiceSet`, `NetBoxConfigTemplate` and
+`NetBoxConfigContextProfile` exist as Kinds so far.
 
-`CustomFieldChoiceSetRef` is the only one whose target is NetBox's *schema* rather than its
-data — a `select` custom field draws its legal values from a choice set — and nothing about
-resolving it is different for that, which is the point of not giving schema kinds a reference
-mechanism of their own. `ConfigTemplateRef` is declared with its Kind and used by nothing yet:
+`CustomFieldChoiceSetRef` and `ConfigContextProfileRef` are the two whose target is NetBox's
+*schema* rather than its data — a `select` custom field draws its legal values from a choice
+set, and a config context's `data` is validated against a profile's JSON Schema — and nothing
+about resolving either is different for that, which is the point of not giving schema kinds a
+reference mechanism of their own. `ConfigTemplateRef` is declared with its Kind and used by nothing yet:
 `config_template` on a device and a virtual machine is not a spec field, so the alias exists so
 that adding it later is a field on a spec rather than a second change to `objectref.go`.
 

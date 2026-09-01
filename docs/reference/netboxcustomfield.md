@@ -190,7 +190,7 @@ destroys its values.
 
 ### `spec.choiceSetRef`
 
-| Type | [`ObjectRef`](netboxtag.md#objectref) → `NetBoxCustomFieldChoiceSet` |
+| Type | [`ObjectRef`](../concepts/references.md) → `NetBoxCustomFieldChoiceSet` |
 |---|---|
 | Required | no |
 | NetBox column | `choice_set`, `ForeignKey -> extras.CustomFieldChoiceSet on_delete=PROTECT` |

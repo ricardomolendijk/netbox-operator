@@ -16,16 +16,16 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 | | count |
 |---|--:|
 | NetBox REST endpoints | 138 |
-| — implemented as a Kind | 30 |
+| — implemented as a Kind | 38 |
 | — excluded, with a reason | 26 |
-| — **not implemented** | 82 |
+| — **not implemented** | 74 |
 | in scope (endpoints − excluded) | 112 |
 | | |
-| writable columns on the implemented Kinds | 342 |
-| — written by a spec field, or engine-owned | 241 |
-| — deliberately omitted, with a reason | 6 |
-| — blocked: a reference whose target model has no Kind | 43 |
-| — **MISSING**: nothing declares it and nothing blocks it | 52 |
+| writable columns on the implemented Kinds | 456 |
+| — written by a spec field, or engine-owned | 332 |
+| — deliberately omitted, with a reason | 10 |
+| — blocked: a reference whose target model has no Kind | 55 |
+| — **MISSING**: nothing declares it and nothing blocks it | 59 |
 | — of those, required on create (fails the audit) | 0 |
 | | |
 | natural-key candidates the IR calls unusable | 21 |
@@ -39,20 +39,26 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 
 | column | status | Kinds | detail |
 |---|---|--:|---|
-| `tags` | MISSING | 29 | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
-| `owner` | blocked | 28 | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `owner` | blocked | 36 | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `tags` | MISSING | 31 | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `comments` | excluded | 6 | organisational kinds map name/slug/description only (api/v1alpha1/virtualization_clustertype.go) |
 | `tenant` | MISSING | 6 | deferred to NetBoxTenant (NBO-021), which now ships -- nothing blocks it any more |
-| `config_template` | blocked | 4 | waits on a Kind for `extras.ConfigTemplate` |
+| `config_template` | MISSING | 4 | — |
+| `data_source` | blocked | 4 | `core.DataSource` is an excluded endpoint, so nothing will ever write this |
 | `comments` | MISSING | 3 | — |
+| `data_file` | blocked | 3 | `core.DataFile` is an excluded endpoint, so nothing will ever write this |
+| `local_context_data` | MISSING | 2 | the ConfigContextModel column on dcim.Device and virtualization.VirtualMachine. NBO-059 added the ClassJSON field class it needs and stopped at the `extras` app; #241 adds the two spec fields, and nothing else blocks them |
 | `primary_mac_address` | blocked | 2 | waits on a Kind for `dcim.MACAddress` |
 | `vlan_translation_policy` | blocked | 2 | waits on a Kind for `ipam.VLANTranslationPolicy` |
 | `asns` | blocked | 1 | waits on a Kind for `ipam.ASN` |
+| `auto_sync_enabled` | MISSING | 1 | — |
+| `data_path` | excluded | 1 | NetBox owns the git-sync trio and overwrites `data` from it (api/v1alpha1/extras_configcontext.go) |
+| `data_path` | excluded | 1 | NetBox owns the git-sync trio and overwrites `schema` from it (api/v1alpha1/extras_configcontextprofile.go) |
+| `data_path` | excluded | 1 | NetBox owns the git-sync trio and overwrites `template_code` from it (api/v1alpha1/extras_configtemplate.go) |
+| `data_path` | excluded | 1 | NetBox owns the git-sync trio and overwrites `template_code` from it (api/v1alpha1/extras_exporttemplate.go) |
 | `face` | MISSING | 1 | — |
 | `front_image` | MISSING | 1 | — |
 | `group` | MISSING | 1 | deferred to NetBoxSiteGroup (NBO-066), which now ships -- nothing blocks it any more |
-| `local_context_data` | MISSING | 1 | — |
-| `local_context_data` | MISSING | 1 | NBO-059 owns it, with the rest of ConfigContextModel |
 | `location` | MISSING | 1 | — |
 | `module` | blocked | 1 | waits on a Kind for `dcim.Module` |
 | `position` | MISSING | 1 | — |
@@ -60,6 +66,7 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 | `rear_image` | MISSING | 1 | — |
 | `region` | MISSING | 1 | deferred with dcim.Site's other optional foreign keys; NetBoxRegion now ships, so nothing blocks it any more (api/v1alpha1/dcim_site.go) |
 | `time_zone` | MISSING | 1 | no ticket and no citation anywhere in the tree: a plain TimeZoneField with no dependency on another Kind |
+| `user` | blocked | 1 | waits on a Kind for `settings.AUTH_USER_MODEL` |
 | `vc_position` | MISSING | 1 | — |
 | `vc_priority` | MISSING | 1 | — |
 | `vdcs` | blocked | 1 | waits on a Kind for `dcim.VirtualDeviceContext` |
@@ -74,6 +81,7 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 | model | column | class | required | status | detail |
 |---|---|---|---|---|---|
 | `dcim.Site` | `asns` | M2M | — | blocked | waits on a Kind for `ipam.ASN` |
+| `extras.ConfigTemplate` | `auto_sync_enabled` | Scalar | — | MISSING | — |
 | `dcim.DeviceRole` | `comments` | Scalar | — | MISSING | — |
 | `dcim.Location` | `comments` | Scalar | — | excluded | organisational kinds map name/slug/description only (api/v1alpha1/virtualization_clustertype.go) |
 | `dcim.Manufacturer` | `comments` | Scalar | — | MISSING | — |
@@ -83,15 +91,26 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 | `tenancy.TenantGroup` | `comments` | Scalar | — | excluded | organisational kinds map name/slug/description only (api/v1alpha1/virtualization_clustertype.go) |
 | `virtualization.ClusterGroup` | `comments` | Scalar | — | excluded | organisational kinds map name/slug/description only (api/v1alpha1/virtualization_clustertype.go) |
 | `virtualization.ClusterType` | `comments` | Scalar | — | excluded | organisational kinds map name/slug/description only (api/v1alpha1/virtualization_clustertype.go) |
-| `dcim.Device` | `config_template` | Ref | — | blocked | waits on a Kind for `extras.ConfigTemplate` |
-| `dcim.DeviceRole` | `config_template` | Ref | — | blocked | waits on a Kind for `extras.ConfigTemplate` |
-| `dcim.Platform` | `config_template` | Ref | — | blocked | waits on a Kind for `extras.ConfigTemplate` |
-| `virtualization.VirtualMachine` | `config_template` | Ref | — | blocked | waits on a Kind for `extras.ConfigTemplate` |
+| `dcim.Device` | `config_template` | Ref | — | MISSING | — |
+| `dcim.DeviceRole` | `config_template` | Ref | — | MISSING | — |
+| `dcim.Platform` | `config_template` | Ref | — | MISSING | — |
+| `virtualization.VirtualMachine` | `config_template` | Ref | — | MISSING | — |
+| `extras.ConfigContext` | `data_file` | Ref | — | blocked | `core.DataFile` is an excluded endpoint, so nothing will ever write this |
+| `extras.ConfigContextProfile` | `data_file` | Ref | — | blocked | `core.DataFile` is an excluded endpoint, so nothing will ever write this |
+| `extras.ConfigTemplate` | `data_file` | Ref | — | blocked | `core.DataFile` is an excluded endpoint, so nothing will ever write this |
+| `extras.ConfigContext` | `data_path` | Scalar | — | excluded | NetBox owns the git-sync trio and overwrites `data` from it (api/v1alpha1/extras_configcontext.go) |
+| `extras.ConfigContextProfile` | `data_path` | Scalar | — | excluded | NetBox owns the git-sync trio and overwrites `schema` from it (api/v1alpha1/extras_configcontextprofile.go) |
+| `extras.ConfigTemplate` | `data_path` | Scalar | — | excluded | NetBox owns the git-sync trio and overwrites `template_code` from it (api/v1alpha1/extras_configtemplate.go) |
+| `extras.ExportTemplate` | `data_path` | Scalar | — | excluded | NetBox owns the git-sync trio and overwrites `template_code` from it (api/v1alpha1/extras_exporttemplate.go) |
+| `extras.ConfigContext` | `data_source` | Ref | — | blocked | `core.DataSource` is an excluded endpoint, so nothing will ever write this |
+| `extras.ConfigContextProfile` | `data_source` | Ref | — | blocked | `core.DataSource` is an excluded endpoint, so nothing will ever write this |
+| `extras.ConfigTemplate` | `data_source` | Ref | — | blocked | `core.DataSource` is an excluded endpoint, so nothing will ever write this |
+| `extras.ExportTemplate` | `data_source` | Ref | — | blocked | `core.DataSource` is an excluded endpoint, so nothing will ever write this |
 | `dcim.Device` | `face` | Enum | — | MISSING | — |
 | `dcim.DeviceType` | `front_image` | Scalar | — | MISSING | — |
 | `dcim.Site` | `group` | Ref | — | MISSING | deferred to NetBoxSiteGroup (NBO-066), which now ships -- nothing blocks it any more |
-| `dcim.Device` | `local_context_data` | JSON | — | MISSING | — |
-| `virtualization.VirtualMachine` | `local_context_data` | JSON | — | MISSING | NBO-059 owns it, with the rest of ConfigContextModel |
+| `dcim.Device` | `local_context_data` | JSON | — | MISSING | the ConfigContextModel column on dcim.Device and virtualization.VirtualMachine. NBO-059 added the ClassJSON field class it needs and stopped at the `extras` app; #241 adds the two spec fields, and nothing else blocks them |
+| `virtualization.VirtualMachine` | `local_context_data` | JSON | — | MISSING | the ConfigContextModel column on dcim.Device and virtualization.VirtualMachine. NBO-059 added the ClassJSON field class it needs and stopped at the `extras` app; #241 adds the two spec fields, and nothing else blocks them |
 | `dcim.Device` | `location` | Ref | — | MISSING | — |
 | `dcim.Interface` | `module` | Ref | — | blocked | waits on a Kind for `dcim.Module` |
 | `dcim.Device` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
@@ -104,6 +123,14 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 | `dcim.Region` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `dcim.Site` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `dcim.SiteGroup` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `extras.ConfigContext` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `extras.ConfigContextProfile` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `extras.ConfigTemplate` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `extras.CustomField` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `extras.CustomFieldChoiceSet` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `extras.CustomLink` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `extras.ExportTemplate` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `extras.SavedFilter` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `ipam.IPAddress` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `ipam.IPRange` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `ipam.Prefix` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
@@ -138,6 +165,8 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 | `dcim.Region` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `dcim.Site` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `dcim.SiteGroup` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
+| `extras.ConfigContextProfile` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
+| `extras.ConfigTemplate` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `ipam.IPAddress` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `ipam.IPRange` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `ipam.Prefix` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
@@ -164,6 +193,7 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 | `ipam.RouteTarget` | `tenant` | Ref | — | MISSING | deferred to NetBoxTenant (NBO-021), which now ships -- nothing blocks it any more |
 | `ipam.VRF` | `tenant` | Ref | — | MISSING | deferred to NetBoxTenant (NBO-021), which now ships -- nothing blocks it any more |
 | `dcim.Site` | `time_zone` | Scalar | — | MISSING | no ticket and no citation anywhere in the tree: a plain TimeZoneField with no dependency on another Kind |
+| `extras.SavedFilter` | `user` | Ref | — | blocked | waits on a Kind for `settings.AUTH_USER_MODEL` |
 | `dcim.Device` | `vc_position` | Scalar | — | MISSING | — |
 | `dcim.Device` | `vc_priority` | Scalar | — | MISSING | — |
 | `dcim.Interface` | `vdcs` | M2M | — | blocked | waits on a Kind for `dcim.VirtualDeviceContext` |
@@ -277,19 +307,19 @@ each pinned column's class rather than from the IR's reason string.
 | `dcim/virtual-chassis` | `dcim.VirtualChassis` | — | MISSING | — |
 | `dcim/virtual-device-contexts` | `dcim.VirtualDeviceContext` | — | MISSING | — |
 | `extras/bookmarks` | `extras.Bookmark` | — | excluded | per-user UI state (plan.md 8) |
-| `extras/config-context-profiles` | `extras.ConfigContextProfile` | — | MISSING | — |
-| `extras/config-contexts` | `extras.ConfigContext` | — | MISSING | — |
-| `extras/config-templates` | `extras.ConfigTemplate` | — | MISSING | — |
-| `extras/custom-field-choice-sets` | `extras.CustomFieldChoiceSet` | — | MISSING | — |
-| `extras/custom-fields` | `extras.CustomField` | — | MISSING | — |
-| `extras/custom-links` | `extras.CustomLink` | — | MISSING | — |
+| `extras/config-context-profiles` | `extras.ConfigContextProfile` | `NetBoxConfigContextProfile` | implemented | — |
+| `extras/config-contexts` | `extras.ConfigContext` | `NetBoxConfigContext` | implemented | — |
+| `extras/config-templates` | `extras.ConfigTemplate` | `NetBoxConfigTemplate` | implemented | — |
+| `extras/custom-field-choice-sets` | `extras.CustomFieldChoiceSet` | `NetBoxCustomFieldChoiceSet` | implemented | — |
+| `extras/custom-fields` | `extras.CustomField` | `NetBoxCustomField` | implemented | — |
+| `extras/custom-links` | `extras.CustomLink` | `NetBoxCustomLink` | implemented | — |
 | `extras/event-rules` | `extras.EventRule` | — | MISSING | — |
-| `extras/export-templates` | `extras.ExportTemplate` | — | MISSING | — |
+| `extras/export-templates` | `extras.ExportTemplate` | `NetBoxExportTemplate` | implemented | — |
 | `extras/image-attachments` | `extras.ImageAttachment` | — | excluded | binary upload, not expressible as a manifest (plan.md 8) |
 | `extras/journal-entries` | `extras.JournalEntry` | — | excluded | append-only; a journal entry is an event, and re-applying a manifest must not rewrite history (plan.md 8) |
 | `extras/notification-groups` | `extras.NotificationGroup` | — | excluded | addresses users and groups, which users/* excludes (plan.md 8) |
 | `extras/notifications` | `extras.Notification` | — | excluded | per-user runtime state (plan.md 8) |
-| `extras/saved-filters` | `extras.SavedFilter` | — | MISSING | — |
+| `extras/saved-filters` | `extras.SavedFilter` | `NetBoxSavedFilter` | implemented | — |
 | `extras/scripts` | `extras.Script` | — | excluded | non-declarative; a script is code uploaded and run (plan.md 8) |
 | `extras/scripts/upload` | `extras.ScriptModule` | — | excluded | binary upload, not expressible as a manifest (plan.md 8) |
 | `extras/subscriptions` | `extras.Subscription` | — | excluded | per-user runtime state (plan.md 8) |

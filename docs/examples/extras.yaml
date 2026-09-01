@@ -1,5 +1,6 @@
 # NetBox's own configuration, declared: a custom field and its choices, a custom link, a
-# saved filter, an export template and a config template.
+# saved filter, an export template, a config template, a config-context profile and the
+# config context it validates.
 #
 # Everything here is `extras` -- the app that configures NetBox rather than describing a
 # network. None of it is a site, a prefix or a device; all of it changes what NetBox shows
@@ -7,7 +8,7 @@
 #
 #   kubectl create namespace homelab
 #   kubectl apply -f docs/examples/extras.yaml
-#   kubectl get nbcf,nbcfcs,nbcl,nbsf,nbet,nbct -n homelab
+#   kubectl get nbcf,nbcfcs,nbcl,nbsf,nbet,nbct,nbccp,nbcc -n homelab
 #
 # Replace the URL and the token before applying.
 #
@@ -254,3 +255,80 @@ spec:
   # Returns a full Python traceback to whoever asks for a render. NetBox's own help text says
   # not to use it in production, and means it.
   debug: false
+---
+# The JSON Schema a config context's `data` is validated against.
+#
+# The one Kind in this app whose provenance stamp does not follow its bases: the AST says
+# PrimaryModel -- both mixins -- and the REST serializer carries `tags` and no
+# `custom_fields` at all. The flag follows the API, because NetBox ignores a column it does
+# not know rather than rejecting it. See docs/reference/netboxconfigcontextprofile.md.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxConfigContextProfile
+metadata:
+  name: dns-profile
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  # `name CharField REQ UNIQUE`, so unlike the two template Kinds above the database
+  # enforces the identity and a `?name=` lookup can never be ambiguous.
+  name: DNS settings
+  description: Shape of the dns block every config context contributes
+
+  schema:
+    type: object
+    properties:
+      dns:
+        type: object
+        properties:
+          servers:
+            type: array
+            items:
+              type: string
+    required:
+      - dns
+---
+# A JSON document merged into the rendered configuration of everything the assignment sets
+# select -- and the widest many-to-many surface in the catalogue: thirteen sets, all of them
+# ClassRefMany entries on the Descriptor and no engine code at all.
+#
+# Only two sets are populated here, and both point at objects this file does not create: a
+# NetBoxConfigContext applied before them reports RefsResolved=False, Reason=RefNotReady
+# naming the element, writes nothing, and converges on a watch once they exist. That is the
+# reference system doing its job, and it is exactly what `spec.customFields` cannot do --
+# which is the whole subject of docs/custom-fields.md.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxConfigContext
+metadata:
+  name: homelab-dns
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  name: Homelab DNS
+  description: Resolvers for everything in the homelab
+
+  # Required by NetBox. A context with nothing to contribute is `isActive: false`, not an
+  # absent document -- and it is compared as a whole document rather than as a scalar, so a
+  # `data` containing an `id` key does not get unwrapped and PATCHed forever.
+  data:
+    dns:
+      servers:
+        - 10.0.0.53
+        - 10.0.1.53
+
+  # Validated against the profile above. A PROTECT foreign key, so no owner reference is
+  # taken on it and deleting the profile is refused while this context names it.
+  profileRef:
+    name: dns-profile
+
+  # `tags` here selects which *tagged objects* the context applies to. It is NOT this
+  # object's own tags: extras.ConfigContext mixes in no TagsMixin, so the provenance stamp
+  # has no column on this Kind and never touches this list. Declaring the Kind taggable
+  # would append `k8s-managed` here and silently change which objects get this
+  # configuration -- internal/registry refuses that combination at boot.
+  tags:
+    - name: production
+
+  weight: 1000                                      # the default; higher is merged later
+  isActive: true                                    # the default
