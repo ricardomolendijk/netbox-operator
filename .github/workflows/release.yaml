@@ -131,10 +131,13 @@ jobs:
           set -euo pipefail
           image="$REGISTRY/${{ github.repository }}"
           version='${{ steps.version.outputs.version }}'
+          # dist/ is where --metadata-file always lands, on both the push and the dry-run
+          # path -- it must exist before buildx runs regardless of which output mode below
+          # it takes.
+          mkdir -p dist
           if [ '${{ steps.gate.outputs.publish }}' = 'true' ]; then
             output="--push"
           else
-            mkdir -p dist
             output="--output=type=oci,dest=dist/netbox-operator-$version.oci.tar"
           fi
           docker buildx build \
