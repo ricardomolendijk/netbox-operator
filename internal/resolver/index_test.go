@@ -159,6 +159,81 @@ func TestRefIndexerDeduplicatesOneTarget(t *testing.T) {
 	}
 }
 
+// TestRefIndexerKeysForAToManyReference is the watch half of NBO-020's "target becoming Ready
+// completes the write in one pass".
+//
+// A to-many field indexes **one key per element**, so any of the objects it points at wakes the
+// referrer -- not just the first, and not only the list as a whole. It has to be per element
+// because of the all-or-nothing rule: a list of three where the third is missing contributes
+// nothing to the payload, so the event that unblocks the write is an event on the third. An
+// index keyed on the field would deliver that event only if the *first* element changed, and
+// the VRF would sit at `RefsResolved=False` until the endpoint's resync got round to it.
+//
+// The mixed modes are the other half of the assertion. A `slug` or an `id` element resolves
+// against NetBox, where no Kubernetes object exists for an event to arrive for, so it
+// contributes no key at all -- the same bound the to-one cases above are held to.
+func TestRefIndexerKeysForAToManyReference(t *testing.T) {
+	tests := []struct {
+		name string
+		spec map[string]any
+		want []string
+	}{
+		{
+			name: "one key per element",
+			spec: map[string]any{"importTargets": []any{
+				map[string]any{"name": "rt-a"},
+				map[string]any{"name": "rt-b"},
+				map[string]any{"name": "rt-c"},
+			}},
+			want: []string{
+				"netboxroutetarget/team-a/rt-a",
+				"netboxroutetarget/team-a/rt-b",
+				"netboxroutetarget/team-a/rt-c",
+			},
+		},
+		{
+			// The element in the middle is the one that would be missed by an index keyed on
+			// the field, and it is exactly the element the all-or-nothing rule is waiting for.
+			name: "only the name elements are indexed",
+			spec: map[string]any{"importTargets": []any{
+				map[string]any{"slug": "rt-a"},
+				map[string]any{"name": "rt-b"},
+				map[string]any{"id": int64(9)},
+			}},
+			want: []string{"netboxroutetarget/team-a/rt-b"},
+		},
+		{
+			// An explicitly-empty relation reaches into nothing, so there is nothing to wake it.
+			// It needs no waking either: `[]` is an instruction the engine carries out on the
+			// pass it reads it.
+			name: "an empty list is no edge",
+			spec: map[string]any{"importTargets": []any{}},
+			want: []string{},
+		},
+		{
+			// Two elements naming one route target are one edge, for the reason
+			// TestRefIndexerDeduplicatesOneTarget gives: a list matched twice is two workqueue
+			// requests before the queue collapses them, and two increments of the enqueue metric.
+			name: "a repeated element is one key",
+			spec: map[string]any{"importTargets": []any{
+				map[string]any{"name": "rt-a"},
+				map[string]any{"name": "rt-a"},
+			}},
+			want: []string{"netboxroutetarget/team-a/rt-a"},
+		},
+	}
+
+	indexer := refIndexer(siteDescriptor())
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := indexer(referrer("vrf-a", tc.spec)); !sameSet(got, tc.want) {
+				t.Errorf("keys = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 // TestRefNamespaceIndexerKeys covers the grant watch's half of the index: which namespaces a
 // referrer reaches into, and why its own is not one of them.
 func TestRefNamespaceIndexerKeys(t *testing.T) {
