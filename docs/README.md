@@ -89,17 +89,31 @@ template — copy its headings in this order:
    sentence on what it does; then a **"If it is wrong"** paragraph naming the condition
    type, `Reason` constant and message the user will actually see, and separating what
    admission rejects from what fails later at reconcile.
-5. **`status`** — a table of field, type, what populates it, and when. Say explicitly which
+5. **M2M fields** — one subsection per many-to-many field, **only when the kind has one**.
+   State the three states as a Spec / Payload / Meaning table — field absent means "do not
+   manage", `[]` clears the relation, a list replaces it — and say that the middle row needs
+   `metadata.managedFields` to be readable, because `omitempty` erases an explicitly-empty
+   list on the way in ([field ownership](concepts/field-ownership.md)). Then: the ids are sent
+   sorted and deduplicated and compared as a set, so **reordering the list writes nothing**;
+   the field resolves **all or nothing**, and an unresolved element is named with its index
+   (`importTargets[1]`); and a member contributes **no owner reference**, because a shared
+   many-to-many is not containment
+   ([ADR-0003](decisions/0003-ownership-and-references.md) §4).
+   [`reference/netboxvrf.md`](reference/netboxvrf.md#specimporttargets-and-specexporttargets)
+   is the worked example. The rule is not optional prose: NetBox replaces a many-to-many
+   wholesale on `PATCH` and has no remove verb, so a page that leaves out the empty state has
+   left out the only way to take the last element off.
+6. **`status`** — a table of field, type, what populates it, and when. Say explicitly which
    fields are *not* cleared on failure.
-6. **Conditions** — a table of type, when `True`, when `False`, and every `Reason` it can
+7. **Conditions** — a table of type, when `True`, when `False`, and every `Reason` it can
    carry; then a reason glossary; then retry intervals.
-7. **Kind-specific behaviour** — the one or two things about this kind that are not
+8. **Kind-specific behaviour** — the one or two things about this kind that are not
    obvious. Cite `docs/netbox-schema.md` or a NetBox source path for every NetBox claim.
-8. **Printer columns** — real `kubectl get <kind>` output, plus a table mapping column to
+9. **Printer columns** — real `kubectl get <kind>` output, plus a table mapping column to
    JSONPath.
-9. **Troubleshooting** — symptom → condition → cause → fix, driven off the `Reason`
-   constants, since those enumerate the real failure modes.
-10. **Related** — links to the concept pages and ADRs that explain the *why*.
+10. **Troubleshooting** — symptom → condition → cause → fix, driven off the `Reason`
+    constants, since those enumerate the real failure modes.
+11. **Related** — links to the concept pages and ADRs that explain the *why*.
 
 Document only what is in the code. If a spec and the code disagree, the code wins and the
 divergence gets reported.

@@ -193,6 +193,49 @@ example harder to read — to re-derive information the API server is already tr
 free. Field ownership makes the Go type irrelevant, which is why it won
 ([issue #121](https://github.com/ricardomolendijk/netbox-operator/issues/121)).
 
+### Amendment (NBO-020): a to-many reference is not a pointer to a slice either
+
+NBO-020's first acceptance criterion predates the paragraph above and contradicts it. It asks
+for every many-to-many spec field to be a **pointer to a slice** —
+`ImportTargets *[]RouteTargetRef` — on the grounds that `nil` and `[]` are then
+distinguishable where a plain `[]RouteTargetRef`'s zero value and an explicit empty list are
+not. **That criterion is superseded, and the shipped fields are plain slices**
+(`api/v1alpha1/ipam_vrf.go`).
+
+The reasoning is the reasoning of this whole page, and it did not stop applying at the
+cardinality boundary:
+
+- The distinction is not read off the Go value for a list any more than for a string. An
+  `importTargets: []` that `omitempty` erased is restored from `metadata.managedFields` as
+  `[]`, by the same reflection that restores `description: ""` as `""` — a slice's empty form
+  is `[]any{}` (`emptyValueOf`, `internal/reconciler/ownership.go`). Nothing about it is
+  per-kind or per-cardinality.
+- A pointer would be a *second* mechanism for one fact, and the two would not agree. A
+  non-nil pointer to an empty slice survives `omitempty` and reaches the payload on its own,
+  so the empty state of a to-many field would be decided by the Go type while the empty state
+  of every scalar beside it was decided by ownership metadata. Which rule fires would depend
+  on which field you were looking at.
+- Taking `omitempty` off to make the pointer honest inverts the bug, exactly as it does below:
+  a typed Go client — the operator itself, materialising an inline child — would marshal
+  every unset field as its empty value and thereby claim it, so adopting a pre-existing NetBox
+  object would clear a relation nobody had mentioned.
+- The pointer is also invisible to the mechanism that already works. `emptyValueOf` answers
+  slices and maps and scalars, not pointers, because a nil pointer is a state of its own — so
+  a `*[]Ref` field would silently have no empty form, and the last route target on a VRF would
+  become unremovable. That is the failure the criterion existed to prevent, reintroduced by
+  the fix for it.
+
+What the ticket wanted checked is still checked, pointed the other way:
+`TestEveryToManyRefFieldIsAPlainSliceWithOmitempty` (`internal/registry/refmany_test.go`) walks
+the registry and fails on any `RefMany` field that is a pointer or has lost `omitempty`, and
+`TestFieldClassAgreesWithTheGeneratedCRD` fails when a field's class and its generated schema
+disagree about how many objects it holds.
+
+The standing rule this generalises to: **cardinality never changes how a field's three states
+are expressed.** A field class says how many objects a field holds and how its value is
+compared; `metadata.managedFields` says whether the user set it. Those are separate questions
+and no Go type is allowed to answer the second one.
+
 ### Why `omitempty` stays on the structs
 
 Taking `omitempty` off would look like a smaller fix: the empty value would then be in the
