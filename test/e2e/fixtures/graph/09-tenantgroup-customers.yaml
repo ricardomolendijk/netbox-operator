@@ -1,0 +1,9 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxTenantGroup
+metadata:
+  name: customers
+  namespace: team-a
+spec:
+  endpointRef: team
+  name: E2E Customers
+  slug: e2e-customers

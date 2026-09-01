@@ -1,0 +1,11 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxTenant
+metadata:
+  name: acme
+  namespace: team-a
+spec:
+  endpointRef: team
+  name: E2E ACME
+  slug: e2e-acme
+  groupRef:
+    name: customers

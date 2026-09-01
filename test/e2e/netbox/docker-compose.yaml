@@ -1,0 +1,91 @@
+# A live NetBox for the e2e suite: the real API, the real serialisers, the real 409s.
+#
+# Attached to the same Docker network as the kind nodes, so the manager running inside the
+# cluster reaches NetBox by container IP and the test process reaches it through the
+# published port. Two addresses for one NetBox is deliberate -- the alternative is a
+# NodePort or a port-forward in the path of every assertion.
+#
+# Postgres data lives in a tmpfs. A convergence run creates a few dozen objects and then
+# throws the whole database away, so durability buys nothing and costs a volume that
+# outlives a failed run.
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: netbox
+      POSTGRES_USER: netbox
+      POSTGRES_PASSWORD: netbox
+      # The database is created once and dropped with the container; fsync is pure cost.
+      PGDATA: /var/lib/postgresql/data/pgdata
+    command: ["postgres", "-c", "fsync=off", "-c", "full_page_writes=off", "-c", "synchronous_commit=off"]
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U netbox -d netbox"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    image: valkey/valkey:8.1-alpine
+    command: ["valkey-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  netbox:
+    # Pinned to the release docs/netbox-schema.md was extracted from. NetBoxEndpoint gates
+    # on >=4.2, <5.0, so a bump here is a deliberate change to what the suite proves.
+    image: netboxcommunity/netbox:${NETBOX_IMAGE_TAG:-v4.6.8}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DB_HOST: postgres
+      DB_NAME: netbox
+      DB_USER: netbox
+      DB_PASSWORD: netbox
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_DATABASE: "0"
+      REDIS_SSL: "false"
+      REDIS_CACHE_HOST: redis
+      REDIS_CACHE_PORT: "6379"
+      REDIS_CACHE_DATABASE: "1"
+      REDIS_CACHE_SSL: "false"
+      SECRET_KEY: e2e-only-secret-key-not-a-credential-0123456789abcdef
+      # The superuser exists so the suite has an owner to hang an API token off. No
+      # SUPERUSER_API_TOKEN: the image only mints a v2 token, and a v2 token is presented
+      # as `Bearer nbt_<key>.<secret>` while internal/netbox sends `Token <token>`. The
+      # harness creates a v1 token instead -- see harness/netbox.go.
+      SUPERUSER_NAME: admin
+      SUPERUSER_EMAIL: admin@e2e.invalid
+      SUPERUSER_PASSWORD: e2e-only-password
+      SKIP_SUPERUSER: "false"
+      # Reads without a token would hide an endpoint whose credentials are wrong.
+      LOGIN_REQUIRED: "true"
+      HOUSEKEEPING_INTERVAL: "0"
+    ports:
+      - "${NETBOX_HOST_PORT:-18080}:8080"
+    healthcheck:
+      # /api/status/ needs a token; /login/ does not, and it is served by the same gunicorn
+      # after migrations have run, which is the thing being waited for.
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://localhost:8080/login/"]
+      interval: 5s
+      timeout: 5s
+      # NetBox applies ~700 migrations on first boot; on a cold container that is minutes.
+      retries: 120
+      start_period: 30s
+
+# The kind nodes' network, created by `kind create cluster`. External rather than
+# compose-managed so that the manager's Pods and this NetBox share one L3 domain without a
+# second network hop -- and so that tearing the compose project down never deletes it.
+networks:
+  default:
+    name: ${NETBOX_DOCKER_NETWORK:-kind}
+    external: true

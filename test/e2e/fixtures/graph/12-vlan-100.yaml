@@ -1,0 +1,20 @@
+# A real foreign key (`site`), unlike NetBoxPrefix's scope -- and a second crossing into the
+# catalogue namespace. Identity is (group, vid), so it waits on 11 as well.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxVLAN
+metadata:
+  name: vlan-100
+  namespace: team-a
+spec:
+  endpointRef: team
+  deletionPolicy: Delete
+  vid: 100
+  name: E2E ACME 100
+  status: active
+  groupRef:
+    name: acme-vlans
+  siteRef:
+    namespace: netbox-catalog
+    name: ams
+  tenantRef:
+    name: acme

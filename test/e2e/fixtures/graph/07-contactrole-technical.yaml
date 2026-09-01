@@ -1,0 +1,9 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxContactRole
+metadata:
+  name: technical
+  namespace: netbox-catalog
+spec:
+  endpointRef: catalogue
+  name: E2E Technical
+  slug: e2e-technical

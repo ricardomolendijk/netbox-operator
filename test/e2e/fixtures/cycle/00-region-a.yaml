@@ -1,0 +1,16 @@
+# Half of a deliberate cycle: `a.parent = b` and `b.parent = a`.
+#
+# The assertion is that this is *detected* rather than requeued forever: both objects report
+# RefsResolved=False, Reason=RefCycle, NetBox receives no write for either, and neither
+# object is reconciled into a requeue storm.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxRegion
+metadata:
+  name: cycle-a
+  namespace: netbox-catalog
+spec:
+  endpointRef: catalogue
+  name: E2E Cycle A
+  slug: e2e-cycle-a
+  parentRef:
+    name: cycle-b

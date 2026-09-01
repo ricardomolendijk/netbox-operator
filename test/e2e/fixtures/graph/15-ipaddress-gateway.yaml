@@ -1,0 +1,16 @@
+# deletionPolicy is spelled out because this kind's own default is Retain: deleting an
+# address frees it for reallocation, which is state rather than configuration. The teardown
+# run asserts NetBox is empty, so this graph opts in to the delete.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxIPAddress
+metadata:
+  name: gateway
+  namespace: team-a
+spec:
+  endpointRef: team
+  deletionPolicy: Delete
+  address: 10.117.0.1/24
+  status: active
+  dnsName: gw.e2e.invalid
+  vrfRef:
+    name: acme-vrf

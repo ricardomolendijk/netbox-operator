@@ -1,0 +1,11 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxRegion
+metadata:
+  name: cycle-b
+  namespace: netbox-catalog
+spec:
+  endpointRef: catalogue
+  name: E2E Cycle B
+  slug: e2e-cycle-b
+  parentRef:
+    name: cycle-a

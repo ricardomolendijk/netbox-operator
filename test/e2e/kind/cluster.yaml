@@ -1,0 +1,30 @@
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+
+# One node. The suite tests convergence, not scheduling, and a second node buys nothing but
+# a slower bring-up.
+nodes:
+  - role: control-plane
+    extraPortMappings:
+      # The manager's /metrics, which the suite scrapes as an assertion: two resync periods
+      # with no mutating request, and a bounded write count per run.
+      #
+      # Published to the host rather than reached at the node container's own address,
+      # because a container IP is only routable from the host on plain Linux Docker -- not on
+      # Docker Desktop, and not inside a nested or remote daemon, where it times out. This
+      # port pairs with the NodePort the harness creates in front of the manager
+      # (test/e2e/harness/operator.go, metricsNodePort); change one and change the other.
+      - containerPort: 30081
+        hostPort: 30081
+        listenAddress: "127.0.0.1"
+        protocol: TCP
+    extraMounts:
+      # kubelet opens /dev/kmsg unconditionally and refuses to start without it
+      # ("failed to create kubelet: open /dev/kmsg: no such file or directory"). A plain
+      # Linux host has one; a nested or sandboxed container runtime often does not, and
+      # there the node comes up NotReady forever with no hint in `kind create` output.
+      #
+      # Mounting /dev/null over it is safe on both: kubelet only ever writes to /dev/kmsg,
+      # and the writes are diagnostics nothing in this suite reads.
+      - hostPath: /dev/null
+        containerPath: /dev/kmsg

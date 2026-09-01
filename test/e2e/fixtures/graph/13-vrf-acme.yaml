@@ -1,0 +1,12 @@
+# `rd` is the unique column and therefore the natural key; `name` is not unique in NetBox.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxVRF
+metadata:
+  name: acme-vrf
+  namespace: team-a
+spec:
+  endpointRef: team
+  deletionPolicy: Delete
+  name: E2E ACME
+  rd: "65000:17"
+  enforceUnique: true

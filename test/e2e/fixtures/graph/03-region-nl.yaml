@@ -1,0 +1,13 @@
+# Self-referential parent: dcim.Region.parent points at dcim.Region, so this is the smallest
+# case where an object's *identity* depends on a reference resolving first.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxRegion
+metadata:
+  name: nl
+  namespace: netbox-catalog
+spec:
+  endpointRef: catalogue
+  name: Netherlands
+  slug: e2e-nl
+  parentRef:
+    name: emea

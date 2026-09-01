@@ -1,0 +1,21 @@
+# The generic-FK pair: `objectRef` writes (object_type, object_id), both columns or neither,
+# and the *member name* is what pins the target Kind -- nothing here spells `dcim.region`.
+#
+# Both halves of the pair are part of the natural key, filtered as
+# `?object_type=dcim.region&object_id=<id>`, so this object has no lookup at all until the
+# region it points at exists.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxContactAssignment
+metadata:
+  name: noc-on-nl
+  namespace: netbox-catalog
+spec:
+  endpointRef: catalogue
+  objectRef:
+    regionRef:
+      name: nl
+  contactRef:
+    name: noc
+  roleRef:
+    name: technical
+  priority: primary

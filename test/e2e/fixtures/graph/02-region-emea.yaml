@@ -1,0 +1,12 @@
+# The root of the deepest chain. A top-level region: no parentRef, which is a *different*
+# natural key rather than the same key with a field omitted.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxRegion
+metadata:
+  name: emea
+  namespace: netbox-catalog
+spec:
+  endpointRef: catalogue
+  name: EMEA
+  slug: e2e-emea
+  description: Top-level region
