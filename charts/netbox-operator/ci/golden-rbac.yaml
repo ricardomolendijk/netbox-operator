@@ -11,10 +11,10 @@ kind: ClusterRole
 metadata:
   name: netbox-operator-manager
   labels:
-    helm.sh/chart: netbox-operator-0.1.0
+    helm.sh/chart: netbox-operator-v0.0.1
     app.kubernetes.io/name: netbox-operator
     app.kubernetes.io/instance: netbox-operator
-    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/version: "v0.0.1"
     app.kubernetes.io/managed-by: Helm
 rules:
 - apiGroups:
@@ -182,10 +182,10 @@ kind: ClusterRoleBinding
 metadata:
   name: netbox-operator-manager
   labels:
-    helm.sh/chart: netbox-operator-0.1.0
+    helm.sh/chart: netbox-operator-v0.0.1
     app.kubernetes.io/name: netbox-operator
     app.kubernetes.io/instance: netbox-operator
-    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/version: "v0.0.1"
     app.kubernetes.io/managed-by: Helm
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -203,10 +203,10 @@ metadata:
   name: netbox-operator-endpoint-credential-reader
   namespace: default
   labels:
-    helm.sh/chart: netbox-operator-0.1.0
+    helm.sh/chart: netbox-operator-v0.0.1
     app.kubernetes.io/name: netbox-operator
     app.kubernetes.io/instance: netbox-operator
-    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/version: "v0.0.1"
     app.kubernetes.io/managed-by: Helm
 rules:
 - apiGroups: [""]
@@ -220,10 +220,10 @@ metadata:
   name: netbox-operator-endpoint-credential-reader
   namespace: default
   labels:
-    helm.sh/chart: netbox-operator-0.1.0
+    helm.sh/chart: netbox-operator-v0.0.1
     app.kubernetes.io/name: netbox-operator
     app.kubernetes.io/instance: netbox-operator
-    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/version: "v0.0.1"
     app.kubernetes.io/managed-by: Helm
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -241,10 +241,10 @@ metadata:
   name: netbox-operator-leader-election
   namespace: netbox-operator-system
   labels:
-    helm.sh/chart: netbox-operator-0.1.0
+    helm.sh/chart: netbox-operator-v0.0.1
     app.kubernetes.io/name: netbox-operator
     app.kubernetes.io/instance: netbox-operator
-    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/version: "v0.0.1"
     app.kubernetes.io/managed-by: Helm
 rules:
 - apiGroups: [""]
@@ -264,10 +264,10 @@ metadata:
   name: netbox-operator-leader-election
   namespace: netbox-operator-system
   labels:
-    helm.sh/chart: netbox-operator-0.1.0
+    helm.sh/chart: netbox-operator-v0.0.1
     app.kubernetes.io/name: netbox-operator
     app.kubernetes.io/instance: netbox-operator
-    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/version: "v0.0.1"
     app.kubernetes.io/managed-by: Helm
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -286,10 +286,10 @@ kind: ClusterRole
 metadata:
   name: netbox-operator-manager
   labels:
-    helm.sh/chart: netbox-operator-0.1.0
+    helm.sh/chart: netbox-operator-v0.0.1
     app.kubernetes.io/name: netbox-operator
     app.kubernetes.io/instance: netbox-operator
-    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/version: "v0.0.1"
     app.kubernetes.io/managed-by: Helm
 rules:
 - apiGroups:
@@ -457,10 +457,10 @@ kind: ClusterRoleBinding
 metadata:
   name: netbox-operator-manager
   labels:
-    helm.sh/chart: netbox-operator-0.1.0
+    helm.sh/chart: netbox-operator-v0.0.1
     app.kubernetes.io/name: netbox-operator
     app.kubernetes.io/instance: netbox-operator
-    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/version: "v0.0.1"
     app.kubernetes.io/managed-by: Helm
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -478,10 +478,10 @@ metadata:
   name: netbox-operator-endpoint-credential-reader
   namespace: default
   labels:
-    helm.sh/chart: netbox-operator-0.1.0
+    helm.sh/chart: netbox-operator-v0.0.1
     app.kubernetes.io/name: netbox-operator
     app.kubernetes.io/instance: netbox-operator
-    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/version: "v0.0.1"
     app.kubernetes.io/managed-by: Helm
 rules:
 - apiGroups: [""]
@@ -495,10 +495,10 @@ metadata:
   name: netbox-operator-endpoint-credential-reader
   namespace: team-a
   labels:
-    helm.sh/chart: netbox-operator-0.1.0
+    helm.sh/chart: netbox-operator-v0.0.1
     app.kubernetes.io/name: netbox-operator
     app.kubernetes.io/instance: netbox-operator
-    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/version: "v0.0.1"
     app.kubernetes.io/managed-by: Helm
 rules:
 - apiGroups: [""]
@@ -512,10 +512,10 @@ metadata:
   name: netbox-operator-endpoint-credential-reader
   namespace: team-b
   labels:
-    helm.sh/chart: netbox-operator-0.1.0
+    helm.sh/chart: netbox-operator-v0.0.1
     app.kubernetes.io/name: netbox-operator
     app.kubernetes.io/instance: netbox-operator
-    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/version: "v0.0.1"
     app.kubernetes.io/managed-by: Helm
 rules:
 - apiGroups: [""]
@@ -529,10 +529,10 @@ metadata:
   name: netbox-operator-endpoint-credential-reader
   namespace: default
   labels:
-    helm.sh/chart: netbox-operator-0.1.0
+    helm.sh/chart: netbox-operator-v0.0.1
     app.kubernetes.io/name: netbox-operator
     app.kubernetes.io/instance: netbox-operator
-    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/version: "v0.0.1"
     app.kubernetes.io/managed-by: Helm
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -550,10 +550,10 @@ metadata:
   name: netbox-operator-endpoint-credential-reader
   namespace: team-a
   labels:
-    helm.sh/chart: netbox-operator-0.1.0
+    helm.sh/chart: netbox-operator-v0.0.1
     app.kubernetes.io/name: netbox-operator
     app.kubernetes.io/instance: netbox-operator
-    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/version: "v0.0.1"
     app.kubernetes.io/managed-by: Helm
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -571,10 +571,10 @@ metadata:
   name: netbox-operator-endpoint-credential-reader
   namespace: team-b
   labels:
-    helm.sh/chart: netbox-operator-0.1.0
+    helm.sh/chart: netbox-operator-v0.0.1
     app.kubernetes.io/name: netbox-operator
     app.kubernetes.io/instance: netbox-operator
-    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/version: "v0.0.1"
     app.kubernetes.io/managed-by: Helm
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -592,10 +592,10 @@ metadata:
   name: netbox-operator-leader-election
   namespace: netbox-operator-system
   labels:
-    helm.sh/chart: netbox-operator-0.1.0
+    helm.sh/chart: netbox-operator-v0.0.1
     app.kubernetes.io/name: netbox-operator
     app.kubernetes.io/instance: netbox-operator
-    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/version: "v0.0.1"
     app.kubernetes.io/managed-by: Helm
 rules:
 - apiGroups: [""]
@@ -615,10 +615,10 @@ metadata:
   name: netbox-operator-leader-election
   namespace: netbox-operator-system
   labels:
-    helm.sh/chart: netbox-operator-0.1.0
+    helm.sh/chart: netbox-operator-v0.0.1
     app.kubernetes.io/name: netbox-operator
     app.kubernetes.io/instance: netbox-operator
-    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/version: "v0.0.1"
     app.kubernetes.io/managed-by: Helm
 roleRef:
   apiGroup: rbac.authorization.k8s.io
