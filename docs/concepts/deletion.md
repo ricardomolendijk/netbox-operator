@@ -85,7 +85,8 @@ the table, and there is no second one.
 | [`NetBoxVRF`](../reference/netboxvrf.md) | `Retain` | A VRF is the table its prefixes and addresses are unique *within*, so deleting one changes what every address inside it means |
 | [`NetBoxVLANGroup`](../reference/netboxvlangroup.md) | **`Delete`** | A container, not an allocation — [see below](#netboxvlangroup-is-a-container-not-an-allocation) |
 | [`NetBoxIPAddressClaim`](../reference/netboxipaddressclaim.md) | **`Delete`** | The claim's CR is the only record its allocation exists — [see below](#the-claim-is-the-exception-to-the-exception) |
-| every other Kind (`NetBoxTag`, `NetBoxSite`, the catalogue kinds, …) | `Delete` | Configuration: cheap to delete, cheap to recreate |
+| [`NetBoxCustomField`](../reference/netboxcustomfield.md) | **`Delete`**, and refused | Deleting one destroys data and NetBox does not refuse it, so the *finalizer* does — [see below](#delete-and-refused-are-not-the-same-axis) |
+| every other Kind (`NetBoxTag`, `NetBoxSite`, the catalogue kinds, the `extras` kinds, …) | `Delete` | Configuration: cheap to delete, cheap to recreate |
 
 The table is checked rather than merely written down.
 `TestEveryKindsDeletionDefaultIsStated` (`internal/reconciler/finalizer_test.go`) reads the
@@ -112,6 +113,30 @@ It is also the case where `Delete` is least likely to lose anything by accident.
 *refuses* to delete a group that still holds VLANs, and the operator can only
 [report the refusal](#what-protect-looks-like). The VLANs themselves default to `Retain` —
 which is the pair worth remembering: the container goes, the contents stay.
+
+### `Delete` and refused are not the same axis
+
+`NetBoxCustomField` is the row that looks like a contradiction: its default is `Delete`, and
+deleting one is *refused* by default with `Deleting=False, Reason=DataLossBlocked`
+(step 4 above). Both are right, because they answer different questions.
+
+`deletionPolicy` answers **"when the CR goes, should the NetBox object go too?"** For a custom
+field the answer is yes: `Retain` would leave a column in NetBox's schema that nothing manages,
+on every object type the field covered, with no CR left to say what it is for. That is the worse
+end state, and it is the one a wrong default would produce silently.
+
+The data-loss guard answers **"is this particular delete one a human should confirm?"** For a
+custom field the answer is also yes, and for a different reason: NetBox strips the field's
+stored value from every object that has one and does not refuse the delete, so the engine's
+usual safety net — send the `DELETE`, let `PROTECT` stop it — cannot fire. The guard keeps the
+finalizer on, which means the CR and the NetBox object are both still there and the decision is
+still reversible. `netbox.kubeforge.org/allow-data-loss: "true"` or `deletionPolicy: Retain`
+each finish it, and they finish it differently
+([custom fields](../custom-fields.md#deleting-a-custom-field-destroys-data)).
+
+So: the policy says what the end state should be, and the guard says who has to agree to it.
+Every other Kind in the catalogue answers the second question with "nobody" because NetBox
+answers it for us.
 
 ### The claim is the exception to the exception
 
