@@ -1,0 +1,161 @@
+{{ template "header" .Header }}
+package registry
+
+import (
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+{{- if .NeedsPtr }}
+	"k8s.io/utils/ptr"
+{{- end }}
+
+	netboxv1alpha1 "github.com/ricardomolendijk/netbox-operator/api/v1alpha1"
+)
+
+// One init() per kind, so adding a kind is a new file and never an edit to shared logic.
+func init() { MustRegister({{ .FuncName }}Descriptor()) }
+
+// {{ .FuncName }}Descriptor is {{ .App }}.{{ .Model }} as data ({{ .SourceFile }}).
+func {{ .FuncName }}Descriptor() Descriptor {
+	return Descriptor{
+		GVK:        netboxv1alpha1.GroupVersion.WithKind("{{ .Kind }}"),
+		Endpoint:   "{{ .Endpoint }}",
+		ObjectType: "{{ .ObjectType }}",
+		Scope:      apiextensionsv1.NamespaceScoped,
+
+		Taggable:        {{ .Taggable }},
+		CustomFieldable: {{ .CustomField }},
+{{ if .Retain }}
+		// What this kind's rows mean outlives the CR that asked for one, so a deleted CR
+		// leaves the NetBox object alone unless the manifest says otherwise
+		// (docs/concepts/deletion.md).
+		RetainOnDelete: true,
+{{ end -}}
+{{- if .DuplicateSpec }}
+		// The spec field that says a natural key matching more than one row is expected here
+		// rather than a Conflict. Data, because which duplicates NetBox permits is a fact
+		// about this model.
+		DuplicateSpec: "{{ .DuplicateSpec }}",
+{{ end }}
+		// The CR spec field on the left, the NetBox column on the right. NetBox ignores a
+		// field name it does not know rather than rejecting it, so a spec name sent verbatim
+		// would write nothing and report success.
+		Fields: []Field{
+{{- range .MapFields }}
+{{- if .Plain }}
+			{Spec: "{{ .Spec }}", API: "{{ .API }}"},
+{{- else }}
+			{
+				Spec: "{{ .Spec }}", API: "{{ .API }}",
+{{- if .Class }}
+				Class: {{ .Class }},
+{{- end }}
+{{- if .Target }}
+				Target: netboxv1alpha1.{{ .Target }}{}.TargetGVK(),
+{{- end }}
+{{- if .Cascade }}
+				CascadeOnDelete: true,
+{{- end }}
+			},
+{{- end }}
+{{- end }}
+		},
+
+		NaturalKeys: []NaturalKey{
+{{- range .NaturalKeys }}
+			{
+{{- range .Doc }}
+				// {{ . }}
+{{- end }}
+				Fields: []KeyField{
+{{- range .Fields }}
+					{Filter: "{{ .Filter }}", Spec: "{{ .Spec }}"{{ if .Lookup }}, Lookup: {{ .Lookup }}{{ end }}},
+{{- end }}
+				},
+{{- if .NullFields }}
+				NullFields: []NullField{
+{{- range .NullFields }}
+					{Filter: "{{ .Filter }}", Spec: "{{ .Spec }}", Column: {{ .Column }}},
+{{- end }}
+				},
+{{- end }}
+			},
+{{- end }}
+		},
+
+		UpdateStrategy: {{ .Strategy }},
+{{ if .RecreateOn }}
+		// The columns whose change is a change of identity, so the diff cannot be PATCHed and
+		// the object is replaced. Data rather than an engine branch: a recreate is destructive
+		// and the engine may not decide per kind that it is warranted.
+		RecreateOn: []string{
+{{- range .RecreateOn }}
+			"{{ . }}",
+{{- end }}
+		},
+{{ end -}}
+{{- if .Deferred }}
+		// Columns left out of the create payload and applied by a follow-up PATCH.
+		Deferred: []DeferredField{
+{{- range .Deferred }}
+{{- range .Doc }}
+			// {{ . }}
+{{- end }}
+			{APIField: "{{ .API }}", Mode: {{ .Mode }}},
+{{- end }}
+		},
+{{ end }}
+{{- if .Unions }}
+		GenericFKs: []GenericFKSpec{
+{{- range .Unions }}
+{{- range .Doc }}
+			// {{ . }}
+{{- end }}
+			{
+				TypeField: "{{ .TypeField }}",
+				IDField:   "{{ .IDField }}",
+				Spec:      "{{ .SpecField }}",
+				// Stated rather than derived from Members' targets: this is the referring
+				// kind's statement of what NetBox will accept in its own type column, and
+				// Validate checks the two against each other -- which only means something
+				// while they are stated independently.
+				AllowedTypes: []string{
+{{- range .AllowedTypes }}
+					"{{ . }}",
+{{- end }}
+				},
+				Members: []GenericFKMember{
+{{- range .Members }}
+					{
+						Spec:   "{{ .Spec }}",
+						Target: netboxv1alpha1.{{ .Target }}{}.TargetGVK(),
+{{- if .Cascade }}
+						CascadeOnDelete: ptr.To({{ .Cascade }}),
+{{- end }}
+					},
+{{- end }}
+				},
+{{- if .Cached }}
+				Cached: []string{
+{{- range .Cached }}
+					"{{ . }}",
+{{- end }}
+				},
+{{- end }}
+			},
+{{- end }}
+		},
+{{ end }}
+		// Every column the operator must never write. Writing one does not fail, it silently
+		// no-ops, so the next reconcile finds the same difference and PATCHes again forever.
+		ReadOnly: []string{
+{{- range .ReadOnly }}
+			"{{ . }}",
+{{- end }}
+		},
+{{ if .Containment }}
+		// The containment parent is whichever reference the *server* cascades, and exactly
+		// one of them, because Kubernetes garbage collection waits for every owner
+		// (docs/decisions/0003-ownership-and-references.md rule 4).
+		ContainmentRef: "{{ .Containment }}",
+{{ end -}}
+	}
+}

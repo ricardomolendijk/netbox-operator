@@ -1,0 +1,18 @@
+{{ template "header" .Header }}
+package controller
+
+import (
+	netboxv1alpha1 "github.com/ricardomolendijk/netbox-operator/api/v1alpha1"
+)
+
+// Neither create nor delete on {{ .Plural }}: the operator reads CRs and writes their status
+// and finalizers, and nothing else.
+// +kubebuilder:rbac:groups=netbox.kubeforge.org,resources={{ .Plural }},verbs=get;list;watch;update;patch
+// +kubebuilder:rbac:groups=netbox.kubeforge.org,resources={{ .Plural }}/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=netbox.kubeforge.org,resources={{ .Plural }}/finalizers,verbs=update
+
+// This file names the kind and carries its RBAC. The reconcile itself is
+// internal/controller/objectcontroller.go's, for every kind: the watches, the field indexes
+// and the engine call are registered once from the descriptor, so a second statement here
+// would mean the descriptor is missing a field.
+func init() { registerObjectKind(&netboxv1alpha1.{{ .Kind }}{}) }

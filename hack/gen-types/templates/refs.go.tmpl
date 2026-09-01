@@ -1,0 +1,31 @@
+{{ template "header" .Header }}
+package v1alpha1
+
+import (
+	"k8s.io/apimachinery/pkg/runtime/schema"
+)
+
+// The typed ObjectRef aliases, one per referenced target kind and deduplicated by target: two
+// kinds referring to the same target share one alias. A distinct type per target is what makes
+// a reference's target checkable at compile time rather than at reconcile time
+// (docs/concepts/references.md).
+type (
+{{- range .Refs }}
+	// {{ .Name }} points at a {{ .Kind }} ({{ .Target }}{{ if .Endpoint }}, {{ .Endpoint }}{{ end }}).
+{{- if not .Generated }}
+	//
+	// {{ .Target }} has no CR of its own, so this alias resolves by NetBox id or by a raw
+	// lookup and never by CR name.
+{{- end }}
+	{{ .Name }} ObjectRef
+{{ end -}}
+)
+{{ range .Refs }}
+// TargetGVK reports the Kind this reference resolves against.
+func (r {{ .Name }}) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("{{ .Kind }}")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r {{ .Name }}) AsObjectRef() ObjectRef { return ObjectRef(r) }
+{{ end }}

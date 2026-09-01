@@ -1,0 +1,73 @@
+{{ template "header" .Header }}
+package v1alpha1
+
+import (
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
+
+// {{ .Spec }} describes one {{ .App }}.{{ .Model }}.
+//
+// Bases: {{ range $i, $b := .Bases }}{{ if $i }}, {{ end }}{{ $b }}{{ end }} ({{ .SourceFile }}).
+// An inherited column is as writable as a declared one, so the field list below is the
+// flattened one and not what {{ .SourceFile }} declares on the class itself.
+type {{ .Spec }} struct {
+	NetBoxObjectSpec `json:",inline"`
+{{ range .Unions }}
+{{- range .Doc }}
+	// {{ . }}
+{{- end }}
+	// +optional
+	{{ .SpecField | title }} *{{ .GoType }} `json:"{{ .SpecField }},omitempty"`
+{{ end }}
+{{- range .Fields }}
+{{- range .Doc }}
+	// {{ . }}
+{{- end }}
+{{- range .Markers }}
+	// {{ . }}
+{{- end }}
+	{{ .Name }} {{ .Type }} {{ .Tag }}
+{{ end -}}
+}
+
+// {{ .Kind }} is one {{ .App }}.{{ .Model }} in NetBox.
+//
+// Namespaced like every kind in v1alpha1 (docs/decisions/0002-crd-scoping.md).
+//
+// +kubebuilder:object:root=true
+// +kubebuilder:subresource:status
+// +kubebuilder:resource:scope=Namespaced,shortName={{ .ShortNames }}
+{{- range .Columns }}
+// +kubebuilder:printcolumn:name="{{ .Name }}",type={{ .Type }},JSONPath=`{{ .Path }}`
+{{- end }}
+// +kubebuilder:printcolumn:name="ID",type=integer,JSONPath=`.status.id`
+// +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
+{{- range .ExtraCEL }}
+// +kubebuilder:validation:XValidation:rule="{{ .Rule }}",message="{{ .Message }}"
+{{- end }}
+type {{ .Kind }} struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	Spec   {{ .Spec }}        `json:"spec,omitempty"`
+	Status NetBoxObjectStatus `json:"status,omitempty"`
+}
+
+// NetBoxSpec returns the engine-owned part of the spec.
+func (o *{{ .Kind }}) NetBoxSpec() *NetBoxObjectSpec { return &o.Spec.NetBoxObjectSpec }
+
+// NetBoxStatus returns the engine-owned part of the status, for the engine to write.
+func (o *{{ .Kind }}) NetBoxStatus() *NetBoxObjectStatus { return &o.Status }
+
+// {{ .Kind }}List is a list of {{ .Kind }}.
+// +kubebuilder:object:root=true
+type {{ .Kind }}List struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []{{ .Kind }} `json:"items"`
+}
+
+func init() {
+	SchemeBuilder.Register(&{{ .Kind }}{}, &{{ .Kind }}List{})
+}
