@@ -39,3 +39,5 @@ resources:
 - netbox_v1alpha1_netboxsavedfilter.yaml
 - netbox_v1alpha1_netboxexporttemplate.yaml
 - netbox_v1alpha1_netboxconfigtemplate.yaml
+- netbox_v1alpha1_netboxconfigcontextprofile.yaml
+- netbox_v1alpha1_netboxconfigcontext.yaml

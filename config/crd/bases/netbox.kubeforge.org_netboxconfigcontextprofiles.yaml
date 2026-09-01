@@ -4,22 +4,19 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.19.0
-  name: netboxsavedfilters.netbox.kubeforge.org
+  name: netboxconfigcontextprofiles.netbox.kubeforge.org
 spec:
   group: netbox.kubeforge.org
   names:
-    kind: NetBoxSavedFilter
-    listKind: NetBoxSavedFilterList
-    plural: netboxsavedfilters
+    kind: NetBoxConfigContextProfile
+    listKind: NetBoxConfigContextProfileList
+    plural: netboxconfigcontextprofiles
     shortNames:
-    - nbsf
-    singular: netboxsavedfilter
+    - nbccp
+    singular: netboxconfigcontextprofile
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .spec.slug
-      name: Slug
-      type: string
     - jsonPath: .status.id
       name: ID
       type: integer
@@ -33,11 +30,14 @@ spec:
     schema:
       openAPIV3Schema:
         description: |-
-          NetBoxSavedFilter is one extras.SavedFilter in NetBox.
+          NetBoxConfigContextProfile is one extras.ConfigContextProfile in NetBox.
 
-          Namespaced like every kind in v1alpha1 (docs/decisions/0002-crd-scoping.md). Presentation
-          rather than data: nothing in NetBox depends on one, so deleting it destroys nothing and
-          there is no data-loss guard.
+          Namespaced like every kind in v1alpha1 (docs/decisions/0002-crd-scoping.md).
+
+          Deleting one destroys nothing: `ConfigContext.profile` is `on_delete=PROTECT`
+          (docs/netbox-schema.md), so NetBox refuses while a config context still names it and that
+          arrives as `Deleting=False, Reason=Protected`, clearing itself when the last context stops
+          pointing at it. No data-loss guard -- a profile only validates, it stores nothing.
         properties:
           apiVersion:
             description: |-
@@ -58,18 +58,36 @@ spec:
             type: object
           spec:
             description: |-
-              NetBoxSavedFilterSpec describes one extras.SavedFilter: a named set of query parameters
-              NetBox offers as a one-click filter in its UI.
+              NetBoxConfigContextProfileSpec describes one extras.ConfigContextProfile: a JSON Schema
+              that config contexts are validated against.
 
-              Neither taggable nor custom-fieldable: the bases are `CloningMixin, ExportTemplatesMixin,
-              OwnerMixin, ChangeLoggedModel` (docs/netbox-schema.md -> extras.SavedFilter).
+              The smallest kind in `extras` and the second whose subject is NetBox's *schema* rather than
+              its data.
 
-              `user` is deliberately absent. It is a `ForeignKey -> settings.AUTH_USER_MODEL` and there
-              is no Kind for a NetBox user, so a `userRef` would be a field the resolver could not
-              resolve against anything -- and NetBox's own default for an unset `user` is "not owned by
-              anybody", which combined with `shared: true` is exactly what a filter declared from Git
-              should be.
+              **Taggable but not custom-fieldable**, and it is the one kind in the catalogue where that
+              combination does not come from the mixins. `extras.ConfigContextProfile` is a
+              `PrimaryModel`, which mixes in both `TagsMixin` and `CustomFieldsMixin`
+              (docs/netbox-schema.md -> extras.ConfigContextProfile, bases) -- but the REST serializer's
+              write path carries `tags` and no `custom_fields` at all. That is the API-versus-AST gap
+              `docs/regenerating.md` says to expect on the sixteen models that shadow an inherited
+              column, and this is one of them. So the profile carries half a provenance stamp: the tag,
+              and no custom fields, because a `custom_fields` key on this endpoint is one NetBox ignores
+              rather than rejects.
+
+              The `SyncedDataMixin` columns (`data_source`, `data_file`, `data_path`,
+              `auto_sync_enabled`) are absent for the reason they are absent from every template kind:
+              NetBox overwrites `schema` from a `core.DataSource` itself, so declaring both would be two
+              writers for one column.
             properties:
+              comments:
+                description: |-
+                  Comments is the long-form note NetBox renders as Markdown.
+
+                  Omit it to leave NetBox's own value alone; set it to `""` to clear the value in
+                  NetBox. The two are different intents and the operator can tell them apart
+                  (docs/concepts/field-ownership.md).
+                maxLength: 8192
+                type: string
               customFields:
                 additionalProperties:
                   nullable: true
@@ -125,23 +143,13 @@ spec:
                 type: string
               description:
                 description: |-
-                  Description is free text shown next to the filter.
+                  Description is free text shown next to the profile.
 
                   Omit it to leave NetBox's own value alone; set it to `""` to clear the value in
                   NetBox. The two are different intents and the operator can tell them apart
                   (docs/concepts/field-ownership.md).
                 maxLength: 200
                 type: string
-              enabled:
-                default: true
-                description: |-
-                  Enabled offers the filter in NetBox's UI. Disabling it retires the filter without
-                  losing it.
-
-                  A pointer with an explicit default rather than a plain bool: `omitempty` on a plain
-                  bool drops a deliberate `false` out of the payload, so the operator could never turn it
-                  off again.
-                type: boolean
               endpointRef:
                 description: |-
                   EndpointRef names the NetBoxEndpoint to write through, in this object's own
@@ -167,27 +175,15 @@ spec:
                   rule: self == oldSelf
               name:
                 description: |-
-                  Name is the filter's name as shown in NetBox. Unique across NetBox
-                  (docs/netbox-schema.md -> extras.SavedFilter, `name CharField REQ UNIQUE len=100`).
+                  Name is the profile's name, and this kind's natural key.
+
+                  `name CharField REQ UNIQUE len=100` (docs/netbox-schema.md ->
+                  extras.ConfigContextProfile), so unlike the template kinds in this app the database
+                  enforces the identity and two profiles of one name cannot exist to be ambiguous
+                  about.
                 maxLength: 100
                 minLength: 1
                 type: string
-              objectTypes:
-                description: |-
-                  ObjectTypes are the NetBox models this filter applies to, as Django ContentType
-                  strings.
-
-                  Required by NetBox: no `required=False` on the serializer
-                  (`netbox/extras/api/serializers_/savedfilters.py:13-16`). Unlike the other
-                  `object_types` in this app the queryset is unrestricted -- `ObjectType.objects.all()`
-                  -- so any content type NetBox has is accepted here.
-                items:
-                  maxLength: 100
-                  pattern: ^[a-z_]+\.[a-z0-9_]+$
-                  type: string
-                maxItems: 256
-                minItems: 1
-                type: array
               onConflict:
                 default: Fail
                 description: OnConflict is what to do when NetBox already holds a
@@ -197,58 +193,22 @@ spec:
                 - Adopt
                 - AdoptOnly
                 type: string
-              parameters:
-                description: "Parameters is the filter itself: the NetBox query parameters
-                  to apply, as a JSON\nobject.\n\n\tparameters:\n\t  status: [\"active\"]\n\t
-                  \ tenant: [\"acme\"]\n\nRequired, and required to be an *object*
-                  rather than any JSON value: NetBox's `clean()`\nrejects anything
-                  that is not a dictionary of keyword arguments\n(`netbox/extras/models/models.py:588-594`).
-                  That is expressible in the schema, so it is\n-- `type: object` here,
-                  rather than a 400 a user has to go and read.\n\nThe values are lists
-                  because that is what a query string is: `?status=active&status=\nreserved`
-                  is one parameter with two values, and NetBox's own UI writes them
-                  that way.\nA bare string works too; NetBox normalises it."
+              schema:
+                description: |-
+                  Schema is the JSON Schema document a config context's `data` is validated against.
+
+                  NetBox validates the document itself when it is set and rejects one that is not a
+                  legal JSON Schema, so the operator is a pipe rather than a second validator
+                  (`schema JSONField` with `blank=True, null=True`).
+
+                  Omit it to leave NetBox's own value alone; set it to `{}` to clear the value in
+                  NetBox. The two are different intents and the operator can tell them apart
+                  (docs/concepts/field-ownership.md).
                 type: object
                 x-kubernetes-preserve-unknown-fields: true
-              shared:
-                default: true
-                description: |-
-                  Shared makes the filter visible to every NetBox user rather than only to its owner.
-
-                  Defaulted to true, which is NetBox's own default and the only useful value here: a
-                  filter declared from Git has no `user`, and an unshared filter with no owner is one
-                  nobody can see.
-                type: boolean
-              slug:
-                description: |-
-                  Slug is the filter's URL-safe identifier, and this kind's first natural-key candidate.
-                  Also unique across NetBox (`slug SlugField REQ UNIQUE len=100`).
-
-                  Two independently-unique columns, so this kind has two lookup candidates rather than
-                  one, and the second is not dead weight: renaming `slug` in Git while leaving `name`
-                  alone finds nothing under the new slug, falls through to `name`, adopts the existing
-                  filter and PATCHes the slug -- which is a rename. Without the fallback it would try to
-                  create a second filter and NetBox would refuse it on the unique `name`. See
-                  internal/registry/extras_savedfilter.go for the order and why.
-                maxLength: 100
-                minLength: 1
-                pattern: ^[-a-zA-Z0-9_]+$
-                type: string
-              weight:
-                default: 100
-                description: |-
-                  Weight orders filters in NetBox's list, lowest first
-                  (docs/netbox-schema.md -> extras.SavedFilter, `meta.ordering: ('weight', 'name')`).
-                format: int32
-                maximum: 32767
-                minimum: 0
-                type: integer
             required:
             - endpointRef
             - name
-            - objectTypes
-            - parameters
-            - slug
             type: object
           status:
             description: |-

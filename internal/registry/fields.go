@@ -22,6 +22,20 @@ var (
 	// ErrDuplicateAPIField is returned when two entries write the same NetBox field.
 	ErrDuplicateAPIField = errors.New("duplicate api field")
 
+	// ErrTagsFieldOnTaggableKind is returned when a Taggable descriptor also maps a spec
+	// field onto `tags`.
+	//
+	// Two writers for one column, and the loudest possible version of it: `tags` is a
+	// full-replacement list, so the provenance stamp appends its tag to whatever the payload
+	// carries (reconciler/stamp.go). On a kind where `tags` is `TagsMixin` that is correct.
+	// On extras.ConfigContext it is not `TagsMixin` at all -- it is a plain M2M selecting
+	// *which tagged objects the context applies to* (docs/netbox-schema.md ->
+	// extras.ConfigContext) -- so a Taggable declaration there would quietly add
+	// `k8s-managed` to the selector and change which objects in NetBox receive the
+	// configuration. The two readings of `tags` cannot both be right on one kind, so the
+	// boot fails rather than the cluster drifting.
+	ErrTagsFieldOnTaggableKind = errors.New("a taggable kind maps a spec field onto the tags column")
+
 	// ErrFieldReadOnly is returned for a spec field mapped onto a read-only column.
 	// Writing one silently no-ops, which is a PATCH loop rather than an error.
 	ErrFieldReadOnly = errors.New("spec field is mapped onto a read-only api field")
@@ -91,6 +105,11 @@ var (
 	// list of parents is that mistake with no upper bound.
 	ErrContainmentToMany = errors.New("containment ref is a to-many reference")
 )
+
+// tagsColumn is NetBox's name for the column the provenance stamp writes into. Spelled here
+// rather than imported from internal/provenance, which reads this package to derive the
+// bootstrap's `object_types` and cannot be depended on back.
+const tagsColumn = "tags"
 
 // FieldClass is what one spec field is: how many references it carries, and how its value
 // is compared.
@@ -480,23 +499,38 @@ func (d Descriptor) validateFieldEntries() error {
 			errs = append(errs, fmt.Errorf("%w: %s", ErrDuplicateAPIField, field.API))
 		}
 
-		if slices.Contains(d.ReadOnly, field.API) {
-			errs = append(errs, fmt.Errorf("%w: %s -> %s", ErrFieldReadOnly, field.Spec, field.API))
-		}
-
-		if !slices.Contains(fieldClasses, field.Class) {
-			errs = append(errs, fmt.Errorf("%w: %s is %q", ErrUnknownFieldClass, field.Spec, field.Class))
-		}
-
-		if !field.Class.Ref() && !field.Target.Empty() {
-			errs = append(errs, fmt.Errorf("%w: %s -> %s", ErrTargetNotRef, field.Spec, field.Target))
-		}
-
-		if !field.Class.Ref() && field.CascadeOnDelete {
-			errs = append(errs, fmt.Errorf("%w: %s", ErrCascadeNotRef, field.Spec))
-		}
+		errs = append(errs, d.validateFieldEntry(field))
 
 		seenSpec[field.Spec], seenAPI[field.API] = struct{}{}, struct{}{}
+	}
+
+	return errors.Join(errs...)
+}
+
+// validateFieldEntry is the checks on one entry that need no knowledge of the others, split out
+// from the loop that also has to spot duplicates. Every one of them is a declaration NetBox
+// would accept and then ignore, which is a PATCH loop rather than an error.
+func (d Descriptor) validateFieldEntry(field Field) error {
+	errs := make([]error, 0, 4)
+
+	if slices.Contains(d.ReadOnly, field.API) {
+		errs = append(errs, fmt.Errorf("%w: %s -> %s", ErrFieldReadOnly, field.Spec, field.API))
+	}
+
+	if d.Taggable && field.API == tagsColumn {
+		errs = append(errs, fmt.Errorf("%w: %s -> %s", ErrTagsFieldOnTaggableKind, field.Spec, field.API))
+	}
+
+	if !slices.Contains(fieldClasses, field.Class) {
+		errs = append(errs, fmt.Errorf("%w: %s is %q", ErrUnknownFieldClass, field.Spec, field.Class))
+	}
+
+	if !field.Class.Ref() && !field.Target.Empty() {
+		errs = append(errs, fmt.Errorf("%w: %s -> %s", ErrTargetNotRef, field.Spec, field.Target))
+	}
+
+	if !field.Class.Ref() && field.CascadeOnDelete {
+		errs = append(errs, fmt.Errorf("%w: %s", ErrCascadeNotRef, field.Spec))
 	}
 
 	return errors.Join(errs...)

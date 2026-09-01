@@ -29,6 +29,8 @@ func TestExtrasDescriptorsValidate(t *testing.T) {
 		{"NetBoxExportTemplate", "extras/export-templates", "extras.exporttemplate"},
 		{"NetBoxSavedFilter", "extras/saved-filters", "extras.savedfilter"},
 		{"NetBoxConfigTemplate", "extras/config-templates", "extras.configtemplate"},
+		{"NetBoxConfigContextProfile", "extras/config-context-profiles", "extras.configcontextprofile"},
+		{"NetBoxConfigContext", "extras/config-contexts", "extras.configcontext"},
 	} {
 		t.Run(tc.kind, func(t *testing.T) {
 			d, ok := Get(netboxv1alpha1.GroupVersion.WithKind(tc.kind))
@@ -166,6 +168,8 @@ func TestExtrasJSONColumnsAreClassJSON(t *testing.T) {
 		"NetBoxSavedFilter":          {"parameters"},
 		"NetBoxExportTemplate":       {"environment_params"},
 		"NetBoxConfigTemplate":       {"environment_params"},
+		"NetBoxConfigContext":        {"data"},
+		"NetBoxConfigContextProfile": {"schema"},
 	} {
 		t.Run(kind, func(t *testing.T) {
 			d, ok := Get(netboxv1alpha1.GroupVersion.WithKind(kind))

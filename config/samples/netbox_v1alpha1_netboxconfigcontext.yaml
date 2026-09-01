@@ -1,0 +1,34 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxConfigContext
+metadata:
+  name: eu-dns
+  namespace: default
+spec:
+  endpointRef: homelab
+
+  name: EU DNS
+  description: Resolvers for everything in the EU region
+
+  # Required by NetBox: a config context with no document has nothing to merge. Use
+  # `isActive: false` to turn one off rather than emptying its data.
+  data:
+    dns:
+      servers:
+        - 10.0.0.53
+        - 10.0.1.53
+
+  # Two of the thirteen assignment sets. Each is a full replacement and each is compared as
+  # an order-independent id set, so reordering these produces no API write.
+  regions:
+    - name: eu-west
+  tenants:
+    - name: acme
+
+  # `tags` here selects which *tagged objects* the context applies to. It is not this
+  # object's own tags: extras.ConfigContext has no TagsMixin, so the operator's provenance
+  # stamp has no column on this kind and never touches this list.
+  tags:
+    - name: production
+
+  weight: 1000 # the default: a higher weight is merged later and wins
+  isActive: true # the default

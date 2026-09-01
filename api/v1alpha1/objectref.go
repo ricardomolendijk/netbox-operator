@@ -273,6 +273,14 @@ type (
 	// extras/config-templates).
 	ConfigTemplateRef ObjectRef
 
+	// ConfigContextProfileRef points at a NetBoxConfigContextProfile
+	// (extras.ConfigContextProfile, extras/config-context-profiles).
+	//
+	// The second reference in this API whose target is NetBox's *schema* rather than its
+	// data: a profile is a JSON Schema a config context's `data` is validated against
+	// (docs/netbox-schema.md -> extras.ConfigContextProfile, `schema JSONField`).
+	ConfigContextProfileRef ObjectRef
+
 	// ClusterRef points at a NetBoxCluster (virtualization.Cluster,
 	// virtualization/clusters).
 	//
@@ -484,6 +492,14 @@ func (r ConfigTemplateRef) TargetGVK() schema.GroupVersionKind {
 func (r ConfigTemplateRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
 
 // TargetGVK reports the Kind this reference resolves against.
+func (r ConfigContextProfileRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxConfigContextProfile")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r ConfigContextProfileRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
 func (r ClusterRef) TargetGVK() schema.GroupVersionKind {
 	return GroupVersion.WithKind("NetBoxCluster")
 }
@@ -584,6 +600,7 @@ var (
 	_ RefTarget = PrefixRef{}
 	_ RefTarget = CustomFieldChoiceSetRef{}
 	_ RefTarget = ConfigTemplateRef{}
+	_ RefTarget = ConfigContextProfileRef{}
 	_ RefTarget = VirtualMachineRef{}
 	_ RefTarget = DeviceRef{}
 	_ RefTarget = DeviceRoleRef{}

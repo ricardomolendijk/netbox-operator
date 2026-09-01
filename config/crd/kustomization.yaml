@@ -43,3 +43,5 @@ resources:
 - bases/netbox.kubeforge.org_netboxsavedfilters.yaml
 - bases/netbox.kubeforge.org_netboxexporttemplates.yaml
 - bases/netbox.kubeforge.org_netboxconfigtemplates.yaml
+- bases/netbox.kubeforge.org_netboxconfigcontextprofiles.yaml
+- bases/netbox.kubeforge.org_netboxconfigcontexts.yaml

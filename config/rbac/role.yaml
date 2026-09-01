@@ -25,13 +25,20 @@ rules:
   - netboxclustergroups
   - netboxclusters
   - netboxclustertypes
+  - netboxconfigcontextprofiles
+  - netboxconfigcontexts
+  - netboxconfigtemplates
   - netboxcontactassignments
   - netboxcontactgroups
   - netboxcontactroles
   - netboxcontacts
+  - netboxcustomfieldchoicesets
+  - netboxcustomfields
+  - netboxcustomlinks
   - netboxdeviceroles
   - netboxdevices
   - netboxdevicetypes
+  - netboxexporttemplates
   - netboxinterfaces
   - netboxipaddressclaims
   - netboxipaddresses
@@ -40,6 +47,7 @@ rules:
   - netboxmanufacturers
   - netboxplatforms
   - netboxprefixclaims
+  - netboxsavedfilters
   - netboxvirtualdisks
   - netboxvirtualmachines
   - netboxvminterfaces
@@ -55,13 +63,20 @@ rules:
   - netboxclustergroups/finalizers
   - netboxclusters/finalizers
   - netboxclustertypes/finalizers
+  - netboxconfigcontextprofiles/finalizers
+  - netboxconfigcontexts/finalizers
+  - netboxconfigtemplates/finalizers
   - netboxcontactassignments/finalizers
   - netboxcontactgroups/finalizers
   - netboxcontactroles/finalizers
   - netboxcontacts/finalizers
+  - netboxcustomfieldchoicesets/finalizers
+  - netboxcustomfields/finalizers
+  - netboxcustomlinks/finalizers
   - netboxdeviceroles/finalizers
   - netboxdevices/finalizers
   - netboxdevicetypes/finalizers
+  - netboxexporttemplates/finalizers
   - netboxinterfaces/finalizers
   - netboxipaddressclaims/finalizers
   - netboxipaddresses/finalizers
@@ -74,6 +89,7 @@ rules:
   - netboxprefixes/finalizers
   - netboxregions/finalizers
   - netboxroutetargets/finalizers
+  - netboxsavedfilters/finalizers
   - netboxsitegroups/finalizers
   - netboxsites/finalizers
   - netboxtags/finalizers
@@ -93,14 +109,21 @@ rules:
   - netboxclustergroups/status
   - netboxclusters/status
   - netboxclustertypes/status
+  - netboxconfigcontextprofiles/status
+  - netboxconfigcontexts/status
+  - netboxconfigtemplates/status
   - netboxcontactassignments/status
   - netboxcontactgroups/status
   - netboxcontactroles/status
   - netboxcontacts/status
+  - netboxcustomfieldchoicesets/status
+  - netboxcustomfields/status
+  - netboxcustomlinks/status
   - netboxdeviceroles/status
   - netboxdevices/status
   - netboxdevicetypes/status
   - netboxendpoints/status
+  - netboxexporttemplates/status
   - netboxinterfaces/status
   - netboxipaddressclaims/status
   - netboxipaddresses/status
@@ -113,6 +136,7 @@ rules:
   - netboxprefixes/status
   - netboxregions/status
   - netboxroutetargets/status
+  - netboxsavedfilters/status
   - netboxsitegroups/status
   - netboxsites/status
   - netboxsweeps/status

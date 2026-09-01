@@ -1,0 +1,25 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxConfigContextProfile
+metadata:
+  name: dns-profile
+  namespace: default
+spec:
+  endpointRef: homelab
+
+  name: DNS settings
+  description: Shape of the dns block every config context contributes
+
+  # A JSON Schema. NetBox validates the document itself and rejects one that is not legal
+  # JSON Schema, so the operator is a pipe rather than a second validator.
+  schema:
+    type: object
+    properties:
+      dns:
+        type: object
+        properties:
+          servers:
+            type: array
+            items:
+              type: string
+    required:
+      - dns
