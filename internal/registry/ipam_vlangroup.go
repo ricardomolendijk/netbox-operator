@@ -56,6 +56,12 @@ func ipamVLANGroupDescriptor() Descriptor {
 		Taggable:        true,
 		CustomFieldable: true,
 
+		// No RetainOnDelete, and that is the deliberate exception among the ipam kinds
+		// (#186). The rule decision #176 turns on is whether deletion destroys *state*: a
+		// VLAN group is an organisational container, not an allocation, so deleting one
+		// frees nothing and hands nobody an address. It belongs with the catalogue kinds.
+		// docs/concepts/deletion.md carries the table.
+
 		// `scope` is absent from this table on purpose: one spec field writing two columns is
 		// a GenericFKSpec, not a Field.
 		//

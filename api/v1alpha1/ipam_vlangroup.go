@@ -55,16 +55,12 @@ type VIDRange struct {
 // on the model itself and has no cached columns at all (docs/netbox-schema.md ->
 // ipam.VLANGroup). The two scoped kinds in this milestone differ there and nowhere else.
 //
-// `deletionPolicy` still defaults to `Delete` here, and per
-// docs/concepts/deletion.md#the-default-depends-on-the-kind it should be `Retain` --
-// an IPAM object that outlives its CR is the safer failure. It is not implemented because it
-// cannot be, per kind, in this API: `deletionPolicy` is declared once on the embedded
-// NetBoxObjectSpec, and redeclaring it here makes controller-gen emit
-// `allOf: [{default: Retain}, {default: Delete}]`, which the API server rejects outright.
-// Giving a kind its own default needs `Descriptor.RetainOnDelete` and
-// `deletionPolicyOf(obj, desc)` (#186, #199), neither of which has landed. Until they do,
-// every NetBoxVLANGroup manifest should say `deletionPolicy: Retain` explicitly, which is
-// what config/samples and docs/reference/netboxvlangroup.md do.
+// `deletionPolicy` defaults to `Delete` here, and this is the one kind in `ipam` where that is
+// deliberate rather than inherited (#186). The rule the table in
+// docs/concepts/deletion.md#the-default-depends-on-the-kind turns on is whether deletion
+// destroys *state*: a VLAN group is an organisational container over `vid_ranges`, not an
+// allocation, so deleting one frees nothing and hands nobody an address. Its neighbour
+// `NetBoxVLAN` -- the thing a group contains -- defaults to `Retain`.
 type NetBoxVLANGroupSpec struct {
 	NetBoxObjectSpec `json:",inline"`
 

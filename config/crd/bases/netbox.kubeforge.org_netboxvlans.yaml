@@ -85,16 +85,15 @@ spec:
               A VLAN group *is* scoped, and `NetBoxVLANGroup` therefore has the `scope` union and no
               `siteRef`. `siteRef` here, `scope` there, in the same API version, is deliberate.
 
-              `deletionPolicy` still defaults to `Delete` here, and per
-              docs/concepts/deletion.md#the-default-depends-on-the-kind `NetBoxVLAN` should default to
-              `Retain` -- deleting a VLAN destroys its change log, its journal entries and every
-              termination hanging off it, and a fresh VLAN with the same `vid` is a different object with
-              a different id. It is not implemented because it cannot be, per kind, in this API:
-              `deletionPolicy` is declared once on the embedded NetBoxObjectSpec, and redeclaring it here
+              `deletionPolicy` defaults to `Retain` here, per
+              docs/concepts/deletion.md#the-default-depends-on-the-kind: deleting a VLAN destroys its
+              change log, its journal entries and every termination hanging off it, and a fresh VLAN with
+              the same `vid` is a different object with a different id. The default is data on the kind's
+              Descriptor (registry.Descriptor.RetainOnDelete) rather than a CRD marker, because
+              `deletionPolicy` is declared once on the embedded NetBoxObjectSpec and redeclaring it here
               makes controller-gen emit `allOf: [{default: Retain}, {default: Delete}]`, which the API
-              server rejects outright. Giving a kind its own default needs `Descriptor.RetainOnDelete`
-              and `deletionPolicyOf(obj, desc)` (#186, #199), neither of which has landed. Until they do,
-              every NetBoxVLAN manifest should say `deletionPolicy: Retain` explicitly.
+              server rejects outright. `NetBoxVLANGroup` is the neighbour that keeps `Delete`, and that
+              contrast is on its own struct.
             properties:
               comments:
                 description: |-

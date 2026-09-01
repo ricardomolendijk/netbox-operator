@@ -10,9 +10,9 @@ spec:
   # default endpoint; see config/samples/netbox_v1alpha1_netboxendpoint.yaml.
   endpointRef: homelab
 
-  # Set explicitly on every IPAM object. The envelope's default is Delete, and the per-Kind
-  # default this Kind wants (docs/concepts/deletion.md) needs #199 to land first.
-  deletionPolicy: Retain
+  # No deletionPolicy: this kind defaults to Retain, because deleting a VLAN takes every
+  # prefix scoped to it and every termination hanging off it too. Write
+  # `deletionPolicy: Delete` to opt out (docs/concepts/deletion.md).
 
   # Required. 1-4094; 0 and 4095 are reserved by the standard and rejected at admission.
   vid: 1

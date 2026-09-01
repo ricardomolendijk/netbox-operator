@@ -379,7 +379,8 @@ Independently of ownership, each object carries
 object when the CR goes away. `Retain` drops the finalizer and leaves NetBox alone —
 for migrating off the operator, or for objects that are shared with something else.
 
-**The default depends on the Kind**: `Retain` for the IPAM kinds, `Delete` everywhere else
+**The default depends on the Kind**: `Retain` for the IPAM kinds that hold an allocation,
+`Delete` everywhere else
 ([#176](https://github.com/ricardomolendijk/netbox-operator/issues/176)). The table of which
 is which, and the reasoning, live in
 [deletion — the default depends on the Kind](../concepts/deletion.md#the-default-depends-on-the-kind).

@@ -33,10 +33,12 @@ metadata:
   namespace: homelab
 spec:
   endpointRef: homelab
-  deletionPolicy: Retain
   startAddress: 10.0.30.128/24
   endAddress: 10.0.30.191/24
 ```
+
+Deleting this CR leaves the NetBox range in place: `deletionPolicy` defaults to `Retain` on this
+kind — see [`spec.deletionPolicy`](#specdeletionpolicy).
 
 ## Full example
 
@@ -48,7 +50,7 @@ metadata:
   namespace: homelab
 spec:
   endpointRef: homelab
-  deletionPolicy: Retain
+  deletionPolicy: Retain      # default *on this kind* -- see below
 
   startAddress: 10.0.30.128/24
   endAddress: 10.0.30.191/24
@@ -166,15 +168,18 @@ operator can tell them apart ([field ownership](../concepts/field-ownership.md))
 
 ### `spec.deletionPolicy`
 
-Defaults to `Delete`, and **should not**. Deleting a range destroys the record of who a block
-of addresses belonged to, and that record is not recoverable by re-creating the object: the
-change log, the journal entries and the id go with it, and a fresh range over the same
-addresses is a different object.
+Defaults to **`Retain`** on this kind (decision
+[#176](https://github.com/ricardomolendijk/netbox-operator/issues/176)). Deleting a range frees
+every address in the block for reallocation at once and destroys the record of who it belonged
+to, and that record is not recoverable by re-creating the object: the change log, the journal
+entries and the id go with it, and a fresh range over the same addresses is a different object.
+Set `deletionPolicy: Delete` explicitly where `kubectl delete` really should remove the range.
 
-The default cannot be changed per kind in this API — `deletionPolicy` is declared once on the
-shared envelope, and redeclaring it here makes controller-gen emit
-`allOf: [{default: Retain}, {default: Delete}]`, a schema the API server rejects — so every
-manifest should say `Retain` explicitly, as the examples above do. Same story as
+The default is not a CRD marker and cannot be — `deletionPolicy` is declared once on the shared
+envelope, so a marker there is one answer for every kind, and redeclaring it here makes
+controller-gen emit `allOf: [{default: Retain}, {default: Delete}]`, a schema the API server
+rejects. It is data on this kind's Descriptor (`registry.Descriptor.RetainOnDelete`), so
+`kubectl explain` prints no default. Same story as
 [`NetBoxPrefix`](netboxprefix.md#specdeletionpolicy).
 
 ## Natural key

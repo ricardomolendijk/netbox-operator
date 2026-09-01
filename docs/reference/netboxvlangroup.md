@@ -41,7 +41,6 @@ metadata:
   namespace: default
 spec:
   endpointRef: homelab
-  deletionPolicy: Retain
   name: Donkerslootstraat VLANs
   slug: house-vlans-rtm
 ```
@@ -50,7 +49,8 @@ A globally-scoped group. That is a legitimate shape rather than a half-filled on
 columns are nullable — but read [natural keys](#natural-keys) before relying on it: with both
 columns null, neither unique constraint fires and two global groups may share this slug.
 
-`deletionPolicy: Retain` is in the *minimal* example on purpose; see
+Deleting this CR asks NetBox to delete the group: `deletionPolicy` defaults to `Delete` here and
+this is the one kind in `ipam` where that is deliberate — see
 [`spec.deletionPolicy`](#specdeletionpolicy).
 
 ## Full example
@@ -69,8 +69,8 @@ spec:
   # Shared-envelope defaults, written out.
   onConflict: Fail
 
-  # NOT the default. See spec.deletionPolicy.
-  deletionPolicy: Retain
+  # The default, and deliberately not Retain. See spec.deletionPolicy.
+  deletionPolicy: Delete
 
   name: Donkerslootstraat VLANs
   slug: house-vlans-rtm
@@ -107,27 +107,26 @@ kind — see [`NetBoxTag`](netboxtag.md#specendpointref) for the full treatment 
 |---|---|
 | Type | `string` (`DeletionPolicy`) |
 | Required | no |
-| Default | `Delete` — **and it should be `Retain` on this kind** |
+| Default | `Delete` — **and that is deliberate on this kind** |
 | Validation | `Enum=Delete;Retain` |
 
-**Write `deletionPolicy: Retain` on every `NetBoxVLANGroup`.**
-[Deletion — the default depends on the Kind](../concepts/deletion.md#the-default-depends-on-the-kind)
-records the decision: the IPAM kinds default to `Retain`, everything else to `Delete`. Deleting
-a VLAN group takes its change log, its journal entries and its `vid_ranges` with it, and a
-fresh group with the same slug is a different object with a different id.
+**This is the one kind in `ipam` that does not default to `Retain`, and the exception is the
+point rather than an oversight**
+([#186](https://github.com/ricardomolendijk/netbox-operator/issues/186)). The rule
+[deletion](../concepts/deletion.md#the-default-depends-on-the-kind) turns on is whether deleting
+the NetBox object destroys *state*: `Retain` protects an allocation, `Delete` is fine for
+configuration. A VLAN group allocates nothing — it is an organisational container over
+`vid_ranges` — so deleting one frees no VLAN, no address and no range, and it belongs with the
+catalogue kinds it behaves like. The VLANs *inside* it default to `Retain`
+([`NetBoxVLAN`](netboxvlan.md#specdeletionpolicy)): the container goes, the contents stay.
 
-The default is still `Delete` because `deletionPolicy` is declared once on the shared envelope
-every object kind embeds, and this API has no way to give one kind a different default:
-redeclaring the field on `NetBoxVLANGroupSpec` makes `controller-gen` emit
-`allOf: [{default: Retain}, {default: Delete}]`, which the API server rejects outright, and the
-engine would still read the envelope's own copy. A per-kind default needs
-`Descriptor.RetainOnDelete` and `deletionPolicyOf(obj, desc)`
-([#186](https://github.com/ricardomolendijk/netbox-operator/issues/186),
-[#199](https://github.com/ricardomolendijk/netbox-operator/issues/199)), neither of which has
-landed.
+`ipam.VLAN.group` is `on_delete=PROTECT` (`docs/netbox-schema.md` → `ipam.VLAN`), so NetBox
+refuses to delete a group that still holds VLANs and the operator can only
+[report the refusal](../concepts/deletion.md#what-protect-looks-like). That is what makes
+`Delete` cheap here: the case where it would lose something is the case the server blocks.
 
-Until then this is a manifest convention, not an enforced one. `Retain` appears in both
-examples above and in `config/samples/netbox_v1alpha1_netboxvlangroup.yaml` for that reason.
+Write `deletionPolicy: Retain` on a group that other tooling also depends on, or one you are
+handing back to a human.
 
 ### `spec.name`
 
@@ -555,7 +554,7 @@ resolved, which is exactly the state where no lookup ran at all.
 | A second group appeared after an edit | none | `spec.slug` or `spec.scope` was changed | See [renaming changes identity](#renaming-changes-identity) |
 | Terminating forever, `Deleting` `Reason=Protected` | finalizer | VLANs still reference this group | Delete them, or switch to `deletionPolicy: Retain` to drop the finalizer without asking NetBox |
 | A `NetBoxTenant` will not delete, blocker in a namespace you cannot see | `Deleting=False`, `Reason=Protected` on the *tenant* | a `NetBoxVLANGroup` in a catalogue namespace holds `tenantRef` | The condition names the group's namespace and name. Remove the `tenantRef` there, or delete the group |
-| `deletionPolicy` was not set and the group is gone | none | the envelope default is `Delete` | Set `deletionPolicy: Retain`. See [`spec.deletionPolicy`](#specdeletionpolicy) |
+| Deleting the CR deleted the group, unlike its VLANs | `Deleted` Event | this kind defaults to `deletionPolicy: Delete` on purpose — it is a container, not an allocation | Set `deletionPolicy: Retain` if the group must outlive its CR. See [`spec.deletionPolicy`](#specdeletionpolicy) |
 
 ## Related
 
@@ -571,8 +570,8 @@ resolved, which is exactly the state where no lookup ran at all.
 - [Field ownership](../concepts/field-ownership.md) — absent, empty and set, and how `[]`
   survives `omitempty`
 - [Drift detection](../concepts/drift.md) — the ordered-array compare `vidRanges` goes through
-- [Deletion](../concepts/deletion.md#the-default-depends-on-the-kind) — why an IPAM kind wants
-  `Retain`, and what `PROTECT` looks like
+- [Deletion](../concepts/deletion.md#the-default-depends-on-the-kind) — why most IPAM kinds
+  default to `Retain` and why this one does not, and what `PROTECT` looks like
 - [ADR-0003: ownership and references](../decisions/0003-ownership-and-references.md) — the
   containment reference and the cascade
 - [`NetBoxTag`](netboxtag.md) — the shared envelope fields in full

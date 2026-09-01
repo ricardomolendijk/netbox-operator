@@ -95,18 +95,17 @@ spec:
               `tenantRef` is deliberately absent while NBO-021 is in flight; a field that is accepted
               and writes nothing is worse than a field that is not there.
 
-              `deletionPolicy` still defaults to `Delete` here, and it should not. Deleting a prefix
+              `deletionPolicy` defaults to `Retain` here, which is decision #176. Deleting a prefix
               destroys the record of who a range of addresses belonged to, and that record is not
               recoverable by re-creating the object: the change log, the journal entries and every child
               row go with it, and a fresh prefix at the same CIDR is a different object with a different
-              id. IPAM kinds want `Retain`. It is not implemented because it cannot be, per kind, in this
-              API: `deletionPolicy` is declared once on the embedded NetBoxObjectSpec, and redeclaring it
-              on this struct makes controller-gen emit `allOf: [{default: Retain}, {default: Delete}]` --
-              a schema the API server rejects outright -- while the engine would still read the
-              envelope's own copy, which JSON decoding leaves empty. Giving a kind its own default takes
-              a change to the shared envelope, which is deliberately out of scope for one kind. Until
-              then every NetBoxPrefix manifest should say `deletionPolicy: Retain` explicitly, which is
-              what docs/reference/netboxprefix.md's examples do.
+              id. The default is data on the kind's Descriptor (registry.Descriptor.RetainOnDelete) rather
+              than a CRD marker, because it cannot be one: `deletionPolicy` is declared once on the
+              embedded NetBoxObjectSpec, so a `+kubebuilder:default` there is the same answer for ~120
+              kinds, and redeclaring the field on this struct makes controller-gen emit
+              `allOf: [{default: Retain}, {default: Delete}]` -- a schema the API server rejects outright.
+              So `kubectl explain netboxprefix.spec.deletionPolicy` prints no default, and
+              docs/concepts/deletion.md is where the table lives.
             properties:
               comments:
                 description: |-

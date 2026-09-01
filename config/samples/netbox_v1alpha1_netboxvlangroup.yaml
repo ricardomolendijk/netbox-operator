@@ -9,9 +9,10 @@ spec:
   # default endpoint; see config/samples/netbox_v1alpha1_netboxendpoint.yaml.
   endpointRef: homelab
 
-  # Set explicitly on every IPAM object. The envelope's default is Delete, and the per-Kind
-  # default this Kind wants (docs/concepts/deletion.md) needs #199 to land first.
-  deletionPolicy: Retain
+  # The default, spelled out, and the one kind in ipam that keeps it: a VLAN group is an
+  # organisational container rather than an allocation, so deleting one frees nothing. Its
+  # VLANs default to Retain (docs/concepts/deletion.md).
+  deletionPolicy: Delete
 
   # Required, and neither is globally unique on this Kind: ipam.VLANGroup is unique on
   # (scope_type, scope_id, name) and (scope_type, scope_id, slug), so two groups may share

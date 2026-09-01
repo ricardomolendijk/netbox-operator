@@ -38,6 +38,11 @@ func ipamIPRangeDescriptor() Descriptor {
 		Taggable:        true,
 		CustomFieldable: true,
 
+		// Decision #176: IPAM defaults to Retain. Deleting a range frees every address in it
+		// for reallocation at once, and if a NetBoxIPRangeClaim allocated it (ADR-0004) that
+		// hands somebody else a block this cluster believes it owns.
+		RetainOnDelete: true,
+
 		// `markPopulated` -> `mark_populated` and `markUtilized` -> `mark_utilized` are the
 		// entries that earn an explicit table: NetBox ignores a field name it does not know
 		// rather than rejecting it, so either sent verbatim would write nothing and report

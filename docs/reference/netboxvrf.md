@@ -66,7 +66,7 @@ metadata:
 spec:
   endpointRef: homelab
   onConflict: Fail            # Fail | Adopt | AdoptOnly
-  deletionPolicy: Retain      # Delete | Retain -- see below
+  deletionPolicy: Retain      # default *on this kind* -- see below
 
   name: Donkerslootstraat (RTM)
   rd: "65000:10"
@@ -310,7 +310,7 @@ way that waiting is not.
 
 So: **set `rd`.** It is the only identity this kind has that NetBox actually enforces.
 
-## `deletionPolicy` and issue #176
+## `deletionPolicy` defaults to `Retain`
 
 `NetBoxVRF` is an IPAM kind holding state rather than configuration, and issue #176 decided
 (option B) that those default to **`Retain`**: deleting a VRF destroys the record of which
@@ -318,13 +318,14 @@ routing table every prefix and address in it belonged to, and re-creating it doe
 the changelog. `ipam.VRF`'s foreign keys are `on_delete=PROTECT` anyway, so NetBox refuses
 many of these deletions and the operator reports rather than retries them.
 
-> **Not yet implemented.** `deletionPolicy` is defaulted by a
-> `+kubebuilder:default=Delete` marker on `NetBoxObjectSpec`, the envelope **every** kind
-> embeds, so a per-kind default is not expressible without changing shared code — and an
-> object-level default on the inlined field only fires when `spec` is absent entirely, which
-> is never. Today this kind defaults to `Delete` like every other. Write
-> `deletionPolicy: Retain` explicitly, as the full example above does, until the shared
-> change lands.
+The default is data on this kind's Descriptor (`registry.Descriptor.RetainOnDelete`) and not a
+CRD marker, because it cannot be one: `deletionPolicy` is declared once on `NetBoxObjectSpec`,
+the envelope **every** kind embeds, so a `+kubebuilder:default` there is the same answer for
+all of them, and redeclaring the field on `NetBoxVRFSpec` makes `controller-gen` emit
+`allOf: [{default: Retain}, {default: Delete}]`, which the API server rejects. So
+`kubectl explain netboxvrf.spec.deletionPolicy` prints no default and
+[deletion](../concepts/deletion.md#the-default-depends-on-the-kind) is where the table lives.
+Set `deletionPolicy: Delete` explicitly where `kubectl delete` really should remove the VRF.
 
 [`NetBoxRouteTarget`](netboxroutetarget.md#deletionpolicy-defaults-to-delete) is `Delete`, and
 that is not an inconsistency: #176's rationale is irreversible loss of *allocated state*, and

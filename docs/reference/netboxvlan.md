@@ -51,7 +51,6 @@ metadata:
   namespace: default
 spec:
   endpointRef: homelab
-  deletionPolicy: Retain
   vid: 20
   name: SERVERS
 ```
@@ -60,8 +59,8 @@ A VLAN with neither a site nor a group. That is legal — both columns are nulla
 [natural keys](#natural-keys) first: such an object is identified by `vid` alone, which is the
 widest identity this kind has.
 
-`deletionPolicy: Retain` is in the *minimal* example on purpose; see
-[`spec.deletionPolicy`](#specdeletionpolicy).
+Deleting this CR leaves the NetBox VLAN in place: `deletionPolicy` defaults to `Retain` on this
+kind — see [`spec.deletionPolicy`](#specdeletionpolicy).
 
 ## Full example
 
@@ -79,7 +78,7 @@ spec:
   # Shared-envelope defaults, written out.
   onConflict: Fail
 
-  # NOT the default. See spec.deletionPolicy.
+  # The default *on this kind*. See spec.deletionPolicy.
   deletionPolicy: Retain
 
   vid: 1
@@ -132,27 +131,26 @@ kind — see [`NetBoxTag`](netboxtag.md#specendpointref) for the full treatment 
 |---|---|
 | Type | `string` (`DeletionPolicy`) |
 | Required | no |
-| Default | `Delete` — **and it should be `Retain` on this kind** |
+| Default | **`Retain`** on this kind |
 | Validation | `Enum=Delete;Retain` |
 
-**Write `deletionPolicy: Retain` on every `NetBoxVLAN`.**
+**`Retain`, unlike most kinds.**
 [Deletion — the default depends on the Kind](../concepts/deletion.md#the-default-depends-on-the-kind)
-lists `NetBoxVLAN` in the `Retain` column explicitly. Deleting a VLAN destroys its change log,
-its journal entries and every L2VPN termination hanging off it, and a fresh VLAN with the same
-`vid` is a different object with a different id.
+lists `NetBoxVLAN` in the `Retain` column. Deleting a VLAN destroys its change log, its journal
+entries and every L2VPN termination hanging off it, and a fresh VLAN with the same `vid` is a
+different object with a different id. Set `deletionPolicy: Delete` explicitly where
+`kubectl delete` really should remove the VLAN.
 
-The default is still `Delete` because `deletionPolicy` is declared once on the shared envelope
-every object kind embeds, and this API has no way to give one kind a different default:
+The default is not a CRD marker. `deletionPolicy` is declared once on the shared envelope every
+object kind embeds, so a marker there could only give every kind the same answer — and
 redeclaring the field on `NetBoxVLANSpec` makes `controller-gen` emit
-`allOf: [{default: Retain}, {default: Delete}]`, which the API server rejects outright, and the
-engine would still read the envelope's own copy. A per-kind default needs
-`Descriptor.RetainOnDelete` and `deletionPolicyOf(obj, desc)`
-([#186](https://github.com/ricardomolendijk/netbox-operator/issues/186),
-[#199](https://github.com/ricardomolendijk/netbox-operator/issues/199)), neither of which has
-landed.
+`allOf: [{default: Retain}, {default: Delete}]`, which the API server rejects outright. The
+per-kind value is data on this kind's Descriptor (`registry.Descriptor.RetainOnDelete`), so
+`kubectl explain netboxvlan.spec.deletionPolicy` prints no default.
 
-Until then this is a manifest convention, not an enforced one. `Retain` appears in both examples
-above and in `config/samples/netbox_v1alpha1_netboxvlan.yaml` for that reason.
+[`NetBoxVLANGroup`](netboxvlangroup.md#specdeletionpolicy) is the neighbour that
+keeps `Delete`, and that is not an inconsistency: a group is an organisational container, not
+an allocation, so deleting one frees nothing.
 
 ### `spec.vid`
 
@@ -637,7 +635,7 @@ identified by a convention rather than by a constraint.
 | `ParentOwned=False`, `Reason=CascadeUnavailable` naming `siteRef` | reconcile | the site is in another namespace, or referenced by `id` | Expected for a shared catalogue site. An owner reference cannot cross a namespace ([ADR-0003](../decisions/0003-ownership-and-references.md)) |
 | A second VLAN appeared after an edit | none | `spec.vid`, `spec.groupRef` or `spec.siteRef` was changed | See [renaming changes identity](#renaming-changes-identity) |
 | Terminating forever, `Deleting` `Reason=Protected` | finalizer | prefixes, L2VPN terminations or a Q-in-Q child still reference this VLAN | Delete them, or switch to `deletionPolicy: Retain` to drop the finalizer without asking NetBox |
-| `deletionPolicy` was not set and the VLAN is gone | none | the envelope default is `Delete` | Set `deletionPolicy: Retain`. See [`spec.deletionPolicy`](#specdeletionpolicy) |
+| Deleting the CR left the VLAN in NetBox | `Retained` Event | this kind defaults to `deletionPolicy: Retain` | Set `deletionPolicy: Delete` if removing the VLAN is what you want. See [`spec.deletionPolicy`](#specdeletionpolicy) |
 
 ## Related
 
@@ -652,8 +650,8 @@ identified by a convention rather than by a constraint.
   `group_id` is pinned rather than omitted
 - [Field ownership](../concepts/field-ownership.md) — absent, empty and set
 - [Drift detection](../concepts/drift.md) — how the choice columns are compared
-- [Deletion](../concepts/deletion.md#the-default-depends-on-the-kind) — why an IPAM kind wants
-  `Retain`, and what `PROTECT` looks like
+- [Deletion](../concepts/deletion.md#the-default-depends-on-the-kind) — why this kind defaults
+  to `Retain` and its group does not, and what `PROTECT` looks like
 - [ADR-0003: ownership and references](../decisions/0003-ownership-and-references.md) — the
   containment reference and the cascade
 - [`NetBoxTag`](netboxtag.md) — the shared envelope fields in full

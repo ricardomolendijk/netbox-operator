@@ -97,11 +97,13 @@ spec:
               `CachedScopeMixin` (docs/netbox-schema.md -> ipam.IPRange) -- and no `parentRef`: a range's
               place in the hierarchy is arithmetic, exactly as a prefix's is.
 
-              Like NetBoxPrefix, this kind wants `deletionPolicy: Retain` and cannot default to it: the
-              field is declared once on the embedded NetBoxObjectSpec, and redeclaring it here makes
-              controller-gen emit a schema the API server rejects. Deleting a range destroys the record of
-              who a block of addresses belonged to, so every manifest should say `Retain` explicitly, as
-              docs/reference/netboxiprange.md's examples do.
+              Like NetBoxPrefix, `deletionPolicy` defaults to `Retain` here (decision #176): deleting a
+              range frees every address in it for reallocation at once and destroys the record of who the
+              block belonged to. The default is data on the kind's Descriptor
+              (registry.Descriptor.RetainOnDelete) rather than a CRD marker, because the field is declared
+              once on the embedded NetBoxObjectSpec and redeclaring it here makes controller-gen emit a
+              schema the API server rejects -- so `kubectl explain` prints no default and
+              docs/concepts/deletion.md carries the table.
             properties:
               comments:
                 description: |-

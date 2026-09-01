@@ -522,6 +522,109 @@ func TestDeletionPolicyDefaultsToDelete(t *testing.T) {
 	}
 }
 
+// deletionDefaults is the effective spec.deletionPolicy of every registered object kind when
+// the CR states none, and it is the whole of the answer: docs/concepts/deletion.md's table is
+// prose about this map.
+//
+// It is a written-out list rather than a derived one on purpose. Deriving it from
+// Descriptor.RetainOnDelete would make the test agree with whatever the registry says,
+// including the wrong thing -- which is exactly how five kinds shipped as `Delete` while the
+// docs promised `Retain` (#186) with `make test` green. Adding a kind therefore means adding a
+// row here and deciding, in writing, whether deleting its NetBox object destroys state.
+var deletionDefaults = map[string]netboxv1alpha1.DeletionPolicy{
+	// Decision #176: an IPAM object holds state. Deleting one frees an allocation or
+	// destroys the record of who a range belonged to, and neither is undone by a recreate.
+	"NetBoxIPAddress": netboxv1alpha1.DeletionRetain,
+	"NetBoxPrefix":    netboxv1alpha1.DeletionRetain,
+	"NetBoxIPRange":   netboxv1alpha1.DeletionRetain,
+	"NetBoxVLAN":      netboxv1alpha1.DeletionRetain,
+	"NetBoxVRF":       netboxv1alpha1.DeletionRetain,
+
+	// The carve-out inside ipam, and the row worth reading twice: a VLAN group is an
+	// organisational container rather than an allocation, so deleting one frees nothing and
+	// the rule the table turns on puts it with the configuration kinds.
+	"NetBoxVLANGroup": netboxv1alpha1.DeletionDelete,
+
+	// Configuration: cheap to delete, cheap to recreate, and mostly PROTECT-refused while
+	// anything still points at it.
+	"NetBoxRouteTarget":       netboxv1alpha1.DeletionDelete,
+	"NetBoxTag":               netboxv1alpha1.DeletionDelete,
+	"NetBoxRegion":            netboxv1alpha1.DeletionDelete,
+	"NetBoxSite":              netboxv1alpha1.DeletionDelete,
+	"NetBoxSiteGroup":         netboxv1alpha1.DeletionDelete,
+	"NetBoxLocation":          netboxv1alpha1.DeletionDelete,
+	"NetBoxTenant":            netboxv1alpha1.DeletionDelete,
+	"NetBoxTenantGroup":       netboxv1alpha1.DeletionDelete,
+	"NetBoxContact":           netboxv1alpha1.DeletionDelete,
+	"NetBoxContactGroup":      netboxv1alpha1.DeletionDelete,
+	"NetBoxContactRole":       netboxv1alpha1.DeletionDelete,
+	"NetBoxContactAssignment": netboxv1alpha1.DeletionDelete,
+	"NetBoxManufacturer":      netboxv1alpha1.DeletionDelete,
+	"NetBoxDeviceRole":        netboxv1alpha1.DeletionDelete,
+	"NetBoxDeviceType":        netboxv1alpha1.DeletionDelete,
+	"NetBoxPlatform":          netboxv1alpha1.DeletionDelete,
+	"NetBoxDevice":            netboxv1alpha1.DeletionDelete,
+	"NetBoxInterface":         netboxv1alpha1.DeletionDelete,
+	"NetBoxClusterType":       netboxv1alpha1.DeletionDelete,
+	"NetBoxClusterGroup":      netboxv1alpha1.DeletionDelete,
+	"NetBoxCluster":           netboxv1alpha1.DeletionDelete,
+	"NetBoxVirtualMachine":    netboxv1alpha1.DeletionDelete,
+	"NetBoxVMInterface":       netboxv1alpha1.DeletionDelete,
+	"NetBoxVirtualDisk":       netboxv1alpha1.DeletionDelete,
+}
+
+// TestEveryKindsDeletionDefaultIsStated is criterion 2 of #186, and it is the test whose
+// absence was the bug. `Descriptor.RetainOnDelete` and `deletionPolicyOf` both shipped, five
+// of the six kinds docs/concepts/deletion.md documented as `Retain` did not set the flag, and
+// nothing failed -- because no test read the default *per kind* at all.
+//
+// So it reads it the way finalizer.go does, through Descriptor.RetainOnDelete and
+// deletionPolicyOf, rather than off the generated CRD. There is no `+kubebuilder:default` to
+// read there and cannot be: spec.deletionPolicy is declared once on the shared envelope, so a
+// marker would be one answer for every kind. A test against the schema would therefore pass
+// while the engine deleted a production prefix.
+//
+// It is exhaustive in both directions. A registered kind with no row fails, so adding a kind
+// forces somebody to state its default; a row naming a kind that is not registered fails too,
+// so the table cannot rot into a list of kinds that used to exist.
+//
+// Claims are not in it. A claim's default is claimRetainsByDefault rather than a Descriptor,
+// asserted in the last row of TestDeletionPolicyDefaultsToDelete above.
+func TestEveryKindsDeletionDefaultIsStated(t *testing.T) {
+	descriptors := registry.List()
+	if len(descriptors) == 0 {
+		t.Fatal("the registry is empty; this test would pass by describing nothing")
+	}
+
+	for _, descriptor := range descriptors {
+		kind := descriptor.GVK.Kind
+
+		want, stated := deletionDefaults[kind]
+		if !stated {
+			t.Errorf("%s is registered and states no deletion default; add it to "+
+				"deletionDefaults and to the table in docs/concepts/deletion.md", kind)
+
+			continue
+		}
+
+		if got := deletionPolicyOf("", descriptor.RetainOnDelete); got != want {
+			t.Errorf("%s defaults to %q, want %q: RetainOnDelete = %v", kind, got, want,
+				descriptor.RetainOnDelete)
+		}
+	}
+
+	registered := make(map[string]bool, len(descriptors))
+	for _, descriptor := range descriptors {
+		registered[descriptor.GVK.Kind] = true
+	}
+
+	for kind := range deletionDefaults {
+		if !registered[kind] {
+			t.Errorf("deletionDefaults names %s, which is not registered", kind)
+		}
+	}
+}
+
 // TestClaimWithoutAFinalizerWriterFailsLoudly pins the guard added after a rebase found
 // the nil path the hard way: claim ran before any NetBox call and segfaulted, which tells
 // whoever is paged nothing. A wiring mistake must name what is missing, and failing here

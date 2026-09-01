@@ -71,6 +71,12 @@ spec:
               on_delete=PROTECT`) is deliberately absent: NetBoxTenant is NBO-021, in flight
               concurrently, and a field that is accepted and does nothing is worse than a field that is
               not there.
+
+              `deletionPolicy` defaults to `Retain` here (decision #176): a VRF is the table its prefixes
+              and addresses are unique *within*, so deleting one changes what every address inside it
+              means. The default is data on the kind's Descriptor (registry.Descriptor.RetainOnDelete)
+              rather than a CRD marker, because the field is declared once on the embedded
+              NetBoxObjectSpec -- docs/concepts/deletion.md carries the table.
             properties:
               comments:
                 description: |-
