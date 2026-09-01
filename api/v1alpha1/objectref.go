@@ -392,8 +392,12 @@ type (
 	// provider's circuit rather than another port.
 	CircuitTerminationRef ObjectRef
 
-	// IPAddressRef points at a NetBoxIPAddress (ipam.IPAddress, ipam/ip-addresses).
-	//
+	// IPAddressRef points at a NetBoxIPAddress (ipam.IPAddress, ipam/ip-addresses).	// WirelessLANGroupRef points at a NetBoxWirelessLANGroup (wireless.WirelessLANGroup,
+	// wireless/wireless-lan-groups).	//
+	// Self-referential, like every NestedGroupModel's alias, and also what
+	// `wireless.WirelessLAN.group` points at -- so one alias serves both the tree edge and
+	// the SSID's group.
+	WirelessLANGroupRef ObjectRef
 )
 
 // TargetGVK reports the Kind this reference resolves against.
@@ -686,6 +690,7 @@ var (
 	_ RefTarget = RearPortRef{}
 	_ RefTarget = PowerFeedRef{}
 	_ RefTarget = CircuitTerminationRef{}
+	_ RefTarget = WirelessLANGroupRef{}
 )
 
 // TargetGVK reports the Kind this reference resolves against.
@@ -775,3 +780,11 @@ func (r CircuitTerminationRef) TargetGVK() schema.GroupVersionKind {
 
 // AsObjectRef returns the underlying reference.
 func (r CircuitTerminationRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r WirelessLANGroupRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxWirelessLANGroup")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r WirelessLANGroupRef) AsObjectRef() ObjectRef { return ObjectRef(r) }

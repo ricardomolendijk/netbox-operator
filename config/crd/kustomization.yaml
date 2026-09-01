@@ -54,4 +54,6 @@ resources:
 - bases/netbox.kubeforge.org_netboxconfigtemplates.yaml
 - bases/netbox.kubeforge.org_netboxconfigcontextprofiles.yaml
 - bases/netbox.kubeforge.org_netboxconfigcontexts.yaml
-- bases/netbox.kubeforge.org_netboxmacaddresses.yaml
+- bases/netbox.kubeforge.org_netboxmacaddresses.yaml- bases/netbox.kubeforge.org_netboxwirelesslangroups.yaml
+- bases/netbox.kubeforge.org_netboxwirelesslans.yaml
+- bases/netbox.kubeforge.org_netboxwirelesslinks.yaml

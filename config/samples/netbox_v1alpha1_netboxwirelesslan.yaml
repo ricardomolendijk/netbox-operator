@@ -1,0 +1,51 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxWirelessLAN
+metadata:
+  # A DNS-1123 label, and unrelated to spec.ssid below.
+  name: donkersloot
+  namespace: default
+spec:
+  # The NetBoxEndpoint to write through, in this namespace.
+  endpointRef: homelab
+
+  # Required. Not unique in NetBox -- wireless.WirelessLAN declares no meta.constraints at
+  # all -- so `(ssid, scope, tenant)` is a lookup convention and two CRs matching the same
+  # rows report Conflict and write nothing.
+  ssid: Donkersloot
+
+  groupRef:
+    name: donkerslootstraat-wifi
+
+  # NetBox's own default, set explicitly so the operator manages the column from the first
+  # reconcile. A defaulted field that never reaches a payload can never be corrected.
+  status: active
+
+  vlanRef:
+    name: iot
+
+  # NetBox's scope, not Kubernetes'. **There is no `siteRef` on this Kind and there will not
+  # be one**: wireless.WirelessLAN is on CachedScopeMixin, so `site` is not a column. NetBox
+  # would accept `site: 3`, drop it, return 201 and report Ready=True forever against an
+  # unscoped SSID -- the bug netbox-populator shipped.
+  #
+  # This is also part of the identity: it is what keeps two houses' `Donkersloot` apart. All
+  # four members cascade, so this is the containment reference.
+  scope:
+    siteRef:
+      name: home
+
+  # on_delete=PROTECT, and the third term of the natural key.
+  # tenantRef:
+  #   name: donkerslootstraat
+
+  authType: wpa-personal
+  authCipher: aes
+
+  # There is deliberately no `authPSK` field. A pre-shared key may never be inline in a
+  # spec, and `authPSKSecretRef` needs the engine to source a payload value from a Secret --
+  # shared machinery rather than descriptor data (NBO-050, plan.md §15). Until it lands the
+  # operator does not manage `auth_psk` at all, so NetBox keeps whatever key it holds; it is
+  # already masked in every log line (internal/netbox/do.go, secretFields).
+
+  description: Household IoT network
+  comments: Managed by netbox-operator.
