@@ -173,8 +173,19 @@ soonest of their intervals — exactly as it does for several unresolved fields.
 
 ```
 {"type":"RefsResolved","status":"False","reason":"RefNotReady",
- "message":"importTargets -> netboxroutetarget/team-a/rt-65000-5: not ready (the target has no status.id yet); importTargets -> netboxroutetarget/team-a/rt-65000-9: not found (no such object in the cluster)"}
+ "message":"importTargets[0] -> netboxroutetarget/team-a/rt-65000-5: not ready (the target has no status.id yet); importTargets[2] -> netboxroutetarget/team-a/rt-65000-9: not found (no such object in the cluster)"}
 ```
+
+Each element is named **by its index**, counted from zero against the order the spec listed
+them in. A field name on its own is not addressable: a VRF with twenty route targets reports
+one `importTargets` for all of them and leaves the reader counting list entries to find the
+one to edit. The index is counted against the manifest and not against the sorted ids the
+payload carries, because the manifest is the thing somebody is about to change.
+
+A to-one reference carries no index. `parentRef[0]` reads like the first of several on a field
+that has exactly one value and no order at all, so the bare field name is what a to-one
+refusal renders — and the same rule applies to the note a resolved-but-unready element leaves
+on this condition.
 
 ### An empty list is a value
 
@@ -182,6 +193,24 @@ soonest of their intervals — exactly as it does for several unresolved fields.
 empty list. Omitting the field entirely is a different statement: spec omission means "do not
 manage", so the column is left as NetBox has it. The two are deliberately distinct, the same
 way an absent reference and a present-but-empty one are.
+
+| Spec | Payload | Meaning |
+|---|---|---|
+| the field is absent | the key is not in the payload at all | do not manage; NetBox keeps whatever it has |
+| `importTargets: []` | `"import_targets": []` | manage it, and clear it |
+| `importTargets: [a, b]` | `"import_targets": [3, 7]` | manage it, exactly these |
+
+The middle row is the only way to take the **last** element off a relation, because NetBox
+replaces a many-to-many wholesale on `PATCH` and offers no remove verb. It is also the row
+that cannot be read off the Go value: `omitempty` erases an explicitly-empty list on the way
+in, so the engine recovers it from `metadata.managedFields` exactly as it recovers an emptied
+string — see [field ownership](field-ownership.md), including
+[why the field is not a pointer to a slice](field-ownership.md#amendment-nbo-020-a-to-many-reference-is-not-a-pointer-to-a-slice-either)
+and what happens when there is no ownership metadata to read.
+
+An absent field must stay absent, which is why no to-many reference carries a
+`+kubebuilder:default`. A field defaulted to `[]` would strip the relation off the first
+hand-configured object the operator ever touched, and report success.
 
 ### An empty reference is a value, when the field says so
 

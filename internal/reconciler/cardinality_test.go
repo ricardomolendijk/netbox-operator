@@ -271,3 +271,64 @@ func TestEmptyToManyRefIsDeclaredAndDoesNotBlock(t *testing.T) {
 		t.Errorf("RefsResolved = %s/%s (%s), want True", resolved.Status, resolved.Reason, resolved.Message)
 	}
 }
+
+// TestToManyMembersContributeNoOwnerReference is ADR-0003 §4's containment rule on a to-many
+// reference: a shared many-to-many is by definition not containment, so no member of one ever
+// becomes an owner.
+//
+// The fixture is deliberately the awkward one. Every ingredient an owner reference needs is
+// present on the to-many members -- resolved by `name`, in the referrer's own namespace, each
+// carrying the Kind and uid the reference walk read off the target CR -- and the *containment*
+// reference resolves in the same pass, so the object does acquire an owner reference and the
+// assertion is which one. Two VRFs may import one route target and neither owns it; garbage
+// collection ANDs its owners, so a member here would make "delete the VRF" mean "delete the
+// VRF or any of its route targets".
+//
+// registry.ErrContainmentToMany already refuses a Descriptor whose containment ref is to-many
+// (fields_test.go), which is the boot half. This is the reconcile half: the engine reads the
+// containment slot by field name and never enumerates the rest.
+func TestToManyMembersContributeNoOwnerReference(t *testing.T) {
+	obj := parentedObject()
+	obj.Spec.ASNRefs = []fakeRef{{Name: "as64500"}, {Name: "as64501"}}
+
+	owners := &fakeOwners{}
+	resolution := parentOwnedBy("team-a", "europe-uid")
+	resolution.ByField["asnRefs"] = resolver.FieldRefs{
+		{
+			ID: 5, ObjectType: "ipam.asn", Mode: resolver.ModeName,
+			Target:    types.NamespacedName{Namespace: "team-a", Name: "as64500"},
+			TargetGVK: fakeGVK, TargetUID: types.UID("as64500-uid"),
+		},
+		{
+			ID: 7, ObjectType: "ipam.asn", Mode: resolver.ModeName,
+			Target:    types.NamespacedName{Namespace: "team-a", Name: "as64501"},
+			TargetGVK: fakeGVK, TargetUID: types.UID("as64501-uid"),
+		},
+	}
+
+	engine := ownerEngine(t, resolution, owners)
+
+	if _, err := engine.Reconcile(context.Background(), obj); err != nil {
+		t.Fatalf("Reconcile() = %v", err)
+	}
+
+	if len(obj.OwnerReferences) != 1 {
+		t.Fatalf("ownerReferences = %+v, want exactly one: the containment parent and no m2m member",
+			obj.OwnerReferences)
+	}
+
+	if got := obj.OwnerReferences[0].Name; got != "europe" {
+		t.Errorf("owner = %q, want the containment parent \"europe\"", got)
+	}
+
+	// The ids still reached the payload, so this is not passing because the to-many was
+	// dropped somewhere upstream.
+	nb, ok := engine.Endpoints.(fakeEndpoints).endpoint.Client.(*fakeClient)
+	if !ok {
+		t.Fatal("the owner engine's client is not the recording fake any more")
+	}
+
+	if got := nb.lastPayload()["asns"]; !reflect.DeepEqual(got, []any{float64(5), float64(7)}) {
+		t.Errorf("payload[asns] = %#v, want [5 7]: the members resolved and were written", got)
+	}
+}

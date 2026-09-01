@@ -166,11 +166,51 @@ type Error struct {
 	// rather than merely prints: NBO-044's admission webhook rejects on it, and an Event
 	// naming the ring is the only record left once a participant is deleted.
 	Path RefPath
+
+	// Index is which element of a to-many reference this is, counted from zero as the spec
+	// listed them, and nil for a to-one field.
+	//
+	// It is what makes a refusal on a list addressable. A VRF with twenty route targets
+	// reports one field name for all of them, so `importTargets -> ... not found` says which
+	// relation is stuck and leaves the reader counting elements by hand; `importTargets[1]`
+	// is the path they can go and edit (NBO-020). The target is still rendered beside it,
+	// because a reference written by `slug` names a NetBox row and the index alone would not
+	// say which.
+	//
+	// Nil for a to-one field rather than zero: `parentRef[0]` would invent a position for a
+	// field that has one value and no order. It is also nil on an ErrRefCycle and an
+	// ErrRefDepthExceeded, which are reported by the walk in cycle.go before any element is
+	// resolved and carry the whole ring in Path instead.
+	Index *int
+}
+
+// FieldPath is the spec field the reference was written under, with the element's position
+// when the field is to-many: `importTargets[1]`, and `parentRef` for a to-one.
+//
+// Separate from Field, which stays the bare spec name because it is a *key*: the engine takes
+// the set difference between the references a spec declared and the ones that resolved
+// (reconciler.resolveRefs) and matches a blocker against the descriptor's deferred list, and
+// both compare against the spelling the field map carries.
+func (e *Error) FieldPath() string {
+	if e.Index == nil {
+		return e.Field
+	}
+
+	return ElementPath(e.Field, *e.Index)
+}
+
+// ElementPath spells one element of a to-many reference: `importTargets[1]`.
+//
+// Exported and used by internal/reconciler because the indexed form appears in two messages a
+// human reads -- the refusal a blocker carries and the note a resolved-but-unready element
+// leaves -- and two spellings of one path is one of them being wrong in somebody's grep.
+func ElementPath(field string, index int) string {
+	return fmt.Sprintf("%s[%d]", field, index)
 }
 
 // Error renders the reference, its target and why it did not resolve.
 func (e *Error) Error() string {
-	rendered := fmt.Sprintf("%s -> %s: %v", e.Field, e.target(), e.Cause)
+	rendered := fmt.Sprintf("%s -> %s: %v", e.FieldPath(), e.target(), e.Cause)
 	if e.Detail == "" {
 		return rendered
 	}

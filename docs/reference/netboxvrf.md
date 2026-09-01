@@ -222,13 +222,19 @@ If **any** element cannot be resolved, the whole field is left out of the payloa
 object reports:
 
 ```
-RefsResolved  False  RefNotFound  importTargets[1] -> team-a/rt-missing: ...
+RefsResolved  False  RefNotFound  importTargets[1] -> netboxroutetarget/team-a/rt-missing: not found (no such object in the cluster)
 Ready         False  WaitingForRef
 ```
 
-with **zero writes**. This is structural rather than a policy the engine has to remember:
-resolution is keyed by field, and a field is present only when every element resolved, so
-"three of five" has no representation.
+with **zero writes**, and no returned error — an element waiting for its target is a state, not
+a failure. This is structural rather than a policy the engine has to remember: resolution is
+keyed by field, and a field is present only when every element resolved, so "three of five"
+has no representation.
+
+The element is named **by its index**, counted from zero against the order this manifest lists
+the route targets in, and the target it pointed at is rendered beside it — a reference written
+by `slug` names a NetBox row and no CR, so the index alone would not say what was looked for
+([references](../concepts/references.md#a-list-resolves-whole-or-not-at-all)).
 
 It has to be that way round. Writing the two that resolved would be a full-list replacement
 with a shorter list — a deletion of the three that did not, reported as a successful write.

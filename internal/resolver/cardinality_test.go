@@ -191,3 +191,92 @@ func TestResolveRefusesAShapeItsClassDoesNotDeclare(t *testing.T) {
 		})
 	}
 }
+
+// TestUnresolvedElementIsNamedByItsIndex is NBO-020's addressability rule: a refusal on a
+// to-many reference names the element, not just the relation it shares with nineteen others.
+//
+// `importTargets -> netboxroutetarget/team-a/rt-nonexistent: not found` says which relation is
+// stuck and leaves the reader counting list entries to find the one to edit. The index is the
+// path they can act on, and it is the form docs/reference/netboxvrf.md quotes the condition in.
+//
+// The element's target is still rendered beside it. A reference written by `slug` or by `id`
+// names a NetBox row and no Kubernetes object, so the index alone would not say what was
+// looked for.
+func TestUnresolvedElementIsNamedByItsIndex(t *testing.T) {
+	tests := map[string]struct {
+		spec      []any
+		wantPaths []string
+	}{
+		"the middle element of three": {
+			spec:      refList("rt-65000-1", "rt-nonexistent", "rt-65000-3"),
+			wantPaths: []string{"importTargets[1]"},
+		},
+
+		// Counted against the spec's own order, which is the order the user can go and read.
+		// The *ids* are sorted before they are written and this deliberately is not: sorting
+		// the report would name a position the manifest does not have.
+		"the first and the last": {
+			spec:      refList("rt-nope-1", "rt-65000-2", "rt-nope-2"),
+			wantPaths: []string{"importTargets[0]", "importTargets[2]"},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			resolver := &Resolver{
+				Objects: &fakeReader{objects: []target{
+					routeTarget("rt-65000-1", 5), routeTarget("rt-65000-2", 7), routeTarget("rt-65000-3", 9),
+				}},
+				Kinds: kinds(),
+			}
+
+			resolution, err := resolver.ResolveAll(context.Background(), &fakeNetBox{},
+				referrer("vrf-a", map[string]any{"importTargets": tc.spec}), siteDescriptor())
+			if err != nil {
+				t.Fatalf("ResolveAll() = %v, want no error: an unresolved element is a state", err)
+			}
+
+			message := resolution.Message()
+			for _, want := range tc.wantPaths {
+				if !strings.Contains(message, want) {
+					t.Errorf("Message() = %q, want it to name the element %q", message, want)
+				}
+			}
+
+			// Blocker.Field stays the bare spec name. The engine takes the set difference
+			// between the references the spec declared and the ones that resolved, and matches
+			// a blocker against the descriptor's deferred list -- both against the spelling
+			// registry.Field.Spec carries, so an indexed key there would report every element
+			// of every to-many field as one this build cannot resolve at all.
+			for _, blocker := range resolution.Blocked {
+				if blocker.Field != "importTargets" {
+					t.Errorf("Blocked field = %q, want the bare spec field name: it is a key, not a label",
+						blocker.Field)
+				}
+			}
+		})
+	}
+}
+
+// TestToOneRefusalCarriesNoIndex is the other half, and the reason Error.Index is a pointer.
+//
+// `regionRef[0]` reads like the first of several on a field that has exactly one value and no
+// order at all, so a to-one refusal renders the bare field name -- which is also the form every
+// shipped doc and every existing condition message quotes.
+func TestToOneRefusalCarriesNoIndex(t *testing.T) {
+	resolver := &Resolver{Objects: &fakeReader{}, Kinds: kinds()}
+
+	resolution, err := resolver.ResolveAll(context.Background(), &fakeNetBox{},
+		referrer("ams", map[string]any{"regionRef": map[string]any{"name": "emea"}}), siteDescriptor())
+	if err != nil {
+		t.Fatalf("ResolveAll() = %v", err)
+	}
+
+	if len(resolution.Blocked) != 1 {
+		t.Fatalf("Blocked = %+v, want the one missing region", resolution.Blocked)
+	}
+
+	if message := resolution.Message(); strings.Contains(message, "regionRef[") {
+		t.Errorf("Message() = %q, want no index on a to-one reference", message)
+	}
+}

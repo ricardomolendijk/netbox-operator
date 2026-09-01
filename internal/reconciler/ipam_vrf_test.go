@@ -3,11 +3,14 @@ package reconciler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 
 	netboxv1alpha1 "github.com/ricardomolendijk/netbox-operator/api/v1alpha1"
@@ -389,6 +392,199 @@ func TestVRFEnforceUniqueIsOnlyWrittenWhenSet(t *testing.T) {
 				t.Errorf("body[enforce_unique] = %#v, want %#v", got, tc.want)
 			}
 		})
+	}
+}
+
+// The update cases. Everything above reconciles a VRF that does not exist yet, which is where
+// an M2M payload is easiest to get right: the whole list is new, so nothing has to be
+// compared. What NBO-020's test plan actually asks for happens on the second apply -- a
+// relation that already holds two route targets, and a spec that now holds one, none, or the
+// same two in a different order.
+//
+// `status.id` set is what puts the engine on that path: it reads the live object by id and
+// diffs against it, rather than looking a VRF up by its natural key.
+
+// adoptedVRFID is the NetBox id of the VRF the update cases reconcile against.
+const adoptedVRFID = 11
+
+// liveVRFWith is what NetBox answers a GET with: an M2M read back as a list of *nested
+// objects*, which is the shape that makes this worth asserting at all. NetBox takes bare ids
+// on write and returns `{"id": 5, "name": "..."}` on read, so a comparison that did not
+// normalise would find drift on every pass and PATCH the same list forever.
+func liveVRFWith(ids ...int64) netbox.Object {
+	targets := make([]any, 0, len(ids))
+	for _, id := range ids {
+		targets = append(targets, map[string]any{"id": float64(id), "name": fmt.Sprintf("65000:%d", id)})
+	}
+
+	live := liveVRF()
+	live["id"] = float64(adoptedVRFID)
+	live["import_targets"] = targets
+
+	return live
+}
+
+// adoptedVRF is vrfObject already written to NetBox once.
+func adoptedVRF(targets []netboxv1alpha1.RouteTargetRef, claimed ...string) *netboxv1alpha1.NetBoxVRF {
+	vrf := vrfObject(targets, claimed...)
+	vrf.Status.ID = adoptedVRFID
+
+	return vrf
+}
+
+// TestVRFImportTargetsAreReplacedWholesale is NBO-020's named regression test, both halves of
+// it: take one route target off a relation that holds two, then clear the relation entirely.
+//
+// It is the only test in this file that watches the *live* value change, and it is the one that
+// proves the empty state does something rather than merely reaching the payload. NetBox has no
+// remove verb -- a PATCH replaces the whole relation -- so removing the last element is
+// expressible only as `[]`, and `[]` is expressible only because the engine reads
+// `metadata.managedFields` rather than the Go value (docs/concepts/field-ownership.md).
+//
+// The absent row is here for the same reason: it is the state the other two have to be
+// distinguishable from, and asserting it beside them is what makes "distinguishable" a claim
+// about one code path rather than three.
+func TestVRFImportTargetsAreReplacedWholesale(t *testing.T) {
+	tests := map[string]struct {
+		spec    []netboxv1alpha1.RouteTargetRef
+		claimed []string
+		ids     []int64
+
+		wantMethods []string
+		wantPatched any
+	}{
+		// One element removed: the shorter list is the whole instruction, and it is one PATCH
+		// rather than a delete followed by a write.
+		"removing one target sends the remaining one": {
+			spec: refsTo("rt-a"), ids: []int64{5},
+			wantMethods: []string{"GET", "PATCH"}, wantPatched: []any{float64(5)},
+		},
+
+		// The last one off. `importTargets: []` marshals to nothing at all, so the claim in
+		// managedFields is the only evidence the user wrote it -- and without that evidence
+		// this row would be the absent row and the route targets would stay.
+		"an explicit empty list clears the relation": {
+			spec: []netboxv1alpha1.RouteTargetRef{}, claimed: []string{"importTargets"},
+			wantMethods: []string{"GET", "PATCH"}, wantPatched: []any{},
+		},
+
+		// Absent: NetBox keeps both. Not one write, because nothing else on this VRF drifts
+		// either -- which is also the assertion that the column was left out of the *desired*
+		// object rather than merely out of the diff.
+		"an absent field leaves the relation alone": {
+			wantMethods: []string{"GET"},
+		},
+
+		// Reordered, and therefore unchanged. The ids are sent sorted and compared as a set,
+		// so the two spellings of one relation produce one payload.
+		"reordering the list writes nothing": {
+			spec: refsTo("rt-b", "rt-a"), ids: []int64{7, 5},
+			wantMethods: []string{"GET"},
+		},
+
+		// The same set with a duplicate in it is still the same set.
+		"repeating an element writes nothing": {
+			spec: refsTo("rt-a", "rt-b", "rt-a"), ids: []int64{5, 7, 5},
+			wantMethods: []string{"GET"},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			obj := adoptedVRF(tc.spec, tc.claimed...)
+
+			nb := &fakeClient{get: liveVRFWith(5, 7), patched: liveVRFWith(5, 7)}
+			engine := vrfEngine(t, nb, &fakeRefs{
+				resolution: resolvedList("importTargets", tc.ids...),
+			})
+
+			if _, err := engine.Reconcile(context.Background(), obj); err != nil {
+				t.Fatalf("Reconcile() = %v", err)
+			}
+
+			if got := nb.methods(); !slices.Equal(got, tc.wantMethods) {
+				t.Fatalf("netbox calls = %v, want %v", got, tc.wantMethods)
+			}
+
+			if tc.wantPatched == nil {
+				return
+			}
+
+			if got := sentBody(t, nb)["import_targets"]; !reflect.DeepEqual(got, tc.wantPatched) {
+				t.Errorf("patch[import_targets] = %#v, want %#v", got, tc.wantPatched)
+			}
+		})
+	}
+}
+
+// TestVRFClearedImportTargetsSettle is the anti-hot-loop half of the row above.
+//
+// The clear has to drift exactly once. A second pass over a VRF whose relation is now empty
+// must find nothing to do, or the operator PATCHes `import_targets: []` at every resync for
+// the lifetime of the object -- the failure docs/concepts/drift.md opens by warning about, and
+// the one an empty *list* is most exposed to, since `[]` and NetBox's answer of `[]` go through
+// two different normalisations to meet.
+func TestVRFClearedImportTargetsSettle(t *testing.T) {
+	obj := adoptedVRF([]netboxv1alpha1.RouteTargetRef{}, "importTargets")
+
+	cleared := liveVRFWith()
+	nb := &fakeClient{get: cleared, patched: cleared}
+	engine := vrfEngine(t, nb, &fakeRefs{resolution: resolvedList("importTargets")})
+
+	if _, err := engine.Reconcile(context.Background(), obj); err != nil {
+		t.Fatalf("Reconcile() = %v", err)
+	}
+
+	if got := nb.methods(); !slices.Equal(got, []string{"GET"}) {
+		t.Errorf("netbox calls = %v, want just the read: an already-empty relation is not drift", got)
+	}
+}
+
+// TestVRFUnresolvedImportTargetIsNamedByItsIndex runs the real resolver against the shipped
+// ipam.VRF descriptor, which is the only way the indexed path is tested end to end: the fake
+// resolvers in this package build their own Blockers, so they would be asserting the fixture.
+//
+// One of three route targets is missing. The whole field is withheld, nothing is written, no
+// error is returned -- and the condition names `importTargets[1]`, which is the promise
+// docs/reference/netboxvrf.md makes twice and the acceptance criterion NBO-020 states.
+func TestVRFUnresolvedImportTargetIsNamedByItsIndex(t *testing.T) {
+	routeTargetGVK := netboxv1alpha1.RouteTargetRef{}.TargetGVK()
+
+	obj := vrfObject(refsTo("rt-a", "rt-missing", "rt-c"))
+
+	nb := &fakeClient{created: liveVRF()}
+	engine := vrfEngine(t, nb, &resolver.Resolver{Objects: fakeCluster{objects: []*unstructured.Unstructured{
+		readyTarget(routeTargetGVK, "team-a", "rt-a", 5),
+		readyTarget(routeTargetGVK, "team-a", "rt-c", 9),
+	}}})
+
+	// No returned error: a reference waiting for its target is a state, and an error return
+	// would put controller-runtime's backoff on top of a wait an event clears.
+	if _, err := engine.Reconcile(context.Background(), obj); err != nil {
+		t.Fatalf("Reconcile() = %v, want no error: an unresolved element is a state", err)
+	}
+
+	if len(nb.calls) != 0 {
+		t.Errorf("netbox calls = %v, want none: a partially resolvable list writes nothing", nb.calls)
+	}
+
+	resolved := vrfCondition(obj, netboxv1alpha1.ConditionRefsResolved)
+	if resolved.Status != metav1.ConditionFalse || resolved.Reason != netboxv1alpha1.ReasonRefNotFound {
+		t.Errorf("RefsResolved = %s/%s, want False/%s",
+			resolved.Status, resolved.Reason, netboxv1alpha1.ReasonRefNotFound)
+	}
+
+	if !strings.Contains(resolved.Message, "importTargets[1]") {
+		t.Errorf("RefsResolved message = %q, want it to name importTargets[1]: the element, "+
+			"not the relation its two siblings share", resolved.Message)
+	}
+
+	// And nothing invents a position for the elements that resolved.
+	for _, unwanted := range []string{"importTargets[0]", "importTargets[2]"} {
+		if strings.Contains(resolved.Message, unwanted) {
+			t.Errorf("RefsResolved message = %q, want no mention of %s: it resolved",
+				resolved.Message, unwanted)
+		}
 	}
 }
 
