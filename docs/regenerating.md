@@ -255,6 +255,69 @@ them to three Kinds would delete the other hundred's enums.
 `handWritten`. That is how the generator is diffed against a human — point `-out` at a scratch
 tree, not at the repository.
 
+### Which Kinds a full run emits
+
+The ones that have a `kinds:` row in `overrides.yaml` and are not marked `handWritten`. Two
+things follow from requiring the row, and both are deliberate:
+
+- **A Kind nobody has triaged is not emitted with every default.** Its `kubectl` short name and
+  its printer columns are judgements with no schema behind them, so a Kind emitted without a row
+  would ship an abbreviation and a `kubectl get` nobody chose.
+- **Adding a Kind stays data entry.** The row *is* the work.
+
+So `make gen-kinds` writes **nothing** today, and exits zero: every NetBox Kind in the tree is
+hand-written, and the ~100 that are not in the tree have no row yet. It reports what each
+untriaged Kind still needs on stderr — that list is the remaining catalogue work, and it is a
+report rather than a failure because a Kind nobody has got to yet blocks nothing that *is*
+being emitted. The two shared files follow the same rule: they serve the generated Kinds, so a
+run that emits no Kind emits neither of them, which is also what keeps a second declaration of
+every typed alias out of a package whose aliases are still hand-written.
+
+`gen-check` is not wired into `make verify` for the same reason — there is nothing committed for
+it to check. NBO-043 flips the M3/M4 Kinds from `handWritten` to generated one at a time and
+wires it in.
+
+### How close the emitters are to the hand-written Kinds
+
+`TestEveryHandWrittenKindEmits` pins this, so it moves as a reviewable test change rather than
+as a number in a document nobody rereads. At NetBox 4.6.8, **27 of the 30** shipped NetBox Kinds
+emit. All three that do not are gaps in the **IR**, not in the emitter:
+
+| Kind | What the IR cannot supply |
+|---|---|
+| `ipam.IPAddress` | the permitted object types for `(assigned_object_type, assigned_object_id)`: the serializer's `ContentTypeField(queryset=…)` is built dynamically rather than written as a literal the AST walk can evaluate, and an empty `AllowedTypes` means "the type half accepts anything" — the opposite of what a union is for |
+| `tenancy.ContactAssignment` | the same, for `(object_type, object_id)` — the widest union in the catalogue |
+| `extras.Tag` | `name` and `slug`. Both are declared on taggit's `TagBase`, which lives **outside** the NetBox source tree, so the AST walk sees neither. Same class of gap as `mptt.MPTTModel`'s `_depth`/`_children`, which `readOnlyExtra` covers — except that these two are the Kind's whole identity |
+
+`extras.Tag` is worth reading as the reason the emitter refuses rather than emits: without the
+check, it would produce a `NetBoxTag` with a colour and no name, whose declared `slug` lookup
+key reads a field that does not exist — and the first sign of it would be a `Descriptor` that
+fails `Validate()` at boot. A lookup candidate naming a spec field no column produces is
+therefore a hard failure, and it is the one check that turns a missing out-of-tree base from a
+silent wrong CRD into a named refusal.
+
+What emitting is *not* is byte-identical to what a human wrote. That gap is NBO-043's, and it
+is almost entirely prose: a hand-written Kind carries cited paragraphs about NetBox that no
+reading of the schema produces, and the generator deliberately emits only facts it has
+(CONTRIBUTING.md bans a comment that restates the code). Of the mechanical differences, three
+are worth knowing before reading a diff:
+
+- **Natural keys.** The derivation makes a candidate out of every column-level `UNIQUE`, so
+  `dcim.Manufacturer` comes out with `name` *and* `slug` where the human chose `slug` alone —
+  a Kind gets one identity. Fixed per Kind by a `naturalKeys:` row, which replaces the derived
+  set outright.
+- **Columns the human left out.** `dcim.Manufacturer.comments` and `ipam.VRF.tenant` are
+  writable columns no shipped spec field maps; the generator emits both. Those are coverage
+  gaps in the hand-written Kind rather than generator noise — `docs/coverage.md` is where they
+  are tracked.
+- **Receiver names.** The emitter spells every receiver `o`; the hand-written Kinds use the
+  Kind's initial.
+
+Of the 27 that emit, 18 differ in their candidate list and 19 in their field list. Four —
+`ipam.VLANGroup`, `tenancy.Contact`, `tenancy.ContactGroup` and `virtualization.VirtualDisk` —
+differ in **nothing but** prose, header and receiver names, which makes them the cheapest first
+entries for the gate.
+
 ### What `overrides.yaml` may contain
 
 Three categories, and nothing else. A fourth entry is a bug in the derivation: a fact that
@@ -276,6 +339,45 @@ indirection and it defeats the reason the generator exists.
 | `inherited` / `omit` | a column the embedded `NetBoxObjectSpec` already supplies, or one deliberately absent |
 | `extraCEL` | a rule that is a fact about NetBox rather than about the column, such as `isCIDR` |
 | `extraRefs` | an alias no NetBox foreign key produces — nothing in NetBox points at `ipam.Prefix`, but `NetBoxIPAddressClaim` does |
+| `deferred` | which columns may be left out of a create payload, beyond the self-references that derive their own — see below |
+| `retainOnDelete` | whether a deleted CR leaves the NetBox row alone: an IPAM row is allocation that outlives the CR that asked for it (#176), and nothing in NetBox says so |
+| `duplicateSpec` | the spec field that makes several natural-key matches legal rather than a `Conflict`; which duplicates NetBox permits depends on the enclosing VRF |
+| `updateStrategy` / `recreateOn` | `dcim.Cable`'s identity lives in its terminations, so its diff cannot be PATCHed (NBO-049). The alternative is a kind switch in the engine |
+| `unionTypes` | the shared Go union type behind a polymorphic pair when it is not named after the pair: `(scope_type, scope_id)` defaults to `ScopeRef`, `ipam.IPAddress`'s pair is `IPAssignment` |
+
+Every one of those six is a `Descriptor` field a hand-written Kind already carries, and the
+reason they are here rather than derived is the same in each case: they are policy, and the
+emitted `Descriptor` may not *lose* a per-Kind fact the hand-written one had. `retainOnDelete`
+is the sharp one — dropped, an IPAM Kind starts deleting NetBox rows on `kubectl delete`.
+
+### Which references are deferred, and why one is not
+
+A deferred column is left out of the create payload and applied by a follow-up PATCH. Every
+**self-reference** derives `DeferIfUnresolved` with nothing declared: a foreign key to the
+Kind's own model cannot be satisfied on create until the parent exists. `IfUnresolved` and never
+`Always`, because stripping a *resolved* `parent` would create the object top-level for one
+pass, where it can adopt an unrelated top-level object of the same name — and the follow-up
+PATCH would then reparent that object.
+
+The derivation excludes a self-reference **any natural-key candidate matches on**, and that
+exclusion is what makes it safe rather than merely plausible. `dcim.DeviceRole` keys on
+`(parent_id, slug)` and on `slug` with `parent_id` pinned null, so stripping `parent` would
+change the identity the lookup had already decided on — `registry.Descriptor.Validate` refuses
+that pair outright (`ErrDeferredNaturalKey`), and a child role writes nothing and waits instead
+([`docs/reference/netboxdevicerole.md`](reference/netboxdevicerole.md)).
+
+Anything else is an entry in `deferred:`, valued `Always`, `IfUnresolved` or `Never`:
+
+| Entry | Why it is not derivable |
+|---|---|
+| `virtualization.VirtualMachine: {primary_ip4: Always}` | neither column is a self-reference; the ring is `VM -> IPAddress -> VMInterface -> VM` and no apply order breaks it |
+| `dcim.Interface: {qinq_svlan: IfUnresolved}` | points at `ipam.VLAN` rather than at this model, so nothing about its shape says it may be deferred |
+| `ipam.VLAN: {qinq_svlan: Always}` | *is* a self-reference, so the derived mode would be `IfUnresolved`; a Q-in-Q service VLAN can never be satisfied on create |
+| `ipam.IPAddress: {nat_inside: Never}` | switches the derived deferral off: the engine already omits an unresolved reference, so deferring strips nothing — but it *does* stop `resolver.blocking` following the edge, and a mutual pair would then be created rather than reported as a `RefCycle` |
+
+A `deferred:` key naming a column the Kind does not have is a hard failure, not a no-op. A typo
+there is the worst possible outcome, because it looks like it worked: the deferral silently does
+not happen and the create carries a reference the server cannot satisfy.
 
 ### What it refuses to emit
 
@@ -346,3 +448,32 @@ Three independent mechanisms, because forgetting is easier than remembering:
    diff explains.
 3. `-check` — regenerate in memory and diff against the working tree, not against git, so a
    tree with legitimately uncommitted work reports exactly the files the emitter would change.
+
+### The golden files
+
+`hack/gen-types/testdata/golden/` holds three Kinds' emitted output, byte for byte:
+
+```sh
+go test ./hack/gen-types                              # compare
+go test ./hack/gen-types -run Golden -update          # rewrite, then read the diff
+```
+
+Bytes rather than properties, because bytes are what NBO-043 gates on: a template change that
+reflows a comment is harmless and one that drops a marker is a CRD the API server refuses at
+install, and only a byte comparison tells a reviewer which one they are looking at. The three
+Kinds are chosen to cover, between them, every part of an emitted file that has gone wrong here
+before — `ipam.VRF` for the two to-many references and their `MaxItems` bound, `ipam.VLANGroup`
+for a polymorphic union with per-member cascades and an `ArrayField`, and
+`virtualization.VMInterface` for two derived self-referential deferrals next to one declared.
+
+The two shared files are deliberately **not** pinned by bytes. They are the whole catalogue's
+enums and typed aliases — 200 kB that moves whenever any of 134 Kinds does — so a golden copy
+would be repo bulk nobody could review as a diff. Their properties are pinned instead, by
+`TestEnumConstantsAreUniquePerType`, `TestExtendableEnumsAreNotPinned` and
+`TestEmitIsDeterministic`.
+
+The header carries the IR's **base name** and the SHA-256 of the IR file, and no directory: the
+base name is version-stamped (`ir-4.6.8.json.gz`) so it still says which release the file holds,
+and dropping the path is what keeps the header identical whether a run spelled `-ir` relatively
+or absolutely. A header that changed with the caller's working directory would make `-check`
+fail in CI for reasons unrelated to the change.

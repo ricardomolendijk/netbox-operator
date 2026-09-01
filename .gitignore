@@ -13,6 +13,9 @@
 /bin
 /dist/
 /testbin/
+# `go build ./hack/...` drops a bare `gen-types` binary at the repository root rather than in
+# /bin, so nothing above covers it. Same class of accident as the `bin` symlink above.
+/gen-types
 *.test
 cover.out
 cover.html
