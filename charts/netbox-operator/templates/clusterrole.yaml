@@ -58,6 +58,7 @@ rules:
   - netboxfhrpgroups
   - netboxiprangeclaims
   - netboxipranges
+  - netboxmacaddresses
   - netboxmanufacturers
   - netboxplatforms
   - netboxprefixclaims
@@ -106,6 +107,7 @@ rules:
   - netboxiprangeclaims/finalizers
   - netboxipranges/finalizers
   - netboxlocations/finalizers
+  - netboxmacaddresses/finalizers
   - netboxmanufacturers/finalizers
   - netboxplatforms/finalizers
   - netboxprefixclaims/finalizers
@@ -164,6 +166,7 @@ rules:
   - netboxiprangeclaims/status
   - netboxipranges/status
   - netboxlocations/status
+  - netboxmacaddresses/status
   - netboxmanufacturers/status
   - netboxplatforms/status
   - netboxprefixclaims/status

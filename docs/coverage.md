@@ -16,16 +16,16 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 | | count |
 |---|--:|
 | NetBox REST endpoints | 138 |
-| — implemented as a Kind | 49 |
+| — implemented as a Kind | 50 |
 | — excluded, with a reason | 27 |
-| — **not implemented** | 62 |
+| — **not implemented** | 61 |
 | in scope (endpoints − excluded) | 111 |
 | | |
-| writable columns on the implemented Kinds | 544 |
-| — written by a spec field, or engine-owned | 399 |
+| writable columns on the implemented Kinds | 551 |
+| — written by a spec field, or engine-owned | 404 |
 | — deliberately omitted, with a reason | 10 |
-| — blocked: a reference whose target model has no Kind | 64 |
-| — **MISSING**: nothing declares it and nothing blocks it | 71 |
+| — blocked: a reference whose target model has no Kind | 63 |
+| — **MISSING**: nothing declares it and nothing blocks it | 74 |
 | — of those, required on create (fails the audit) | 0 |
 | | |
 | natural-key candidates the IR calls unusable | 21 |
@@ -39,8 +39,8 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 
 | column | status | Kinds | detail |
 |---|---|--:|---|
-| `owner` | blocked | 46 | `users.Owner` is an excluded endpoint, so nothing will ever write this |
-| `tags` | MISSING | 41 | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
+| `owner` | blocked | 47 | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `tags` | MISSING | 42 | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `comments` | excluded | 6 | organisational kinds map name/slug/description only (api/v1alpha1/virtualization_clustertype.go) |
 | `tenant` | MISSING | 6 | deferred to NetBoxTenant (NBO-021), which now ships -- nothing blocks it any more |
 | `config_template` | MISSING | 4 | — |
@@ -48,7 +48,7 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 | `comments` | MISSING | 3 | — |
 | `data_file` | blocked | 3 | `core.DataFile` is an excluded endpoint, so nothing will ever write this |
 | `local_context_data` | MISSING | 2 | the ConfigContextModel column on dcim.Device and virtualization.VirtualMachine. NBO-059 added the ClassJSON field class it needs and stopped at the `extras` app; #241 adds the two spec fields, and nothing else blocks them |
-| `primary_mac_address` | blocked | 2 | waits on a Kind for `dcim.MACAddress` |
+| `primary_mac_address` | MISSING | 2 | NBO-053 owns it. NBO-048 ships the forward half -- a NetBoxMACAddress names the interface it is assigned to -- and the reverse half is a deferred field on the two BaseInterface component specs, because modelling both directions as required references is the unresolvable cycle NBO-016 rejects (api/v1alpha1/dcim_macaddress.go) |
 | `vlan_translation_policy` | blocked | 2 | waits on a Kind for `ipam.VLANTranslationPolicy` |
 | `asns` | MISSING | 1 | deferred with dcim.Site's other optional foreign keys; NetBoxASN ships with NBO-055, so nothing blocks it any more (api/v1alpha1/dcim_site.go) |
 | `auth_key` | MISSING | 1 | a pre-shared key, permitted only as spec.authKeySecretRef (plan.md 15) and the engine has no FieldClass that reads a Secret into a payload, so the column is unmapped rather than inline; it is in internal/netbox/do.go's redaction set because NetBox returns it (api/v1alpha1/ipam_fhrpgroup.go, docs/reference/netboxfhrpgroup.md) |
@@ -122,6 +122,7 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 | `dcim.DeviceType` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `dcim.Interface` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `dcim.Location` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `dcim.MACAddress` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `dcim.Manufacturer` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `dcim.Platform` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `dcim.Region` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
@@ -162,8 +163,8 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 | `virtualization.VirtualDisk` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `virtualization.VirtualMachine` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `dcim.Device` | `position` | Decimal | — | MISSING | — |
-| `dcim.Interface` | `primary_mac_address` | Ref | — | blocked | waits on a Kind for `dcim.MACAddress` |
-| `virtualization.VMInterface` | `primary_mac_address` | Ref | — | blocked | waits on a Kind for `dcim.MACAddress` |
+| `dcim.Interface` | `primary_mac_address` | Ref | — | MISSING | NBO-053 owns it. NBO-048 ships the forward half -- a NetBoxMACAddress names the interface it is assigned to -- and the reverse half is a deferred field on the two BaseInterface component specs, because modelling both directions as required references is the unresolvable cycle NBO-016 rejects (api/v1alpha1/dcim_macaddress.go) |
+| `virtualization.VMInterface` | `primary_mac_address` | Ref | — | MISSING | NBO-053 owns it. NBO-048 ships the forward half -- a NetBoxMACAddress names the interface it is assigned to -- and the reverse half is a deferred field on the two BaseInterface component specs, because modelling both directions as required references is the unresolvable cycle NBO-016 rejects (api/v1alpha1/dcim_macaddress.go) |
 | `dcim.Device` | `rack` | Ref | — | blocked | waits on a Kind for `dcim.Rack` |
 | `dcim.DeviceType` | `rear_image` | Scalar | — | MISSING | — |
 | `dcim.Site` | `region` | Ref | — | MISSING | deferred with dcim.Site's other optional foreign keys; NetBoxRegion now ships, so nothing blocks it any more (api/v1alpha1/dcim_site.go) |
@@ -174,6 +175,7 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 | `dcim.DeviceType` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `dcim.Interface` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `dcim.Location` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
+| `dcim.MACAddress` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `dcim.Manufacturer` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `dcim.Platform` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `dcim.Region` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
@@ -302,7 +304,7 @@ each pinned column's class rather than from the IR's reason string.
 | `dcim/inventory-item-templates` | `dcim.InventoryItemTemplate` | — | MISSING | — |
 | `dcim/inventory-items` | `dcim.InventoryItem` | — | MISSING | — |
 | `dcim/locations` | `dcim.Location` | `NetBoxLocation` | implemented | — |
-| `dcim/mac-addresses` | `dcim.MACAddress` | — | MISSING | — |
+| `dcim/mac-addresses` | `dcim.MACAddress` | `NetBoxMACAddress` | implemented | — |
 | `dcim/manufacturers` | `dcim.Manufacturer` | `NetBoxManufacturer` | implemented | — |
 | `dcim/module-bay-templates` | `dcim.ModuleBayTemplate` | — | MISSING | — |
 | `dcim/module-bays` | `dcim.ModuleBay` | — | MISSING | — |

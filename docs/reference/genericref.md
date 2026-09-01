@@ -10,9 +10,9 @@ schema digest, how the pair is kept atomic and how a new union is added — see
 | | |
 |---|---|
 | API version | `netbox.kubeforge.org/v1alpha1` |
-| Go types | `IPAssignment`, `ScopeRef`, `ContactAssignmentTarget`, `FHRPInterface`, `ServiceParent`, `CableTerminationTarget` |
-| Milestone | M3 (NBO-018, NBO-019); `ContactAssignmentTarget` M10 (NBO-056); `FHRPInterface` and `ServiceParent` M10 (NBO-055); `CableTerminationTarget` M10 (NBO-049) |
-| Status | The mechanism is built. Six unions ship: four with the `== 1` shape, and one of those **to-many**. |
+| Go types | `IPAssignment`, `ScopeRef`, `ContactAssignmentTarget`, `FHRPInterface`, `ServiceParent`, `CableTerminationTarget`, `MACAssignment` |
+| Milestone | M3 (NBO-018, NBO-019); `ContactAssignmentTarget` M10 (NBO-056); `FHRPInterface` and `ServiceParent` M10 (NBO-055); `CableTerminationTarget` M10 (NBO-049); `MACAssignment` M9 (NBO-048) |
+| Status | The mechanism is built. Seven unions ship: four with the `== 1` shape, and one of those **to-many**. |
 
 ## The shape
 
@@ -69,6 +69,7 @@ Some NetBox pairs are nullable and some are not, and the union follows the colum
 | `FHRPInterface` (`ipam.FHRPGroupAssignment.interface_*`) | `REQ` | **exactly** one | rejected at admission, and the field itself is required |
 | `ServiceParent` (`ipam.Service.parent_object_*`) | `REQ` | **exactly** one | rejected at admission, and the field itself is required |
 | `CableTerminationTarget` (`dcim.CableTermination.termination_*`) | `REQ` | **exactly** one | rejected at admission; the *list* it sits in is required and `MinItems=1` |
+| `MACAssignment` (`dcim.MACAddress.assigned_object_*`) | nullable | at most one | legal — the address is unattached |
 
 ## The unions
 
@@ -85,13 +86,13 @@ CRD to embed a union.
 | `vmInterfaceRef` | `NetBoxVMInterface` | `virtualization.vminterface` |
 | `fhrpGroupRef` | `NetBoxFHRPGroup` | `ipam.fhrpgroup` |
 
-None of the three Kinds exists before M4. Until each one's Descriptor is registered, a
-member naming it reports:
+Two of the three Kinds ship; `NetBoxFHRPGroup` arrives with NBO-055. Until a Kind's
+Descriptor is registered, a member naming it reports:
 
 ```
 RefsResolved  False  RefKindUnavailable
-  assignedObject.interfaceRef -> netboxinterface/team-a/eth0: target kind unavailable
-  (no descriptor is registered for netbox.kubeforge.org/v1alpha1, Kind=NetBoxInterface)
+  assignedObject.fhrpGroupRef -> netboxfhrpgroup/team-a/vrrp-1: target kind unavailable
+  (no descriptor is registered for netbox.kubeforge.org/v1alpha1, Kind=NetBoxFHRPGroup)
 ```
 
 The reference is reported and **never silently dropped**, and no write is made for it.
@@ -302,6 +303,49 @@ report [`RefKindUnavailable`](#conditions) in all four modes until their Kinds l
 | `connector`, `positions` | real columns of `dcim.CableTermination`, and **unreachable from the 4.6.8 REST API by any route**: the termination endpoint is read-only and `GenericObjectSerializer` carries only the pair |
 | `_abs_length` | a cache NetBox maintains from `length` and `length_unit` |
 
+### `MACAssignment`
+
+`spec.assignedObject` on [`NetBoxMACAddress`](netboxmacaddress.md) — what a MAC address is
+attached to. `assigned_object_type` / `assigned_object_id` on `dcim.MACAddress`, both nullable:
+an unattached MAC is legal.
+
+```yaml
+spec:
+  assignedObject:
+    vmInterfaceRef:
+      name: dns-eth0
+```
+
+| Member | Target Kind | NetBox object type |
+|---|---|---|
+| `interfaceRef` | [`NetBoxInterface`](netboxinterface.md) | `dcim.interface` |
+| `vmInterfaceRef` | [`NetBoxVMInterface`](netboxvminterface.md) | `virtualization.vminterface` |
+
+**The narrowest union here, and the one that is deliberately not a reuse.** It is
+`IPAssignment` minus `fhrpGroupRef`, over the same two typed ref aliases — and it is its own Go
+type because NetBox restricts this column to the two models deriving from `dcim.BaseInterface`:
+
+```python
+MACADDRESS_ASSIGNMENT_MODELS = Q(app_label='dcim', model='interface') | \
+                               Q(app_label='virtualization', model='vminterface')
+```
+
+(`netbox/dcim/constants.py:156-159`, applied to the serializer's `assigned_object_type` queryset
+at `netbox/dcim/api/serializers_/devices.py:318`.) `ipam.fhrpgroup` is legal for an IP address
+and illegal for a MAC.
+
+Sharing `IPAssignment` and narrowing only the pair's `AllowedTypes` would be a **boot failure
+waiting to happen**, not a wider `kubectl explain`: `validateUnionTypes` cross-checks every
+member whose Kind is registered against `AllowedTypes` and returns `ErrMemberTypeNotAllowed`,
+which fails the manager for *every* kind. `NetBoxFHRPGroup` (NBO-055) is registered today, and
+`ipam.fhrpgroup` is legal for an `IPAssignment` member and illegal for `MACAssignment` — sharing
+the type would already fail the manager on boot rather than merely "the day NBO-055 adds it".
+
+It is also the first union that is **part of its kind's identity**: `(assigned_object_type,
+assigned_object_id, mac_address)` is the natural key, so a member declared and not yet resolved
+means no applicable candidate and **no write at all** — unlike on `NetBoxIPAddress`, where the
+row is created and the assignment follows. See
+[`NetBoxMACAddress`](netboxmacaddress.md#a-declared-but-unresolved-union-writes-nothing).
 ### Unions that are not written yet
 
 There are none left. `ServiceParent` and `FHRPInterface` landed with NBO-055 and
@@ -351,4 +395,5 @@ same point, before the target is read.
 - [`NetBoxContactAssignment`](netboxcontactassignment.md) — the `REQ` pair in use, and an
   identity built from one
 - [`NetBoxCable`](netboxcable.md) — the to-many pair in use, and an identity built from a
-  *representative element* of one
+  *representative element* of one- [`NetBoxMACAddress`](netboxmacaddress.md) — the narrowest union, and why narrowing a shared
+  one instead would fail the manager's boot
