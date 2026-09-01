@@ -1,0 +1,24 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxRIR
+metadata:
+  name: rfc-1918
+  namespace: default
+spec:
+  # The NetBoxEndpoint to write through, in this namespace. There is no cluster-wide
+  # default endpoint; see config/samples/netbox_v1alpha1_netboxendpoint.yaml.
+  endpointRef: homelab
+
+  # IPAM kinds default to deletionPolicy: Retain (decision #176), so deleting this CR
+  # leaves the NetBox row alone. Write Delete explicitly to change that.
+  deletionPolicy: Retain
+
+  # ipam.RIR declares one column of its own -- is_private. name, slug, description and
+  # comments come from OrganizationalModel. `slug` is the natural key and is unique across
+  # the whole NetBox.
+  name: RFC 1918
+  slug: rfc-1918
+
+  # Not globally routable. A pointer in Go, so omitting it leaves NetBox's own value alone.
+  isPrivate: true
+
+  description: Private IPv4 address space

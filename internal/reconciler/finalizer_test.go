@@ -540,6 +540,19 @@ var deletionDefaults = map[string]netboxv1alpha1.DeletionPolicy{
 	"NetBoxVLAN":      netboxv1alpha1.DeletionRetain,
 	"NetBoxVRF":       netboxv1alpha1.DeletionRetain,
 
+	// NBO-055: the same rule applied to the ipam remainder. Each holds an allocation or an
+	// identity nothing else records -- see docs/concepts/deletion.md's table for the reason
+	// per kind.
+	"NetBoxRIR":                 netboxv1alpha1.DeletionRetain,
+	"NetBoxAggregate":           netboxv1alpha1.DeletionRetain,
+	"NetBoxASN":                 netboxv1alpha1.DeletionRetain,
+	"NetBoxASNRange":            netboxv1alpha1.DeletionRetain,
+	"NetBoxRole":                netboxv1alpha1.DeletionRetain,
+	"NetBoxFHRPGroup":           netboxv1alpha1.DeletionRetain,
+	"NetBoxFHRPGroupAssignment": netboxv1alpha1.DeletionRetain,
+	"NetBoxService":             netboxv1alpha1.DeletionRetain,
+	"NetBoxServiceTemplate":     netboxv1alpha1.DeletionRetain,
+
 	// The carve-out inside ipam, and the row worth reading twice: a VLAN group is an
 	// organisational container rather than an allocation, so deleting one frees nothing and
 	// the rule the table turns on puts it with the configuration kinds.

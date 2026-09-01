@@ -74,9 +74,11 @@ spec:
               no longer for want of a resolver: internal/resolver landed in M2 and resolves references,
               including to-many ones. What is left is per-field work on this Kind, and it waits on the
               Kinds each field points at -- `group` on NetBoxSiteGroup (NBO-066), `tenant` on
-              NetBoxTenant (NBO-021), `asns` on NetBoxASN (NBO-055). A field that is accepted and does
-              nothing is worse than a field that is not there: `kubectl apply` reports success and
-              NetBox never sees the value.
+              NetBoxTenant (NBO-021), `asns` on NetBoxASN (NBO-055) -- all of which now ship, so what is
+              left is the per-field work on this Kind and nothing blocks it. A field that is accepted and
+              does nothing is worse than a field that is not there: `kubectl apply` reports success and
+              NetBox never sees the value, which is why each one waits for its own change rather than
+              arriving with the Kind it points at (docs/coverage.md records all four as gaps).
 
               `tags` is the exception that is only waiting on this Kind: NetBoxTag exists, and the
               digest now carries the row to cite it against (`tags (TagsMixin) NetBoxTaggableManagerField

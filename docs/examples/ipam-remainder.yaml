@@ -1,0 +1,189 @@
+# The IPAM remainder, end to end: the allocation registry (RIR, aggregate, ASN, ASN range),
+# the address role, and the two generic-FK families (FHRP, services).
+#
+# Runnable as-is against a real NetBox 4.6.x once the URL and token are yours:
+#
+#   kubectl apply -f docs/examples/ipam-remainder.yaml
+#   kubectl get nbrir,nbagg,nbasn,nbasnrange,nbrole,nbfhrp,nbfhrpa,nbsvc,nbsvctpl -n netbox-ipam
+#
+# Every kind referenced here exists and its CRD ships in config/crd. The one reference that
+# does not resolve on a fresh cluster is `interface.vmInterfaceRef` on the FHRP group
+# assignment: it names a NetBoxVMInterface, so create one (docs/reference/netboxvminterface.md)
+# or point the ref at a NetBox interface by id.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: netbox-ipam
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: netbox-token
+  namespace: netbox-ipam
+  labels:
+    # Required. The operator reads Secrets through a label-scoped informer, so an
+    # unlabelled Secret is invisible to it and the endpoint reports SecretMissing even
+    # though `kubectl get secret` shows it. See docs/operations/rbac.md.
+    netbox.kubeforge.org/endpoint-credential: "true"
+type: Opaque
+stringData:
+  token: "0123456789abcdef0123456789abcdef01234567"
+---
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxEndpoint
+metadata:
+  name: homelab
+  namespace: netbox-ipam
+spec:
+  url: https://netbox.home.arpa
+  tokenSecretRef:
+    name: netbox-token
+  mode: Apply
+---
+# The root of the allocation registry. ipam.ASN, ipam.ASNRange and ipam.Aggregate all
+# declare `rir ForeignKey REQ -> ipam.RIR on_delete=PROTECT`, so nothing below exists
+# without this.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxRIR
+metadata:
+  name: rfc-1918
+  namespace: netbox-ipam
+spec:
+  endpointRef: homelab
+  deletionPolicy: Retain
+  name: RFC 1918
+  slug: rfc-1918
+  isPrivate: true
+  description: Private IPv4 address space
+---
+# No uniqueness constraint on ipam.Aggregate at all, so `(prefix, rir)` is a convention:
+# a second CR with the same pair reports Conflict rather than writing a second row.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxAggregate
+metadata:
+  name: ten-slash-eight
+  namespace: netbox-ipam
+spec:
+  endpointRef: homelab
+  deletionPolicy: Retain
+  prefix: 10.0.0.0/8
+  rirRef:
+    name: rfc-1918
+  dateAdded: "2026-01-01"
+  description: The whole of RFC 1918's 10/8
+---
+# ipam.Role, not dcim.DeviceRole and not ipam.IPAddress.role. This is the Kind `roleRef`
+# on a NetBoxPrefix, a NetBoxVLAN or the NetBoxASN below points at.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxRole
+metadata:
+  name: management
+  namespace: netbox-ipam
+spec:
+  endpointRef: homelab
+  deletionPolicy: Retain
+  name: Management
+  slug: management
+  weight: 100
+  description: Out-of-band and infrastructure management
+---
+# The number is the whole identity: no name column, no slug column, `asn` column-unique.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxASN
+metadata:
+  name: as64512
+  namespace: netbox-ipam
+spec:
+  endpointRef: homelab
+  deletionPolicy: Retain
+  asn: 64512
+  rirRef:
+    name: rfc-1918
+  roleRef:
+    slug: management
+  description: Private AS for the lab fabric
+---
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxASNRange
+metadata:
+  name: private-16-bit
+  namespace: netbox-ipam
+spec:
+  endpointRef: homelab
+  deletionPolicy: Retain
+  name: Private 16-bit
+  slug: private-16-bit
+  rirRef:
+    name: rfc-1918
+  start: 64512
+  end: 65534
+  description: RFC 6996 private ASNs
+---
+# `(protocol, group_id)` is a lookup convention: ipam.FHRPGroup has no meta.constraints.
+# There is deliberately no authKey field -- see docs/reference/netboxfhrpgroup.md.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxFHRPGroup
+metadata:
+  name: vrrp-10
+  namespace: netbox-ipam
+spec:
+  endpointRef: homelab
+  deletionPolicy: Retain
+  protocol: vrrp3
+  groupId: 10
+  name: Gateway VRRP
+  authType: md5
+  description: Redundant default gateway for the lab VLAN
+---
+# The join row, and the one object Kind with no tags, no custom fields and no provenance
+# stamp: its model is a bare ChangeLoggedModel.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxFHRPGroupAssignment
+metadata:
+  name: dns-eth0-vrrp-10
+  namespace: netbox-ipam
+spec:
+  endpointRef: homelab
+  deletionPolicy: Retain
+  interface:
+    vmInterfaceRef:
+      name: dns-eth0
+  groupRef:
+    name: vrrp-10
+  priority: 200
+---
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxServiceTemplate
+metadata:
+  name: https
+  namespace: netbox-ipam
+spec:
+  endpointRef: homelab
+  deletionPolicy: Retain
+  name: https
+  protocol: tcp
+  ports:
+    - 443
+  description: Web management interface
+---
+# A polymorphic parent, an ordered array and a many-to-many on one object. Parented to the
+# FHRP group above, which is one of the three targets NetBox accepts -- the other two are
+# dcim.device and virtualization.virtualmachine.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxService
+metadata:
+  name: gateway-https
+  namespace: netbox-ipam
+spec:
+  endpointRef: homelab
+  deletionPolicy: Retain
+  parent:
+    fhrpGroupRef:
+      name: vrrp-10
+  name: https
+  protocol: tcp
+  ports:
+    - 443
+    - 8443
+  description: Management UI on the virtual address

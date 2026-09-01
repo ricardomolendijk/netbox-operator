@@ -41,3 +41,12 @@ resources:
 - netbox_v1alpha1_netboxconfigtemplate.yaml
 - netbox_v1alpha1_netboxconfigcontextprofile.yaml
 - netbox_v1alpha1_netboxconfigcontext.yaml
+- netbox_v1alpha1_netboxrir.yaml
+- netbox_v1alpha1_netboxaggregate.yaml
+- netbox_v1alpha1_netboxasn.yaml
+- netbox_v1alpha1_netboxasnrange.yaml
+- netbox_v1alpha1_netboxrole.yaml
+- netbox_v1alpha1_netboxfhrpgroup.yaml
+- netbox_v1alpha1_netboxfhrpgroupassignment.yaml
+- netbox_v1alpha1_netboxservice.yaml
+- netbox_v1alpha1_netboxservicetemplate.yaml

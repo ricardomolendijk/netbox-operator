@@ -1,0 +1,22 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxAggregate
+metadata:
+  name: ten-slash-eight
+  namespace: default
+spec:
+  endpointRef: homelab
+  deletionPolicy: Retain
+
+  # ipam.Aggregate has no uniqueness constraint at all, so (prefix, rir) is a lookup
+  # convention: two CRs with the same pair give one Ready and one Conflict, never two rows.
+  # Write the network address -- NetBox masks host bits.
+  prefix: 10.0.0.0/8
+
+  rirRef:
+    name: rfc-1918
+
+  # A nullable DateField. Set it to "" to clear it in NetBox; omit it to leave NetBox's own
+  # value alone.
+  dateAdded: "2026-01-01"
+
+  description: The whole of RFC 1918's 10/8

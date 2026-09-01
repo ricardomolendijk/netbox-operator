@@ -972,12 +972,23 @@ and the resolver reads it from the *type* rather than from a switch on the field
 | `CustomFieldChoiceSetRef` | `NetBoxCustomFieldChoiceSet` | `extras.CustomFieldChoiceSet` | `extras/custom-field-choice-sets` |
 | `ConfigTemplateRef` | `NetBoxConfigTemplate` | `extras.ConfigTemplate` | `extras/config-templates` |
 | `ConfigContextProfileRef` | `NetBoxConfigContextProfile` | `extras.ConfigContextProfile` | `extras/config-context-profiles` |
+| `RoleRef` | `NetBoxRole` | `ipam.Role` | `ipam/roles` |
+| `RIRRef` | `NetBoxRIR` | `ipam.RIR` | `ipam/rirs` |
+| `ASNRef` | `NetBoxASN` | `ipam.ASN` | `ipam/asns` |
+
+`RoleRef` is the row to read twice: `ipam.Role` is **not** `dcim.DeviceRole`, which has its own
+`DeviceRoleRef` and its own `dcim/device-roles` endpoint, and neither is
+`NetBoxIPAddress.role`, which is a choice *string* rather than a reference. Three things called
+"role"; see [`reference/netboxrole.md`](../reference/netboxrole.md).
+
+`ASNRef` is the one alias whose target has **no `slug` column**, so `slug` mode matches nothing
+and reports `RefNotFound`. Use `name` for a sibling CR, or `lookup: {asn: "64512"}`.
 
 Model and endpoint spellings are from `docs/netbox-schema.md` and its endpoint map.
 `NetBoxTag`, `NetBoxSite`, `NetBoxRegion`, `NetBoxSiteGroup`, `NetBoxLocation`, `NetBoxTenant`,
 `NetBoxTenantGroup`, `NetBoxClusterType`, `NetBoxClusterGroup`, `NetBoxCluster`, `NetBoxDevice`,
-`NetBoxInterface`, `NetBoxCustomFieldChoiceSet`, `NetBoxConfigTemplate` and
-`NetBoxConfigContextProfile` exist as Kinds so far.
+`NetBoxInterface`, `NetBoxCustomFieldChoiceSet`, `NetBoxConfigTemplate`,
+`NetBoxConfigContextProfile`, `NetBoxRole`, `NetBoxRIR` and `NetBoxASN` exist as Kinds so far.
 
 `CustomFieldChoiceSetRef` and `ConfigContextProfileRef` are the two whose target is NetBox's
 *schema* rather than its data — a `select` custom field draws its legal values from a choice

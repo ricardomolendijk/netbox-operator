@@ -25,12 +25,18 @@ import (
 var stampedObjectTypes = []string{
 	"dcim.device", "dcim.devicerole", "dcim.devicetype", "dcim.interface",
 	"dcim.location", "dcim.manufacturer", "dcim.platform", "dcim.region",
-	"dcim.site", "dcim.sitegroup", "ipam.ipaddress",
+	"dcim.site", "dcim.sitegroup",
+	// ipam.fhrpgroupassignment is deliberately absent: ipam.FHRPGroupAssignment's model is a
+	// bare ChangeLoggedModel (docs/netbox-schema.md), which mixes in neither TagsMixin nor
+	// CustomFieldsMixin, so it is the one object Kind that carries no provenance stamp.
+	"ipam.aggregate", "ipam.asn", "ipam.asnrange", "ipam.fhrpgroup",
+	"ipam.ipaddress",
 	// ipam.iprange comes from both directions and has to be in the set once: NetBoxIPRange's
 	// own Descriptor supplies it, and NetBoxIPRangeClaim's ClaimDescriptor supplies it again
 	// because the range it creates needs the identity custom field to exist first.
-	"ipam.iprange", "ipam.prefix",
-	"ipam.routetarget", "ipam.vlan", "ipam.vlangroup", "ipam.vrf",
+	"ipam.iprange", "ipam.prefix", "ipam.rir", "ipam.role",
+	"ipam.routetarget", "ipam.service", "ipam.servicetemplate",
+	"ipam.vlan", "ipam.vlangroup", "ipam.vrf",
 	"tenancy.contact", "tenancy.contactassignment", "tenancy.contactgroup",
 	"tenancy.contactrole", "tenancy.tenant", "tenancy.tenantgroup",
 	"virtualization.cluster", "virtualization.clustergroup",

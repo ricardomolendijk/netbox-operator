@@ -32,6 +32,9 @@ var shippedManifests = []string{
 	filepath.Join("..", "..", "docs", "examples", "tag.yaml"),
 	filepath.Join("..", "..", "docs", "examples", "contacts.yaml"),
 	filepath.Join("..", "..", "docs", "examples", "extras.yaml"),
+	// One file carrying all nine kinds NBO-055 ships, so every enum value, pattern,
+	// bound and `== 1` union rule in them is dry-run through real admission.
+	filepath.Join("..", "..", "docs", "examples", "ipam-remainder.yaml"),
 }
 
 // TestShippedManifestsAreAccepted applies every sample and example against the real CRDs.
@@ -112,11 +115,18 @@ const triStateNote = "Omit it to leave NetBox's own value alone"
 // forbidsEmptyValue treats any `enum` as validation that rejects the empty value. The
 // statement lives on the ContactPriority type instead
 // (api/v1alpha1/tenancy_contactassignment.go, docs/reference/netboxcontactassignment.md).
+//
+// ipam.FHRPGroupAssignment is another, and for a different reason: its model is a bare
+// ChangeLoggedModel (docs/netbox-schema.md -> ipam.FHRPGroupAssignment, bases), so unlike
+// every other NetBox object Kind it inherits no `description` and no `comments` from
+// PrimaryModel or OrganizationalModel. Its three spec fields -- `interface`, `groupRef` and
+// `priority` -- are all `REQ` columns, and a required field has two states rather than three.
 var noClearableFields = map[string]bool{
-	"netbox.kubeforge.org_netboxipaddressclaims.yaml":    true,
-	"netbox.kubeforge.org_netboxprefixclaims.yaml":       true,
-	"netbox.kubeforge.org_netboxiprangeclaims.yaml":      true,
-	"netbox.kubeforge.org_netboxcontactassignments.yaml": true,
+	"netbox.kubeforge.org_netboxipaddressclaims.yaml":      true,
+	"netbox.kubeforge.org_netboxprefixclaims.yaml":         true,
+	"netbox.kubeforge.org_netboxiprangeclaims.yaml":        true,
+	"netbox.kubeforge.org_netboxcontactassignments.yaml":   true,
+	"netbox.kubeforge.org_netboxfhrpgroupassignments.yaml": true,
 }
 
 // TestClearableFieldsDocumentBothStatesInTheSchema is NBO-079's third acceptance criterion:

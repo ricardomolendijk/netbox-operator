@@ -157,6 +157,18 @@ notes:
     reason: >-
       deferred to NetBoxSiteGroup (NBO-066), which now ships -- nothing blocks it any more
   - kind: dcim.Site
+    column: asns
+    reason: >-
+      deferred with dcim.Site's other optional foreign keys; NetBoxASN ships with NBO-055,
+      so nothing blocks it any more (api/v1alpha1/dcim_site.go)
+  - kind: ipam.FHRPGroup
+    column: auth_key
+    reason: >-
+      a pre-shared key, permitted only as spec.authKeySecretRef (plan.md 15) and the engine
+      has no FieldClass that reads a Secret into a payload, so the column is unmapped rather
+      than inline; it is in internal/netbox/do.go's redaction set because NetBox returns it
+      (api/v1alpha1/ipam_fhrpgroup.go, docs/reference/netboxfhrpgroup.md)
+  - kind: dcim.Site
     column: time_zone
     reason: >-
       no ticket and no citation anywhere in the tree: a plain TimeZoneField with no

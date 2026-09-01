@@ -237,6 +237,21 @@ type (
 	// and silently drops would be worse than one that reports RefKindUnavailable.
 	RoleRef ObjectRef
 
+	// RIRRef points at a NetBoxRIR (ipam.RIR, ipam/rirs).
+	//
+	// Required on three Kinds -- NetBoxASN, NetBoxASNRange and NetBoxAggregate all declare
+	// `rir ForeignKey REQ -> ipam.RIR on_delete=PROTECT` (docs/netbox-schema.md) -- so an
+	// unresolved one writes nothing at all rather than a partial object.
+	RIRRef ObjectRef
+
+	// ASNRef points at a NetBoxASN (ipam.ASN, ipam/asns).
+	//
+	// The one alias whose target has **no `slug` column**: ipam.ASN is unique on `asn`
+	// (docs/netbox-schema.md -> ipam.ASN, `asn ASNField REQ UNIQUE`) and declares no slug of
+	// any kind, so `slug` mode matches nothing here and reports NotFound. Use `name` for a
+	// sibling CR, or `lookup: {asn: "64512"}` for an ASN the operator does not manage.
+	ASNRef ObjectRef
+
 	// VLANRef points at a NetBoxVLAN (ipam.VLAN, ipam/vlans).
 	VLANRef ObjectRef
 
@@ -448,6 +463,18 @@ func (r RoleRef) TargetGVK() schema.GroupVersionKind { return GroupVersion.WithK
 func (r RoleRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
 
 // TargetGVK reports the Kind this reference resolves against.
+func (r RIRRef) TargetGVK() schema.GroupVersionKind { return GroupVersion.WithKind("NetBoxRIR") }
+
+// AsObjectRef returns the underlying reference.
+func (r RIRRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r ASNRef) TargetGVK() schema.GroupVersionKind { return GroupVersion.WithKind("NetBoxASN") }
+
+// AsObjectRef returns the underlying reference.
+func (r ASNRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
 func (r VLANRef) TargetGVK() schema.GroupVersionKind { return GroupVersion.WithKind("NetBoxVLAN") }
 
 // AsObjectRef returns the underlying reference.
@@ -588,6 +615,8 @@ var (
 	_ RefTarget = VMInterfaceRef{}
 	_ RefTarget = FHRPGroupRef{}
 	_ RefTarget = RoleRef{}
+	_ RefTarget = RIRRef{}
+	_ RefTarget = ASNRef{}
 	_ RefTarget = VLANRef{}
 	_ RefTarget = VLANGroupRef{}
 	_ RefTarget = RouteTargetRef{}

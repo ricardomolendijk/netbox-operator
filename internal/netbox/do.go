@@ -175,7 +175,7 @@ func firstLine(body []byte) string {
 // secretFields are payload keys whose values must never reach a log, at any level.
 // NetBox stores pre-shared keys and passwords in plain fields on several models.
 var secretFields = map[string]struct{}{
-	"auth_psk": {}, "psk": {}, "preshared_key": {}, "password": {},
+	"auth_psk": {}, "psk": {}, "preshared_key": {}, "password": {}, "auth_key": {},
 	"token": {}, "secret": {}, "private_key": {}, "api_key": {},
 }
 

@@ -1,0 +1,28 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxService
+metadata:
+  name: gateway-https
+  namespace: default
+spec:
+  endpointRef: homelab
+  deletionPolicy: Retain
+
+  # Exactly one member: parent_object_type and parent_object_id are both REQ, so a service
+  # with no parent is not a thing NetBox stores. deviceRef and virtualMachineRef are the
+  # other two members.
+  #
+  # This is also the containment parent: all three targets declare a `services`
+  # GenericRelation, so deleting the parent takes the service -- and the CR -- with it.
+  parent:
+    fhrpGroupRef:
+      name: vrrp-10
+
+  # (parent, name, protocol) is the lookup convention. `ports` is deliberately not part of
+  # it, so reordering the list never produces a second object.
+  name: https
+  protocol: tcp
+  ports:
+    - 443
+    - 8443
+
+  description: Management UI on the virtual address

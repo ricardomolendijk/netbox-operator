@@ -68,6 +68,10 @@ convention somebody can forget.
 | `NetBoxVLANGroup` | `scopeRef` | same, through `vlan_groups` on all four targets |
 | `NetBoxCluster` | `scopeRef` | every scope target deletes its clusters, by two different mechanisms — see below |
 | `NetBoxDevice` | *none* | every reference on it is `PROTECT` or `SET_NULL` |
+| `NetBoxService` | `parent` | all three parent targets delete their services, through a `services` `GenericRelation` |
+| `NetBoxFHRPGroupAssignment` | `groupRef` | `group` is `CASCADE` on the model; the interface union cascades too, and one is the limit — see below |
+| `NetBoxRIR`, `NetBoxRole`, `NetBoxFHRPGroup`, `NetBoxServiceTemplate` | *none* | no mapped foreign key at all |
+| `NetBoxASN`, `NetBoxASNRange`, `NetBoxAggregate` | *none* | `rir` and `tenant` are `PROTECT`, `role` is `SET_NULL` |
 
 `NetBoxTenantGroup` is the row worth reading twice, because there the owner reference is
 carrying the weight on its own. The three `dcim` nested groups read `parent_id` in every
@@ -78,6 +82,18 @@ global, so it keys on `slug` alone and never asks about a parent. Its candidate 
 applicable, finds nothing, and create-if-absent **re-creates a row NetBox deleted on purpose**
 (#203). Same missing declaration, one class worse outcome — and the reason a kind's containment
 parent is read off `on_delete` rather than off how catalogue-like the kind looks.
+
+`NetBoxFHRPGroupAssignment` is the second kind where two references qualify, and the tiebreak
+is different from `NetBoxLocation`'s because *both* of its candidates cascade by a real
+mechanism: `group` is a declared `on_delete=CASCADE` foreign key on the model, and both members
+of its `interface` union cascade through an `fhrp_group_assignments` `GenericRelation` on
+`dcim.Interface` and `virtualization.VMInterface`. `groupRef` wins on the declared `on_delete`
+— the most direct evidence there is — and on shipping: `NetBoxInterface` does not exist, so
+`interfaceRef` resolves only in `slug`, `lookup` and `id` mode, and a reference to an object
+with no CR cannot produce an owner reference at all. The consequence is real and is written down
+rather than hidden: deleting a `NetBoxVMInterface` whose interface NetBox cascades leaves the
+assignment CR behind, and the engine recreates the row
+([`reference/netboxfhrpgroupassignment.md`](../reference/netboxfhrpgroupassignment.md#ownership)).
 
 `NetBoxLocation` is the only kind so far where two references qualify and there is one slot, so
 it needs a tiebreak. `siteRef` wins on three counts: `site` is required, so every location has
