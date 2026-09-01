@@ -11,10 +11,8 @@ kind: ClusterRole
 metadata:
   name: netbox-operator-manager
   labels:
-    helm.sh/chart: netbox-operator-v0.0.1
     app.kubernetes.io/name: netbox-operator
     app.kubernetes.io/instance: netbox-operator
-    app.kubernetes.io/version: "v0.0.1"
     app.kubernetes.io/managed-by: Helm
 rules:
 - apiGroups:
@@ -35,6 +33,11 @@ rules:
 - apiGroups:
   - netbox.kubeforge.org
   resources:
+  - netboxaggregates
+  - netboxasnranges
+  - netboxasns
+  - netboxcablebundles
+  - netboxcables
   - netboxclustergroups
   - netboxclusters
   - netboxclustertypes
@@ -52,18 +55,20 @@ rules:
   - netboxdevices
   - netboxdevicetypes
   - netboxexporttemplates
-  - netboxinterfaces
-  - netboxipaddressclaims
-  - netboxipaddresses
+  - netboxfhrpgroupassignments
+  - netboxfhrpgroups
   - netboxiprangeclaims
   - netboxipranges
+  - netboxmacaddresses
   - netboxmanufacturers
   - netboxplatforms
   - netboxprefixclaims
+  - netboxrirs
+  - netboxroles
   - netboxsavedfilters
-  - netboxvirtualdisks
+  - netboxservices
+  - netboxservicetemplates
   - netboxvirtualmachines
-  - netboxvminterfaces
   - netboxwirelesslangroups
   - netboxwirelesslans
   - netboxwirelesslinks
@@ -76,6 +81,11 @@ rules:
 - apiGroups:
   - netbox.kubeforge.org
   resources:
+  - netboxaggregates/finalizers
+  - netboxasnranges/finalizers
+  - netboxasns/finalizers
+  - netboxcablebundles/finalizers
+  - netboxcables/finalizers
   - netboxclustergroups/finalizers
   - netboxclusters/finalizers
   - netboxclustertypes/finalizers
@@ -93,19 +103,26 @@ rules:
   - netboxdevices/finalizers
   - netboxdevicetypes/finalizers
   - netboxexporttemplates/finalizers
+  - netboxfhrpgroupassignments/finalizers
+  - netboxfhrpgroups/finalizers
   - netboxinterfaces/finalizers
   - netboxipaddressclaims/finalizers
   - netboxipaddresses/finalizers
   - netboxiprangeclaims/finalizers
   - netboxipranges/finalizers
   - netboxlocations/finalizers
+  - netboxmacaddresses/finalizers
   - netboxmanufacturers/finalizers
   - netboxplatforms/finalizers
   - netboxprefixclaims/finalizers
   - netboxprefixes/finalizers
   - netboxregions/finalizers
+  - netboxrirs/finalizers
+  - netboxroles/finalizers
   - netboxroutetargets/finalizers
   - netboxsavedfilters/finalizers
+  - netboxservices/finalizers
+  - netboxservicetemplates/finalizers
   - netboxsitegroups/finalizers
   - netboxsites/finalizers
   - netboxtags/finalizers
@@ -125,6 +142,11 @@ rules:
 - apiGroups:
   - netbox.kubeforge.org
   resources:
+  - netboxaggregates/status
+  - netboxasnranges/status
+  - netboxasns/status
+  - netboxcablebundles/status
+  - netboxcables/status
   - netboxclustergroups/status
   - netboxclusters/status
   - netboxclustertypes/status
@@ -143,19 +165,26 @@ rules:
   - netboxdevicetypes/status
   - netboxendpoints/status
   - netboxexporttemplates/status
+  - netboxfhrpgroupassignments/status
+  - netboxfhrpgroups/status
   - netboxinterfaces/status
   - netboxipaddressclaims/status
   - netboxipaddresses/status
   - netboxiprangeclaims/status
   - netboxipranges/status
   - netboxlocations/status
+  - netboxmacaddresses/status
   - netboxmanufacturers/status
   - netboxplatforms/status
   - netboxprefixclaims/status
   - netboxprefixes/status
   - netboxregions/status
+  - netboxrirs/status
+  - netboxroles/status
   - netboxroutetargets/status
   - netboxsavedfilters/status
+  - netboxservices/status
+  - netboxservicetemplates/status
   - netboxsitegroups/status
   - netboxsites/status
   - netboxsweeps/status
@@ -188,6 +217,9 @@ rules:
 - apiGroups:
   - netbox.kubeforge.org
   resources:
+  - netboxinterfaces
+  - netboxipaddressclaims
+  - netboxipaddresses
   - netboxlocations
   - netboxprefixes
   - netboxregions
@@ -197,8 +229,10 @@ rules:
   - netboxtags
   - netboxtenantgroups
   - netboxtenants
+  - netboxvirtualdisks
   - netboxvlangroups
   - netboxvlans
+  - netboxvminterfaces
   - netboxvrfs
   verbs:
   - create
@@ -215,10 +249,8 @@ kind: ClusterRoleBinding
 metadata:
   name: netbox-operator-manager
   labels:
-    helm.sh/chart: netbox-operator-v0.0.1
     app.kubernetes.io/name: netbox-operator
     app.kubernetes.io/instance: netbox-operator
-    app.kubernetes.io/version: "v0.0.1"
     app.kubernetes.io/managed-by: Helm
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -236,10 +268,8 @@ metadata:
   name: netbox-operator-endpoint-credential-reader
   namespace: default
   labels:
-    helm.sh/chart: netbox-operator-v0.0.1
     app.kubernetes.io/name: netbox-operator
     app.kubernetes.io/instance: netbox-operator
-    app.kubernetes.io/version: "v0.0.1"
     app.kubernetes.io/managed-by: Helm
 rules:
 - apiGroups: [""]
@@ -253,10 +283,8 @@ metadata:
   name: netbox-operator-endpoint-credential-reader
   namespace: default
   labels:
-    helm.sh/chart: netbox-operator-v0.0.1
     app.kubernetes.io/name: netbox-operator
     app.kubernetes.io/instance: netbox-operator
-    app.kubernetes.io/version: "v0.0.1"
     app.kubernetes.io/managed-by: Helm
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -274,10 +302,8 @@ metadata:
   name: netbox-operator-leader-election
   namespace: netbox-operator-system
   labels:
-    helm.sh/chart: netbox-operator-v0.0.1
     app.kubernetes.io/name: netbox-operator
     app.kubernetes.io/instance: netbox-operator
-    app.kubernetes.io/version: "v0.0.1"
     app.kubernetes.io/managed-by: Helm
 rules:
 - apiGroups: [""]
@@ -297,10 +323,8 @@ metadata:
   name: netbox-operator-leader-election
   namespace: netbox-operator-system
   labels:
-    helm.sh/chart: netbox-operator-v0.0.1
     app.kubernetes.io/name: netbox-operator
     app.kubernetes.io/instance: netbox-operator
-    app.kubernetes.io/version: "v0.0.1"
     app.kubernetes.io/managed-by: Helm
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -319,10 +343,8 @@ kind: ClusterRole
 metadata:
   name: netbox-operator-manager
   labels:
-    helm.sh/chart: netbox-operator-v0.0.1
     app.kubernetes.io/name: netbox-operator
     app.kubernetes.io/instance: netbox-operator
-    app.kubernetes.io/version: "v0.0.1"
     app.kubernetes.io/managed-by: Helm
 rules:
 - apiGroups:
@@ -343,6 +365,11 @@ rules:
 - apiGroups:
   - netbox.kubeforge.org
   resources:
+  - netboxaggregates
+  - netboxasnranges
+  - netboxasns
+  - netboxcablebundles
+  - netboxcables
   - netboxclustergroups
   - netboxclusters
   - netboxclustertypes
@@ -360,18 +387,20 @@ rules:
   - netboxdevices
   - netboxdevicetypes
   - netboxexporttemplates
-  - netboxinterfaces
-  - netboxipaddressclaims
-  - netboxipaddresses
+  - netboxfhrpgroupassignments
+  - netboxfhrpgroups
   - netboxiprangeclaims
   - netboxipranges
+  - netboxmacaddresses
   - netboxmanufacturers
   - netboxplatforms
   - netboxprefixclaims
+  - netboxrirs
+  - netboxroles
   - netboxsavedfilters
-  - netboxvirtualdisks
+  - netboxservices
+  - netboxservicetemplates
   - netboxvirtualmachines
-  - netboxvminterfaces
   - netboxwirelesslangroups
   - netboxwirelesslans
   - netboxwirelesslinks
@@ -384,6 +413,11 @@ rules:
 - apiGroups:
   - netbox.kubeforge.org
   resources:
+  - netboxaggregates/finalizers
+  - netboxasnranges/finalizers
+  - netboxasns/finalizers
+  - netboxcablebundles/finalizers
+  - netboxcables/finalizers
   - netboxclustergroups/finalizers
   - netboxclusters/finalizers
   - netboxclustertypes/finalizers
@@ -401,19 +435,26 @@ rules:
   - netboxdevices/finalizers
   - netboxdevicetypes/finalizers
   - netboxexporttemplates/finalizers
+  - netboxfhrpgroupassignments/finalizers
+  - netboxfhrpgroups/finalizers
   - netboxinterfaces/finalizers
   - netboxipaddressclaims/finalizers
   - netboxipaddresses/finalizers
   - netboxiprangeclaims/finalizers
   - netboxipranges/finalizers
   - netboxlocations/finalizers
+  - netboxmacaddresses/finalizers
   - netboxmanufacturers/finalizers
   - netboxplatforms/finalizers
   - netboxprefixclaims/finalizers
   - netboxprefixes/finalizers
   - netboxregions/finalizers
+  - netboxrirs/finalizers
+  - netboxroles/finalizers
   - netboxroutetargets/finalizers
   - netboxsavedfilters/finalizers
+  - netboxservices/finalizers
+  - netboxservicetemplates/finalizers
   - netboxsitegroups/finalizers
   - netboxsites/finalizers
   - netboxtags/finalizers
@@ -433,6 +474,11 @@ rules:
 - apiGroups:
   - netbox.kubeforge.org
   resources:
+  - netboxaggregates/status
+  - netboxasnranges/status
+  - netboxasns/status
+  - netboxcablebundles/status
+  - netboxcables/status
   - netboxclustergroups/status
   - netboxclusters/status
   - netboxclustertypes/status
@@ -451,19 +497,26 @@ rules:
   - netboxdevicetypes/status
   - netboxendpoints/status
   - netboxexporttemplates/status
+  - netboxfhrpgroupassignments/status
+  - netboxfhrpgroups/status
   - netboxinterfaces/status
   - netboxipaddressclaims/status
   - netboxipaddresses/status
   - netboxiprangeclaims/status
   - netboxipranges/status
   - netboxlocations/status
+  - netboxmacaddresses/status
   - netboxmanufacturers/status
   - netboxplatforms/status
   - netboxprefixclaims/status
   - netboxprefixes/status
   - netboxregions/status
+  - netboxrirs/status
+  - netboxroles/status
   - netboxroutetargets/status
   - netboxsavedfilters/status
+  - netboxservices/status
+  - netboxservicetemplates/status
   - netboxsitegroups/status
   - netboxsites/status
   - netboxsweeps/status
@@ -496,6 +549,9 @@ rules:
 - apiGroups:
   - netbox.kubeforge.org
   resources:
+  - netboxinterfaces
+  - netboxipaddressclaims
+  - netboxipaddresses
   - netboxlocations
   - netboxprefixes
   - netboxregions
@@ -505,8 +561,10 @@ rules:
   - netboxtags
   - netboxtenantgroups
   - netboxtenants
+  - netboxvirtualdisks
   - netboxvlangroups
   - netboxvlans
+  - netboxvminterfaces
   - netboxvrfs
   verbs:
   - create
@@ -523,10 +581,8 @@ kind: ClusterRoleBinding
 metadata:
   name: netbox-operator-manager
   labels:
-    helm.sh/chart: netbox-operator-v0.0.1
     app.kubernetes.io/name: netbox-operator
     app.kubernetes.io/instance: netbox-operator
-    app.kubernetes.io/version: "v0.0.1"
     app.kubernetes.io/managed-by: Helm
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -544,10 +600,8 @@ metadata:
   name: netbox-operator-endpoint-credential-reader
   namespace: default
   labels:
-    helm.sh/chart: netbox-operator-v0.0.1
     app.kubernetes.io/name: netbox-operator
     app.kubernetes.io/instance: netbox-operator
-    app.kubernetes.io/version: "v0.0.1"
     app.kubernetes.io/managed-by: Helm
 rules:
 - apiGroups: [""]
@@ -561,10 +615,8 @@ metadata:
   name: netbox-operator-endpoint-credential-reader
   namespace: team-a
   labels:
-    helm.sh/chart: netbox-operator-v0.0.1
     app.kubernetes.io/name: netbox-operator
     app.kubernetes.io/instance: netbox-operator
-    app.kubernetes.io/version: "v0.0.1"
     app.kubernetes.io/managed-by: Helm
 rules:
 - apiGroups: [""]
@@ -578,10 +630,8 @@ metadata:
   name: netbox-operator-endpoint-credential-reader
   namespace: team-b
   labels:
-    helm.sh/chart: netbox-operator-v0.0.1
     app.kubernetes.io/name: netbox-operator
     app.kubernetes.io/instance: netbox-operator
-    app.kubernetes.io/version: "v0.0.1"
     app.kubernetes.io/managed-by: Helm
 rules:
 - apiGroups: [""]
@@ -595,10 +645,8 @@ metadata:
   name: netbox-operator-endpoint-credential-reader
   namespace: default
   labels:
-    helm.sh/chart: netbox-operator-v0.0.1
     app.kubernetes.io/name: netbox-operator
     app.kubernetes.io/instance: netbox-operator
-    app.kubernetes.io/version: "v0.0.1"
     app.kubernetes.io/managed-by: Helm
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -616,10 +664,8 @@ metadata:
   name: netbox-operator-endpoint-credential-reader
   namespace: team-a
   labels:
-    helm.sh/chart: netbox-operator-v0.0.1
     app.kubernetes.io/name: netbox-operator
     app.kubernetes.io/instance: netbox-operator
-    app.kubernetes.io/version: "v0.0.1"
     app.kubernetes.io/managed-by: Helm
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -637,10 +683,8 @@ metadata:
   name: netbox-operator-endpoint-credential-reader
   namespace: team-b
   labels:
-    helm.sh/chart: netbox-operator-v0.0.1
     app.kubernetes.io/name: netbox-operator
     app.kubernetes.io/instance: netbox-operator
-    app.kubernetes.io/version: "v0.0.1"
     app.kubernetes.io/managed-by: Helm
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -658,10 +702,8 @@ metadata:
   name: netbox-operator-leader-election
   namespace: netbox-operator-system
   labels:
-    helm.sh/chart: netbox-operator-v0.0.1
     app.kubernetes.io/name: netbox-operator
     app.kubernetes.io/instance: netbox-operator
-    app.kubernetes.io/version: "v0.0.1"
     app.kubernetes.io/managed-by: Helm
 rules:
 - apiGroups: [""]
@@ -681,10 +723,8 @@ metadata:
   name: netbox-operator-leader-election
   namespace: netbox-operator-system
   labels:
-    helm.sh/chart: netbox-operator-v0.0.1
     app.kubernetes.io/name: netbox-operator
     app.kubernetes.io/instance: netbox-operator
-    app.kubernetes.io/version: "v0.0.1"
     app.kubernetes.io/managed-by: Helm
 roleRef:
   apiGroup: rbac.authorization.k8s.io
