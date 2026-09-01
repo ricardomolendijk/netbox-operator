@@ -78,6 +78,12 @@ var (
 	// amount of retrying will add one.
 	errNoObjectID = errors.New("netbox returned an object with no id")
 
+	// errReservedByProvenance is a CR naming a NetBox object the provenance bootstrap owns
+	// on this endpoint: the `k8s-managed` tag, or one of the four custom fields
+	// spec.managedBy configures. Nothing is written for it, ever
+	// (registry.Descriptor.ReservedKeySpec, provenance.Config.Reserved).
+	errReservedByProvenance = errors.New("this netbox object is written by the operator's own provenance bootstrap")
+
 	// errNotConfigured is a wiring mistake: a collaborator the engine needs was not
 	// supplied. It is an error rather than a panic because a nil dereference halfway
 	// through a reconcile tells whoever is paged nothing about what is missing.
@@ -266,6 +272,16 @@ func classifyInvalid(err error, resync time.Duration) (outcome, bool) {
 		return conflict, true
 	case errors.As(err, &validation):
 		return invalid, true
+	// Reserved by the operator's own bootstrap. Its own reason rather than Invalid or
+	// Conflict: the spec is well-formed and there is nothing to adopt -- the name is taken by
+	// this operator, for this endpoint, and only a change to spec.managedBy or to the CR's
+	// own name frees it. The endpoint's resync is the right interval because that is when
+	// spec.managedBy would be re-read.
+	case errors.Is(err, errReservedByProvenance):
+		return outcome{
+			reason: netboxv1alpha1.ReasonReservedByOperator, requeue: resync,
+			event: netboxv1alpha1.EventInvalid, severe: true, result: metrics.ResultError,
+		}, true
 	case errors.Is(err, errUnmappedField), errors.Is(err, errNoCustomFields),
 		errors.Is(err, errUnfilterable), errors.Is(err, errNoObjectID),
 		errors.Is(err, errDuplicateNeedsProvenance):

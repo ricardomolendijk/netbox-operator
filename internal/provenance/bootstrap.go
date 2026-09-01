@@ -271,15 +271,7 @@ func bootstrapField(ctx context.Context, client Client, cfg Config, name string,
 		return false, nil
 	}
 
-	created, err := client.Create(ctx, customFieldsEndpoint, netbox.Object{
-		"object_types": objectTypes,
-		"type":         customFieldType,
-		"filter_logic": customFieldFilterLogic,
-		"name":         name,
-		"label":        label(name),
-		"group_name":   customFieldGroup,
-		"description":  "Written by the netbox-operator; see docs/operations/provenance.md.",
-	})
+	created, err := client.Create(ctx, customFieldsEndpoint, CustomFieldPayload(name, objectTypes))
 	if err != nil {
 		return false, fmt.Errorf("creating the netbox custom field %q: %w", name, err)
 	}
@@ -294,6 +286,31 @@ func bootstrapField(ctx context.Context, client Client, cfg Config, name string,
 	result.Created = append(result.Created, "custom field "+name)
 
 	return true, nil
+}
+
+// CustomFieldPayload is the extras.CustomField the bootstrap creates for one definition.
+//
+// Exported and separate from the call that sends it so that there is one description of the
+// operator's own custom field rather than two. The other reader is the test that holds every
+// key here to a column the NetBoxCustomField descriptor declares
+// (internal/registry/extras_customfield.go): the CRD and the bootstrap write the same NetBox
+// model through different code paths, and a key spelled one way here and another way there
+// is not an error NetBox reports -- it ignores a column it does not know, so the definition
+// would be created missing a field and the operator would report success (NBO-059).
+//
+// It is deliberately *not* reachable from a NetBoxCustomField CR. A CR may not name one of
+// these definitions at all (Config.Reserved), so the two writers never render the same
+// object and there is nothing to keep byte-identical at runtime -- only the vocabulary.
+func CustomFieldPayload(name string, objectTypes []string) netbox.Object {
+	return netbox.Object{
+		"object_types": objectTypes,
+		"type":         customFieldType,
+		"filter_logic": customFieldFilterLogic,
+		"name":         name,
+		"label":        label(name),
+		"group_name":   customFieldGroup,
+		"description":  "Written by the netbox-operator; see docs/operations/provenance.md.",
+	}
 }
 
 // widen adds the object types this definition does not yet cover.

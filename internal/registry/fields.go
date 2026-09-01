@@ -22,6 +22,20 @@ var (
 	// ErrDuplicateAPIField is returned when two entries write the same NetBox field.
 	ErrDuplicateAPIField = errors.New("duplicate api field")
 
+	// ErrTagsFieldOnTaggableKind is returned when a Taggable descriptor also maps a spec
+	// field onto `tags`.
+	//
+	// Two writers for one column, and the loudest possible version of it: `tags` is a
+	// full-replacement list, so the provenance stamp appends its tag to whatever the payload
+	// carries (reconciler/stamp.go). On a kind where `tags` is `TagsMixin` that is correct.
+	// On extras.ConfigContext it is not `TagsMixin` at all -- it is a plain M2M selecting
+	// *which tagged objects the context applies to* (docs/netbox-schema.md ->
+	// extras.ConfigContext) -- so a Taggable declaration there would quietly add
+	// `k8s-managed` to the selector and change which objects in NetBox receive the
+	// configuration. The two readings of `tags` cannot both be right on one kind, so the
+	// boot fails rather than the cluster drifting.
+	ErrTagsFieldOnTaggableKind = errors.New("a taggable kind maps a spec field onto the tags column")
+
 	// ErrFieldReadOnly is returned for a spec field mapped onto a read-only column.
 	// Writing one silently no-ops, which is a PATCH loop rather than an error.
 	ErrFieldReadOnly = errors.New("spec field is mapped onto a read-only api field")
@@ -92,6 +106,11 @@ var (
 	ErrContainmentToMany = errors.New("containment ref is a to-many reference")
 )
 
+// tagsColumn is NetBox's name for the column the provenance stamp writes into. Spelled here
+// rather than imported from internal/provenance, which reads this package to derive the
+// bootstrap's `object_types` and cannot be depended on back.
+const tagsColumn = "tags"
+
 // FieldClass is what one spec field is: how many references it carries, and how its value
 // is compared.
 //
@@ -136,12 +155,24 @@ const (
 	// array order-independently misses a reordering the user asked for, and comparing an
 	// M2M order-sensitively PATCHes forever.
 	ClassArray FieldClass = "Array"
+
+	// ClassJSON is a Postgres JSONField whose value is a whole document:
+	// extras.SavedFilter.parameters, extras.CustomField.default and .validation_schema,
+	// extras.CustomFieldChoiceSet.choice_colors (docs/netbox-schema.md).
+	//
+	// It cannot be ClassValue, and that is not a nicety. The scalar comparison unwraps any
+	// JSON object carrying an `id` or a `value` key, because that is how NetBox renders a
+	// foreign key and a choice on read -- so `parameters: {"id": ["3"]}`, an ordinary NetBox
+	// filter, would be compared as `[3]` against the whole document, never settle, and PATCH
+	// forever (netbox.FieldRules.JSON). It cannot be ClassArray either: a document is not a
+	// list, and the array rule compares element by element with the same scalar rule.
+	ClassJSON FieldClass = "JSON"
 )
 
 // fieldClasses is the closed set, with ClassValue in it: Validate rejects anything else, so
 // a class invented in a descriptor fails the boot rather than being treated as a scalar.
 var fieldClasses = []FieldClass{
-	ClassValue, ClassRefOne, ClassRefMany, ClassObjectTypeList, ClassArray,
+	ClassValue, ClassRefOne, ClassRefMany, ClassObjectTypeList, ClassArray, ClassJSON,
 }
 
 // Ref reports whether this class is a reference internal/resolver turns into an id.
@@ -277,6 +308,12 @@ func (d Descriptor) ObjectTypeListFields() []string {
 // ArrayField the order is data.
 func (d Descriptor) ArrayFields() []string {
 	return d.apiFieldsOf(ClassArray)
+}
+
+// JSONFields are the NetBox columns compared as whole JSON documents, without the
+// nested-object unwrapping the scalar rule applies.
+func (d Descriptor) JSONFields() []string {
+	return d.apiFieldsOf(ClassJSON)
 }
 
 // apiFieldsOf is the NetBox columns of every field in one class, in descriptor order.
@@ -462,23 +499,38 @@ func (d Descriptor) validateFieldEntries() error {
 			errs = append(errs, fmt.Errorf("%w: %s", ErrDuplicateAPIField, field.API))
 		}
 
-		if slices.Contains(d.ReadOnly, field.API) {
-			errs = append(errs, fmt.Errorf("%w: %s -> %s", ErrFieldReadOnly, field.Spec, field.API))
-		}
-
-		if !slices.Contains(fieldClasses, field.Class) {
-			errs = append(errs, fmt.Errorf("%w: %s is %q", ErrUnknownFieldClass, field.Spec, field.Class))
-		}
-
-		if !field.Class.Ref() && !field.Target.Empty() {
-			errs = append(errs, fmt.Errorf("%w: %s -> %s", ErrTargetNotRef, field.Spec, field.Target))
-		}
-
-		if !field.Class.Ref() && field.CascadeOnDelete {
-			errs = append(errs, fmt.Errorf("%w: %s", ErrCascadeNotRef, field.Spec))
-		}
+		errs = append(errs, d.validateFieldEntry(field))
 
 		seenSpec[field.Spec], seenAPI[field.API] = struct{}{}, struct{}{}
+	}
+
+	return errors.Join(errs...)
+}
+
+// validateFieldEntry is the checks on one entry that need no knowledge of the others, split out
+// from the loop that also has to spot duplicates. Every one of them is a declaration NetBox
+// would accept and then ignore, which is a PATCH loop rather than an error.
+func (d Descriptor) validateFieldEntry(field Field) error {
+	errs := make([]error, 0, 4)
+
+	if slices.Contains(d.ReadOnly, field.API) {
+		errs = append(errs, fmt.Errorf("%w: %s -> %s", ErrFieldReadOnly, field.Spec, field.API))
+	}
+
+	if d.Taggable && field.API == tagsColumn {
+		errs = append(errs, fmt.Errorf("%w: %s -> %s", ErrTagsFieldOnTaggableKind, field.Spec, field.API))
+	}
+
+	if !slices.Contains(fieldClasses, field.Class) {
+		errs = append(errs, fmt.Errorf("%w: %s is %q", ErrUnknownFieldClass, field.Spec, field.Class))
+	}
+
+	if !field.Class.Ref() && !field.Target.Empty() {
+		errs = append(errs, fmt.Errorf("%w: %s -> %s", ErrTargetNotRef, field.Spec, field.Target))
+	}
+
+	if !field.Class.Ref() && field.CascadeOnDelete {
+		errs = append(errs, fmt.Errorf("%w: %s", ErrCascadeNotRef, field.Spec))
 	}
 
 	return errors.Join(errs...)
@@ -503,6 +555,10 @@ func (d Descriptor) validateSpecReferences() error {
 				errs = append(errs, fmt.Errorf("%w: natural key %d pins %s", ErrUnknownSpecField, i, field.Spec))
 			}
 		}
+	}
+
+	if d.ReservedKeySpec != "" && !d.declaresSpecField(d.ReservedKeySpec) {
+		errs = append(errs, fmt.Errorf("%w: reserved key %s", ErrUnknownSpecField, d.ReservedKeySpec))
 	}
 
 	return errors.Join(append(errs, d.validateContainment())...)

@@ -1,0 +1,854 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.19.0
+  name: netboxcustomfields.netbox.kubeforge.org
+spec:
+  group: netbox.kubeforge.org
+  names:
+    kind: NetBoxCustomField
+    listKind: NetBoxCustomFieldList
+    plural: netboxcustomfields
+    shortNames:
+    - nbcf
+    singular: netboxcustomfield
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.name
+      name: Field
+      type: string
+    - jsonPath: .spec.type
+      name: Type
+      type: string
+    - jsonPath: .status.id
+      name: ID
+      type: integer
+    - jsonPath: .status.conditions[?(@.type=="Ready")].status
+      name: Ready
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          NetBoxCustomField is one extras.CustomField in NetBox: a column on NetBox's own schema
+          that every other kind's `spec.customFields` can then write into.
+
+          Namespaced like every kind in v1alpha1 (docs/decisions/0002-crd-scoping.md). It is schema
+          rather than data, so the convention is that it lives in one shared namespace: a custom
+          field is global in NetBox whatever namespace declares it, and two teams declaring the same
+          name in two namespaces is one NetBox object and a Conflict.
+
+          **Deleting one destroys data, and this kind refuses by default.** NetBox strips the field's
+          stored value from every object that has one, on a `pre_delete` signal, with no `PROTECT`
+          anywhere (`netbox/extras/signals.py:59-68` calling
+          `netbox/extras/models/customfields.py:387-401`). So the finalizer stays on and reports
+          `Deleting=False, Reason=DataLossBlocked` until either the
+          `netbox.kubeforge.org/allow-data-loss: "true"` annotation says otherwise, or
+          `spec.deletionPolicy: Retain` says the NetBox object should be left alone. See
+          docs/concepts/deletion.md.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              NetBoxCustomFieldSpec describes one extras.CustomField: a column added to NetBox's own
+              schema, not a row of data.
+
+              **The one kind where the operator is already a writer.** The provenance bootstrap creates
+              `k8s_uid`, `k8s_cluster`, `k8s_owner` and `k8s_allocation_identity` -- or whatever
+              `spec.managedBy` on the endpoint renamed them to -- before that endpoint reports Ready, and
+              keeps their `object_types` in step with the kinds this build carries
+              (internal/provenance/bootstrap.go, docs/operations/provenance.md). A CR naming one of those
+              is therefore **refused**: `Ready=False, Reason=ReservedByOperator`, and nothing at all is
+              written. See docs/custom-fields.md for the whole argument; the short version is that
+              `object_types` on `k8s_uid` is derived from the descriptor registry and widens on every
+              upgrade, a CR declares it statically, and the CR would win -- and narrowing `object_types`
+              deletes that field's stored value from every object of the types removed
+              (`netbox/extras/signals.py:23-49`, `handle_cf_object_types_changed` on `post_remove`).
+
+              Which names are reserved is per endpoint rather than a fixed list, because the names are
+              configurable: an endpoint with no `spec.managedBy` reserves nothing, and one that set
+              `uidField: ""` frees `k8s_uid`.
+
+              Neither taggable nor custom-fieldable: the bases are `CloningMixin, ExportTemplatesMixin,
+              OwnerMixin, ChangeLoggedModel` (docs/netbox-schema.md -> extras.CustomField), with no
+              TagsMixin and no CustomFieldsMixin -- a custom field cannot carry custom fields. So a
+              NetBoxCustomField is a managed object with no provenance stamp, which is the case
+              docs/operations/provenance.md calls out and NetBoxSweep (NBO-046) must never delete.
+            properties:
+              choiceSetRef:
+                description: |-
+                  ChoiceSetRef names the NetBoxCustomFieldChoiceSet a `select` or `multiselect` field
+                  draws its values from.
+
+                  `on_delete=PROTECT` (`netbox/extras/models/customfields.py:236-243`), so this reference
+                  is not a containment parent and deleting the choice set while a field still uses it is
+                  refused by NetBox -- `Deleting=False, Reason=Protected` on the choice set, which clears
+                  itself once the last field using it is gone.
+
+                  A strict ObjectRef, like every other reference in this API version. The column is
+                  `blank=True, null=True`, so *clearing* it is a state NetBox has and this field cannot
+                  express: omitting the reference means "do not manage the column"
+                  (docs/concepts/field-ownership.md), and there is no `choiceSetRef: {}` yet. OptionalRef
+                  exists for exactly that and no kind uses it (#185); the first kind that needs a
+                  clearable reference should be one whose clearable state somebody actually wants, not
+                  this one -- a `select` field with its choice set removed is a field NetBox refuses to
+                  validate anyway.
+                properties:
+                  id:
+                    description: |-
+                      ID is a literal NetBox primary key: the escape hatch, and the only place in the API
+                      where a raw id is accepted.
+
+                      A pointer so that `id: 0` is distinguishable from unset. NetBox primary keys start
+                      at 1, so zero is never a real object and has to be rejected rather than silently
+                      treated as "no id".
+                    format: int64
+                    minimum: 1
+                    type: integer
+                  lookup:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      Lookup is a raw NetBox API filter, for an object no slug identifies -- a VLAN is
+                      `{vid: "20", site: "home"}` because its identity is a pair.
+
+                      `q` is rejected by the CEL rules along with the pagination and formatting
+                      parameters. It is NetBox's fuzzy search, and a fuzzy filter behind a reference that
+                      must identify exactly one object would make ambiguity the normal case rather than
+                      an error.
+                    maxProperties: 8
+                    type: object
+                  name:
+                    description: |-
+                      Name of a CR of the target Kind, resolved through that CR's `.status.id`.
+
+                      This is the mode to prefer: it is the only one that expresses a dependency the
+                      operator can wait on, which is what lets a graph applied in any order converge.
+                    maxLength: 253
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                    type: string
+                  namespace:
+                    description: |-
+                      Namespace of that CR. Defaults to the referring object's namespace.
+
+                      Load-bearing on the common path rather than an edge case: every Kind is namespaced
+                      in v1alpha1 (docs/decisions/0002-crd-scoping.md), so a team namespace pointing at a
+                      shared catalogue namespace is the normal shape. Crossing a namespace requires a
+                      NetBoxRefGrant in the target namespace (NBO-014).
+                    maxLength: 63
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                    type: string
+                  slug:
+                    description: |-
+                      Slug looks the object up in NetBox directly, for objects the operator does not
+                      manage. No CR needs to exist.
+
+                      Bounded at 100 characters because that is what NetBox's own column allows:
+                      `slug SlugField len=100` on every OrganizationalModel, NestedGroupModel and
+                      PrimaryModel (docs/netbox-schema.md -> dcim.Site, dcim.Region, extras.Tag).
+                    maxLength: 100
+                    pattern: ^[-a-zA-Z0-9_]+$
+                    type: string
+                type: object
+                x-kubernetes-validations:
+                - message: exactly one of name, slug, lookup or id must be set
+                  rule: '[has(self.name) && size(self.name) > 0, has(self.slug) &&
+                    size(self.slug) > 0, has(self.lookup) && size(self.lookup) > 0,
+                    has(self.id)].filter(x, x).size() == 1'
+                - message: namespace may only be set together with name
+                  rule: '!has(self.namespace) || (has(self.name) && size(self.name)
+                    > 0)'
+                - message: lookup keys must be lowercase NetBox filter names
+                  rule: '!has(self.lookup) || self.lookup.all(k, k.matches(''^[a-z][a-z0-9_]*$''))'
+                - message: lookup may not set pagination, formatting or fuzzy-search
+                    parameters
+                  rule: '!has(self.lookup) || self.lookup.all(k, !(k in [''limit'',''offset'',''format'',''brief'',''ordering'',''q'']))'
+                - message: lookup values are limited to 200 characters
+                  rule: '!has(self.lookup) || self.lookup.all(k, size(self.lookup[k])
+                    <= 200)'
+              comments:
+                description: |-
+                  Comments is long-form free text on the field itself.
+
+                  Omit it to leave NetBox's own value alone; set it to `""` to clear the value in
+                  NetBox. The two are different intents and the operator can tell them apart
+                  (docs/concepts/field-ownership.md).
+                maxLength: 10000
+                type: string
+              customFields:
+                additionalProperties:
+                  nullable: true
+                  type: string
+                description: |-
+                  CustomFields are NetBox custom-field values to write, keyed by NetBox custom-field
+                  name. Every key must already exist as an `extras.CustomField` covering this object
+                  type -- NetBox rejects the whole payload otherwise.
+
+                  The map is deliberately **not** exhaustive: only the keys named here are written and
+                  compared, and every other custom field on the NetBox object is left exactly as it is.
+                  NetBox merges a partial `custom_fields` PATCH and returns every custom field defined
+                  for the object type, including ones this operator knows nothing about, so treating
+                  the map as the whole container would null out every custom field another writer on
+                  that NetBox owns, on every reconcile. Omitting the map, or setting it to `{}`,
+                  therefore means "manage nothing" rather than "clear everything".
+
+                  `null` and `""` are different intents and both are expressible:
+
+                    customFields:
+                      rack_position: ""      # set this custom field to the empty string
+                      audit_ticket: null     # remove this custom field's value
+
+                  `null` is sent to NetBox as JSON null, which is the value NetBox stores for a custom
+                  field that has no value and the value it returns on read -- indistinguishable from a
+                  field never set, which is what "removed" means here. `""` stores and returns the
+                  empty string. Removing the key from the manifest entirely is the third state: it
+                  hands the field back and NetBox keeps whatever it holds
+                  (docs/concepts/field-ownership.md).
+
+                  Set on a kind whose NetBox model carries no `custom_fields` column -- extras.Tag is
+                  one, so a NetBoxTag is the case -- and the object reports Ready=False,
+                  Reason=Invalid. Refused rather than dropped: a discarded value would leave the
+                  object claiming to be synced while NetBox never received it.
+                type: object
+              default:
+                description: |-
+                  Default is the value NetBox fills in for objects that have none, as JSON. A string
+                  default has to be written as a JSON string -- `default: "\"eu-west\""` in YAML -- which
+                  is NetBox's own rule, not this operator's
+                  (`netbox/extras/models/customfields.py:183-190`).
+
+                  Setting it on an existing field back-fills: NetBox writes the default onto every
+                  object of every type *added* to ObjectTypes afterwards
+                  (`netbox/extras/signals.py:44-46`, `populate_initial_data`).
+
+                  Omit it to leave NetBox's own value alone; set it to `null` to clear the value in
+                  NetBox. The two are different intents and the operator can tell them apart
+                  (docs/concepts/field-ownership.md).
+                x-kubernetes-preserve-unknown-fields: true
+              deletionPolicy:
+                description: |-
+                  DeletionPolicy is what happens to the NetBox object when this CR is deleted.
+
+                  Read fresh on every pass rather than latched when deletion starts, so switching it
+                  to Retain on an object whose delete NetBox keeps refusing is a way out of that
+                  state (docs/concepts/deletion.md).
+
+                  Left unset it is Delete for most kinds and Retain for the IPAM ones, where deleting
+                  the NetBox object destroys state rather than configuration -- an address freed for
+                  reallocation, a range whose ownership record is gone (decision #176). The default is
+                  therefore *not* a CRD marker: this field is declared once for every kind, so a marker
+                  here could only give them all the same answer. Each kind declares its own on its
+                  Descriptor and docs/concepts/deletion.md lists them.
+                enum:
+                - Delete
+                - Retain
+                type: string
+              description:
+                description: |-
+                  Description is free text shown next to the field.
+
+                  Omit it to leave NetBox's own value alone; set it to `""` to clear the value in
+                  NetBox. The two are different intents and the operator can tell them apart
+                  (docs/concepts/field-ownership.md).
+                maxLength: 200
+                type: string
+              endpointRef:
+                description: |-
+                  EndpointRef names the NetBoxEndpoint to write through, in this object's own
+                  namespace. Required: there is no cluster-wide default endpoint, so an omitted
+                  reference cannot be resolved into one.
+
+                  **Immutable.** Pointing a CR at a different NetBox is not a mutation of the object, it
+                  is a different object: the natural key is looked up in whichever NetBox this names, so
+                  an edit here would leave the old NetBox holding an object nothing manages and would
+                  adopt or create a second one in the new one, with the CR's status.id switching between
+                  the two. Edit it by deleting the CR -- which lets spec.deletionPolicy do what it says
+                  about the object being left behind -- and re-applying it.
+
+                  A CEL transition rule and not the admission webhook, which is the whole layer-1 test:
+                  it needs `self` and `oldSelf` and no second object, so the API server enforces it
+                  unconditionally and it survives every webhook in the cluster being down (NBO-044).
+                minLength: 1
+                type: string
+                x-kubernetes-validations:
+                - message: endpointRef is immutable; pointing a CR at a different
+                    NetBox is a different object, so delete this one and re-apply
+                    it
+                  rule: self == oldSelf
+              filterLogic:
+                default: loose
+                description: FilterLogic is how NetBox's `?cf_<name>=` filter matches
+                  this field.
+                enum:
+                - disabled
+                - loose
+                - exact
+                type: string
+              groupName:
+                description: |-
+                  GroupName groups this field with others under one heading in NetBox's UI. The
+                  operator's own definitions use `Kubernetes` (internal/provenance/bootstrap.go).
+
+                  Omit it to leave NetBox's own value alone; set it to `""` to clear the value in
+                  NetBox. The two are different intents and the operator can tell them apart
+                  (docs/concepts/field-ownership.md).
+                maxLength: 50
+                type: string
+              isCloneable:
+                default: false
+                description: IsCloneable copies this field's value when a NetBox object
+                  is cloned in the UI.
+                type: boolean
+              label:
+                description: |-
+                  Label is the name NetBox shows users. Empty means NetBox derives one from Name.
+
+                  Omit it to leave NetBox's own value alone; set it to `""` to clear the value in
+                  NetBox. The two are different intents and the operator can tell them apart
+                  (docs/concepts/field-ownership.md).
+                maxLength: 50
+                type: string
+              name:
+                description: |-
+                  Name is the field's internal name -- the key `spec.customFields` on every other kind
+                  writes -- and this kind's natural key. Unique across NetBox.
+
+                  The pattern and the length are NetBox's own: `CharField len=50 unique=True` with a
+                  `^[a-z0-9_]+$` validator applied case-insensitively and a second validator forbidding
+                  a double underscore (`netbox/extras/models/customfields.py:120-138`). The double
+                  underscore is not decoration: NetBox's own filters are spelled `?cf_<name>__ic=`, so a
+                  name containing `__` would be an unparseable filter.
+
+                  Uppercase is legal in NetBox and rejected here, which is the one place this schema is
+                  stricter than the API. A custom field's name is a JSON key written by hand in every
+                  manifest that populates it, and `k8s_Uid` versus `k8s_uid` is a 400 on every object
+                  rather than a lookup that finds the wrong one.
+                maxLength: 50
+                minLength: 1
+                pattern: ^[a-z0-9]+(_[a-z0-9]+)*$
+                type: string
+              objectTypes:
+                description: |-
+                  ObjectTypes are the NetBox models this field applies to, as Django ContentType
+                  strings: `dcim.device`, `ipam.prefix`.
+
+                  Required, and required by NetBox rather than by preference:
+                  `object_types ManyToManyField -> contenttypes.ContentType` with no `required=False` on
+                  the serializer (docs/netbox-schema.md -> extras.CustomField,
+                  `netbox/extras/api/serializers_/customfields.py:45-48`). A field declared for the wrong
+                  set makes every write to a type outside it a 400.
+
+                  Not references of any cardinality, so the descriptor declares this an ObjectTypeList
+                  rather than an M2M: the values are `app_label.model` strings, and a resolver told to
+                  resolve one would go looking for a CR named `dcim.device`, which cannot exist. The
+                  item pattern is the REST spelling -- lowercased and unpunctuated, so `dcim.device` and
+                  never `dcim.Device`.
+
+                  **Not validated against this operator's kind registry, on purpose.** A NetBox holds
+                  content types for models this build has no Kind for, and a custom field on
+                  `dcim.device` is perfectly reasonable in a cluster whose operator cannot yet manage
+                  devices -- so a registry check would reject the useful case in order to catch a typo.
+                  NetBox catches the typo instead, and catches more of them: its `ContentTypeField` is
+                  scoped to `ObjectType.objects.with_feature('custom_fields')`, so a type that does not
+                  exist *and* a type that exists without supporting custom fields both come back as
+                  `Invalid content type: <what you wrote>`
+                  (`netbox/netbox/api/fields.py:102-122`). That arrives as `Ready=False,
+                  Reason=Invalid` carrying NetBox's own sentence.
+
+                  Narrowing this list on an existing field **destroys data**: NetBox strips the field's
+                  stored value from every object of every type removed
+                  (`netbox/extras/signals.py:23-49`). Nothing guards that -- the guard is on deletion
+                  only -- so treat an edit here the way you would treat a `DROP COLUMN`.
+                items:
+                  maxLength: 100
+                  pattern: ^[a-z_]+\.[a-z0-9_]+$
+                  type: string
+                maxItems: 256
+                minItems: 1
+                type: array
+              onConflict:
+                default: Fail
+                description: OnConflict is what to do when NetBox already holds a
+                  matching object.
+                enum:
+                - Fail
+                - Adopt
+                - AdoptOnly
+                type: string
+              relatedObjectFilter:
+                description: |-
+                  RelatedObjectFilter narrows the objects an `object` field may point at, as a NetBox
+                  query-parameter document: `{"status": "active"}`.
+
+                  Omit it to leave NetBox's own value alone; set it to `{}` to clear the value in
+                  NetBox. The two are different intents and the operator can tell them apart
+                  (docs/concepts/field-ownership.md).
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
+              relatedObjectType:
+                description: |-
+                  RelatedObjectType is the NetBox model an `object` or `multiobject` field points at, as
+                  one `app_label.model` string.
+
+                  Singular and a plain value, not an ObjectTypeList: the column is
+                  `related_object_type ForeignKey -> contenttypes.ContentType on_delete=PROTECT`
+                  (docs/netbox-schema.md -> extras.CustomField), so it holds one content type rather
+                  than a set of them. It still travels as a string rather than an id, because
+                  `ContentTypeField` renders a ContentType as `app_label.model` in both directions
+                  (`netbox/netbox/api/fields.py:102-122`) -- which is why this is not a reference either.
+
+                  The pattern admits `""` so the column can be cleared, and the descriptor marks it
+                  EmptyIsNull because that is the only value NetBox accepts to clear it: the serializer
+                  is `required=False, allow_null=True` with no `allow_blank`
+                  (`netbox/extras/api/serializers_/customfields.py:50-54`).
+
+                  Omit it to leave NetBox's own value alone; set it to `""` to clear the value in
+                  NetBox. The two are different intents and the operator can tell them apart
+                  (docs/concepts/field-ownership.md).
+                maxLength: 100
+                pattern: ^([a-z_]+\.[a-z0-9_]+)?$
+                type: string
+              required:
+                default: false
+                description: |-
+                  Required makes the field mandatory when creating or editing an object of any type it
+                  applies to.
+
+                  Turning it on is a decision with a blast radius: every writer of every type in
+                  ObjectTypes then has to supply the field, this operator included -- and this operator
+                  only writes the keys a manifest names, so a required custom field nobody sets is a 400
+                  on every object of that type. NetBox does not backfill.
+
+                  A pointer with an explicit default rather than a plain bool, for the same reason
+                  NetBoxTag.weight is one: `omitempty` on a plain bool drops a deliberate `false` out of
+                  the payload, so the operator could never turn the flag back off.
+                type: boolean
+              searchWeight:
+                default: 1000
+                description: |-
+                  SearchWeight is how heavily this field counts in NetBox's global search. Lower is
+                  more important; zero excludes it.
+
+                  A pointer with an explicit default for the reason NetBoxTag.weight is one: `omitempty`
+                  on a plain int32 would drop a deliberate `0` -- which here is the value that switches
+                  the field out of search entirely (`netbox/extras/models/customfields.py:168-176`).
+                format: int32
+                maximum: 32767
+                minimum: 0
+                type: integer
+              type:
+                default: text
+                description: |-
+                  Type is the kind of data the field holds.
+
+                  **Immutable, because NetBox refuses to change it**: the serializer rejects a PATCH
+                  whose `type` differs from the stored one with "Changing the type of custom fields is
+                  not supported" (`netbox/extras/api/serializers_/customfields.py:75-79`). Without the
+                  CEL rule below, editing it in Git would be a 400 on every reconcile forever, reported
+                  as `Reason=Invalid` and fixable only by putting the old value back -- so the API server
+                  rejects the edit at `kubectl apply`, where the message can say what to do instead.
+
+                  Recreating the CR is not a way round it either: the natural key is the name, so a fresh
+                  CR adopts the same NetBox object. Changing a field's type means deleting the NetBox
+                  custom field, which destroys its values -- see AllowDataLossAnnotation.
+
+                  Defaulted to NetBox's own default so the operator manages the column from the first
+                  reconcile, and because NetBox's serializer requires it on create
+                  (`netbox/extras/api/serializers_/customfields.py:49`).
+                enum:
+                - text
+                - longtext
+                - integer
+                - decimal
+                - boolean
+                - date
+                - datetime
+                - url
+                - json
+                - select
+                - multiselect
+                - object
+                - multiobject
+                type: string
+                x-kubernetes-validations:
+                - message: 'type is immutable: NetBox refuses to change the type of
+                    an existing custom field'
+                  rule: self == oldSelf
+              uiEditable:
+                default: "yes"
+                description: |-
+                  UIEditable is whether NetBox lets the field be edited in its UI. Set it to `no` on a
+                  field a program owns, so that a hand edit does not fight the next reconcile.
+                enum:
+                - "yes"
+                - "no"
+                - hidden
+                type: string
+              uiVisible:
+                default: always
+                description: UIVisible is whether NetBox shows the field.
+                enum:
+                - always
+                - if-set
+                - hidden
+                type: string
+              unique:
+                default: false
+                description: Unique makes the field's value unique across objects
+                  of one type.
+                type: boolean
+              validationMaximum:
+                description: |-
+                  ValidationMaximum is the largest value an `integer` or `decimal` field may hold. A
+                  string for the same reason ValidationMinimum is.
+
+                  Omit it to leave NetBox's own value alone; set it to `""` to clear the value in
+                  NetBox. The two are different intents and the operator can tell them apart
+                  (docs/concepts/field-ownership.md).
+                maxLength: 32
+                pattern: ^(-?[0-9]{1,12}(\.[0-9]{1,4})?)?$
+                type: string
+              validationMinimum:
+                description: |-
+                  ValidationMinimum is the smallest value an `integer` or `decimal` field may hold.
+
+                  A string, and not a number. NetBox's column is `DecimalField decimal(16,4)`
+                  (docs/netbox-schema.md -> extras.CustomField) and DRF renders a decimal as a JSON
+                  string, so `"1.0000"` is what comes back and a float in the spec would compare unequal
+                  to it forever. The descriptor marks the column EmptyIsNull, because DRF parses `""` as
+                  a number and rejects it -- so without that, `""` would be admissible and unwritable
+                  (#170).
+
+                  Omit it to leave NetBox's own value alone; set it to `""` to clear the value in
+                  NetBox. The two are different intents and the operator can tell them apart
+                  (docs/concepts/field-ownership.md).
+                maxLength: 32
+                pattern: ^(-?[0-9]{1,12}(\.[0-9]{1,4})?)?$
+                type: string
+              validationRegex:
+                description: |-
+                  ValidationRegex is a regular expression every value of a text field must match. Use
+                  `^` and `$` to anchor it; NetBox does not.
+
+                  Not compiled here. It is a Python regular expression, validated by NetBox with
+                  `validate_regex` (`netbox/extras/models/customfields.py:222-231`), and a Go
+                  `regexp.Compile` in an admission rule would reject expressions Python accepts and
+                  accept ones it does not.
+
+                  Omit it to leave NetBox's own value alone; set it to `""` to clear the value in
+                  NetBox. The two are different intents and the operator can tell them apart
+                  (docs/concepts/field-ownership.md).
+                maxLength: 500
+                type: string
+              validationSchema:
+                description: |-
+                  ValidationSchema is a JSON Schema document every value of a `json` field must
+                  satisfy.
+
+                  Omit it to leave NetBox's own value alone; set it to `null` to clear the value in
+                  NetBox. The two are different intents and the operator can tell them apart
+                  (docs/concepts/field-ownership.md).
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
+              weight:
+                default: 100
+                description: Weight orders the field within its group in NetBox's
+                  forms; higher appears lower.
+                format: int32
+                maximum: 32767
+                minimum: 0
+                type: integer
+            required:
+            - endpointRef
+            - name
+            - objectTypes
+            type: object
+          status:
+            description: |-
+              NetBoxObjectStatus is the part of every object CR's status that the engine owns. It is
+              the only thing the operator writes: the spec belongs to Git
+              (docs/decisions/0005-gitops-coexistence.md).
+            properties:
+              adopted:
+                description: Adopted reports that the engine took over an object it
+                  did not create.
+                type: boolean
+              children:
+                description: |-
+                  Children are the child CRs this object's inline lists materialised, one entry per
+                  declared child (NBO-032).
+
+                  A status field rather than only a label query, so that `kubectl describe` answers
+                  "what did this VM create" without one. It is also what lets the pruner know which
+                  *kinds* to list after every inline entry has been removed: with an empty inline list
+                  there is no desired child left to read a GVK off, and the children recorded here are
+                  the only remaining record of what to go looking for.
+                items:
+                  description: ChildStatus is one child CR a parent's inline list
+                    materialised.
+                  properties:
+                    kind:
+                      description: Kind is the child's Kind, in this API group.
+                      type: string
+                    name:
+                      description: Name is the child CR's name, derived from the parent's
+                        metadata.name and Path.
+                      type: string
+                    path:
+                      description: |-
+                        Path is the key-based spec path that declared this child, the same string as the
+                        OwnedByPathAnnotation on the child itself: `spec.interfaces[eth0]`. The map key,
+                        because it is the child's identity within the parent -- the name is derived from it.
+                      type: string
+                    ready:
+                      description: |-
+                        Ready is the child's own Ready condition, as of this pass. False includes "the child
+                        was only just created", which is why the parent requeues rather than settling.
+                      type: boolean
+                  required:
+                  - kind
+                  - name
+                  - path
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - path
+                x-kubernetes-list-type: map
+              conditions:
+                description: Conditions follow the standard Kubernetes vocabulary.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              conflict:
+                description: |-
+                  Conflict is the other writer this object's NetBox counterpart says it belongs to, when
+                  its stamp names one (NBO-047). The write went ahead regardless -- see
+                  ConditionConflict and docs/operations/multi-writer.md.
+                properties:
+                  clusterID:
+                    description: |-
+                      ClusterID is the other writer's cluster stamp, verbatim. Empty when the live object
+                      carries none, which is what an endpoint whose clusterField is switched off writes.
+                    type: string
+                  firstObserved:
+                    description: |-
+                      FirstObserved is when this claimant was first seen on this object. Preserved across
+                      reconciles for as long as the claimant does not change.
+                    format: date-time
+                    type: string
+                  observations:
+                    description: |-
+                      Observations is how many consecutive reconciles have found this same claimant. One is a
+                      flap -- a migration, a hand edit, a cluster mid-rebuild; a number that keeps climbing is
+                      two writers taking turns, and only the second is worth waking somebody for.
+
+                      Consecutive reconciles rather than a duration, because a reconcile is when the operator
+                      can observe anything at all: multiply by the endpoint's resyncPeriod for the wall-clock
+                      answer, or read firstObserved. It resets to one when the claimant changes, since a
+                      different writer is a different fight.
+                    format: int32
+                    type: integer
+                  owner:
+                    description: |-
+                      Owner is the other writer's CR, as `<lowercased kind>/<namespace>/<name>` -- the
+                      manifest to go and edit, in the same spelling `status.provenance` and the
+                      netbox.kubeforge.org/generated-by annotation use. Empty when the live object carries no
+                      owner stamp.
+
+                      It names a CR in *another* cluster when Reason is ForeignCluster, so it is a lead rather
+                      than a resolvable reference: nothing in this cluster can look it up, and that is the
+                      point -- otherwise the only record of the other writer would be in a cluster you may not
+                      have.
+                    type: string
+                  reason:
+                    description: |-
+                      Reason is ForeignCluster or ForeignOwner -- the same value as the Conflict condition's
+                      reason, repeated here so a single `-o jsonpath` over `status.conflict` is a complete
+                      answer.
+                    type: string
+                required:
+                - reason
+                type: object
+              deferredPending:
+                description: |-
+                  DeferredPending are the CR spec fields the engine has declared deferred and has not
+                  yet written to NetBox: a `primary_ip4` whose address does not exist yet, or one that
+                  was stripped from the create and is waiting for its follow-up PATCH.
+
+                  A status field rather than only a condition message. The intermediate state is
+                  legitimate and can be long-lived -- a reference that never resolves stays here
+                  forever, on purpose -- so "what is this object still waiting to write" has to be
+                  answerable from `kubectl get -o yaml` and greppable across a namespace, which a
+                  sentence inside a condition is not (docs/concepts/object-lifecycle.md).
+
+                  Spec field names rather than NetBox column names, because it is the spelling the
+                  user wrote and the one the RefsResolved message already uses.
+                items:
+                  type: string
+                type: array
+                x-kubernetes-list-type: atomic
+              deletionAttempts:
+                description: |-
+                  DeletionAttempts counts the deletes NetBox refused because something still
+                  references the object.
+
+                  It is a status field rather than in-memory state because a controller has no memory
+                  between passes: the exponential backoff on a protected delete has to be computed
+                  from a count that survives a requeue, a leader election and a restart. Non-zero
+                  only while a CR is terminating.
+                format: int32
+                type: integer
+              id:
+                description: |-
+                  ID is the NetBox primary key. Zero until the object provably exists server-side --
+                  a DryRun write is reported and never sent, so it leaves this empty rather than
+                  inventing an id that nothing would ever match.
+                format: int64
+                type: integer
+              lastAppliedHash:
+                description: |-
+                  LastAppliedHash is a digest of the last payload NetBox accepted. NetBox
+                  canonicalises some values on write, so the request and the response legitimately
+                  differ; this is the record of what was actually sent.
+                type: string
+              lastSyncTime:
+                description: |-
+                  LastSyncTime is when the engine last wrote to NetBox. Unset until it does, and
+                  untouched by a reconcile that found nothing to do -- otherwise every resync would
+                  bump the resourceVersion of every object in the cluster.
+                format: date-time
+                type: string
+              naturalKey:
+                additionalProperties:
+                  type: string
+                description: |-
+                  NaturalKey is the lookup that actually located the object, filter by filter. The
+                  first thing anyone needs when asking why an object was adopted, or was not.
+                type: object
+              observedGeneration:
+                description: |-
+                  ObservedGeneration is the spec generation this status refers to. Always set,
+                  because `kubectl wait` lies without it.
+                format: int64
+                type: integer
+              provenance:
+                description: |-
+                  Provenance is the stamp this object carries in NetBox: the tag and the custom fields
+                  the engine wrote, as it wrote them.
+
+                  Unset when the endpoint's spec.managedBy is unset, and unset for a kind whose NetBox
+                  model carries neither `tags` nor `custom_fields` -- extras.Tag is one, so a
+                  NetBoxTag is managed and unstamped by construction. That is the state NetBoxSweep
+                  (NBO-046) reports and never deletes; see docs/operations/provenance.md.
+                properties:
+                  clusterID:
+                    description: ClusterID is the cluster identifier written into
+                      the cluster custom field.
+                    type: string
+                  customFields:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      CustomFields are the custom fields written, as NetBox names to the values sent.
+                      Empty for a kind whose NetBox model has no `custom_fields` column.
+
+                      These keys are also the only ones compared: NetBox merges a partial `custom_fields`
+                      PATCH and returns every custom field defined for the object type, including ones the
+                      operator knows nothing about, so it compares the keys it sets and leaves the rest
+                      alone. An absent or empty map therefore still means "manage nothing" rather than
+                      "clear everything"; removing one key's value is said with a `null` under
+                      spec.customFields (docs/concepts/field-ownership.md, #196).
+                    type: object
+                  tag:
+                    description: |-
+                      Tag is the tag's slug, written by id. Empty for a kind whose NetBox model has no
+                      `tags` column.
+                    type: string
+                type: object
+              url:
+                description: URL is the object's absolute NetBox URL, as returned
+                  by the API.
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

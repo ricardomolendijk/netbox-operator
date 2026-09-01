@@ -41,6 +41,19 @@ func extrasTagDescriptor() Descriptor {
 		Taggable:        false,
 		CustomFieldable: false,
 
+		// The other half of NBO-059's collision, and the one that shipped first: the provenance
+		// bootstrap creates `spec.managedBy.tag` -- `k8s-managed` by default -- by slug, before
+		// the endpoint reports Ready (internal/provenance/bootstrap.go, bootstrapTag). So a
+		// NetBoxTag claiming that slug would be a second writer of the tag NetBoxSweep
+		// (NBO-046) keys on and multi-writer detection (NBO-047) reads, and deleting the CR
+		// would delete the tag off every object the operator manages -- at which point nothing
+		// in NetBox says the operator owns anything.
+		//
+		// Refused instead: `Ready=False, Reason=ReservedByOperator`, nothing written. Per
+		// endpoint, so a NetBoxTag for `k8s-managed` is perfectly fine against an endpoint that
+		// stamps nothing or that renamed its tag (provenance.Config.Reserved).
+		ReservedKeySpec: "slug",
+
 		// The bridge between the two vocabularies every other list here uses: CR spec
 		// names on the left, NetBox API names on the right. `objectTypes` -> `object_types`
 		// is the entry that earns the table -- no camelCase-to-snake_case convention gets

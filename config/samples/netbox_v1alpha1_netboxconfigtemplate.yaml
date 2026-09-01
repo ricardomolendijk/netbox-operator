@@ -1,0 +1,25 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxConfigTemplate
+metadata:
+  name: motd
+  namespace: default
+spec:
+  endpointRef: homelab
+
+  # The natural key -- not unique in NetBox, so two templates with this name report
+  # Conflict rather than one of them winning.
+  name: motd
+  description: Login banner
+
+  templateCode: |
+    Welcome to {{ object.name }}.
+    This host is managed from Kubernetes. Do not edit by hand.
+
+  # Jinja2 Environment keyword arguments. `autoescape` is ignored here: NetBox forces it
+  # off for config templates.
+  environmentParams:
+    trim_blocks: true
+
+  mimeType: text/plain
+  asAttachment: false
+  debug: false

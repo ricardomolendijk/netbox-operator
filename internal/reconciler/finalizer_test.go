@@ -571,6 +571,26 @@ var deletionDefaults = map[string]netboxv1alpha1.DeletionPolicy{
 	"NetBoxVirtualMachine":    netboxv1alpha1.DeletionDelete,
 	"NetBoxVMInterface":       netboxv1alpha1.DeletionDelete,
 	"NetBoxVirtualDisk":       netboxv1alpha1.DeletionDelete,
+
+	// `extras` -- NetBox's own configuration, and the app where "cheap to recreate" is most
+	// literally true: a link, a filter or a template holds no state, and deleting one loses a
+	// button rather than a record.
+	//
+	// NetBoxCustomField is `Delete` too, and that is not the loose end it looks like. Deleting
+	// one *does* destroy data, on every object in NetBox that has the field -- which is why it
+	// declares DataLossOnDelete and the finalizer refuses by default with
+	// `Deleting=False, Reason=DataLossBlocked`. That guard is a separate axis from this one:
+	// `Retain` would mean "leave the definition in NetBox and forget it", and defaulting to
+	// that would leave a schema column nothing manages behind every deleted CR. Refusing until
+	// a human says the loss is acceptable is the honest default, and it is reversible.
+	"NetBoxCustomField":          netboxv1alpha1.DeletionDelete,
+	"NetBoxCustomFieldChoiceSet": netboxv1alpha1.DeletionDelete,
+	"NetBoxCustomLink":           netboxv1alpha1.DeletionDelete,
+	"NetBoxSavedFilter":          netboxv1alpha1.DeletionDelete,
+	"NetBoxExportTemplate":       netboxv1alpha1.DeletionDelete,
+	"NetBoxConfigTemplate":       netboxv1alpha1.DeletionDelete,
+	"NetBoxConfigContextProfile": netboxv1alpha1.DeletionDelete,
+	"NetBoxConfigContext":        netboxv1alpha1.DeletionDelete,
 }
 
 // TestEveryKindsDeletionDefaultIsStated is criterion 2 of #186, and it is the test whose

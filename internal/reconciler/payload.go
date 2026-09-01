@@ -264,11 +264,17 @@ func isGenericFK(d registry.Descriptor, spec string) bool {
 func fieldRules(d registry.Descriptor) netbox.FieldRules {
 	m2m := set(d.M2MFields())
 
-	// `tags` is not in any descriptor's M2M list because no spec field maps onto it: it is
-	// the engine's own column, written by the provenance stamp (NBO-075). It still needs the
-	// M2M rule, and getting that wrong is the loud kind of wrong -- NetBox returns tags as
-	// nested objects and takes them as bare ids, so compared as scalars they never match and
-	// the operator PATCHes the same list forever.
+	// `tags` is not in a *Taggable* descriptor's M2M list, because on those kinds no spec
+	// field maps onto it: it is the engine's own column, written by the provenance stamp
+	// (NBO-075). It still needs the M2M rule, and getting that wrong is the loud kind of
+	// wrong -- NetBox returns tags as nested objects and takes them as bare ids, so compared
+	// as scalars they never match and the operator PATCHes the same list forever.
+	//
+	// The rule arrives from M2MFields() instead on extras.ConfigContext, where `tags` is not
+	// `TagsMixin` but a user-owned selector and the kind is deliberately not Taggable. The
+	// two paths are mutually exclusive by construction: registry.Validate refuses a
+	// descriptor that is Taggable *and* maps a spec field onto `tags`
+	// (registry.ErrTagsFieldOnTaggableKind), so this never overwrites a declared entry.
 	if d.Taggable {
 		if m2m == nil {
 			m2m = map[string]bool{}
@@ -280,6 +286,7 @@ func fieldRules(d registry.Descriptor) netbox.FieldRules {
 		M2M:             m2m,
 		ObjectTypeLists: set(d.ObjectTypeListFields()),
 		Arrays:          set(d.ArrayFields()),
+		JSON:            set(d.JSONFields()),
 		GenericFKs:      make([]netbox.GenericFK, 0, len(d.GenericFKs)),
 	}
 

@@ -85,7 +85,8 @@ the table, and there is no second one.
 | [`NetBoxVRF`](../reference/netboxvrf.md) | `Retain` | A VRF is the table its prefixes and addresses are unique *within*, so deleting one changes what every address inside it means |
 | [`NetBoxVLANGroup`](../reference/netboxvlangroup.md) | **`Delete`** | A container, not an allocation — [see below](#netboxvlangroup-is-a-container-not-an-allocation) |
 | [`NetBoxIPAddressClaim`](../reference/netboxipaddressclaim.md) | **`Delete`** | The claim's CR is the only record its allocation exists — [see below](#the-claim-is-the-exception-to-the-exception) |
-| every other Kind (`NetBoxTag`, `NetBoxSite`, the catalogue kinds, …) | `Delete` | Configuration: cheap to delete, cheap to recreate |
+| [`NetBoxCustomField`](../reference/netboxcustomfield.md) | **`Delete`**, and refused | Deleting one destroys data and NetBox does not refuse it, so the *finalizer* does — [see below](#delete-and-refused-are-not-the-same-axis) |
+| every other Kind (`NetBoxTag`, `NetBoxSite`, the catalogue kinds, the `extras` kinds, …) | `Delete` | Configuration: cheap to delete, cheap to recreate |
 
 The table is checked rather than merely written down.
 `TestEveryKindsDeletionDefaultIsStated` (`internal/reconciler/finalizer_test.go`) reads the
@@ -112,6 +113,30 @@ It is also the case where `Delete` is least likely to lose anything by accident.
 *refuses* to delete a group that still holds VLANs, and the operator can only
 [report the refusal](#what-protect-looks-like). The VLANs themselves default to `Retain` —
 which is the pair worth remembering: the container goes, the contents stay.
+
+### `Delete` and refused are not the same axis
+
+`NetBoxCustomField` is the row that looks like a contradiction: its default is `Delete`, and
+deleting one is *refused* by default with `Deleting=False, Reason=DataLossBlocked`
+(step 4 above). Both are right, because they answer different questions.
+
+`deletionPolicy` answers **"when the CR goes, should the NetBox object go too?"** For a custom
+field the answer is yes: `Retain` would leave a column in NetBox's schema that nothing manages,
+on every object type the field covered, with no CR left to say what it is for. That is the worse
+end state, and it is the one a wrong default would produce silently.
+
+The data-loss guard answers **"is this particular delete one a human should confirm?"** For a
+custom field the answer is also yes, and for a different reason: NetBox strips the field's
+stored value from every object that has one and does not refuse the delete, so the engine's
+usual safety net — send the `DELETE`, let `PROTECT` stop it — cannot fire. The guard keeps the
+finalizer on, which means the CR and the NetBox object are both still there and the decision is
+still reversible. `netbox.kubeforge.org/allow-data-loss: "true"` or `deletionPolicy: Retain`
+each finish it, and they finish it differently
+([custom fields](../custom-fields.md#deleting-a-custom-field-destroys-data)).
+
+So: the policy says what the end state should be, and the guard says who has to agree to it.
+Every other Kind in the catalogue answers the second question with "nobody" because NetBox
+answers it for us.
 
 ### The claim is the exception to the exception
 
@@ -222,20 +247,21 @@ unreachable**. An escape hatch that only works when it is not needed is not an e
 | 1 | The `netbox.kubeforge.org/skip-finalizer=true` annotation | Drop the finalizer, `Warning`/`FinalizerSkipped`. No NetBox call. |
 | 2 | `spec.deletionPolicy: Retain` | Drop the finalizer, `Normal`/`Retained`. No NetBox call. |
 | 3 | `status.id == 0` | Drop the finalizer, `Normal`/`NothingToDelete`. No NetBox call. |
-| 4 | A child CR this object [materialised](inline-children.md) is still in the cluster | `Deleting=False, Reason=PendingDependents` naming it. Keep the finalizer, requeue in 15s. **This is what orders the NetBox deletes**, not `blockOwnerDeletion` — see below. |
-| 5 | The endpoint is not `Ready` | `Deleting=False, Reason=WaitingForEndpoint`. Keep the finalizer, requeue in 30s. |
-| 6 | `DELETE` returns success | Drop the finalizer, `Normal`/`Deleted`. |
-| 7 | `DELETE` returns 404 | Drop the finalizer, `Normal`/`Deleted`. Already gone is the end state that was asked for. |
-| 8 | `DELETE` returns 409, or a body naming a protected relation | `Deleting=False, Reason=Protected`, NetBox's message verbatim. Keep the finalizer, requeue with capped backoff. |
-| 9 | Anything else | `Deleting=False`, reason and interval from the [error table](errors-and-retries.md). Keep the finalizer. |
+| 4 | The Kind destroys data on delete and `netbox.kubeforge.org/allow-data-loss` is not `"true"` | `Deleting=False, Reason=DataLossBlocked`. Keep the finalizer. No NetBox call. |
+| 5 | A child CR this object [materialised](inline-children.md) is still in the cluster | `Deleting=False, Reason=PendingDependents` naming it. Keep the finalizer, requeue in 15s. **This is what orders the NetBox deletes**, not `blockOwnerDeletion` — see below. |
+| 6 | The endpoint is not `Ready` | `Deleting=False, Reason=WaitingForEndpoint`. Keep the finalizer, requeue in 30s. |
+| 7 | `DELETE` returns success | Drop the finalizer, `Normal`/`Deleted`. |
+| 8 | `DELETE` returns 404 | Drop the finalizer, `Normal`/`Deleted`. Already gone is the end state that was asked for. |
+| 9 | `DELETE` returns 409, or a body naming a protected relation | `Deleting=False, Reason=Protected`, NetBox's message verbatim. Keep the finalizer, requeue with capped backoff. |
+| 10 | Anything else | `Deleting=False`, reason and interval from the [error table](errors-and-retries.md). Keep the finalizer. |
 
 A CR that carries no finalizer of ours is left alone entirely: something else is holding it
 open, and requeueing against that would be a busy loop.
 
 That table is the **declarative** engine's. A claim runs the same sequence in the same order,
 over `status.netboxID` instead of `status.id` and reporting `AddressRetained` where this one
-reports `Retained` — with one difference: steps 4, 7 and 8 are bounded, and the eighth attempt
-releases the finalizer rather than keeping it
+reports `Retained` — with one difference: the endpoint-unavailable and NetBox-failure steps are
+bounded there, and the eighth attempt releases the finalizer rather than keeping it
 ([the claim reference](../reference/netboxipaddressclaim.md#it-still-cannot-make-a-namespace-undeletable)).
 
 **Step 4 is why a cascade comes out in the right order.** `blockOwnerDeletion: true` is on
@@ -254,11 +280,55 @@ The `Deleting` condition is only ever `False`. The finalizer comes off the insta
 side settles, so a `True` would have to sit on a CR that no longer exists to carry it. The
 `Reason` is therefore always *what is holding the deletion up*.
 
-Every step that drops the finalizer — 1, 2, 3, 5 and 6 — writes no status: the object is
+Every step that drops the finalizer — 1, 2, 3, 6 and 7 — writes no status: the object is
 about to stop existing, so a status update either races the delete or is never read. The
 Event is the record that outlives the CR, which is why every one of those steps has one. The
-steps that keep the finalizer — 4, 7 and 8 — write a condition instead, because there is
+steps that keep the finalizer — 4, 5, 8 and 9 — write a condition instead, because there is
 still an object to describe.
+
+### Step 4 — the delete NetBox will not refuse for you
+
+Steps 8 and 9 are the engine's usual safety net: send the `DELETE`, and let NetBox refuse
+anything that would break a relation. It works because NetBox declares `on_delete=PROTECT` on
+the foreign keys that matter, so the destructive case answers itself.
+
+`extras.CustomField` is the case where it does not. A custom field's values live inside each
+object's own `custom_field_data` JSON rather than in rows pointing back at the definition, so
+there is nothing to protect — and NetBox does not merely permit the delete, it *performs the
+cleanup*: a `pre_delete` signal issues `custom_field_data = custom_field_data - <name>` over
+every object of every type the field was assigned to
+(`netbox/extras/signals.py`, `handle_cf_deleted`). One `kubectl delete` would silently drop a
+column's worth of data across the whole instance, and NetBox would return 204.
+
+So the refusal has to be the operator's. A Kind whose descriptor declares `DataLossOnDelete`
+blocks here by default:
+
+```console
+Type:     Deleting
+Status:   False
+Reason:   DataLossBlocked
+Message:  deleting netbox extras/custom-fields/42 destroys this field's stored value on every
+          object in netbox that has one, and netbox does not refuse it; the finalizer stays
+          on. Set the annotation netbox.kubeforge.org/allow-data-loss=true to accept the
+          loss, or spec.deletionPolicy: Retain to keep the netbox object
+```
+
+The finalizer stays on, which is what makes it a decision rather than an outage: the CR is
+still there, the NetBox object is still there, and both ways out are in the message.
+
+| Way out | Effect |
+|---|---|
+| `netbox.kubeforge.org/allow-data-loss: "true"` on the CR | The `DELETE` goes out. The values are gone. |
+| `spec.deletionPolicy: Retain` | Step 2 answers first: the finalizer comes off and NetBox is untouched. |
+
+Only the exact string `"true"` unblocks — the annotation being absent, misspelled or set to
+`yes` all block, so a typo is safe in the direction that keeps the data. And note the ordering:
+this is step 4, *after* `skip-finalizer` and `Retain`, so a CR that never intended to delete
+anything is not asked to make a decision about data it was not going to destroy.
+
+Today the only Kind that declares it is [`NetBoxCustomField`](../custom-fields.md). The flag is
+data on the Descriptor rather than a branch in the engine, so the next model with the same
+property is one line.
 
 ### Step 3 — why an unset `status.id` deletes nothing
 
@@ -283,7 +353,7 @@ the natural key from `status.naturalKey` when there is one, because that is the 
 anyone has. This is the single place where the operator can leave behind an object it will
 never find again, and it says so rather than picking the flattering reading.
 
-### Step 4 — the endpoint-unavailable decision
+### Step 5 — the endpoint-unavailable decision
 
 **Decision: block the deletion, keep the finalizer, and say so in the condition.**
 
@@ -425,3 +495,4 @@ body — so nothing can mistake a suppressed delete for a completed one.
   — the deletion policy and the `PROTECT` behaviour as decided
 - [Object lifecycle](object-lifecycle.md) — the create/adopt/update half of the same engine
 - [Errors and retries](errors-and-retries.md) — which NetBox failure becomes which typed error
+- [Custom fields](../custom-fields.md) — the one Kind whose delete the operator refuses, and why

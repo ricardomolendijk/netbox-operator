@@ -77,6 +77,10 @@ type irField struct {
 	Required    bool   `json:"required"`
 	Ref         *irRef `json:"ref"`
 	SQL         irSQL  `json:"sql"`
+
+	// DeclaredBy is the mixin or base class the column comes from, or empty when the model
+	// declares it itself. It is what tells `tags` from `tags`: see mixesInTagsMixin.
+	DeclaredBy string `json:"declared_by"`
 }
 
 // irNullField is one column a natural-key candidate pins to null.
@@ -583,7 +587,7 @@ func (a *audit) checkRegistryAgreesWithSchema(t *testing.T) {
 			t.Errorf("descriptor %s: endpoint %q, schema says %q", d.GVK.Kind, d.Endpoint, kind.Endpoint)
 		}
 
-		assertFlag(t, d.GVK.Kind, "Taggable", d.Taggable, hasWritableColumn(kind, "tags"))
+		assertFlag(t, d.GVK.Kind, "Taggable", d.Taggable, mixesInTagsMixin(kind))
 		assertFlag(t, d.GVK.Kind, "CustomFieldable", d.CustomFieldable, slices.Contains(kind.WritePath, "custom_fields"))
 	}
 }
@@ -596,9 +600,19 @@ func assertFlag(t *testing.T, kind, name string, declared, schema bool) {
 	}
 }
 
-func hasWritableColumn(kind irKind, column string) bool {
+// mixesInTagsMixin reports whether this model's `tags` column is the object's *own* tags --
+// the column the provenance stamp writes into -- rather than a plain many-to-many that
+// happens to point at extras.Tag.
+//
+// A writable `tags` column is not enough, and extras.ConfigContext is why: it declares
+// `tags` itself, as a `ManyToManyField -> extras.Tag` with `related_name='+'` selecting which
+// tagged objects the context applies to, and it mixes in no TagsMixin at all. Deriving
+// Taggable from the column alone would make the operator append `k8s-managed` to that
+// selector and silently change which objects in NetBox receive the configuration, so the IR's
+// own record of *where the column comes from* is what the flag is checked against.
+func mixesInTagsMixin(kind irKind) bool {
 	return slices.ContainsFunc(kind.Fields, func(f irField) bool {
-		return f.Name == column && f.InWritePath && !f.ReadOnly
+		return f.Name == "tags" && f.DeclaredBy == "TagsMixin" && f.InWritePath && !f.ReadOnly
 	})
 }
 

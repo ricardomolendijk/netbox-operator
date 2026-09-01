@@ -1,0 +1,29 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxCustomFieldChoiceSet
+metadata:
+  name: service-tier
+  namespace: default
+spec:
+  # The NetBoxEndpoint to write through, in this namespace. There is no cluster-wide
+  # default endpoint; see config/samples/netbox_v1alpha1_netboxendpoint.yaml.
+  endpointRef: homelab
+
+  # The natural key. NetBox enforces name uniqueness globally, so the first namespace to
+  # claim it gets it and a second NetBoxCustomFieldChoiceSet with this name reports Conflict.
+  name: service-tier
+  description: Service tiers for the platform team
+
+  # `[value, label]` pairs, in the order NetBox should offer them. The order is data:
+  # NetBox only re-sorts when orderAlphabetically is true.
+  extraChoices:
+    - ["gold", "Gold"]
+    - ["silver", "Silver"]
+    - ["bronze", "Bronze"]
+
+  # A JSON object mapping a choice value to one of NetBox's own colour names.
+  choiceColors:
+    gold: yellow
+    silver: gray
+    bronze: orange
+
+  orderAlphabetically: false

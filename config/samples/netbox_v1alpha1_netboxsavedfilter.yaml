@@ -1,0 +1,23 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxSavedFilter
+metadata:
+  name: active-vms
+  namespace: default
+spec:
+  endpointRef: homelab
+
+  name: Active virtual machines
+  # The first natural-key candidate. `name` is the second, which is what makes editing
+  # this slug a rename rather than a duplicate.
+  slug: active-vms
+  description: Everything currently running
+
+  objectTypes:
+    - virtualization.virtualmachine
+
+  # NetBox query parameters. Values are lists because a query string can repeat a key.
+  parameters:
+    status:
+      - active
+
+  weight: 10

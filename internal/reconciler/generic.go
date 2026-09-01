@@ -13,6 +13,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -259,6 +260,14 @@ func (e *Engine) Reconcile(ctx context.Context, obj Object) (ctrl.Result, error)
 		return p.stop(ctx, err)
 	}
 
+	// After build, because the key is read from the decoded spec; before anything reaches
+	// NetBox, because the whole point is that nothing does. A refused object never locates,
+	// never creates and never deletes: its status.id stays zero, so deleting the CR releases
+	// the finalizer without a DELETE (finalizer.go, releaseWithoutDeleting).
+	if err := p.reserved(); err != nil {
+		return p.stop(ctx, err)
+	}
+
 	// After build, because the parent's namespace, Kind and uid come out of reference
 	// resolution; before the NetBox write, so that an object whose lifecycle depends on
 	// another is marked as such before anything exists for it to leak. A failure here is a
@@ -393,6 +402,50 @@ func (p *pass) build(ctx context.Context) error {
 	p.deferred = newDeferral(p.desc, p.state, p.desired)
 
 	return nil
+}
+
+// reserved refuses an object whose NetBox counterpart the provenance bootstrap writes.
+//
+// The one place two writers for one NetBox object could otherwise happen, and the operator
+// is both of them: the bootstrap creates the `k8s-managed` tag and the custom fields
+// spec.managedBy names before this endpoint reported Ready, derives their `object_types` from
+// the descriptor registry and widens it as kinds are added (internal/provenance). A CR for
+// one of those is a second writer of the object every stamped object in the cluster depends
+// on -- and the CR would win, because it PATCHes on every resync. Narrowing `object_types` on
+// `k8s_uid` deletes the stored value from every object of the types removed; deleting the
+// definition deletes all of them.
+//
+// So: refuse, and write nothing. Not "merge", because there is no merge -- the CR's spec is
+// the whole desired state for the columns it declares. Not "adopt", because adopting is how
+// the CR becomes the writer. Not "exclude the field from the payload", because a CR whose
+// `objectTypes` is silently ignored reports itself synced while NetBox holds something else.
+//
+// Data-driven both ways round, so nothing here is about a Kind: the descriptor says which
+// spec field holds a key for its NetBox model (ReservedKeySpec), and the endpoint says which
+// keys are reserved for that model (provenance.Config.Reserved). A kind with no
+// ReservedKeySpec, an endpoint with no spec.managedBy, and an endpoint whose field names were
+// changed all fall out of the same two lookups.
+func (p *pass) reserved() error {
+	if p.desc.ReservedKeySpec == "" {
+		return nil
+	}
+
+	// A non-string, or the empty string, is not a key that can collide. The spec field's own
+	// validation is what rejects it as a value; this guard is not the place to duplicate it.
+	key, ok := p.spec[p.desc.ReservedKeySpec].(string)
+	if !ok || key == "" {
+		return nil
+	}
+
+	if !slices.Contains(p.endpoint.Provenance.Reserved()[p.desc.ObjectType], key) {
+		return nil
+	}
+
+	return fmt.Errorf("%w: %s %q is configured on netboxendpoint %q as part of spec.managedBy, "+
+		"so the operator writes it and this object writes nothing; "+
+		"rename it, or switch that provenance field off with the empty string "+
+		"(docs/operations/provenance.md)",
+		errReservedByProvenance, p.desc.ReservedKeySpec, key, p.obj.NetBoxSpec().EndpointRef)
 }
 
 // reportUntrackedOwnership records that this object carries no spec ownership metadata, so

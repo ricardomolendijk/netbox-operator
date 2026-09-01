@@ -11,6 +11,7 @@ Examples arrive with the milestone that makes them real:
 | [`tag.yaml`](tag.yaml) — a credential, a connection and one NetBox object | **available** (M1, NBO-008) |
 | [`site.yaml`](site.yaml) — a site, exercising a choice field and two decimals | **available** (M1, NBO-009) |
 | [`contacts.yaml`](contacts.yaml) — a contact group tree, two roles, one contact, and the same contact attached to a tenant, a site and an unmanaged prefix | **available** (M10, NBO-056) |
+| [`extras.yaml`](extras.yaml) — NetBox's own configuration: a custom field, its choices, a link, a filter, two templates and a config context | **available** (M10, NBO-059) |
 | `graph-any-order.yaml` — apply a dependency graph in reverse and watch it converge | M2 |
 | `ipam-core.yaml` — tenant, VRF, VLAN, prefix, addresses | M3 |
 | `vm-and-device.yaml` — clusters, VMs, devices, interfaces | M4 |

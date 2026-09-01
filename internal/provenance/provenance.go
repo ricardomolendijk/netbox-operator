@@ -126,6 +126,50 @@ func (c Config) CustomFieldNames() []string {
 	return names
 }
 
+// The `app_label.model` strings of the two NetBox models the bootstrap writes. They match
+// the Descriptor.ObjectType of NetBoxTag and NetBoxCustomField, which is what joins the two
+// halves of the reservation: this package says which keys are reserved on which model, the
+// descriptor says which CR spec field holds a key for that model, and neither has to know
+// the other's Kind names.
+const (
+	tagObjectType         = "extras.tag"
+	customFieldObjectType = "extras.customfield"
+)
+
+// Reserved are the lookup keys this endpoint's bootstrap owns, by the NetBox model they
+// belong to.
+//
+// It exists because the operator is a writer of two NetBox models that also have CRDs, and
+// two writers for one object is not something the engine can make safe. The bootstrap
+// creates the tag and up to four custom fields before the endpoint reports Ready, derives
+// `object_types` from the descriptor registry, and widens it whenever a kind is added
+// (bootstrap.go). A CR claiming one of those objects would be the second writer of it, and
+// the loser of that fight is not the CR -- it is every stamped object in the cluster:
+// narrowing `object_types` on `k8s_uid` deletes the stored value from every object of the
+// types removed (netbox/extras/signals.py, handle_cf_object_types_changed with post_remove),
+// and deleting the definition deletes all of them.
+//
+// So the engine refuses such a CR outright (registry.Descriptor.ReservedKeySpec). This
+// function is the list of what is refused, and it is per endpoint rather than a package
+// constant for the reason the names are configurable at all: an endpoint that set
+// `uidField: k8s_id` reserves `k8s_id` and leaves `k8s_uid` free, an endpoint that set
+// `uidField: ""` bootstraps nothing under that name and reserves nothing, and an endpoint
+// with no `spec.managedBy` at all reserves nothing whatsoever -- there is no second writer,
+// so there is nothing to refuse.
+//
+// Nil when provenance is off, which callers read as "reserves nothing" without a special
+// case: indexing a nil map yields the nil slice, and nothing is contained in that.
+func (c Config) Reserved() map[string][]string {
+	if !c.Enabled() {
+		return nil
+	}
+
+	return map[string][]string{
+		tagObjectType:         {c.Tag},
+		customFieldObjectType: c.CustomFieldNames(),
+	}
+}
+
 // Stamp is a Config the bootstrap has resolved against a live NetBox: the same names, plus
 // the tag's id, which is the one part of the stamp that cannot be known from the spec.
 //

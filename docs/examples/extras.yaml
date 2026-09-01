@@ -1,0 +1,334 @@
+# NetBox's own configuration, declared: a custom field and its choices, a custom link, a
+# saved filter, an export template, a config template, a config-context profile and the
+# config context it validates.
+#
+# Everything here is `extras` -- the app that configures NetBox rather than describing a
+# network. None of it is a site, a prefix or a device; all of it changes what NetBox shows
+# you and what it will let you store.
+#
+#   kubectl create namespace homelab
+#   kubectl apply -f docs/examples/extras.yaml
+#   kubectl get nbcf,nbcfcs,nbcl,nbsf,nbet,nbct,nbccp,nbcc -n homelab
+#
+# Replace the URL and the token before applying.
+#
+# Order matters here in a way it does not elsewhere. `spec.customFields` on any other Kind
+# writes keys into NetBox's custom-field storage and NetBox rejects an unknown key with a
+# 400, so the NetBoxCustomField below has to exist before anything populates `service_tier`.
+# Applying the whole file at once is fine -- the choice set and the field converge in
+# whatever order the API server hands them over, and a consumer that arrives too early
+# reports Reason=Invalid naming the key and retries. See docs/custom-fields.md.
+#
+# One thing this file cannot show you: a NetBoxCustomField named `k8s_uid`. The operator
+# bootstraps that field itself and refuses a CR for it, with
+# Ready=False, Reason=ReservedByOperator and no request sent at all.
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: netbox-token
+  namespace: homelab
+  labels:
+    # Required. The operator's Secret cache selects on this label, so a Secret without it
+    # is invisible even when the name on the endpoint is right. See docs/operations/rbac.md.
+    netbox.kubeforge.org/endpoint-credential: "true"
+type: Opaque
+stringData:
+  # A NetBox API token with write access to the extras app. Adding custom fields is a
+  # schema change in NetBox's eyes: this token needs extras.add_customfield and
+  # extras.change_customfield, which a read-mostly token will not have.
+  token: "0123456789abcdef0123456789abcdef01234567"
+---
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxEndpoint
+metadata:
+  name: homelab
+  namespace: homelab
+spec:
+  url: https://netbox.home.arpa
+  tokenSecretRef:
+    name: netbox-token
+  resyncPeriod: 2m
+  mode: Apply
+---
+# The legal values for the custom field below. It comes first in the file because the field
+# references it; it need not, because a reference the operator cannot resolve yet is a wait
+# rather than a failure.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxCustomFieldChoiceSet
+metadata:
+  name: service-tier
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  # The natural key. Unique across the whole NetBox.
+  name: service-tier
+  description: Support tiers the platform team offers
+
+  # `[value, label]` pairs. The order is data: NetBox concatenates the base set and these in
+  # the order given, and only re-sorts when orderAlphabetically is true.
+  extraChoices:
+    - ["gold", "Gold"]
+    - ["silver", "Silver"]
+    - ["bronze", "Bronze"]
+
+  # A JSON object keyed on choice *value*, using NetBox's own colour names. Compared as a
+  # whole document rather than field by field.
+  choiceColors:
+    gold: yellow
+    silver: gray
+    bronze: orange
+
+  orderAlphabetically: false
+---
+# The custom field itself: a column on NetBox's schema, which every other Kind's
+# `spec.customFields` can then write into as `service_tier`.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxCustomField
+metadata:
+  # The CR name and the NetBox name are independent, and have to be: `service_tier` is not a
+  # legal Kubernetes object name. The natural key is spec.name.
+  name: service-tier
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  # Lowercase, digits and single underscores. NetBox allows uppercase and this CRD does not:
+  # the name is a JSON key written by hand in every manifest that populates the field, and
+  # `service_Tier` versus `service_tier` is a 400 on every object rather than a typo you can
+  # see.
+  name: service_tier
+
+  # Required by NetBox, and Django ContentType strings rather than references to CRs. A type
+  # this operator has no Kind for is accepted; a type NetBox does not have is rejected by
+  # NetBox with "Invalid content type".
+  #
+  # Removing a type from this list later destroys that field's stored value on every object
+  # of the type removed. Treat an edit here like a DROP COLUMN.
+  objectTypes:
+    - virtualization.virtualmachine
+    - dcim.device
+
+  # Immutable. NetBox refuses to change the type of an existing custom field, so the API
+  # server rejects the edit at `kubectl apply` rather than letting it 400 forever.
+  type: select
+  choiceSetRef:
+    name: service-tier
+
+  label: Service tier
+  groupName: Platform
+  description: Which support tier this workload is on
+
+  # `exact`, not NetBox's own `loose`: this field is a label to filter on precisely, and
+  # loose filtering would make ?cf_service_tier=gold a substring match.
+  filterLogic: exact
+
+  # A field a program owns should not be hand-editable in the UI -- an edit there is drift
+  # the next reconcile reverts, which is confusing for whoever made it.
+  uiEditable: "no"
+
+  # A JSON *value*, so a string default is a quoted JSON string. NetBox back-fills it onto
+  # every object of a type added to objectTypes afterwards.
+  default: '"bronze"'
+
+  # Deleting this CR is blocked by default: NetBox would strip service_tier off every VM and
+  # device that has it, and does not refuse the delete. Annotate the CR with
+  # netbox.kubeforge.org/allow-data-loss: "true" to accept that, or set
+  # deletionPolicy: Retain to leave the NetBox object alone. See docs/custom-fields.md.
+---
+# A button on every VM's page in NetBox, whose text and URL are Jinja2 rendered with that
+# object as context.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxCustomLink
+metadata:
+  name: grafana
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  name: Grafana dashboard
+  objectTypes:
+    - virtualization.virtualmachine
+
+  linkText: "Grafana: {{ object.name }}"
+  linkUrl: "https://grafana.home.arpa/d/vm?var-host={{ object.name }}"
+
+  # Links sharing a groupName collapse into one dropdown, and the first one's buttonClass
+  # colours the button.
+  groupName: Observability
+  buttonClass: blue
+  newWindow: true
+  weight: 100
+---
+# A one-click filter in NetBox's UI.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxSavedFilter
+metadata:
+  name: gold-tier-vms
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  name: Gold-tier virtual machines
+  # The first natural-key candidate; `name` is the second. That is what makes editing this
+  # slug a rename rather than a create NetBox refuses on the unique name.
+  slug: gold-tier-vms
+  description: Everything on the tier with a pager attached
+
+  objectTypes:
+    - virtualization.virtualmachine
+
+  # NetBox query parameters, as a JSON object. Values are lists because a query string can
+  # repeat a key. This one filters on the custom field declared above.
+  parameters:
+    status:
+      - active
+    cf_service_tier:
+      - gold
+
+  # Shared, because a filter declared from Git has no NetBox user to own it and an unshared
+  # filter with no owner is one nobody can see.
+  shared: true
+  weight: 10
+---
+# An export format offered on NetBox's VM list view.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxExportTemplate
+metadata:
+  name: vm-inventory-csv
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  # NetBox does *not* enforce uniqueness on this column, so two export templates called
+  # `vm-inventory-csv` make the lookup ambiguous and this CR reports
+  # Ready=False, Reason=Conflict naming both -- rather than picking one and overwriting it.
+  # `table` is a reserved name NetBox refuses.
+  name: vm-inventory-csv
+  description: One row per virtual machine, with its service tier
+
+  objectTypes:
+    - virtualization.virtualmachine
+
+  templateCode: |
+    name,status,vcpus,memory,tier
+    {% for vm in queryset %}{{ vm.name }},{{ vm.status }},{{ vm.vcpus }},{{ vm.memory }},{{ vm.custom_field_data.service_tier }}
+    {% endfor %}
+
+  mimeType: text/csv
+  fileName: vm-inventory
+  fileExtension: csv
+  asAttachment: true
+---
+# A configuration NetBox can render for a device or a VM.
+#
+# Nothing in this API version points at one yet: `config_template` on NetBoxVirtualMachine
+# and NetBoxDevice is not a spec field. Rendering it from NetBox's own UI or API works.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxConfigTemplate
+metadata:
+  name: motd
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  # Not unique in NetBox either, for the same reason and with the same consequence as the
+  # export template above.
+  name: motd
+  description: Login banner
+
+  templateCode: |
+    Welcome to {{ object.name }}.
+    Service tier: {{ object.custom_field_data.service_tier | default("none") }}.
+    This host is managed from Kubernetes. Do not edit by hand.
+
+  # Jinja2 Environment keyword arguments. `autoescape` is ignored on this Kind: NetBox forces
+  # it off, because a config template renders plain text and an escaping template would be a
+  # latent XSS sink if the output were ever shown as HTML.
+  environmentParams:
+    trim_blocks: true
+
+  mimeType: text/plain
+  asAttachment: false
+
+  # Returns a full Python traceback to whoever asks for a render. NetBox's own help text says
+  # not to use it in production, and means it.
+  debug: false
+---
+# The JSON Schema a config context's `data` is validated against.
+#
+# The one Kind in this app whose provenance stamp does not follow its bases: the AST says
+# PrimaryModel -- both mixins -- and the REST serializer carries `tags` and no
+# `custom_fields` at all. The flag follows the API, because NetBox ignores a column it does
+# not know rather than rejecting it. See docs/reference/netboxconfigcontextprofile.md.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxConfigContextProfile
+metadata:
+  name: dns-profile
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  # `name CharField REQ UNIQUE`, so unlike the two template Kinds above the database
+  # enforces the identity and a `?name=` lookup can never be ambiguous.
+  name: DNS settings
+  description: Shape of the dns block every config context contributes
+
+  schema:
+    type: object
+    properties:
+      dns:
+        type: object
+        properties:
+          servers:
+            type: array
+            items:
+              type: string
+    required:
+      - dns
+---
+# A JSON document merged into the rendered configuration of everything the assignment sets
+# select -- and the widest many-to-many surface in the catalogue: thirteen sets, all of them
+# ClassRefMany entries on the Descriptor and no engine code at all.
+#
+# Only two sets are populated here, and both point at objects this file does not create: a
+# NetBoxConfigContext applied before them reports RefsResolved=False, Reason=RefNotReady
+# naming the element, writes nothing, and converges on a watch once they exist. That is the
+# reference system doing its job, and it is exactly what `spec.customFields` cannot do --
+# which is the whole subject of docs/custom-fields.md.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxConfigContext
+metadata:
+  name: homelab-dns
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  name: Homelab DNS
+  description: Resolvers for everything in the homelab
+
+  # Required by NetBox. A context with nothing to contribute is `isActive: false`, not an
+  # absent document -- and it is compared as a whole document rather than as a scalar, so a
+  # `data` containing an `id` key does not get unwrapped and PATCHed forever.
+  data:
+    dns:
+      servers:
+        - 10.0.0.53
+        - 10.0.1.53
+
+  # Validated against the profile above. A PROTECT foreign key, so no owner reference is
+  # taken on it and deleting the profile is refused while this context names it.
+  profileRef:
+    name: dns-profile
+
+  # `tags` here selects which *tagged objects* the context applies to. It is NOT this
+  # object's own tags: extras.ConfigContext mixes in no TagsMixin, so the provenance stamp
+  # has no column on this Kind and never touches this list. Declaring the Kind taggable
+  # would append `k8s-managed` here and silently change which objects get this
+  # configuration -- internal/registry refuses that combination at boot.
+  tags:
+    - name: production
+
+  weight: 1000                                      # the default; higher is merged later
+  isActive: true                                    # the default
