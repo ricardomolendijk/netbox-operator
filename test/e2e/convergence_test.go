@@ -52,12 +52,13 @@ type runResult struct {
 	// ReconcileErrors and ErrorLines are the engine-quality numbers, recorded per run and
 	// asserted once at the end rather than inside the run.
 	//
-	// That placement is deliberate. NBO-017 requires both to be zero for a whole passing
-	// run, and they are not -- #252 makes the second reconcile of every object lose its
-	// status write to a stale-cache 409. Asserting inside each pass would stop the suite at
-	// the forward run and leave the twenty permutations, the dump equality, the quiescence
-	// and the write economy unexecuted, which is most of the gate. One spec at the end names
-	// the defect once and lets the rest of the gate do its job.
+	// That placement is deliberate. NBO-017 requires both to be zero for a whole passing run,
+	// and asserting inside each pass would stop the suite at the forward run and leave the
+	// twenty permutations, the dump equality, the quiescence and the write economy
+	// unexecuted, which is most of the gate. One spec at the end reports every run's numbers
+	// at once and lets the rest of the gate do its job. It is what found #252, where the
+	// second reconcile of every object accused the operator of a foreign NetBox object and
+	// then lost its status write to a stale-cache 409.
 	ReconcileErrors float64
 	ErrorLines      []string
 }
@@ -319,7 +320,8 @@ var _ = Describe("Ordering", Ordered, ContinueOnFailure, func() {
 
 	// Last, and over every run at once. Waiting on a reference is a legitimate intermediate
 	// state and reaching Ready through an error path is not, so a converging graph has no
-	// business producing either of these -- see #252 for the defect that currently does.
+	// business producing either of these -- #252 is the defect that used to, and is the one
+	// this spec exists to keep from coming back.
 	It("never went through an error path and never logged at error level", func(_ SpecContext) {
 		Expect(timings).NotTo(BeEmpty(), "no run recorded its numbers, so this asserts nothing")
 

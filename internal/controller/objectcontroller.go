@@ -17,6 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 
+	netboxv1alpha1 "github.com/ricardomolendijk/netbox-operator/api/v1alpha1"
 	"github.com/ricardomolendijk/netbox-operator/internal/reconciler"
 	"github.com/ricardomolendijk/netbox-operator/internal/registry"
 	"github.com/ricardomolendijk/netbox-operator/internal/resolver"
@@ -166,6 +167,16 @@ func newObjectController(mgr ctrl.Manager, endpoints reconciler.Endpoints, kind 
 			Finalizers: finalizerWriter{writer},
 			Owners:     ownerWriter{writer},
 
+			// The one collaborator deliberately *not* wired from the cached client: it exists
+			// so that the engine never concludes "somebody else's NetBox object" from a
+			// status.id the informer cache is behind on (issue #252). Reading it through the
+			// cache would answer with the very copy that is stale.
+			//
+			// Not wrapped in specGuard either, and it is the one route here that needs no
+			// wrapping: an APIReader is a client.Reader with no write method to guard, which
+			// is a stronger guarantee than the guard's own.
+			LiveStatus: liveStatus{mgr.GetAPIReader()},
+
 			// Through specGuard like everything else, and it passes for a reason rather
 			// than by accident: specGuard.generated() keys on the *controller* owner
 			// reference, and every object handed to this writer carries one naming the
@@ -207,9 +218,10 @@ func (c *objectController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 
 	result, err := c.engine.Reconcile(ctx, obj)
 	if err != nil {
-		// The engine returns an error for exactly two things -- a kind with no registered
-		// descriptor and a failed status write -- and neither is about NetBox. Both are
-		// worth naming the object for, since they are the only failures that reach
+		// The engine returns an error for exactly three things -- a kind with no registered
+		// descriptor, a status write that failed for anything but losing a race, and a live
+		// status read the API server would not answer -- and none of them is about NetBox.
+		// All are worth naming the object for, since they are the only failures that reach
 		// controller-runtime's backoff rather than the object's own conditions.
 		return result, fmt.Errorf("reconciling %s: %w", req.NamespacedName, err)
 	}
@@ -283,6 +295,35 @@ func (w statusWriter) UpdateStatus(ctx context.Context, obj client.Object) error
 	}
 
 	return nil
+}
+
+// liveStatus reads an object's engine-owned status straight from the API server.
+//
+// A client.Reader rather than a client.Client, and the shipped one is the manager's
+// APIReader: the whole value of this seam is that it does not answer from the informer cache
+// the reconcile was fed from, and a type that cannot write is also a type that cannot be
+// mistaken for a route to one.
+type liveStatus struct{ reader client.Reader }
+
+// LiveStatus returns the status the API server currently holds for obj.
+//
+// Into a fresh copy rather than into obj: the caller is mid-reconcile and has already written
+// to the status it is holding, so reading over it would silently discard the pass's own work.
+func (r liveStatus) LiveStatus(ctx context.Context, obj reconciler.Object) (
+	netboxv1alpha1.NetBoxObjectStatus, error,
+) {
+	fresh, ok := obj.DeepCopyObject().(reconciler.Object)
+	if !ok {
+		return netboxv1alpha1.NetBoxObjectStatus{},
+			fmt.Errorf("%T does not deep-copy into a reconciler.Object", obj)
+	}
+
+	if err := r.reader.Get(ctx, client.ObjectKeyFromObject(obj), fresh); err != nil {
+		return netboxv1alpha1.NetBoxObjectStatus{}, fmt.Errorf("reading %s/%s past the cache: %w",
+			obj.GetNamespace(), obj.GetName(), err)
+	}
+
+	return *fresh.NetBoxStatus(), nil
 }
 
 // finalizerWriter persists an object's metadata.finalizers.

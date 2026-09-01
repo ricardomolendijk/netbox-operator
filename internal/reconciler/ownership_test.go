@@ -197,6 +197,7 @@ func TestFieldShapeAdoptionDoesNotWipe(t *testing.T) {
 					endpoint: Endpoint{Client: client, Resync: testResync}, ready: true,
 				},
 				Status: &fakeStatus{}, Finalizers: &fakeFinalizers{}, Scheme: fakeScheme(t),
+				LiveStatus: &fakeLiveStatus{},
 			}
 
 			if _, err := engine.Reconcile(context.Background(), obj); err != nil {

@@ -240,6 +240,7 @@ func TestEngineReconcileDeleting(t *testing.T) {
 					ready:    !tc.notReady,
 				},
 				Status:     status,
+				LiveStatus: &fakeLiveStatus{},
 				Finalizers: finalizers,
 				Events:     events,
 				Scheme:     fakeScheme(t),
@@ -305,6 +306,7 @@ func TestEngineClaimsBeforeItWrites(t *testing.T) {
 		Descriptors: fakeDescriptors{descriptor: fakeDescriptor(), registered: true},
 		Endpoints:   fakeEndpoints{endpoint: Endpoint{Client: client, Resync: testResync}, ready: true},
 		Status:      &fakeStatus{},
+		LiveStatus:  &fakeLiveStatus{},
 		Finalizers:  finalizers,
 		Scheme:      fakeScheme(t),
 	}
@@ -340,6 +342,7 @@ func TestEngineClaimFailureWritesNothing(t *testing.T) {
 		Descriptors: fakeDescriptors{descriptor: fakeDescriptor(), registered: true},
 		Endpoints:   fakeEndpoints{endpoint: Endpoint{Client: client, Resync: testResync}, ready: true},
 		Status:      &fakeStatus{},
+		LiveStatus:  &fakeLiveStatus{},
 		Finalizers:  &fakeFinalizers{err: errFinalizerWrite},
 		Scheme:      fakeScheme(t),
 	}
@@ -368,6 +371,7 @@ func TestEngineReleaseFailureKeepsTheFinalizer(t *testing.T) {
 		Descriptors: fakeDescriptors{descriptor: fakeDescriptor(), registered: true},
 		Endpoints:   fakeEndpoints{endpoint: Endpoint{Client: &fakeClient{}, Resync: testResync}, ready: true},
 		Status:      &fakeStatus{},
+		LiveStatus:  &fakeLiveStatus{},
 		Finalizers:  &fakeFinalizers{err: errFinalizerWrite},
 		Scheme:      fakeScheme(t),
 	}
@@ -423,6 +427,7 @@ func TestProtectedDeleteEventuallyWarns(t *testing.T) {
 			ready: true,
 		},
 		Status:     &fakeStatus{},
+		LiveStatus: &fakeLiveStatus{},
 		Finalizers: &fakeFinalizers{},
 		Events:     events,
 		Scheme:     fakeScheme(t),
@@ -466,6 +471,7 @@ func TestDeletionPolicyNeverReachesNetBox(t *testing.T) {
 		Descriptors: fakeDescriptors{descriptor: fakeDescriptor(), registered: true},
 		Endpoints:   fakeEndpoints{endpoint: Endpoint{Client: client, Resync: testResync}, ready: true},
 		Status:      &fakeStatus{},
+		LiveStatus:  &fakeLiveStatus{},
 		Finalizers:  &fakeFinalizers{},
 		Scheme:      fakeScheme(t),
 	}

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/equality"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -205,6 +206,12 @@ func (p *pass) finish(ctx context.Context, requeue time.Duration) (ctrl.Result, 
 	}
 
 	if err := p.engine.Status.UpdateStatus(ctx, p.obj); err != nil {
+		if staleStatusWrite(ctx, err) {
+			p.result = metrics.ResultWaiting
+
+			return ctrl.Result{RequeueAfter: Jitter(staleRetry)}, nil
+		}
+
 		// The NetBox side may well have succeeded, but a reconcile whose status never
 		// landed is not a success: observedGeneration is stale and the next pass will do
 		// the work again. Counted as an error so it cannot hide inside `updated`.
@@ -215,6 +222,33 @@ func (p *pass) finish(ctx context.Context, requeue time.Duration) (ctrl.Result, 
 	}
 
 	return ctrl.Result{RequeueAfter: Jitter(requeue)}, nil
+}
+
+// staleStatusWrite reports whether err is a status write the API server refused because
+// another pass of the same object got there first -- and says so in the log when it is.
+//
+// Not a failure, and this is the difference the whole of issue #252's second half is about.
+// The engine reconciles from an informer cache, so two passes of one key overlap routinely: the
+// second carries the resourceVersion of a copy the first has already superseded and its write
+// is refused. Returning that as an error put an `error` line, a failed reconcile in
+// reconcile_total and controller-runtime backoff behind every object of a graph that had
+// converged correctly -- 18 error reconciles and 27 error lines for a 17-object graph on the
+// e2e run that found this.
+//
+// Nothing is re-applied over the copy that won. This pass computed its status from the read
+// that turned out to be stale, so re-sending it could put back a status.id or a condition the
+// winning write had already moved past -- and a status.id written back as zero is the shape
+// that creates a second NetBox object. The next pass reads the caught-up copy and reaches the
+// same conclusions again if they still hold, which is what makes dropping them safe.
+func staleStatusWrite(ctx context.Context, err error) bool {
+	if !apierrors.IsConflict(err) {
+		return false
+	}
+
+	logf.FromContext(ctx).V(1).Info("another pass wrote this status first; reconciling again",
+		"action", "requeue", "conflict", err.Error())
+
+	return true
 }
 
 // resync is this endpoint's drift re-check interval.

@@ -160,8 +160,9 @@ func TestReconcileMetrics(t *testing.T) {
 					endpoint: Endpoint{Client: tc.client(t), Resync: testResync},
 					ready:    !tc.notReady,
 				},
-				Status: &fakeStatus{},
-				Scheme: fakeScheme(t),
+				Status:     &fakeStatus{},
+				LiveStatus: &fakeLiveStatus{},
+				Scheme:     fakeScheme(t),
 			}
 
 			if _, err := engine.Reconcile(context.Background(), tc.object()); err != nil {

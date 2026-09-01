@@ -45,6 +45,7 @@ func catalogueEngine(t *testing.T, kind string, nb NetBoxClient, refs RefResolve
 		Endpoints:   fakeEndpoints{endpoint: Endpoint{Client: nb, Resync: testResync}, ready: true},
 		Refs:        refs,
 		Status:      &fakeStatus{},
+		LiveStatus:  &fakeLiveStatus{},
 		Finalizers:  &fakeFinalizers{},
 		Scheme:      scheme,
 	}

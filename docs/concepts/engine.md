@@ -222,10 +222,12 @@ that is still there.
 
 ## Failures are conditions, not errors
 
-`Reconcile` returns an error for exactly two things: a kind with no registered descriptor,
-and a failed status write. Everything else — every NetBox failure, every wait — is a
-condition plus a chosen requeue. A returned error means controller-runtime backoff, and
-backoff on a normal waiting state is minutes of latency for nothing.
+`Reconcile` returns an error for exactly three things: a kind with no registered descriptor,
+a status write the API server refused for anything other than [losing a
+race](errors-and-retries.md#a-cached-read-is-not-a-conflict), and a live status read it would
+not answer. Everything else — every NetBox failure, every wait — is a condition plus a chosen
+requeue. A returned error means controller-runtime backoff, and backoff on a normal waiting
+state is minutes of latency for nothing.
 
 The mapping from failure to condition and requeue lives in one function and classifies by
 error **type**, never by message; see [errors and retries](errors-and-retries.md) for the
@@ -245,7 +247,9 @@ for the rest of its life and turn one NetBox into the bottleneck.
 The engine's collaborators are consumer-defined interfaces, so it is testable with no NetBox
 and no cluster: `Reader` and `Writer` (a NetBox client), `Endpoints` (a `spec.endpointRef`
 to a client), `Descriptors` (per-kind facts), `RefResolver` (a reference to an id),
-`StatusWriter` and `Recorder`. A kind's
+`StatusWriter`, `StatusReader` (this object's own status, read past the cache — see
+[a cached read is not a conflict](errors-and-retries.md#a-cached-read-is-not-a-conflict))
+and `Recorder`. A kind's
 controller supplies them and does nothing else — a controller containing business logic has
 taken work that belongs to the engine.
 

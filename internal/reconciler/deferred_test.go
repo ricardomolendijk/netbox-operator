@@ -214,6 +214,7 @@ func deferringEngine(
 		Endpoints:   fakeEndpoints{endpoint: Endpoint{Client: nb, Resync: testResync}, ready: true},
 		Refs:        refs,
 		Status:      status,
+		LiveStatus:  &fakeLiveStatus{},
 		Finalizers:  &fakeFinalizers{},
 		Scheme:      fakeScheme(t),
 	}

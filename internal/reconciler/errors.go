@@ -36,6 +36,15 @@ const (
 	// practice: the next pass re-creates or re-adopts it.
 	vanishedRetry = time.Second
 
+	// staleRetry is the wait after a status write lost an optimistic-concurrency race.
+	//
+	// The same tier as vanishedRetry, and for the mirror-image reason: nothing has to change
+	// for the next attempt to work, because the copy that won the race is already in the
+	// cache the next pass reads (issue #252, staleStatusWrite). Long enough not to spin
+	// against a watch that is still in flight, short enough that a whole graph applied at
+	// once converges without waiting on a resync.
+	staleRetry = time.Second
+
 	// truncatedRetry is the wait after a lookup paginated past the client's page cap.
 	//
 	// The same tier as a version mismatch (internal/controller, failureBackoff), for the
