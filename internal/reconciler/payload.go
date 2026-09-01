@@ -106,6 +106,63 @@ func inlineChildFields(obj Object) map[string]bool {
 	return fields
 }
 
+// derive folds the references a Kind's inline sugar contributes to its own payload into the
+// spec map, before anything reads it.
+//
+// The opposite direction from dropInlineChildren above, and the one case where inline sugar
+// flows *upward*: `primary: true` on a VM's inline address is not a column on the address, it
+// is `virtualization.VirtualMachine.primary_ip4` on the VM, whose value is the id of a child
+// the VM materialised (NBO-033). One type assertion and no branch on Kind, exactly like the
+// materialiser's: a Kind that contributes none answers by not implementing
+// netboxv1alpha1.InlineRefParent, and reconciles as it did before this function existed.
+//
+// **Into the spec map rather than onto the object, and that is what makes this a handful of
+// lines instead of a second resolution path.** Everything downstream -- the field map, the
+// declared set, reference resolution, the deferral, the differ, status.deferredPending -- reads
+// this map, so a derived reference is indistinguishable from a written one from here on and
+// none of it had to learn that inline children exist. Writing it onto the CR instead is what
+// ADR-0005 §1 forbids: Argo CD would revert the spec on its next sync and the controller would
+// write it again, at the shorter of the two intervals, forever.
+//
+// A derived reference never displaces a written one. The Kind's own DerivedRefs() already
+// reports that clash with both locations named, and this is the backstop that holds for a Kind
+// whose implementation forgets to: two declarations for one column is a refusal, because
+// choosing between them by precedence makes one of the two a lie.
+func (s specFields) derive(obj Object) error {
+	refs, err := netboxv1alpha1.DerivedSpecRefs(obj)
+	if err != nil {
+		return fmt.Errorf("deriving the references of %s/%s: %w",
+			obj.GetNamespace(), obj.GetName(), err)
+	}
+
+	for _, ref := range refs {
+		if s[ref.Field] != nil {
+			return fmt.Errorf("%w: spec.%s is set and the inline sugar derives it too",
+				netboxv1alpha1.ErrDerivedRefConflict, ref.Field)
+		}
+
+		encoded, err := json.Marshal(ref.Ref)
+		if err != nil {
+			return fmt.Errorf("encoding the derived spec.%s of %s/%s: %w",
+				ref.Field, obj.GetNamespace(), obj.GetName(), err)
+		}
+
+		// Back through JSON so the value has the same shape as every other entry in this map
+		// -- map[string]any, as encoding/json produces it. A typed ObjectRef here would read
+		// back differently in filterValue and writeValue than the identical reference written
+		// by hand, which is the one way this could stop being invisible downstream.
+		var value any
+		if err := json.Unmarshal(encoded, &value); err != nil {
+			return fmt.Errorf("decoding the derived spec.%s of %s/%s: %w",
+				ref.Field, obj.GetNamespace(), obj.GetName(), err)
+		}
+
+		s[ref.Field] = value
+	}
+
+	return nil
+}
+
 // desired renders the spec into the payload to send, and reports what it could not render.
 //
 // What arrives here has already been through specFields.restoreEmpty, so a field the user

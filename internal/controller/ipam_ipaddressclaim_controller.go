@@ -21,11 +21,13 @@ import (
 	"github.com/ricardomolendijk/netbox-operator/internal/resolver"
 )
 
-// Neither create nor delete on netboxipaddressclaims: the operator reads claims and writes
-// their status and finalizers, and nothing else. The claim is the one kind whose *NetBox*
-// object the operator creates without a name, which is precisely why its Kubernetes side
-// stays as read-only as every other kind's.
-// +kubebuilder:rbac:groups=netbox.kubeforge.org,resources=netboxipaddressclaims,verbs=get;list;watch;update;patch
+// `create` and `delete` on netboxipaddressclaims, because an inline address that says
+// `claimFrom` materialises one as an owned child of its NetBoxVirtualMachine -- the inline form
+// is sugar over a real claim rather than a second allocation path
+// (docs/decisions/0004-claims-first-allocation.md, NBO-033). Which is the only reason this
+// Kind's Kubernetes side is writable: the claim is still the one kind whose *NetBox* object the
+// operator creates without a name, and nothing here changes that.
+// +kubebuilder:rbac:groups=netbox.kubeforge.org,resources=netboxipaddressclaims,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=netbox.kubeforge.org,resources=netboxipaddressclaims/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=netbox.kubeforge.org,resources=netboxipaddressclaims/finalizers,verbs=update
 

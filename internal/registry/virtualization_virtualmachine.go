@@ -24,6 +24,20 @@ func init() { MustRegister(virtualizationVirtualMachineDescriptor()) }
 //
 // The VM's own children (VMInterface, VirtualDisk) do cascade from it, so the ownership chain
 // runs downward from the VM and stops here.
+//
+// **This Kind carries inline child sugar and nothing here says so** (NBO-033), which is the
+// property worth stating in the one file a reader would expect to find it in. `spec.interfaces`
+// and `spec.disks` materialise NetBoxVMInterface, NetBoxIPAddress, NetBoxIPAddressClaim and
+// NetBoxVirtualDisk children, each of which writes its own NetBox object
+// (docs/concepts/inline-children.md) -- and the engine learns all of it from the Kind's own
+// InlineChildren(), including which spec fields to keep out of the payload
+// (specFields.dropInlineChildren). A list here would be a second statement of one fact, and
+// one of the two would eventually be wrong.
+//
+// The two deferred fields below are the exception the sugar does touch: an inline address
+// marked `primary` derives `primaryIP4Ref` or `primaryIP6Ref`, which is why they are declared
+// `DeferAlways` for a spec field the user need never write
+// (api/v1alpha1/virtualization_virtualmachine_inline.go, DerivedRefs).
 func virtualizationVirtualMachineDescriptor() Descriptor {
 	return Descriptor{
 		GVK:        netboxv1alpha1.GroupVersion.WithKind("NetBoxVirtualMachine"),
@@ -111,16 +125,7 @@ func virtualizationVirtualMachineDescriptor() Descriptor {
 			{APIField: "primary_ip6", Mode: DeferAlways},
 		},
 
-		// The four columns every ChangeLoggedModel carries, plus the two CounterCacheFields
-		// (docs/netbox-schema.md -> virtualization.VirtualMachine, `interface_count
-		// CounterCacheField`, `virtual_disk_count CounterCacheField`). NetBox maintains both
-		// from the child rows and ignores an attempt to set either, so writing one does not
-		// fail -- it silently no-ops, the next reconcile finds the same difference, and the
-		// operator PATCHes forever.
-		ReadOnly: []string{
-			"created", "last_updated", "url", "display",
-			"interface_count", "virtual_disk_count",
-		},
+		ReadOnly: virtualizationVirtualMachineReadOnly(),
 
 		// `clusterRef` and not "clusterRef, or siteRef when there is no cluster", which is
 		// what NBO-029's spec asks for. ContainmentRef is one field because Kubernetes
@@ -134,6 +139,28 @@ func virtualizationVirtualMachineDescriptor() Descriptor {
 		// ParentOwned=False. That is visible in the status rather than silent, and a
 		// per-Kind conditional parent is a change to the shared Descriptor, which is out of
 		// scope for one kind (docs/decisions/0003-ownership-and-references.md rule 4).
+	}
+}
+
+// virtualizationVirtualMachineReadOnly are the columns the operator must never write.
+//
+// The four every ChangeLoggedModel carries, plus the two CounterCacheFields
+// (docs/netbox-schema.md -> virtualization.VirtualMachine, `interface_count
+// CounterCacheField`, `virtual_disk_count CounterCacheField`). NetBox maintains both from the
+// child rows and ignores an attempt to set either, so writing one does not fail -- it silently
+// no-ops, the next reconcile finds the same difference, and the operator PATCHes forever.
+//
+// The two counter caches are what this kind's inline sugar makes visible for the first time: a
+// VM with inline interfaces and disks is a VM whose counts NetBox is actively recomputing, and
+// an undeclared one here would turn every materialised child into a permanent drift report on
+// its parent (NBO-033).
+//
+// Extracted from the descriptor for the reason the natural keys are: nothing about it is
+// dynamic, and the literal plus its reasoning is longer than the function that returns it.
+func virtualizationVirtualMachineReadOnly() []string {
+	return []string{
+		"created", "last_updated", "url", "display",
+		"interface_count", "virtual_disk_count",
 	}
 }
 

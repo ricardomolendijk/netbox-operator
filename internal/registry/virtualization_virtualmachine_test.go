@@ -1,7 +1,9 @@
 package registry
 
 import (
+	"encoding/json"
 	"errors"
+	"maps"
 	"reflect"
 	"slices"
 	"testing"
@@ -377,5 +379,66 @@ func TestVirtualMachineDriftsCleanlyAgainstNetBoxsReadShape(t *testing.T) {
 
 	if drift := netbox.Drift(live, sent, netbox.FieldRules{}); len(drift) != 0 {
 		t.Errorf("second reconcile would PATCH %v -- this is an infinite loop", drift)
+	}
+}
+
+// TestVirtualMachineInlineFieldsAreNoColumn is the descriptor half of NBO-033, and it is an
+// assertion about an *absence*.
+//
+// `interfaces` and `disks` are inline child declarations rather than NetBox columns, and the
+// engine learns which spec fields those are from the Kind's own InlineChildren() -- not from a
+// list on the Descriptor (specFields.dropInlineChildren). So the thing to hold here is that the
+// field map does not claim them: an entry for either would render a list of child objects into
+// a payload as a column NetBox has never heard of, which NetBox drops rather than rejects, and
+// the write would report success having stored nothing.
+//
+// The names are read off the Kind rather than written out, so a third inline list is covered
+// without an edit here.
+func TestVirtualMachineInlineFieldsAreNoColumn(t *testing.T) {
+	d := virtualMachineDescriptor(t)
+
+	sets := (&netboxv1alpha1.NetBoxVirtualMachine{}).InlineChildren()
+	if len(sets) == 0 {
+		t.Fatal("NetBoxVirtualMachine declares no inline child sets, so this proves nothing")
+	}
+
+	for _, set := range sets {
+		if set.Field == "" {
+			t.Error("an inline child set names no spec field, so nothing would exclude it")
+
+			continue
+		}
+
+		if field, mapped := d.FieldFor(set.Field); mapped {
+			t.Errorf("spec.%s is an inline child list *and* mapped onto the netbox column %q",
+				set.Field, field.API)
+		}
+	}
+
+	// The other half of the same fact: the inline lists are real fields on the CR, read through
+	// the encoding the engine reads a spec with. A set naming a field that does not exist would
+	// exclude nothing, and the real one would then be refused as unmapped.
+	encoded, err := json.Marshal(netboxv1alpha1.NetBoxVirtualMachine{
+		Spec: netboxv1alpha1.NetBoxVirtualMachineSpec{
+			Interfaces: []netboxv1alpha1.InlineVMInterface{{Name: "eth0"}},
+			Disks:      []netboxv1alpha1.InlineVirtualDisk{{Name: "scsi0", Size: 1}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("encoding a virtual machine: %v", err)
+	}
+
+	var decoded struct {
+		Spec map[string]json.RawMessage `json:"spec"`
+	}
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatalf("decoding the spec: %v", err)
+	}
+
+	for _, set := range sets {
+		if _, present := decoded.Spec[set.Field]; !present {
+			t.Errorf("an inline child set names spec.%s, which is not a field on the CR: %v",
+				set.Field, slices.Sorted(maps.Keys(decoded.Spec)))
+		}
 	}
 }

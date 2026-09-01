@@ -211,6 +211,7 @@ func (v *validator) reviewObject(
 		check func(context.Context) (string, error)
 	}{
 		{"reference cycle", review.cycle},
+		{"duplicate flag on a generated object", review.generatedDuplicate},
 		{"natural-key collision", review.collision},
 		{"reference grant", review.grants},
 		{"endpoint readiness", review.endpoint},
