@@ -12,7 +12,14 @@ about it.
 
 ## Helm
 
+`--create-namespace` only creates the *release* namespace (`netbox-operator-system` below) —
+it says nothing about the namespaces listed in `credentialNamespaces`. The chart renders a
+`Role`/`RoleBinding` into each of those, and Helm refuses to create either in a namespace that
+does not exist yet, so create it first:
+
 ```sh
+kubectl create namespace homelab
+
 helm install netbox-operator oci://ghcr.io/ricardomolendijk/netbox-operator/charts/netbox-operator \
   --namespace netbox-operator-system --create-namespace \
   --set credentialNamespaces={homelab}
@@ -22,6 +29,8 @@ Nothing is published yet — the chart lives in `charts/netbox-operator/` and in
 checkout in the meantime:
 
 ```sh
+kubectl create namespace homelab
+
 helm install netbox-operator ./charts/netbox-operator \
   --namespace netbox-operator-system --create-namespace \
   --set credentialNamespaces={homelab}
