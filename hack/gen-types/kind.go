@@ -23,7 +23,30 @@ var (
 	errUnknownLookup    = errors.New("natural key uses a lookup a natural key may not use")
 	errUnresolvedUnion  = errors.New("polymorphic reference resolved no object types")
 	errNoFieldMap       = errors.New("kind has no writable column")
+	errUnknownDefer     = errors.New("deferral mode the engine does not implement")
+	errUnknownStrategy  = errors.New("update strategy the engine does not implement")
+	errRecreateOnPatch  = errors.New("recreateOn declared on a kind that updates in place")
+	errDeferredUnmapped = errors.New("deferred column has no spec field")
+	errKeyFieldUnmapped = errors.New("natural key reads a spec field the kind does not have")
 )
+
+// deferModes are the two registry.DeferMode values, as the constant names the template emits,
+// plus `Never` -- which is not a mode but the way overrides.yaml switches the derived deferral
+// of a self-reference back off. A closed set with no default: whether a reference reaches the
+// create payload decides whether a fresh object is briefly wrong in NetBox, so a typo here has
+// to be a failure rather than a silent Always.
+var deferModes = map[string]string{
+	"Always":       "DeferAlways",
+	"IfUnresolved": "DeferIfUnresolved",
+	"Never":        "",
+}
+
+// updateStrategies are the two registry.UpdateStrategy values. The zero value is deliberately
+// absent from registry's own list, so the emitter states one explicitly on every kind.
+var updateStrategies = map[string]string{
+	"Patch":    "UpdatePatch",
+	"Recreate": "UpdateRecreate",
+}
 
 // envelopeFields are the JSON names the embedded NetBoxObjectSpec already occupies. A kind
 // column landing on one of them would shadow it silently, so it is a named failure instead
@@ -52,10 +75,20 @@ func baseReadOnly() []string { return []string{"created", "last_updated", "url",
 // -- which then fails Validate, because its natural key matches on columns the field map does
 // not have.
 type union struct {
-	Doc          []string
-	SpecField    string
-	TypeField    string
-	IDField      string
+	Doc       []string
+	SpecField string
+	TypeField string
+	IDField   string
+
+	// GoType is the shared union struct the spec field is typed as: `ScopeRef` for NetBox's
+	// `(scope_type, scope_id)` pair, and whatever `unionTypes` names for any other pair.
+	//
+	// Read from the view rather than written into the template, and that is the whole point:
+	// a template that spelled `*ScopeRef` would be right for the four scoped kinds and wrong
+	// for every other polymorphic reference in the catalogue -- a kind conditional with the
+	// condition left out (specs/NBO-042-codegen-emitters.md).
+	GoType string
+
 	AllowedTypes []string
 	Members      []unionMember
 	Cached       []string
@@ -101,6 +134,22 @@ type kindView struct {
 	CustomField bool
 	Containment string
 
+	// Deferred are the columns the engine may leave out of a create payload. Derived for a
+	// self-reference and declared for every other case -- see kindOverride.Deferred.
+	Deferred []deferredField
+
+	// Strategy is the registry.UpdateStrategy constant name, and RecreateOn the columns whose
+	// change forces a recreate. Stated on every kind rather than defaulted in the template:
+	// whether an update is destructive is too important to arrive by omission.
+	Strategy   string
+	RecreateOn []string
+
+	// Retain makes spec.deletionPolicy default to Retain on this kind.
+	Retain bool
+
+	// DuplicateSpec is the spec field that lets one natural key match more than one row.
+	DuplicateSpec string
+
 	// FileStem is the `<app>_<kind>` basename every per-kind output shares.
 	FileStem string
 
@@ -125,6 +174,11 @@ type mapField struct {
 	Class   string
 	Target  string
 	Cascade bool
+
+	// Plain reports that the row is a spec name and an API name and nothing else, so it is
+	// emitted on one line. Most rows are, and a nine-line struct literal per scalar column
+	// turns a readable table into something nobody reads.
+	Plain bool
 }
 
 // buildKind assembles one kind's view.
@@ -167,6 +221,22 @@ func (b *builder) buildKind(name string) (kindView, error) {
 	}
 
 	view.ReadOnly = append(b.readOnly(kind), over.ReadOnlyExtra...)
+	view.Retain, view.DuplicateSpec = over.RetainOnDelete, over.DuplicateSpec
+	view.RecreateOn = over.RecreateOn
+
+	strategy, err := updateStrategy(kind, over)
+	if err != nil {
+		return kindView{}, err
+	}
+
+	view.Strategy = strategy
+
+	deferred, err := b.buildDeferred(kind, over, view.NaturalKeys)
+	if err != nil {
+		return kindView{}, err
+	}
+
+	view.Deferred = deferred
 
 	return view, validateView(kind, view)
 }
@@ -198,7 +268,56 @@ func validateView(kind irKind, view kindView) error {
 			errNoFieldMap, kind.App, kind.Model))
 	}
 
+	// A lookup candidate reading a spec field the kind does not have. Derived candidates cannot
+	// hit this -- they are built from the column-to-spec map -- so it is always a declared one,
+	// and it is the failure that matters most on a kind whose columns the IR is missing.
+	//
+	// extras.Tag is the worked example: `name` and `slug` are declared on taggit's `TagBase`,
+	// which lives outside the NetBox source tree, so the AST walk never sees either and the IR
+	// carries neither. Without this check the emitter would produce a NetBoxTag with a colour
+	// and no name, whose declared `slug` key reads a field that does not exist -- and the
+	// failure would be a Descriptor that cannot boot rather than one anybody read.
+	for _, key := range view.NaturalKeys {
+		errs = append(errs, unmappedKeySpecs(kind, view, key)...)
+	}
+
 	return errors.Join(errs...)
+}
+
+// unmappedKeySpecs reports the spec fields one candidate reads that the kind does not emit.
+func unmappedKeySpecs(kind irKind, view kindView, key naturalKey) []error {
+	specs := make([]string, 0, len(key.Fields)+len(key.NullFields))
+
+	for _, f := range key.Fields {
+		specs = append(specs, f.Spec)
+	}
+
+	for _, f := range key.NullFields {
+		specs = append(specs, f.Spec)
+	}
+
+	errs := make([]error, 0, len(specs))
+
+	for _, spec := range specs {
+		// A union contributes three legal names: its spec field, and each half of the column
+		// pair -- the halves because the engine reads a polymorphic key by column, exactly as
+		// the hand-written descriptors do (internal/registry/ipam_vlangroup.go,
+		// `{Filter: ScopeTypeField, Spec: ScopeTypeField}`).
+		emitted := spec == "" ||
+			slices.ContainsFunc(view.MapFields, func(m mapField) bool { return m.Spec == spec }) ||
+			slices.ContainsFunc(view.Unions, func(u union) bool {
+				return u.SpecField == spec || u.TypeField == spec || u.IDField == spec
+			})
+
+		if !emitted {
+			errs = append(errs, fmt.Errorf("%w: %s.%s keys on `%s`, which no column of that kind "+
+				"produces; either the IR is missing the column or the naturalKeys entry in "+
+				"overrides.yaml names the wrong spec field",
+				errKeyFieldUnmapped, kind.App, kind.Model, spec))
+		}
+	}
+
+	return errs
 }
 
 // buildSpec fills the spec fields, the descriptor's field table and the natural keys, which
@@ -256,7 +375,166 @@ func (b *builder) mapField(f irField, jsonName string, over kindOverride) mapFie
 		row.Class = "ClassArray"
 	}
 
+	row.Plain = row.Class == "" && row.Target == "" && !row.Cascade
+
 	return row
+}
+
+// deferredField is one row of the descriptor's Deferred list.
+type deferredField struct {
+	// API is the NetBox column as written, not the filter name: the engine strips it from a
+	// payload, and a payload is keyed on columns.
+	API string
+
+	// Mode is the registry.DeferMode constant name.
+	Mode string
+
+	// Doc says why the column is deferred, since why is the whole of the reviewable content
+	// here -- the column name is already in the code.
+	Doc []string
+}
+
+// buildDeferred is the columns the engine may leave out of a create payload: every
+// self-reference the kind's identity does not depend on, derived, plus whatever the overrides
+// declare.
+func (b *builder) buildDeferred(kind irKind, over kindOverride, keys []naturalKey) ([]deferredField, error) {
+	out := make([]deferredField, 0, len(kind.Fields))
+
+	var errs []error
+
+	for _, f := range kind.Fields {
+		row, deferred, err := b.deferralOf(kind, over, keys, f)
+		if err != nil {
+			errs = append(errs, err)
+
+			continue
+		}
+
+		if deferred {
+			out = append(out, row)
+		}
+	}
+
+	return out, errors.Join(append(errs, unmappedDeferrals(kind, over, out)...)...)
+}
+
+// deferralOf is one column's deferral, or reports that it has none.
+//
+// The derived mode is IfUnresolved and never Always, and the difference is visible state
+// rather than taste. Stripping a resolved `parent` would create the object top-level for one
+// pass, where it can adopt an unrelated top-level object of the same name -- and the follow-up
+// PATCH would then reparent that object (NBO-015, internal/reconciler/deferred.go).
+//
+// A self-reference a natural-key candidate matches on is *not* deferred, and that exclusion is
+// what makes the derivation safe rather than merely plausible. dcim.DeviceRole keys on
+// `(parent_id, slug)` and on `slug` with `parent_id` pinned null, so stripping `parent` from
+// the create would change the identity the lookup had already decided on -- which is why
+// registry.Descriptor.Validate refuses the pair outright (ErrDeferredNaturalKey), and why a
+// child role writes nothing and waits instead (docs/reference/netboxdevicerole.md).
+func (b *builder) deferralOf(
+	kind irKind, over kindOverride, keys []naturalKey, f irField,
+) (deferredField, bool, error) {
+	mode, stated := over.Deferred[f.Name]
+
+	if !stated {
+		self := f.Ref != nil && f.Ref.Self && f.Class == "Ref"
+		if !self || matchedByKey(keys, b.jsonFieldName(f)) {
+			return deferredField{}, false, nil
+		}
+
+		mode = "IfUnresolved"
+	}
+
+	constant, known := deferModes[mode]
+	if !known {
+		return deferredField{}, false, fmt.Errorf(
+			"%w: %s.%s is deferred %q; it is Always, IfUnresolved or Never",
+			errUnknownDefer, kind.App, f.Name, mode)
+	}
+
+	// `Never`: the column is a self-reference whose derived deferral the overrides switch off,
+	// so it is emitted as an ordinary reference and not listed at all.
+	if constant == "" {
+		return deferredField{}, false, nil
+	}
+
+	doc := fmt.Sprintf("`%s` is a foreign key to %s -- this kind's own model -- so it cannot "+
+		"be satisfied on create until the parent object exists.", f.Name, kind.App+"."+kind.Model)
+	if stated {
+		doc = fmt.Sprintf("`%s` is deferred %s, declared in overrides.yaml.", f.Name, mode)
+	}
+
+	return deferredField{API: f.Name, Mode: constant, Doc: wrap(doc)}, true, nil
+}
+
+// unmappedDeferrals reports a declared column that names nothing the kind has.
+//
+// It is the worst failure this file can produce, because it looks like it worked: the deferral
+// silently does not happen and the create carries a reference the server cannot satisfy.
+func unmappedDeferrals(kind irKind, over kindOverride, emitted []deferredField) []error {
+	declared := make([]string, 0, len(over.Deferred))
+	for column := range over.Deferred {
+		declared = append(declared, column)
+	}
+
+	slices.Sort(declared)
+
+	errs := make([]error, 0, len(declared))
+
+	for _, column := range declared {
+		mapped := slices.ContainsFunc(emitted,
+			func(d deferredField) bool { return d.API == column })
+
+		if mapped || over.Deferred[column] == "Never" {
+			continue
+		}
+
+		errs = append(errs, fmt.Errorf("%w: %s.%s is deferred in overrides.yaml and is not a "+
+			"column of that kind", errDeferredUnmapped, kind.App, column))
+	}
+
+	return errs
+}
+
+// matchedByKey reports whether any lookup candidate reads or pins the given spec field.
+func matchedByKey(keys []naturalKey, spec string) bool {
+	for _, key := range keys {
+		for _, f := range key.Fields {
+			if f.Spec == spec {
+				return true
+			}
+		}
+
+		for _, f := range key.NullFields {
+			if f.Spec == spec {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// updateStrategy resolves the kind's update strategy, defaulting to Patch: every kind PATCHes
+// unless its identity lives somewhere a PATCH cannot reach.
+func updateStrategy(kind irKind, over kindOverride) (string, error) {
+	declared := over.UpdateStrategy
+	if declared == "" {
+		declared = "Patch"
+	}
+
+	constant, known := updateStrategies[declared]
+	if !known {
+		return "", fmt.Errorf("%w: %s.%s declares %q; it is Patch or Recreate",
+			errUnknownStrategy, kind.App, kind.Model, declared)
+	}
+
+	if declared == "Patch" && len(over.RecreateOn) > 0 {
+		return "", fmt.Errorf("%w: %s.%s lists recreateOn without updateStrategy: Recreate",
+			errRecreateOnPatch, kind.App, kind.Model)
+	}
+
+	return constant, nil
 }
 
 // skip reports whether a column yields no spec field: read-only in the API, off the write
@@ -294,16 +572,31 @@ func (b *builder) buildUnions(kind irKind, over kindOverride) []union {
 
 		out = append(out, union{
 			Doc: wrap(fmt.Sprintf("`(%s, %s)` is one reference written as two columns and diffed "+
-				"as a unit. The permitted object types are the serializer's own ContentTypeField "+
-				"queryset (%s), which is the only place they are written down.",
+				"as a unit, so moving the object between target types is one change and one PATCH "+
+				"carrying both keys. The permitted object types are the serializer's own "+
+				"ContentTypeField queryset (%s), which is the only place they are written down.",
 				f.Name, spec+"_id", kind.SourceFile)),
 			SpecField: spec, TypeField: f.Name, IDField: spec + "_id",
+			GoType:       unionGoType(spec, over),
 			AllowedTypes: f.ObjectTypes, Members: b.unionMembers(f, over),
 			Cached: b.cachedColumns(kind, spec),
 		})
 	}
 
 	return out
+}
+
+// unionGoType is the Go type behind one polymorphic pair, defaulting to the pair's own name
+// with a `Ref` suffix -- so NetBox's `scope_type` / `scope_id` is `ScopeRef` with nothing
+// declared. The default is keyed on the NetBox column and never on the kind, which is what
+// keeps it a fact about NetBox rather than a per-kind branch; a pair whose shared type is
+// spelled differently names it in `unionTypes`.
+func unionGoType(spec string, over kindOverride) string {
+	if declared, ok := over.UnionTypes[spec]; ok {
+		return declared
+	}
+
+	return title(spec) + "Ref"
 }
 
 // unionMembers are the CR spec fields that select each permitted target.

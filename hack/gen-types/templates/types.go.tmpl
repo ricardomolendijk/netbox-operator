@@ -13,15 +13,11 @@ import (
 type {{ .Spec }} struct {
 	NetBoxObjectSpec `json:",inline"`
 {{ range .Unions }}
-	// {{ .SpecField | title }} is written as the `({{ .TypeField }}, {{ .IDField }})` pair and
-	// diffed as a unit, so moving the object between target types is one change and one PATCH
-	// carrying both keys.
-	//
 {{- range .Doc }}
 	// {{ . }}
 {{- end }}
 	// +optional
-	{{ .SpecField | title }} *ScopeRef `json:"{{ .SpecField }},omitempty"`
+	{{ .SpecField | title }} *{{ .GoType }} `json:"{{ .SpecField }},omitempty"`
 {{ end }}
 {{- range .Fields }}
 {{- range .Doc }}

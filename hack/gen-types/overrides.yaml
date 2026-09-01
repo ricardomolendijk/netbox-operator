@@ -1,15 +1,16 @@
 # Per-kind data no reading of NetBox can supply, for hack/gen-types.
 #
-# Three categories and nothing else:
+# Two kinds of entry and nothing else, every key of both tabulated in docs/regenerating.md:
 #
-#   1. `shortNames` -- the `kubectl get` abbreviation. There is no schema for what humans type
-#      (docs/decisions/0001-*.md). The default is `nb` + the lower-cased model, which is right
-#      for a short model name and unusable for `virtualization.VirtualMachine`.
-#   2. `printerColumns` -- which columns matter in `kubectl get`. A judgement, not a fact.
-#   3. `cascades` -- whether the server deletes this kind's rows when a union member goes.
-#      Half the answer is a GenericRelation on the *target* and half is an `on_delete=CASCADE`
-#      denormalised column on the referrer, so it is a fact about the referring kind per
-#      target and cannot be defaulted (internal/registry/scope.go, #214).
+#   1. A judgement with no schema behind it -- `shortNames`, the `kubectl get` abbreviation
+#      (docs/decisions/0001-*.md), and `printerColumns`, which columns matter to a human. The
+#      short-name default is `nb` + the lower-cased model, right for a short model name and
+#      unusable for `virtualization.VirtualMachine`.
+#   2. A fact neither source states -- `cascades`, whether the server deletes this kind's rows
+#      when a union member goes (half the answer is a GenericRelation on the *target* and half
+#      an `on_delete=CASCADE` cache column on the referrer, so it cannot be defaulted:
+#      internal/registry/scope.go, #214); and the Descriptor policy the engine reads as data --
+#      `retainOnDelete`, `duplicateSpec`, `deferred`, `updateStrategy` / `recreateOn`.
 #
 # Anything else here is a bug in the derivation. An entry that could be read out of the IR
 # belongs in hack/build-netbox-ir.py, and a per-kind behaviour belongs in the Descriptor as
@@ -141,7 +142,6 @@ acronyms:
   - XEN
   - XML
   - YAML
-  - ipam.Prefix
 
 # Typed reference aliases no NetBox foreign key produces. NetBoxIPAddressClaim allocates out of
 # a prefix, and nothing in NetBox has a foreign key to ipam.Prefix, so there is nothing to
@@ -200,6 +200,14 @@ kinds:
   extras.Tag:
     handWritten: true
     shortNames: [nbtag]
+    naturalKeys:
+      - doc: >-
+          `slug` carries UNIQUE on the column itself (extras/models/tags.py), so it identifies
+          exactly one tag. `name` is column-unique too and is deliberately not a candidate: a
+          kind gets one identity, and a rename that collides comes back as NetBox's own 409
+          rather than being adopted under the other candidate.
+        fields:
+          - {filter: slug, spec: slug}
     printerColumns:
       - {name: Slug, type: string, path: .spec.slug}
       - {name: Color, type: string, path: .spec.color}
@@ -226,6 +234,11 @@ kinds:
     handWritten: true
     shortNames: [nbprefix]
     containmentRef: scope
+    # Decision #176: IPAM defaults to Retain. Deleting a prefix destroys the record of who a
+    # range of addresses belonged to, and a recreate does not restore it -- the change log, the
+    # journal entries and every child row go with it, and a fresh prefix at the same CIDR is a
+    # different object with a different id.
+    retainOnDelete: true
     # ipam.Prefix carries no meta.constraints at all and `prefix` is not unique, so there is
     # nothing to derive. `(vrf, prefix)` is the model's ordering tuple, which is a convention
     # rather than a database guarantee: duplicates are legal when the enclosing VRF has
@@ -260,6 +273,11 @@ kinds:
   ipam.VRF:
     handWritten: true
     shortNames: [nbvrf]
+    # Decision #176: IPAM defaults to Retain. A VRF is the table its prefixes and addresses are
+    # unique *within*, so deleting one changes what every address inside it means -- and `vrf`
+    # is on_delete=PROTECT throughout ipam (docs/netbox-schema.md), so NetBox refuses the delete
+    # anyway in every case that has addresses in it.
+    retainOnDelete: true
     # `rd` is UNIQUE on the column, which the derivation finds. The second candidate is not
     # derivable from anything: `name` carries no UNIQUE, and a VRF with no RD being identified
     # by name is NetBox's convention rather than its schema.
@@ -290,6 +308,14 @@ kinds:
   ipam.VLAN:
     handWritten: true
     shortNames: [nbvlan]
+    # Decision #176: IPAM defaults to Retain. A VLAN is state the network is carrying: deleting
+    # one takes every prefix scoped to it and every termination hanging off it with it, and a
+    # fresh VLAN with the same `vid` is a different object with a different id.
+    retainOnDelete: true
+    # `qinq_svlan` is a self-reference, so the derived deferral would be IfUnresolved. It is
+    # Always: a Q-in-Q service VLAN is a VLAN whose own service VLAN is the one being created,
+    # and no apply order satisfies that pair on create.
+    deferred: {qinq_svlan: Always}
     printerColumns:
       - {name: VID, type: integer, path: .spec.vid}
       - {name: Name, type: string, path: .spec.name}
@@ -312,6 +338,41 @@ kinds:
   ipam.IPAddress:
     handWritten: true
     shortNames: [nbip]
+    # An address is address-space allocation, and it outlives the CR that asked for one:
+    # deleting the CR that describes 10.0.20.5 does not mean 10.0.20.5 is free (#176).
+    retainOnDelete: true
+    # NetBox permits two rows to hold one address when the enclosing VRF has
+    # `enforce_unique=false`, so a natural key matching twice is legitimate server state on
+    # this kind alone (docs/reference/netboxipaddress.md).
+    duplicateSpec: allowDuplicate
+    # The `(assigned_object_type, assigned_object_id)` pair's shared union type is not named
+    # after the pair (api/v1alpha1/genericref.go). Recorded now so the row is complete; the
+    # kind does not emit yet, because the IR cannot read the serializer's ContentTypeField
+    # queryset for this pair.
+    unionTypes: {assigned_object: IPAssignment}
+    # `nat_inside` is a self-reference, so the derived deferral would be IfUnresolved. Switched
+    # off: the engine already leaves an unresolved reference out of the payload, so the
+    # deferral would strip nothing -- while it *would* stop resolver.blocking following the
+    # edge, and a mutual pair of addresses each naming the other would then be created rather
+    # than reported as a RefCycle (NBO-025).
+    deferred: {nat_inside: Never}
+    naturalKeys:
+      - doc: >-
+          ipam.IPAddress declares no meta.constraints at all -- only indexes
+          (docs/netbox-schema.md -> ipam.IPAddress) -- so `(address, vrf)` is NetBox's own
+          convention, enforced at the application layer through `ipam.VRF.enforce_unique` or
+          not enforced at all, which is what spec.allowDuplicate exists for.
+        fields:
+          - {filter: address, spec: address}
+          - {filter: vrf_id, spec: vrfRef}
+      - doc: >-
+          The same identity in the global table. The `vrf_id` pin is load-bearing:
+          `?address=10.0.20.5/24` alone matches that address in every VRF, so a global address
+          would adopt a VRF's address and PATCH the VRF off somebody else's row.
+        fields:
+          - {filter: address, spec: address}
+        nullFields:
+          - {filter: vrf_id, spec: vrfRef, column: ref}
     printerColumns:
       - {name: Address, type: string, path: .spec.address}
       - {name: VRF, type: string, path: .spec.vrfRef.name}
@@ -342,6 +403,10 @@ kinds:
     handWritten: true
     shortNames: [nbvm]
     containmentRef: clusterRef
+    # Not derivable: neither column is a self-reference, and the ring is
+    # `VM -> IPAddress -> VMInterface -> VM`. No apply order breaks it, so both are stripped
+    # from every create and applied by a follow-up PATCH (NBO-015).
+    deferred: {primary_ip4: Always, primary_ip6: Always}
     printerColumns:
       - {name: Status, type: string, path: .spec.status}
       - {name: Cluster, type: string, path: .spec.clusterRef.name}
@@ -350,6 +415,20 @@ kinds:
     handWritten: true
     shortNames: [nbvmif]
     containmentRef: virtualMachineRef
+    # `parent` and `bridge` are self-references and derive their own IfUnresolved. `qinq_svlan`
+    # points at ipam.VLAN rather than at this model, so nothing about its shape says it may be
+    # deferred -- the reason is that a VLAN is an unrelated object whose absence must not stop
+    # the interface being created.
+    deferred: {qinq_svlan: IfUnresolved}
+    naturalKeys:
+      - doc: >-
+          Unique per virtual machine rather than globally, from
+          `VMInterface.Meta.unique_together = (virtual_machine, name)`
+          (docs/netbox-schema.md -> virtualization.VMInterface). Case-*sensitive*, next to the
+          machine's own case-insensitive name.
+        fields:
+          - {filter: virtual_machine_id, spec: virtualMachineRef}
+          - {filter: name, spec: name}
     printerColumns:
       - {name: VM, type: string, path: .spec.virtualMachineRef.name}
       - {name: MAC, type: string, path: .spec.macAddress}
@@ -358,6 +437,170 @@ kinds:
     handWritten: true
     shortNames: [nbvdisk]
     containmentRef: virtualMachineRef
+    naturalKeys:
+      - doc: >-
+          `(virtual_machine, name)`, from the model's own `unique_together`
+          (docs/netbox-schema.md -> virtualization.VirtualDisk): a disk is identified within
+          its machine and nowhere else.
+        fields:
+          - {filter: virtual_machine_id, spec: virtualMachineRef}
+          - {filter: name, spec: name}
     printerColumns:
       - {name: VM, type: string, path: .spec.virtualMachineRef.name}
       - {name: Size, type: integer, path: .spec.size}
+
+  # ---------------------------------------------------------------------------------------
+  # The kinds M4-M5 shipped by hand after the emitters were first written: the hardware
+  # catalogue (NBO-027, NBO-030), ipam.IPRange (NBO-055) and the tenancy contacts (NBO-056).
+  # Same treatment as the block above -- kept out of a full run, regenerated with `--kinds`
+  # when the generator is being diffed against them (NBO-043).
+  # ---------------------------------------------------------------------------------------
+
+  dcim.Manufacturer:
+    handWritten: true
+    shortNames: [nbmfr]
+    printerColumns:
+      - {name: Slug, type: string, path: .spec.slug}
+
+  dcim.DeviceRole:
+    handWritten: true
+    # mptt.MPTTModel is outside the NetBox tree, so the AST walk never sees its two
+    # denormalised caches and the IR carries neither.
+    readOnlyExtra: [_depth, _children]
+    shortNames: [nbdrole]
+    containmentRef: parentRef
+    printerColumns:
+      - {name: Slug, type: string, path: .spec.slug}
+      - {name: Parent, type: string, path: .spec.parentRef.name}
+
+  dcim.DeviceType:
+    handWritten: true
+    shortNames: [nbdtype]
+    printerColumns:
+      - {name: Manufacturer, type: string, path: .spec.manufacturerRef.name}
+      - {name: Model, type: string, path: .spec.model}
+      - {name: U, type: string, path: .spec.uHeight}
+
+  dcim.Platform:
+    handWritten: true
+    # mptt.MPTTModel is outside the NetBox tree, so the AST walk never sees its two
+    # denormalised caches and the IR carries neither.
+    readOnlyExtra: [_depth, _children]
+    shortNames: [nbplatform]
+    containmentRef: parentRef
+    printerColumns:
+      - {name: Slug, type: string, path: .spec.slug}
+      - {name: Manufacturer, type: string, path: .spec.manufacturerRef.name}
+
+  dcim.Device:
+    handWritten: true
+    shortNames: [nbdev]
+    # Not derivable: none of the three is a self-reference, and every one of them closes a
+    # ring through dcim.Interface. Stripped from every create and applied by a follow-up
+    # PATCH (NBO-015, docs/reference/netboxdevice.md).
+    deferred: {primary_ip4: Always, primary_ip6: Always, oob_ip: Always}
+    printerColumns:
+      - {name: Site, type: string, path: .spec.siteRef.name}
+      - {name: Type, type: string, path: .spec.deviceTypeRef.name}
+      - {name: Status, type: string, path: .spec.status}
+      - {name: Primary-IP, type: string, path: .spec.primaryIP4Ref.name}
+
+  dcim.Interface:
+    handWritten: true
+    shortNames: [nbif]
+    containmentRef: deviceRef
+    # `lag`, `parent` and `bridge` are self-references and derive their own IfUnresolved.
+    # `qinq_svlan` points at ipam.VLAN rather than at this model, so nothing about its shape
+    # says it may be deferred.
+    deferred: {qinq_svlan: IfUnresolved}
+    naturalKeys:
+      - doc: >-
+          The identity is inherited from dcim.ComponentModel, whose `unique_together` is
+          `(device, name)` (docs/netbox-schema.md -> dcim.ComponentModel). Matched
+          case-sensitively, unlike the device's own `?name__ie=`: NetBox's constraint is on the
+          column and not on `lower(name)`.
+        fields:
+          - {filter: device_id, spec: deviceRef}
+          - {filter: name, spec: name}
+    printerColumns:
+      - {name: Device, type: string, path: .spec.deviceRef.name}
+      - {name: Type, type: string, path: .spec.type}
+      - {name: Enabled, type: boolean, path: .spec.enabled}
+
+  ipam.IPRange:
+    handWritten: true
+    shortNames: [nbrange]
+    # Decision #176: IPAM defaults to Retain. A range is address-space allocation on the same
+    # terms as an address -- deleting the CR does not mean the run is free.
+    retainOnDelete: true
+    naturalKeys:
+      - doc: >-
+          ipam.IPRange declares no meta.constraints (docs/netbox-schema.md -> ipam.IPRange), so
+          both endpoints plus the VRF are NetBox's own identity for a run of addresses. The
+          address filters are exact only because both endpoints carry the containing prefix's
+          mask.
+        fields:
+          - {filter: start_address, spec: startAddress}
+          - {filter: end_address, spec: endAddress}
+          - {filter: vrf_id, spec: vrfRef}
+      - doc: >-
+          The same identity in the global table, with `vrf_id` pinned rather than omitted: the
+          endpoints alone match the same run in every VRF.
+        fields:
+          - {filter: start_address, spec: startAddress}
+          - {filter: end_address, spec: endAddress}
+        nullFields:
+          - {filter: vrf_id, spec: vrfRef, column: ref}
+    printerColumns:
+      - {name: Start, type: string, path: .spec.startAddress}
+      - {name: End, type: string, path: .spec.endAddress}
+      - {name: VRF, type: string, path: .spec.vrfRef.name}
+      - {name: Status, type: string, path: .spec.status}
+
+  tenancy.ContactGroup:
+    handWritten: true
+    # mptt.MPTTModel is outside the NetBox tree, so the AST walk never sees its two
+    # denormalised caches and the IR carries neither.
+    readOnlyExtra: [_depth, _children]
+    shortNames: [nbcontactgroup]
+    containmentRef: parentRef
+    printerColumns:
+      - {name: Slug, type: string, path: .spec.slug}
+      - {name: Parent, type: string, path: .spec.parentRef.name}
+
+  tenancy.ContactRole:
+    handWritten: true
+    shortNames: [nbcontactrole]
+    printerColumns:
+      - {name: Slug, type: string, path: .spec.slug}
+
+  tenancy.Contact:
+    handWritten: true
+    shortNames: [nbcontact]
+    naturalKeys:
+      - doc: >-
+          `name` is backed by an *index* and no constraint at all (docs/netbox-schema.md ->
+          tenancy.Contact), so two contacts of one name is legal server state and more than one
+          match is a Conflict rather than a guess.
+        fields:
+          - {filter: name, spec: name}
+    # No duplicateSpec, deliberately. Two contacts of one name is legal server state and is
+    # reported as a Conflict rather than resolved: unlike an address, there is no field on
+    # which the operator could tell the two apart (docs/reference/netboxcontact.md).
+    printerColumns:
+      - {name: Contact, type: string, path: .spec.name}
+      - {name: Email, type: string, path: .spec.email}
+
+  tenancy.ContactAssignment:
+    handWritten: true
+    shortNames: [nbcontactassignment]
+    # The containment parent is the union rather than the contact: NetBox cascades an
+    # assignment when the assigned object goes, and PROTECTs the contact.
+    containmentRef: objectRef
+    # The widest union in the catalogue, and its type is not named after the pair. Recorded
+    # for the same reason as ipam.IPAddress's: the kind does not emit yet.
+    unionTypes: {object: ContactAssignmentTarget}
+    printerColumns:
+      - {name: Contact, type: string, path: .spec.contactRef.name}
+      - {name: Role, type: string, path: .spec.roleRef.name}
+      - {name: Priority, type: string, path: .spec.priority}

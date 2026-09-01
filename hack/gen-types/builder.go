@@ -17,7 +17,12 @@ type header struct {
 	// IRSHA is the SHA-256 of the IR *file*, so it moves only when the inputs move.
 	IRSHA string
 
-	// IRPath is the IR's path relative to the repository, never absolute.
+	// IRPath is the IR file's base name, never its path. The base name is version-stamped
+	// (`ir-4.6.8.json.gz`) so it still says which release the file holds, and dropping the
+	// directory is what keeps the header identical whether the run spelled `--ir` relatively
+	// or absolutely -- a header that changes with the caller's working directory makes
+	// `--check` fail in CI for reasons unrelated to the change. The reviewable provenance is
+	// IRSHA either way.
 	IRPath string
 }
 

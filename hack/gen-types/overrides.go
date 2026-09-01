@@ -89,6 +89,45 @@ type kindOverride struct {
 	// ExtraCEL are XValidation rules that are facts about NetBox rather than about the
 	// column, emitted verbatim.
 	ExtraCEL []celRule `json:"extraCEL"`
+
+	// Deferred names the columns the engine may leave out of a create payload, keyed by the
+	// NetBox column and valued `Always` or `IfUnresolved`.
+	//
+	// A self-reference is derived rather than declared -- the IR marks it and every one of
+	// them gets `IfUnresolved` -- so an entry here is for the deferral no shape of the column
+	// implies: virtualization.VirtualMachine's `primary_ip4` needs an address that needs an
+	// interface that needs the machine, which is a fact about the ring and not about the FK
+	// (internal/registry/virtualization_virtualmachine.go, NBO-015).
+	Deferred map[string]string `json:"deferred"`
+
+	// RetainOnDelete makes `spec.deletionPolicy` default to Retain on this kind rather than
+	// Delete. A policy judgement about what a row means, not a schema fact: an IPAM row is
+	// address-space allocation that outlives the CR that asked for it (#176), and nothing in
+	// NetBox says so (internal/registry/ipam_ipaddress.go).
+	RetainOnDelete bool `json:"retainOnDelete"`
+
+	// DuplicateSpec names the spec field that lets one natural key legitimately match more
+	// than one row, e.g. `allowDuplicate` on ipam.IPAddress. Which duplicates NetBox permits
+	// depends on the enclosing VRF's `enforce_unique`, so it is per kind and not derivable.
+	DuplicateSpec string `json:"duplicateSpec"`
+
+	// UpdateStrategy is `Patch` (the default) or `Recreate`. dcim.Cable needs Recreate: its
+	// identity lives in its terminations and `unique(termination_type, termination_id)` keeps
+	// the wanted endpoint occupied until the old cable is gone, so the replacement cannot be
+	// created first (NBO-049). Declared here because the alternative is a kind switch in the
+	// engine.
+	UpdateStrategy string `json:"updateStrategy"`
+
+	// RecreateOn are the columns whose change forces the recreate. Only legal alongside
+	// `updateStrategy: Recreate`, which registry.Descriptor.Validate enforces.
+	RecreateOn []string `json:"recreateOn"`
+
+	// UnionTypes names the shared Go union struct behind a polymorphic pair, keyed by the
+	// pair's spec field. Only needed where the type is not spelled after the pair:
+	// `(scope_type, scope_id)` defaults to `ScopeRef` and needs no entry, while
+	// `ipam.IPAddress`'s `(assigned_object_type, assigned_object_id)` is `IPAssignment`
+	// (api/v1alpha1/genericref.go).
+	UnionTypes map[string]string `json:"unionTypes"`
 }
 
 // naturalKeyOverride is one hand-declared lookup candidate.
@@ -149,3 +188,16 @@ func loadOverrides(path string) (*overrides, error) {
 
 // of returns a kind's overrides, zero-valued when it has none.
 func (o *overrides) of(kind string) kindOverride { return o.Kinds[kind] }
+
+// triaged reports whether the kind has a `kinds:` row at all.
+//
+// It is what decides a full run's emission set, and the absence of a row is read as "nobody
+// has looked at this kind yet" rather than as "emit it with every default". The two facts
+// every kind needs -- its `kubectl` short name and its printer columns -- are judgements with
+// no schema behind them, so a kind emitted without a row ships an abbreviation and a
+// `kubectl get` nobody chose. Reported, never guessed.
+func (o *overrides) triaged(kind string) bool {
+	_, ok := o.Kinds[kind]
+
+	return ok
+}

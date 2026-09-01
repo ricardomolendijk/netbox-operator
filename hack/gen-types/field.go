@@ -159,7 +159,7 @@ func (b *builder) jsonFieldName(f irField) string {
 func (b *builder) fieldType(kind irKind, f irField, optional bool) (string, []string, error) {
 	switch f.Class {
 	case "Ref":
-		return b.refType(f)
+		return b.refType(f, optional)
 	case "M2M":
 		target, err := b.refTarget(f)
 		if err != nil {
@@ -182,12 +182,19 @@ func (b *builder) fieldType(kind irKind, f irField, optional bool) (string, []st
 	return "", nil, fmt.Errorf("%w: %s.%s is class %q", errUnmappedField, kind.App, f.Name, f.Class)
 }
 
-// refType is a single reference: a pointer, always, because a reference has three states and
-// a struct value cannot express "absent".
-func (b *builder) refType(f irField) (string, []string, error) {
+// refType is a single reference: a pointer when it is optional, because an optional reference
+// has three states and a struct value cannot express "absent"; a value when it is required,
+// because there is no absent state to express and a required pointer says two contradictory
+// things about the same field. The shipped kinds set the convention both ways
+// (api/v1alpha1/virtualization_vminterface.go, `VirtualMachineRef VirtualMachineRef`).
+func (b *builder) refType(f irField, optional bool) (string, []string, error) {
 	target, err := b.refTarget(f)
 	if err != nil {
 		return "", nil, err
+	}
+
+	if !optional {
+		return target, nil, nil
 	}
 
 	return "*" + target, nil, nil

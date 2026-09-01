@@ -88,7 +88,7 @@ func plan(opts options) ([]output, error) {
 		return nil, err
 	}
 
-	head := header{NetBoxVersion: loaded.NetBoxVersion, IRSHA: sha, IRPath: filepath.ToSlash(opts.ir)}
+	head := header{NetBoxVersion: loaded.NetBoxVersion, IRSHA: sha, IRPath: filepath.Base(opts.ir)}
 	build := newBuilder(loaded, over, head)
 
 	emit, err := newEmitter(opts.out)
@@ -101,10 +101,11 @@ func plan(opts options) ([]output, error) {
 	// delete the other hundred kinds' enums and typed references. A kind that does not build
 	// yet contributes nothing, which is consistent -- the per-kind file that would cite its
 	// enum does not exist either.
-	// Reported only on a full run. A --kinds run is someone iterating on one template, and the
-	// other hundred kinds' missing overrides are not what they are looking at.
+	// Reported only on a full, writing run. A --kinds run is someone iterating on one
+	// template, and --check is a CI gate whose job is to compare what is committed against
+	// what the IR says -- neither wants the outstanding catalogue on stderr.
 	reached := build.reach(everyKind(loaded))
-	if opts.kinds == "" {
+	if opts.kinds == "" && !opts.check {
 		warn(reached)
 	}
 
@@ -127,12 +128,26 @@ func plan(opts options) ([]output, error) {
 		return nil, err
 	}
 
-	shared, err := sharedFiles(build, emit)
-	if err != nil {
+	return withShared(build, emit, outputs)
+}
+
+// withShared appends the two shared files, unless there is nothing for them to serve.
+//
+// They serve the generated kinds and nothing else, so a run that emits no kind emits neither of
+// them. Writing them unconditionally would put a second declaration of every typed reference
+// alias next to the hand-written ones and the package would not compile -- and it would do it
+// on the very run whose answer is "there is nothing to do".
+func withShared(build *builder, emit *emitter, outputs []output) ([]output, error) {
+	if err := errors.Join(build.collisions...); err != nil {
 		return nil, err
 	}
 
-	if err := errors.Join(build.collisions...); err != nil {
+	if len(outputs) == 0 {
+		return outputs, nil
+	}
+
+	shared, err := sharedFiles(build, emit)
+	if err != nil {
 		return nil, err
 	}
 
@@ -221,10 +236,19 @@ func warn(err error) {
 		return
 	}
 
-	fmt.Fprintf(os.Stderr, "gen-types: kinds not yet emittable:\n%v\n", err)
+	fmt.Fprintf(os.Stderr, "gen-types: kinds the IR cannot yet supply, and what each one needs:\n%v\n", err)
 }
 
 // selectKinds resolves the --kinds flag, and reports whether the caller named a subset.
+//
+// A full run emits the kinds that have a `kinds:` row in overrides.yaml and are not marked
+// hand-written. Two things follow from requiring the row, and both are deliberate:
+//
+//   - A kind nobody has triaged is not emitted with every default. Its `kubectl` short name
+//     and its printer columns are judgements with no schema behind them (ADR-0001), so a kind
+//     emitted without a row would ship an abbreviation and a `kubectl get` nobody chose.
+//   - Adding a kind stays data entry. The row is the whole of the work, which is the property
+//     the generator exists to produce (specs/NBO-042-codegen-emitters.md).
 //
 // A hand-written kind is skipped by default and emitted when named, which is the only way to
 // diff what the generator would produce against what a human wrote -- the case NBO-043
@@ -240,7 +264,7 @@ func selectKinds(loaded *ir, over *overrides, flagValue string) ([]string, bool)
 	var out []string
 
 	for name := range loaded.Kinds {
-		if !over.of(name).HandWritten {
+		if over.triaged(name) && !over.of(name).HandWritten {
 			out = append(out, name)
 		}
 	}

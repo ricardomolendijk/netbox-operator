@@ -51,6 +51,31 @@ func (n namer) word(part string) string {
 		}
 	}
 
+	// An initialism with a version suffix: `primary_ip4` is `PrimaryIP4Ref` and not
+	// `PrimaryIp4Ref`. Same shape as the plural rule below, and needed for the same reason --
+	// the table lists the initialism and NetBox glues a digit onto it.
+	if stem := strings.TrimRight(part, "0123456789"); stem != part && stem != "" {
+		for _, acronym := range n.acronyms {
+			if strings.EqualFold(stem, acronym) {
+				return acronym + part[len(stem):]
+			}
+		}
+	}
+
+	// The plural of an initialism, which is how NetBox spells every to-many column:
+	// `tagged_vlans` is `TaggedVLANs` and `import_targets` is not affected. The table lists
+	// singulars, and listing `VLANS` next to `VLAN` would spell it `TaggedVLANS`.
+	//
+	// Stem matching and not prefix matching, so this stays as narrow as the whole-part rule
+	// above: `idle` does not become `IDle` because `idl` is not in the table.
+	if stem, plural := strings.CutSuffix(part, "s"); plural {
+		for _, acronym := range n.acronyms {
+			if strings.EqualFold(stem, acronym) {
+				return acronym + "s"
+			}
+		}
+	}
+
 	return string(unicode.ToUpper(rune(part[0]))) + part[1:]
 }
 
