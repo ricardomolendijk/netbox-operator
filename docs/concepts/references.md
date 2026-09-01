@@ -442,6 +442,46 @@ $ kubectl get netboxregion -A \
 [Stuck references](../operations/stuck-references.md) is the operational version of this:
 which condition to read, what the metrics mean, and the two caveats on that `jsonpath`.
 
+### Ordering guarantees
+
+The claim at the top of this section is not an aspiration. It is what
+[the e2e ordering gate](../operations/e2e.md) exists to prove, against a real NetBox, and this
+is exactly what it establishes:
+
+- **Any apply order reaches the same end state.** The same seventeen-object graph — five levels
+  deep, with a self-reference, a required reference, a to-many, two uses of the scope union, a
+  generic FK and three cross-namespace crossings — is applied in dependency order, in exactly
+  the reverse of it, and in twenty seeded random permutations. All twenty-two runs produce a
+  **byte-identical canonicalised dump** of NetBox.
+- **No polling is involved.** In the grant-last run, `resyncPeriod` is set to an hour and every
+  referrer sits at `RefDenied` until the grant is applied. They reach `Ready` on the grant's
+  creation, so the watch is what converged them and not the timer.
+- **Convergence is quiet.** Two full `resyncPeriod`s after a run converges, NetBox receives
+  **zero** mutating requests. This is the assertion that catches a resolver which "converges"
+  by re-`PATCH`ing forever, and an end-state check would pass one.
+- **Convergence is cheap.** A whole run costs at most one create per object plus one follow-up
+  `PATCH` per [deferred field](#a-declared-reference-that-does-not-resolve-writes-nothing). A
+  controller that got there by brute force fails here even though its end state is right.
+- **A waiting object writes nothing.** An object whose reference has not resolved has no
+  `status.id` and no counterpart in NetBox, checked per object rather than inferred from the
+  end state.
+- **Nothing in memory is load-bearing.** The manager Pod is deleted partway through a
+  random-order apply and the run still converges to the same dump. Reconciliation is
+  level-triggered, so a restart replays every object as a Create.
+- **Order does not matter on the way out either.** The whole graph is deleted in random order
+  and NetBox ends up empty, with no CR held by a finalizer — NetBox's own `PROTECT` 409s
+  resolve themselves as the dependents go away.
+
+The two documented exceptions stand, and the suite does not contradict them:
+
+- **A `slug`, `lookup` or `id` reference is not watched**, because it terminates in NetBox where
+  there is no Kubernetes object an event could arrive for. Its target appearing is noticed on
+  the retry interval and nothing else ([what is not woken](#what-is-not-woken)).
+- **A target that never becomes usable blocks its referrers forever**, by design. The fix is on
+  the target; a poll would hide a stuck graph rather than reveal it. The suite asserts the
+  terminal form of this too: two objects in a
+  [cycle](#cycles) report `RefCycle`, write nothing, and *stop* rather than requeue.
+
 ## Crossing a namespace
 
 A `name` reference that resolves into another namespace is **denied unless that namespace
