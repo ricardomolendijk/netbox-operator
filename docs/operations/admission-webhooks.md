@@ -113,9 +113,10 @@ The last row is the important one. `spec.endpointRef` immutability, `spec.prefix
 every enum and every one-of are enforced by the API server whether or not anything is serving
 admission. Turning this webhook off loses three rejections and three warnings, and nothing else.
 
-To turn it off deliberately — a cluster without cert-manager, or one that has not installed the
-configuration — run the manager with `--enable-webhooks=false` and do not apply
-`config/webhook`.
+To turn it off deliberately, set `webhook.enabled=false` on the chart, or run the manager with
+`--enable-webhooks=false` and do not apply `config/webhook`. A cluster without cert-manager
+needs neither: the chart detects that and degrades to exactly this state on its own — see
+[on a cluster without cert-manager](#on-a-cluster-without-cert-manager).
 
 ## `failurePolicy: Ignore`, and why
 
@@ -205,6 +206,38 @@ the webhook `Service`, and `config/webhook` puts `cert-manager.io/inject-ca-from
 configuration so the CA injector fills in the `caBundle`. The certificate is renewed at two
 thirds of its lifetime (`duration: 8760h`, `renewBefore: 2920h`). `insecureSkipTLSVerify` is
 never set.
+
+The Helm chart renders the same four objects, from `webhook.enabled` (default `true`) and
+`webhook.certManager.*` — including the `inject-ca-from` annotation, because there is no
+second CA mechanism to fall back to. `webhook.certManager.issuerRef.name` points the
+`Certificate` at an `Issuer` or `ClusterIssuer` you already run instead of the self-signed one.
+
+### On a cluster without cert-manager
+
+Both install paths degrade rather than fail, and neither does it silently.
+
+- **The chart** gates every webhook object on the `cert-manager.io/v1` CRDs existing — the
+  same shape as the `ServiceMonitor` gate. With them absent it renders no `Certificate`, no
+  `Service` and no configuration, and starts the manager with `--enable-webhooks=false`;
+  `NOTES.txt` says which of the two happened. All three follow from one `if`
+  (`netbox-operator.webhookEnabled`), so the manager's flag cannot disagree with what was
+  rendered. Before [#249](https://github.com/ricardomolendijk/netbox-operator/issues/249) the
+  chart rendered nothing and left the flag at its default, and the manager CrashLooped on
+  `open /tmp/k8s-webhook-server/serving-certs/tls.crt: no such file or directory`.
+- **`make deploy`** has no such gate: `config/base` includes `../certmanager`
+  unconditionally, so a cluster without the CRDs fails the apply with `no matches for kind
+  "Certificate"` — which is loud, immediate, and the right failure for a path whose user is
+  editing the overlay anyway.
+- **Either way**, run with `--enable-webhooks=false` and do not apply `config/webhook`. Set
+  `webhook.certManager.required=true` to make cert-manager's absence an install-time error
+  instead, which is the setting to reach for when admission is a control you rely on: under
+  `Ignore`, a webhook that is quietly not there admits everything and logs nothing.
+
+The certificate `Secret` is mounted **not** optional, in the chart and in
+`config/manager/manager.yaml` both. While cert-manager has yet to write it the `Pod` stays in
+`ContainerCreating`, which is visible and clears itself; mounted optionally the replica would
+start, join the `Service` and fail every TLS handshake instead — a silent bypass under
+`Ignore`.
 
 NBO-044's **self-signed fallback is not implemented**, and that is the point rather than a gap.
 It would need `update` and `patch` on `validatingwebhookconfigurations` — which is patching

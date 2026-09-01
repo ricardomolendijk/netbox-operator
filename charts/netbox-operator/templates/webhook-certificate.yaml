@@ -1,0 +1,53 @@
+{{- if include "netbox-operator.webhookEnabled" . }}
+{{- /*
+The webhook's serving certificate, and the self-signed Issuer that signs it unless the
+install named one of its own.
+
+The chart's copy of config/certmanager/certificate.yaml, and cert-manager is the only
+certificate path here for the reason that file gives: the self-signed fallback would need
+`update` and `patch` on validatingwebhookconfigurations -- patching cluster-wide admission,
+a privilege this operator holds nowhere else -- plus a rotation that publishes the new CA in
+the bundle before the new leaf is served. cert-manager already does both, correctly.
+docs/operations/admission-webhooks.md#certificates.
+
+A self-signed Issuer rather than a CA anybody else trusts, because the only client is the API
+server and the only thing it trusts is the CA the injected caBundle names.
+*/ -}}
+{{- if not .Values.webhook.certManager.issuerRef.name }}
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ include "netbox-operator.webhookIssuerName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "netbox-operator.labels" . | nindent 4 }}
+spec:
+  selfSigned: {}
+---
+{{- end }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "netbox-operator.webhookCertName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "netbox-operator.labels" . | nindent 4 }}
+spec:
+  {{- /*
+  The webhook Service's in-cluster names, from the same helper the Service and the
+  configuration's clientConfig use, so the three cannot drift apart.
+  */}}
+  dnsNames:
+  - {{ printf "%s.%s.svc" (include "netbox-operator.webhookServiceName" .) .Release.Namespace }}
+  - {{ printf "%s.%s.svc.cluster.local" (include "netbox-operator.webhookServiceName" .) .Release.Namespace }}
+  issuerRef:
+    kind: {{ .Values.webhook.certManager.issuerRef.kind }}
+    name: {{ .Values.webhook.certManager.issuerRef.name | default (include "netbox-operator.webhookIssuerName" .) }}
+  {{- /*
+  The Secret the manager mounts. Named from the release, not fixed, so two releases in one
+  namespace do not overwrite each other's certificate.
+  */}}
+  secretName: {{ include "netbox-operator.webhookCertName" . }}
+  duration: {{ .Values.webhook.certManager.duration }}
+  renewBefore: {{ .Values.webhook.certManager.renewBefore }}
+{{- end }}

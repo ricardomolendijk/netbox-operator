@@ -174,7 +174,8 @@ test-e2e: ## Run e2e tests against a kind cluster and a live NetBox.
 # conflating them makes the target useless locally.
 GENERATED_PATHS ?= config/crd config/rbac config/webhook/manifests.yaml \
                   api/v1alpha1/zz_generated.deepcopy.go \
-                  charts/netbox-operator/crds charts/netbox-operator/templates/clusterrole.yaml
+                  charts/netbox-operator/crds charts/netbox-operator/templates/clusterrole.yaml \
+                  charts/netbox-operator/templates/webhook.yaml
 
 .PHONY: verify
 verify: manifests generate ## Fail if generated output is not committed.
@@ -274,14 +275,23 @@ helm-lint: ## helm lint the chart over the default and the all-features values.
 
 .PHONY: helm-template
 helm-template: ## Render the chart over both value files, to /dev/null.
-	@# --api-versions so the ServiceMonitor branch is rendered rather than skipped: the
-	@# template is gated on the Prometheus Operator CRD existing, and `helm template` off a
-	@# cluster otherwise reports it as absent and never exercises the branch.
+	@# --api-versions so the branches gated on a CRD existing are rendered rather than
+	@# skipped: the ServiceMonitor is gated on the Prometheus Operator's and the webhook on
+	@# cert-manager's, and `helm template` off a cluster otherwise reports both as absent and
+	@# never exercises either branch.
 	@for values in $(CHART_VALUES); do \
 		echo "==> $$values"; \
 		$(HELM) template netbox-operator $(CHART) -n netbox-operator-system \
-			-f $$values --api-versions monitoring.coreos.com/v1 >/dev/null || exit 1; \
+			-f $$values --api-versions monitoring.coreos.com/v1 \
+			--api-versions cert-manager.io/v1 >/dev/null || exit 1; \
 	done
+	@# And once with cert-manager absent, which is the other half of the webhook gate and the
+	@# render a default install on a cluster without cert-manager actually gets: no
+	@# Certificate, no configuration, and --enable-webhooks=false on the manager so it comes
+	@# up rather than CrashLooping (#249).
+	@echo "==> $(CHART)/values.yaml, cert-manager absent"
+	@$(HELM) template netbox-operator $(CHART) -n netbox-operator-system \
+		-f $(CHART)/values.yaml --api-versions monitoring.coreos.com/v1 >/dev/null
 
 # Every RBAC object the chart renders, over both value files. Committed, so an accidental
 # widening -- a `secrets` rule that became cluster-scoped, a Role that became a ClusterRole

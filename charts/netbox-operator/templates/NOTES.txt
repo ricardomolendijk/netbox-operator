@@ -30,6 +30,23 @@ WARNING: metrics.serviceMonitor.enabled is set but monitoring.coreos.com/v1 is n
 installed on this cluster, so no ServiceMonitor was created.
 {{- end }}
 {{- end }}
+{{- if include "netbox-operator.webhookEnabled" . }}
+
+Admission: the validating webhook is registered, and cert-manager issues its serving
+certificate into Secret {{ include "netbox-operator.webhookCertName" . }}. The manager's Pod
+stays in ContainerCreating until that Secret exists, which is seconds on a healthy cluster
+and forever if cert-manager is installed but not running.
+{{- else if .Values.webhook.enabled }}
+
+WARNING: cert-manager.io/v1 is not installed, so no validating webhook was created and the
+manager runs with --enable-webhooks=false. Three denials and three warnings move from apply
+time to reconcile time, where each of them has a backstop -- nothing is silently accepted and
+no NetBox write happens on a blocked object
+(docs/operations/admission-webhooks.md#what-breaks-when-it-is-off).
+
+Install cert-manager and re-run `helm upgrade` to turn admission on, or set
+webhook.certManager.required=true to make its absence an install-time error instead.
+{{- end }}
 {{- if not .Values.endpoint.enabled }}
 
 No NetBoxEndpoint was created. Apply one (docs/examples/) or set endpoint.enabled=true.
