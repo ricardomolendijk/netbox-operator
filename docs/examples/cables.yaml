@@ -1,0 +1,145 @@
+# Cables, end to end: a bundle, a patch lead between two switch ports, and a multi-strand
+# trunk that lands on two ports at one end.
+#
+#   kubectl create namespace homelab
+#   kubectl apply -f docs/examples/cables.yaml
+#   kubectl get nbcable,nbcablebundle -n homelab -w
+#
+# Replace the URL and the token before applying.
+#
+# What this file is really showing is the **to-many polymorphic reference**. `aTerminations`
+# and `bTerminations` are lists of a union with one member per legal target, and the member
+# name is what pins the target Kind -- there is no `kind:` field and no content-type string to
+# spell. Two properties are worth watching for:
+#
+#   * Order inside a list is not data. Swap the two entries in the trunk's `aTerminations`,
+#     re-apply, and the operator issues **zero** API calls.
+#   * Changing the *membership* of either list deletes the cable and creates a new one, with a
+#     `Recreated` Event and a new `status.id`. NetBox's own unique constraint on
+#     (termination_type, termination_id) is what makes that the only legal order.
+#
+# See docs/reference/netboxcable.md.
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: netbox-token
+  namespace: homelab
+  labels:
+    # Required. The operator's Secret cache selects on this label, so a Secret without it is
+    # invisible even when the name on the endpoint is right. See docs/operations/rbac.md.
+    netbox.kubeforge.org/endpoint-credential: "true"
+type: Opaque
+stringData:
+  # A NetBox API token with write access to the dcim app.
+  token: "0123456789abcdef0123456789abcdef01234567"
+---
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxEndpoint
+metadata:
+  name: homelab
+  namespace: homelab
+spec:
+  url: https://netbox.home.arpa
+  tokenSecretRef:
+    name: netbox-token
+  resyncPeriod: 2m
+  mode: Apply
+---
+# A bundle. `dcim.CableBundle` has one column of its own -- `name`, with a real column-level
+# UNIQUE -- so `name` is the natural key and two bundles of one name is a Conflict the
+# database itself prevents. There is no `slug`, so a `slug`-mode reference to this Kind
+# cannot resolve; name it, or use `lookup`/`id`.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxCableBundle
+metadata:
+  name: riser-a
+  namespace: homelab
+spec:
+  endpointRef: homelab
+  name: Riser A
+  description: Rack 1 to rack 8, 48-strand OM4
+  comments: |
+    Installed 2026-03-11. Strands 25-48 are spare.
+---
+# The ordinary case: one patch lead, one termination per end.
+#
+# `metadata.name` is yours alone -- a cable has no name in NetBox, and its identity is the
+# terminations. Both ends are looked up here with `lookup`, so this example needs no
+# NetBoxInterface CRs to exist; in a real topology you would use `name` mode and point at
+# sibling CRs, which is the only mode the operator can wait on.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxCable
+metadata:
+  name: sw1-eth0-sw2-eth0
+  namespace: homelab
+spec:
+  endpointRef: homelab
+  aTerminations:
+    - interfaceRef:
+        lookup:
+          device: sw1
+          name: Ethernet1/1
+  bTerminations:
+    - interfaceRef:
+        lookup:
+          device: sw2
+          name: Ethernet1/1
+  type: cat6
+  status: connected
+  label: patch-14
+  color: 2196f3
+  # A string, not a number: NetBox stores a DecimalField and returns "3.50" for a spec that
+  # said "3.5". The engine compares the two numerically, so this settles on the first pass.
+  length: "3.5"
+  lengthUnit: m
+  bundleRef:
+    name: riser-a
+  description: Rack 3 to rack 4, top of rack
+---
+# The interesting case: a two-strand trunk whose A end lands on two front ports of one patch
+# panel. NetBox 4.x permits several terminations per cable end, which is why these fields are
+# lists at all.
+#
+# `frontPortRef` is one of the eight members whose Kind has not landed yet, so this cable will
+# report `RefsResolved=False, Reason=RefKindUnavailable` naming `aTerminations[0].frontPortRef`
+# until NetBoxFrontPort exists -- reported, and never silently dropped. It is here on purpose:
+# the indexed path is what tells you *which* termination is waiting when an end carries
+# several.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxCable
+metadata:
+  name: panel-1-trunk
+  namespace: homelab
+spec:
+  endpointRef: homelab
+  # Reorder these two and re-apply: nothing is written. The operator sorts and deduplicates
+  # before comparing and before sending, because NetBox returns the termination rows in its
+  # own order and not in yours.
+  aTerminations:
+    - frontPortRef:
+        lookup:
+          device: panel-1
+          name: "1"
+    - frontPortRef:
+        lookup:
+          device: panel-1
+          name: "2"
+  bTerminations:
+    - rearPortRef:
+        lookup:
+          device: panel-2
+          name: "1"
+  type: mmf-om4
+  # `planned` documents a link that is not installed. It contributes no active CablePath.
+  status: planned
+  # The connector-and-position geometry: two connectors of one position each. There is
+  # deliberately no way to *clear* a profile once set -- see docs/reference/netboxcable.md.
+  profile: trunk-2c1p
+  label: trunk-01
+  length: "18"
+  lengthUnit: m
+  bundleRef:
+    name: riser-a
+  comments: |
+    Two strands of the 48-strand riser, patched through panel 1.

@@ -646,6 +646,17 @@ sw1-eth1-panel-1     patch-15   cat6   planned     8    False   4m
 | A connectivity check fails just after an edit | — | the recreate window: paths are rebuilt on the create | Poll rather than reading once |
 | `Deleting=False`, `Reason=Protected` | `Deleting` | NetBox refused the delete | Read the message; something else references the cable |
 
+## A runnable example
+
+[`docs/examples/cables.yaml`](../examples/cables.yaml) is a bundle, a patch lead and a
+two-strand trunk that lands on two front ports at one end. It is in `shippedManifests`, so
+every enum value, pattern, bound and `== 1` union rule on this Kind is dry-run through real
+admission on every `make test` — including a one-entry list and a two-entry one, which are
+different CEL evaluations.
+
+The trunk deliberately uses `frontPortRef`, one of the eight members whose Kind has not landed,
+so applying the file shows what `RefKindUnavailable` looks like on an *indexed* path.
+
 ## Related
 
 - [`NetBoxCableBundle`](netboxcablebundle.md) — the bundle a cable is pulled with
