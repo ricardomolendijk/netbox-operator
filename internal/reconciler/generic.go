@@ -387,6 +387,10 @@ func (p *pass) build(ctx context.Context) error {
 	p.reportUntrackedOwnership(ctx, owned)
 	spec.restoreEmpty(p.obj, owned)
 
+	// After restoreEmpty, which would otherwise put an emptied inline list back: an inline
+	// list is not a NetBox column and must not reach a payload (payload.go).
+	spec.dropInlineChildren(p.obj)
+
 	desired, state, refs, err := spec.desired(p.desc)
 	if err != nil {
 		return err

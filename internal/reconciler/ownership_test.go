@@ -417,11 +417,18 @@ func TestEveryRegisteredKindCanExpressAnEmptyValue(t *testing.T) {
 			// mentioned this field" into errUnmappedField, so a missing mapping stops being
 			// a latent bug and starts failing the object -- which is the right outcome, and
 			// this is where it is caught instead.
+			// An inline child list is exempt for a third reason: it describes other Kinds'
+			// objects rather than a column of this one's, so specFields.dropInlineChildren
+			// removes it before the payload is built (NBO-034). Read off the object's own
+			// InlineChildren() rather than listed here, so a Kind that grows one is covered
+			// without an edit.
+			inline := inlineChildFields(obj)
+
 			for name := range empties {
 				// Descriptor.DuplicateSpec is exempt with the envelope's own fields, and for
 				// the same reason: it configures the operator rather than describing a
 				// column, so specFields.desired skips it too (NBO-025).
-				if envelopeFields[name] || name == d.DuplicateSpec {
+				if envelopeFields[name] || name == d.DuplicateSpec || inline[name] {
 					continue
 				}
 

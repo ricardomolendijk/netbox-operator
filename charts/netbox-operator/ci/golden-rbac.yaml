@@ -57,9 +57,7 @@ rules:
   - netboxexporttemplates
   - netboxfhrpgroupassignments
   - netboxfhrpgroups
-  - netboxinterfaces
   - netboxipaddressclaims
-  - netboxipaddresses
   - netboxiprangeclaims
   - netboxipranges
   - netboxmanufacturers
@@ -206,6 +204,8 @@ rules:
 - apiGroups:
   - netbox.kubeforge.org
   resources:
+  - netboxinterfaces
+  - netboxipaddresses
   - netboxlocations
   - netboxprefixes
   - netboxregions
@@ -383,9 +383,7 @@ rules:
   - netboxexporttemplates
   - netboxfhrpgroupassignments
   - netboxfhrpgroups
-  - netboxinterfaces
   - netboxipaddressclaims
-  - netboxipaddresses
   - netboxiprangeclaims
   - netboxipranges
   - netboxmanufacturers
@@ -532,6 +530,8 @@ rules:
 - apiGroups:
   - netbox.kubeforge.org
   resources:
+  - netboxinterfaces
+  - netboxipaddresses
   - netboxlocations
   - netboxprefixes
   - netboxregions

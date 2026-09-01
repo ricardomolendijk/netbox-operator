@@ -47,6 +47,13 @@ role, at a site.
 > The cascade that does exist runs the other way: deleting a `NetBoxDevice` takes its
 > [`NetBoxInterface`s](netboxinterface.md) with it, because `dcim.Interface.device` **is**
 > `CASCADE`.
+>
+> An interface the device *materialised* from [`spec.interfaces`](#specinterfaces) takes a
+> **controller** owner reference instead of that containment one, and its addresses take one
+> too — so `kubectl delete nbdev` removes a whole inline tree. That is not an exception to the
+> rule above but the other half of it: the containment owner reference mirrors a foreign key
+> NetBox cascades, and a controller owner reference records that this operator *created* the
+> object. A device with no parent of its own is still a parent.
 
 ## Minimal example
 
@@ -110,7 +117,7 @@ spec:
   longitude: "4.4777"
 
   primaryIP4Ref:             # all three are deferred, always
-    name: rtmrpi0001-eth0
+    name: rtmrpi0001-eth0-ip-10-0-20-10-24   # the inline address child, by its derived name
   primaryIP6Ref:
     name: rtmrpi0001-eth0-v6
   oobIPRef:
@@ -121,7 +128,41 @@ spec:
 
   description: Raspberry Pi 4B, house RTM
   comments: Managed by netbox-operator.
+
+  interfaces:                # sugar: materialises NetBoxInterface + NetBoxIPAddress CRs
+    - name: bond0
+      type: lag
+    - name: eth0
+      type: 10gbase-t
+      lag: bond0             # a sibling key, not a reference
+      label: Port 1
+      enabled: true
+      mgmtOnly: false
+      mtu: 9000
+      speed: 1000000
+      duplex: full
+      mode: tagged
+      poeMode: pd
+      poeType: type2-ieee802.3at
+      untaggedVLANRef:
+        name: vlan-mgmt
+      taggedVLANs:
+        - name: vlan-guest
+      vrfRef:
+        name: vrf-home
+      description: Uplink
+      addresses:
+        - address: 10.0.20.10/24
+          status: active     # NetBox's own default, written out
+          dnsName: rtmrpi0001.home.arpa
+          vrfRef:
+            name: vrf-home
 ```
+
+`primaryIP4Ref` names the address child the inline `eth0` entry materialised, by its derived
+name. That is the whole of how a device's primary address is set today: there is no `primary:
+true` flag on an inline address, and
+[`spec.interfaces[].addresses`](#specinterfacesaddresses) says why.
 
 ## `spec`
 
@@ -391,6 +432,137 @@ NetBox.
 `description` is `maxLength: 200`; `comments` is a `TextField` with no cap. Both inherited from
 `PrimaryModel`. Omit either to leave NetBox's own value alone; set it to `""` to clear it.
 
+### `spec.interfaces`
+
+| | |
+|---|---|
+| Type | `[]InlineInterface` |
+| Required | no |
+| Default | none |
+| Validation | `maxItems: 128`; `listType: map` keyed on `name` |
+
+The device's interfaces, written inline and materialised as real
+[`NetBoxInterface`](netboxinterface.md) CRs — with each entry's `addresses` materialised as real
+[`NetBoxIPAddress`](netboxipaddress.md) CRs under them. This is
+[ADR-0003 rule 5](../decisions/0003-ownership-and-references.md)'s inline sugar, and the whole of
+it is documented on one page: [inline children](../concepts/inline-children.md).
+
+**Not a NetBox column, and the only field on this spec that is not.** `dcim.Device` has no
+`interfaces` column — the foreign key points the other way, `dcim.Interface.device` — so nothing
+here reaches the device's own payload. Each child writes its own NetBox object; the device never
+writes NetBox on a child's behalf.
+
+**Sugar, and never required.** Every entry is equally expressible as a `NetBoxInterface` with a
+`deviceRef` naming this device, and the longhand kind stays the complete one: an inline entry
+offers a subset of its fields. The two coexist on one device — a hand-written `NetBoxInterface`
+pointing here is never pruned, never adopted, and absent from `status.children`.
+
+**Omitting it and writing `[]` are the same instruction**, unlike every other optional field on
+this spec. There is no NetBox value to leave alone, so there is no third state: both mean
+"declare no children", and both prune the children a previous spec declared.
+
+```yaml
+spec:
+  interfaces:
+    - name: bond0                 # the child key -> NetBoxInterface `<device>-bond0`
+      type: lag
+    - name: eth0
+      type: 10gbase-t             # required; dcim.Interface.type is REQ
+      lag: bond0                  # a SIBLING KEY, not a reference
+      enabled: true
+      mtu: 9000
+      mode: tagged
+      untaggedVLANRef: {name: vlan-mgmt}
+      taggedVLANs: [{name: vlan-guest}]
+      vrfRef: {name: vrf-home}
+      addresses:
+        - address: 10.0.20.10/24  # the child key, prefix length included
+          dnsName: rtmrpi0001.home.arpa
+```
+
+`name` and `type` are the only required fields on an entry. The rest — `label`, `enabled`,
+`mgmtOnly`, `mtu`, `speed`, `duplex`, `mode`, `poeMode`, `poeType`, `lag`, `parent`, `bridge`,
+`untaggedVLANRef`, `taggedVLANs`, `vrfRef`, `description`, `addresses` — are optional and carry
+the longhand kind's own types, so every enum, pattern and length limit is declared once.
+
+`deviceRef` is **absent** from an entry, and so is an address's `assignedObject`: the
+materialiser sets both, and a field the user cannot meaningfully set does not exist.
+
+**An inline field has two states, not three.** Setting `description: ""` on an entry does *not*
+clear NetBox's description: the child is written with server-side apply, `omitempty` drops the
+empty string, no manager claims the field, and the child's own pass therefore reads it as
+absent — which means "leave NetBox alone"
+([field ownership](../concepts/field-ownership.md)). An inline entry can set a value and can
+leave one alone; clearing one is a `NetBoxInterface`, where the field is yours and the
+distinction survives.
+
+**The bounds.** 128 interfaces, 128 tagged VLANs per interface, 16 addresses per interface —
+narrower than the project's standard 256 for the two nested lists, because validation cost
+multiplies through every level: the API server costs `interfaces[].taggedVLANs[]`'s five
+`ObjectRef` rules at 128 × 128 = 16 384 items, not at either bound alone
+([a list needs a bound](../concepts/references.md#a-list-needs-a-bound)). 128 interfaces is past
+every fixed-form switch; a trunk enumerating more than 128 VLANs wants `mode: tagged-all`; an
+interface with more than sixteen addresses is a `NetBoxIPAddress` each.
+
+**If it is wrong.** Two entries with the same `name`, or two addresses with the same `address`
+under one interface: rejected at admission by the map key, `Duplicate value`. An entry with no
+`type`: rejected at admission. Two entries whose names differ only in case, or an entry whose
+derived name is already taken by a CR the operator does not own: `ChildrenReady=False`,
+`Reason=Conflict`, and **nothing is written at all** — see
+[inline components](#inline-components-and-what-they-are-not).
+
+#### `spec.interfaces[].lag` / `parent` / `bridge`
+
+| | |
+|---|---|
+| Type | `string` |
+| Required | no |
+| Validation | `minLength: 1`, `maxLength: 64` |
+
+The **key of a sibling inline interface**, not a reference and not a CR name. `lag: bond0` means
+the entry named `bond0` in this same list.
+
+A key rather than an `ObjectRef` because an `ObjectRef` would make you write
+`lagRef: {name: <device>-bond0}`, hardcoding the derived-name algorithm into your manifest — so a
+device name long enough to take the truncate-and-hash path would silently point at a name that
+does not exist. A key is stable because it is your own input.
+
+From there it is an ordinary deferred self-reference on the child: `lag` is left out of the
+child's `POST` when the sibling has no id yet and applied by a follow-up `PATCH`
+(`DeferIfUnresolved`, see [`NetBoxInterface`](netboxinterface.md)). **The order the two entries
+appear in the list does not matter.**
+
+**If it is wrong.** A key that names no sibling is not silently dropped: the child is written with
+a `lagRef` naming a CR that does not exist and reports `RefsResolved=False`,
+`Reason=RefNotFound`, which leaves the device `ChildrenReady=False`, `Reason=PendingChildren`.
+Two entries naming each other are a ring, reported as `RefCycle` on the children.
+
+#### `spec.interfaces[].addresses`
+
+| | |
+|---|---|
+| Type | `[]InlineIPAddress` |
+| Required | no |
+| Validation | `maxItems: 16`; `listType: map` keyed on `address` |
+
+The addresses assigned to this interface. Four fields: `address` (required, the key, prefix
+length included), `status`, `vrfRef` and `dnsName`.
+
+The child is a `NetBoxIPAddress` whose `assignedObject.interfaceRef` names the **sibling
+interface child**, so NetBox records `assigned_object_type: "dcim.interface"`. It is a child of
+the *device* rather than of the interface, because a controller owner reference names the object
+that created another; the interface still gets a non-controller containment owner reference on it
+from its own pass, and the two coexist ([ownership](../concepts/ownership.md)).
+
+Four fields the longhand kind has are deliberately absent here:
+
+| Absent | Why |
+|---|---|
+| `primary` / `oob` | there is no mechanism yet to write the device's `primary_ip4`, `primary_ip6` or `oob_ip` from a child's identity: the payload is built from the spec, and the materialiser may not write a spec ([ADR-0005 §1](../decisions/0005-gitops-coexistence.md)). Set [`spec.primaryIP4Ref`](#specprimaryip4ref--specprimaryip6ref--specoobipref) to the child's derived name instead — `<device>-<interface>-ip-<slugified address>` |
+| `claimFrom` | an inline address that names a pool instead of a literal materialises a `NetBoxIPAddressClaim`, which is [ADR-0004](../decisions/0004-claims-first-allocation.md)'s single allocation code path and NBO-036's ticket. `fromPrefixRef`, the spelling an older draft used, does not exist and never will |
+| `allowDuplicate` | it makes the provenance stamp part of the address's identity, so a materialised child that lost `status.id` would create a **second** NetBox address rather than adopting its own. An anycast or VRRP address that needs it is written as its own `NetBoxIPAddress` |
+| `tenantRef`, `role`, `natInsideRef`, `description`, `comments` | `NetBoxIPAddress` has no `tenantRef` to carry the first to, and the rest are the longhand kind's. Inline covers the common case; the standalone kind stays the complete one |
+
 ### What is deliberately absent
 
 Each of these is a NetBox column this CRD does not offer, and each is absent rather than
@@ -404,7 +576,9 @@ a field that is accepted and silently discarded reports success while writing no
 | `virtual_chassis`, `vc_position`, `vc_priority` | `dcim.VirtualChassis` has no Kind, so the `('virtual_chassis', 'vc_position')` constraint is unreachable too | NBO-053 |
 | `config_template`, `local_context_data` | rendering and config contexts are their own feature | NBO-059 |
 | `tags` | written by the engine as the provenance stamp; a user-facing tag list needs `NetBoxTag` references on every kind at once | NBO-055 |
-| inline components | interfaces, console ports and the rest as a list on the device | NBO-034 |
+| inline `consolePorts`, `consoleServerPorts`, `powerPorts`, `powerOutlets` | the same sugar as [`spec.interfaces`](#specinterfaces), for components whose Kind does not exist yet. Declaring the field first would accept input the operator cannot honour | NBO-052 |
+| inline `frontPorts`, `rearPorts`, `deviceBays`, `moduleBays`, `inventoryItems` | as above | NBO-053 |
+| inline `services`, MAC addresses, cables | `ipam.Service` is NBO-055 and `NetBoxMACAddress` is NBO-048. A cable is not a component of one device — its terminations point at two, so neither could own it — and `NetBoxCable` (NBO-049) will stay a first-class kind referencing both ends | — |
 
 ## Natural keys
 
@@ -479,6 +653,27 @@ cleared. Nothing is cleared on failure: `status.id` in particular survives.
 `status.deferredPending` is the field to read on this kind. It lists `primaryIP4Ref`,
 `primaryIP6Ref` and `oobIPRef` while their follow-up `PATCH` has not happened.
 
+`status.children` is the other one, and it is populated only on a device that declares
+[`spec.interfaces`](#specinterfaces): one entry per materialised child, with the key-based spec
+path that declared it, its Kind, its derived name and its own readiness.
+
+```yaml
+status:
+  children:
+    - path: spec.interfaces[eth0]
+      kind: NetBoxInterface
+      name: rtmrpi0001-eth0
+      ready: true
+    - path: spec.interfaces[eth0].addresses[10.0.20.10/24]
+      kind: NetBoxIPAddress
+      name: rtmrpi0001-eth0-ip-10-0-20-10-24
+      ready: true
+```
+
+It lists the **inline** set and not "every child of this device": a hand-written
+`NetBoxInterface` pointing at this device never appears here. It is also what the device's own
+finalizer reads while deleting, so it is not cleared on failure either.
+
 `status.naturalKey` records which candidate ran, filter by filter, so
 `{"name__ie": "sw1", "site_id": "12", "tenant_id__isnull": "true"}` tells you the engine
 treated the object as a tenant-less device at site 12 — and `{"asset_tag": "RTM-0001"}` tells
@@ -496,6 +691,7 @@ report on. See [the box at the top](#this-kind-has-no-containment-parent-and-tha
 | `RefsResolved` | every declared reference resolved | any did not | `AllResolved`, `RefNotFound`, `RefNotReady`, `RefTargetFailed`, `RefAmbiguous`, `RefDenied`, `RefCycle`, `RefDepthExceeded`, `RefKindUnavailable` |
 | `DriftDetected` | NetBox differs from the spec | it does not | `NoDrift`, `DriftDetected` |
 | `ParentOwned` | **never set on this kind** | — | — |
+| `ChildrenReady` | every child [`spec.interfaces`](#specinterfaces) declares exists and is Ready. `AllReady` over an empty set on a device that declares none | any declared child is missing, unready or blocked; or the device has no `status.id` yet | `AllReady`, `PendingChildren`, `Conflict`, `PruneBlocked`, `APIError`, `DryRunPending`, `ReportPending` |
 | `Deleting` | never | while terminating and NetBox is not settled | `Protected`, `WaitingForEndpoint`, `APIError`, `Invalid` |
 
 Reason glossary and retry intervals are shared; see
@@ -511,6 +707,16 @@ particular here:
 - **`Protected`** on `Deleting`: NetBox refuses to delete a device while something still
   references it — an interface holding an IP address is the usual one. The delete completes on
   its own once the blocker is gone, and `status.deletionAttempts` counts the tries.
+- **`ChildrenReady` is set on every device**, not only on one with inline entries: the Kind
+  implements the inline-parent capability, so a device with no `spec.interfaces` reports
+  `AllReady` over an empty set. Before the first successful write it reports
+  `PendingChildren` — no `status.id` means every child's reference back to the device would sit
+  unresolved — which is expected and transient, and is why the reason exists on a device that
+  declares nothing.
+- **`Conflict`** on `ChildrenReady` is a different failure from `Conflict` on `Ready`: it is
+  about a Kubernetes name, not a NetBox object, and it blocks **all** materialisation for this
+  device rather than one entry. See
+  [inline components](#inline-components-and-what-they-are-not).
 
 ## Kind-specific behaviour
 
@@ -549,6 +755,90 @@ rollout renames a hundred devices' capitalisation.
 Once `status.id` is set the natural key is not consulted again, so an edit to any of them
 `PATCH`es the existing device rather than creating a second one. Editing them *before* the
 first successful write, or after `status.id` is lost, changes which device the CR is about.
+
+### Inline components, and what they are not
+
+[`spec.interfaces`](#specinterfaces) is the whole of the inline component surface today, and
+what follows is device-specific; the mechanism itself is
+[inline children](../concepts/inline-children.md).
+
+**One manifest, three objects, and nothing hidden.** A device with one inline interface carrying
+one address produces a `NetBoxDevice`, a `NetBoxInterface` and a `NetBoxIPAddress`. All three
+appear in `kubectl get`, each carries its own conditions, each is reconciled by its own
+controller, and each writes its own NetBox object.
+
+```console
+$ kubectl get nbdev,nbif,nbip
+NAME                                      SITE   TYPE              ID    READY
+netboxdevice.../rtmrpi0001                home   raspberry-pi-4b   412   True
+
+NAME                                      DEVICE       NAME   ID    READY
+netboxinterface.../rtmrpi0001-eth0        rtmrpi0001   eth0   901   True
+
+NAME                                             ADDRESS          ID    READY
+netboxipaddress.../rtmrpi0001-eth0-ip-10-0-20-10-24   10.0.20.10/24   1204  True
+```
+
+**The names are derived and deterministic**: `slugify(<device>-<key>)` per level, with `ip` as
+the addresses' discriminator. `metadata.name` and never `spec.name`, so renaming the device in
+NetBox churns nothing in Kubernetes.
+
+**The one case where the naming rule and NetBox disagree.** `dcim.Interface`'s uniqueness is
+`('device', 'name')` with **no** `Lower()`, so `Eth0` and `eth0` are two interfaces on one device
+([`NetBoxInterface`](netboxinterface.md#specname)) — while this kind's own name is matched with
+`?name__ie=` and is one device either way. A derived child name is slugified, which lowercases,
+so two entries differing only in case derive **one** CR name. The device reports:
+
+```
+ChildrenReady  False  Conflict  spec.interfaces[eth0] and spec.interfaces[Eth0] both derive
+                                the NetBoxInterface name "sw1-eth0", so nothing was written:
+                                give them different keys, or a different discriminator on one
+                                of the two lists
+```
+
+and **nothing at all is written** — not even the entries that did not collide. That is
+deliberate: two entries applying one name in turn would each overwrite the other on alternate
+reconciles, forever, and there is no safe partial answer. A pair of interfaces differing only in
+case is a shape the inline form cannot express; write at least one of them as a
+`NetBoxInterface`.
+
+**A pre-existing CR at a derived name is never hijacked.** If `sw1-eth0` already exists and does
+not carry both the owner-uid label for this device and a controller owner reference to it,
+nothing is written to it — no `PATCH`, no label, no owner reference — and the device reports
+`ChildrenReady=False`, `Reason=Conflict` naming it. Two consequences worth knowing:
+
+- The other entries' **CRs are still materialised**, but their NetBox side stalls: a
+  `ChildrenReady=False` downgrades the device's `Ready`, and a child's `deviceRef` only resolves
+  against a Ready target, so every sibling reports `RefsResolved=False`,
+  `Reason=RefTargetFailed` carrying the device's own Conflict message and writes nothing. One
+  occupied name therefore holds up the whole device until somebody renames or deletes the object
+  in the way. Fail-closed, and legible: every stalled child names the cause.
+- A hand-written `NetBoxInterface` at a name **no entry derives** is unaffected in every way. It
+  is never pruned, it keeps its non-controller containment owner reference, and it is absent from
+  `status.children`.
+
+**The cascade runs one way, and only one.** `dcim.Device` has no containment parent
+([the box at the top](#this-kind-has-no-containment-parent-and-that-is-deliberate)), so nothing
+cascades *into* a device: deleting a site, a device type or a cluster leaves it alone, because
+NetBox refuses those deletions anyway. Materialisation is the other direction and is a stronger
+claim than containment — the operator *created* the child — so a materialised child gets a
+**controller** owner reference from the device ([ADR-0003](../decisions/0003-ownership-and-references.md)
+rule 3), and `kubectl delete nbdev` takes its interfaces and their addresses with it, parent
+last. The ordering is the device's own finalizer waiting while owned children exist, not the
+owner reference: the children's finalizers delete their NetBox objects first, so NetBox never
+sees a `PROTECT`-refused device delete it could have avoided.
+
+The chain is longer than a virtual machine's, and the failure surface with it: an address on this
+device that is *another* device's `primary_ip4` stalls this whole cascade with
+`Deleting=False`, `Reason=Protected` carrying NetBox's own message naming the other device. That
+is correct, it is the server's opinion, and it completes with no manual step once the other
+reference is removed.
+
+**What inline deliberately cannot do.** No `primary` / `oob` flag, no `claimFrom`, no
+`allowDuplicate`, no MAC address, no service, no cable, and none of the nine other component
+kinds — [`spec.interfaces[].addresses`](#specinterfacesaddresses) and
+[what is deliberately absent](#what-is-deliberately-absent) give the reason for each. Every one
+of them is expressible as a longhand CR today.
 
 ### What NetBox validates and the operator does not
 
@@ -604,11 +894,22 @@ needs when two devices share a name — `kubectl get nbdev` is where you see tha
 | No `ParentOwned` condition at all | none | this kind has no containment parent | Expected. Every other kind's `ParentOwned` reports a cascade this one does not have |
 | Terminating forever, `Deleting` `Reason=Protected` | finalizer | something still references the device — usually an interface holding an IP address | Delete the blocker; the device converges on its own. Or `deletionPolicy: Retain` to drop the finalizer without asking NetBox |
 | Deleting the device deleted its interfaces too | none | `dcim.Interface.device` is `CASCADE`, so interfaces *do* take an owner reference from the device | Expected. See [`NetBoxInterface`](netboxinterface.md) |
+| `kubectl apply` rejected, `spec.interfaces` `Duplicate value` | admission, nothing stored | two entries share a `name`, or two addresses under one interface share an `address` | The lists are keyed; give them different keys. The key is what the child's name and path are derived from |
+| `ChildrenReady=False`, `Reason=Conflict`, "both derive" | reconcile, **zero writes of any kind** | two inline entries derive one child name — usually two interface names differing only in case | Rename one, or write one of them as a longhand `NetBoxInterface`. See [inline components](#inline-components-and-what-they-are-not) |
+| `ChildrenReady=False`, `Reason=Conflict`, "already exists and is unowned" | reconcile, zero writes to that object | a CR the operator does not own already holds the derived name | Rename or delete it, or rename the inline entry. Nothing was written to it |
+| Every inline child stuck at `RefTargetFailed` naming the device | reconcile, zero NetBox writes | the device is not `Ready`, and a child's `deviceRef` only resolves against a Ready target — a single `ChildrenReady` Conflict does this | Fix the Conflict the device reports; the whole tree converges on its own |
+| `ChildrenReady=False`, `Reason=PendingChildren` on a device with no `spec.interfaces` | reconcile | the device has no `status.id` yet, so materialisation is skipped | Expected and transient. It clears on the first successful write |
+| `ChildrenReady=False`, `Reason=PruneBlocked` | reconcile, **nothing deleted** | more children would be pruned than the device declares, plus a margin of 8 | Remove inline entries in smaller commits, or delete the device and let the cascade take them |
+| An inline entry's child never appears | `ChildrenReady=False`, `Reason=PendingChildren` | the child exists but is not Ready — usually a `lag`, `parent` or `bridge` key naming no sibling | Read the child's own `RefsResolved`. A key must name another entry of the same list |
 
 ## Related
 
 - [`NetBoxInterface`](netboxinterface.md) — this kind's children, and the one reference on this
   model whose cascade runs the other way
+- [`NetBoxIPAddress`](netboxipaddress.md) — what an inline `addresses` entry becomes, and the
+  complete kind an inline entry is a subset of
+- [Inline children](../concepts/inline-children.md) — the derived name, the three prune cases,
+  the blast-radius cap, and why a hand-written CR is never hijacked
 - [`NetBoxSite`](netboxsite.md) — half the identity, and the parent that does *not* cascade
 - [`NetBoxTenant`](netboxtenant.md) — the other half, when it is set
 - [`NetBoxCluster`](netboxcluster.md) — the containment-shaped reference that is not a parent

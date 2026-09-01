@@ -608,10 +608,12 @@ Same namespace, `dcim.Interface.device` is `CASCADE`, so the device gets a **non
 owner reference on every interface it owns. `kubectl delete nbdev rtmrpi0001` garbage-collects
 the interface CRs, whose finalizers then find NetBox has already deleted the rows.
 
-Non-controller and not controller, deliberately: M5 gives interfaces the operator
-*materialises* from a device's inline list a controller owner reference (NBO-034), and two
-controllers on one object is the one thing Kubernetes will not allow. A hand-written interface
-stays a non-controller owner so the two can coexist.
+Non-controller and not controller, deliberately: an interface the operator *materialises* from
+a device's [`spec.interfaces`](netboxdevice.md#specinterfaces) carries a **controller** owner
+reference instead (NBO-034), and two controllers on one object is the one thing Kubernetes will
+not allow. A hand-written interface keeps the non-controller one, so the two coexist on one
+device — and the difference is exactly what pruning reads: a materialised interface whose inline
+entry is removed is deleted, a hand-written one never is.
 
 Set `netbox.kubeforge.org/parent-ownership: "false"` on the CR to opt out.
 

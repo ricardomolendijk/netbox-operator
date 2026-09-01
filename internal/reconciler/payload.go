@@ -58,6 +58,54 @@ func specOf(obj Object) (specFields, error) {
 	return decoded.Spec, nil
 }
 
+// dropInlineChildren removes the inline child sugar from the spec, because it describes other
+// Kinds' objects rather than a column of this one's.
+//
+// Without this, the first Kind to implement InlineParent reports `Ready=False,
+// Reason=Invalid` the moment somebody uses it: an inline list is a spec field no field map
+// declares, and desired() below refuses an unmapped field rather than dropping it -- which is
+// the right default and the reason the refusal exists (issue #132). `spec.interfaces` on a
+// NetBoxDevice is not an unmapped column, though; it is not a column at all, and the object
+// itself is what says so.
+//
+// Which fields those are comes from the parent's own InlineChildren(), so this knows no Kind
+// and there is nothing to keep in sync: the same declaration the materialiser reads to build
+// the children is what excludes them from the payload, and a Kind cannot declare an inline
+// list the payload then tries to send. A second list on the Descriptor would have been a
+// second statement of one fact, and one of the two would eventually be wrong.
+//
+// Called after restoreEmpty, and the order is load-bearing: an inline list is a slice, so
+// restoreEmpty has an empty form for it and puts `interfaces: []` back the moment any
+// non-operator manager owns the field -- which is always, since the user wrote it. Dropping
+// first would drop nothing.
+func (s specFields) dropInlineChildren(obj Object) {
+	for name := range inlineChildFields(obj) {
+		delete(s, name)
+	}
+}
+
+// inlineChildFields are the spec fields obj declares as inline child sugar, empty for the
+// Kinds that declare none.
+//
+// Only the top level. A nested set's field name -- an interface's `addresses` -- is a field of
+// the *child's* inline entry and was never a key of this spec, so including it could only ever
+// exclude a same-named field of the parent's own.
+func inlineChildFields(obj Object) map[string]bool {
+	parent, declares := obj.(netboxv1alpha1.InlineParent)
+	if !declares {
+		return nil
+	}
+
+	sets := parent.InlineChildren()
+	fields := make(map[string]bool, len(sets))
+
+	for _, set := range sets {
+		fields[set.Field] = true
+	}
+
+	return fields
+}
+
 // desired renders the spec into the payload to send, and reports what it could not render.
 //
 // What arrives here has already been through specFields.restoreEmpty, so a field the user
