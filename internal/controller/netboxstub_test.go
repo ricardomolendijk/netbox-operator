@@ -45,6 +45,9 @@ type netboxStubServer struct {
 	// that column is where status.url comes from.
 	url string
 
+	// refKeys are the extra `<column>_id` filters this stub honours; see stubKind.refKeys.
+	refKeys []string
+
 	mu      sync.Mutex
 	objects map[int64]netbox.Object
 	writes  []stubWrite
@@ -85,6 +88,17 @@ var provenanceEndpoints = []string{"extras/tags", "extras/custom-fields"}
 type stubKind struct {
 	endpoint string
 	key      string
+
+	// refKeys are extra `<column>_id` filters the stub matches exactly, against the
+	// un-suffixed column the payload actually writes -- `?interface_a_id=9` against
+	// `interface_a: 9`, which is how NetBox spells the same pair on the way in and on the
+	// way out.
+	//
+	// Opt-in and empty for every kind whose identity is one field, so the default behaviour
+	// of stubMatches does not move. It exists for wireless.WirelessLink, the first kind
+	// whose natural key is *two* references and therefore the first for which matching one
+	// field is matching the wrong row.
+	refKeys []string
 }
 
 // newNetBoxStub returns a running stub and its URL.
@@ -92,7 +106,7 @@ func newNetBoxStub(t *testing.T, kind stubKind) (*netboxStubServer, string) {
 	t.Helper()
 
 	s := &netboxStubServer{
-		t: t, endpoint: kind.endpoint, key: kind.key,
+		t: t, endpoint: kind.endpoint, key: kind.key, refKeys: kind.refKeys,
 		objects: map[int64]netbox.Object{}, nextID: 100,
 	}
 
@@ -535,6 +549,10 @@ func (s *netboxStubServer) stubMatches(obj netbox.Object, query url.Values) bool
 			}
 		case name == s.key:
 			if fmt.Sprint(obj[name]) != values[0] {
+				return false
+			}
+		case slices.Contains(s.refKeys, name):
+			if fmt.Sprint(obj[strings.TrimSuffix(name, "_id")]) != values[0] {
 				return false
 			}
 		}

@@ -198,3 +198,17 @@ notes:
       BaseInterface component specs, because modelling both directions as required
       references is the unresolvable cycle NBO-016 rejects
       (api/v1alpha1/dcim_macaddress.go)
+  - kind: "*"
+    column: auth_psk
+    reason: >-
+      deliberately unmapped on both wireless kinds and NOT excused: a pre-shared key may
+      never be inline in a spec, so the field has to be `authPSKSecretRef` -> a Secret key,
+      which needs a Secret read in the payload path and a Secret informer scoped to the
+      object's own namespace. That is shared machinery and an RBAC decision (NBO-072), so
+      it owes its own ticket rather than riding along with the kinds
+      (api/v1alpha1/wireless_auth.go)
+  - kind: dcim.Interface
+    column: wireless_lans
+    reason: >-
+      NBO-053 owns it, with the rest of dcim.Interface's component fields. NBO-050 ships
+      wireless.WirelessLAN, so the column is no longer blocked -- only unwritten

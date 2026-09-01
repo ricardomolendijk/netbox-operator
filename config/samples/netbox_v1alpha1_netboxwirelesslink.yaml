@@ -1,0 +1,46 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxWirelessLink
+metadata:
+  # A DNS-1123 label, and unrelated to spec.ssid below.
+  name: rtmap0003-backhaul
+  namespace: default
+spec:
+  # The NetBoxEndpoint to write through, in this namespace.
+  endpointRef: homelab
+
+  # Both required, and together they are the whole natural key: NetBox's one constraint is
+  # unique(interface_a, interface_b) (netbox/wireless/models.py:190-195). That pair is
+  # *ordered*, so NetBox will store (a,b) and (b,a) as two rows for one radio path -- which
+  # is why the operator also looks the reverse pair up. A second CR declaring the reverse of
+  # this one finds this object's row and, under the default onConflict: Fail, reports
+  # Conflict instead of creating a duplicate.
+  #
+  # Both halves of the key are references, so while either is unresolved no candidate is
+  # applicable and the operator waits rather than creating a link with an endpoint it could
+  # not name.
+  interfaceARef:
+    name: rtmap0003-wlan0
+  interfaceBRef:
+    name: rtmap0001-wlan1
+
+  # Optional here, unlike on a NetBoxWirelessLAN: the column is blank=True and a backhaul
+  # link commonly has none.
+  ssid: Donkersloot-Backhaul
+
+  # NetBox's own default, set explicitly for the reason the WirelessLAN sample gives.
+  status: connected
+
+  # A string and not a number: NetBox stores decimal(8,2) and returns a string, and an
+  # OpenAPI `number` would round-trip through IEEE-754. The engine compares numerically, so
+  # "12" and NetBox's "12.00" produce no PATCH. NetBox clears the unit by itself whenever
+  # the distance is null.
+  distance: "12"
+  distanceUnit: m
+
+  authType: wpa-personal
+  authCipher: aes
+
+  # No `authPSK` field here either; see the NetBoxWirelessLAN sample.
+
+  description: Mesh backhaul to the shed AP
+  comments: Managed by netbox-operator.

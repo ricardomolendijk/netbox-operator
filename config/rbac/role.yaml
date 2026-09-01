@@ -58,6 +58,9 @@ rules:
   - netboxservices
   - netboxservicetemplates
   - netboxvirtualmachines
+  - netboxwirelesslangroups
+  - netboxwirelesslans
+  - netboxwirelesslinks
   verbs:
   - get
   - list
@@ -120,6 +123,9 @@ rules:
   - netboxvlans/finalizers
   - netboxvminterfaces/finalizers
   - netboxvrfs/finalizers
+  - netboxwirelesslangroups/finalizers
+  - netboxwirelesslans/finalizers
+  - netboxwirelesslinks/finalizers
   verbs:
   - update
 - apiGroups:
@@ -180,6 +186,9 @@ rules:
   - netboxvlans/status
   - netboxvminterfaces/status
   - netboxvrfs/status
+  - netboxwirelesslangroups/status
+  - netboxwirelesslans/status
+  - netboxwirelesslinks/status
   verbs:
   - get
   - patch

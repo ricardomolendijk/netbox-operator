@@ -1,0 +1,25 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxWirelessLANGroup
+metadata:
+  # A DNS-1123 label, and unrelated to spec.name below.
+  name: donkerslootstraat-wifi
+  namespace: default
+spec:
+  # The NetBoxEndpoint to write through, in this namespace.
+  endpointRef: homelab
+
+  # Both columns carry their own `unique=True` (netbox/wireless/models.py:53-63), so both
+  # are globally unique -- and `slug` is this Kind's whole natural key. There is no
+  # `parent IS NULL` variant to model: the one table constraint is unique(parent, name) with
+  # no `condition=` clause, and a global unique on `name` already subsumes it.
+  name: Donkerslootstraat Wi-Fi
+  slug: donkerslootstraat-wifi
+
+  # Nesting is allowed and is deliberately outside the natural key, so a child applied in
+  # the same batch as its parent is created top-level and PATCHed once the parent resolves.
+  # `parent` is on_delete=CASCADE, which makes it the containment reference.
+  # parentRef:
+  #   name: homelab-wifi
+
+  description: SSIDs served in this house
+  comments: Managed by netbox-operator.

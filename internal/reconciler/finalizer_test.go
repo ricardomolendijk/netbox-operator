@@ -621,8 +621,13 @@ var deletionDefaults = map[string]netboxv1alpha1.DeletionPolicy{
 	// out and nothing else has to be told it was freed, so deleting one destroys no state a
 	// recreate does not restore. NetBox's own `GenericRelation` deletes it with its interface
 	// in any case, which is the shape the containment owner reference mirrors.
-	"NetBoxMACAddress": netboxv1alpha1.DeletionDelete,
-}
+	"NetBoxMACAddress": netboxv1alpha1.DeletionDelete, // Wireless. An SSID, its group and a radio link are all configuration: nothing is handed
+	// out, so deleting one destroys no state a recreate does not restore. The group and the
+	// SSID are `SET_NULL`/`PROTECT`-guarded on the way out anyway, and a link is pointed at by
+	// nothing at all.
+	"NetBoxWirelessLAN":      netboxv1alpha1.DeletionDelete,
+	"NetBoxWirelessLANGroup": netboxv1alpha1.DeletionDelete,
+	"NetBoxWirelessLink":     netboxv1alpha1.DeletionDelete}
 
 // TestEveryKindsDeletionDefaultIsStated is criterion 2 of #186, and it is the test whose
 // absence was the bug. `Descriptor.RetainOnDelete` and `deletionPolicyOf` both shipped, five
