@@ -62,6 +62,11 @@ rules:
   - netboxmanufacturers
   - netboxplatforms
   - netboxprefixclaims
+  - netboxrackgroups
+  - netboxrackreservations
+  - netboxrackroles
+  - netboxracks
+  - netboxracktypes
   - netboxrirs
   - netboxroles
   - netboxsavedfilters
@@ -115,6 +120,11 @@ rules:
   - netboxplatforms/finalizers
   - netboxprefixclaims/finalizers
   - netboxprefixes/finalizers
+  - netboxrackgroups/finalizers
+  - netboxrackreservations/finalizers
+  - netboxrackroles/finalizers
+  - netboxracks/finalizers
+  - netboxracktypes/finalizers
   - netboxregions/finalizers
   - netboxrirs/finalizers
   - netboxroles/finalizers
@@ -177,6 +187,11 @@ rules:
   - netboxplatforms/status
   - netboxprefixclaims/status
   - netboxprefixes/status
+  - netboxrackgroups/status
+  - netboxrackreservations/status
+  - netboxrackroles/status
+  - netboxracks/status
+  - netboxracktypes/status
   - netboxregions/status
   - netboxrirs/status
   - netboxroles/status

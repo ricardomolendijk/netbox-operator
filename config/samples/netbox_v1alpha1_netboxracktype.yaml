@@ -1,0 +1,46 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxRackType
+metadata:
+  name: mcs-42u
+  namespace: default
+spec:
+  endpointRef: homelab
+  onConflict: Fail
+  deletionPolicy: Delete
+
+  # Required: `dcim.RackType.manufacturer` is a REQ foreign key and both natural keys start at
+  # it, so until this resolves the object writes nothing at all. In a real deployment the
+  # manufacturer lives in a shared catalogue namespace and this ref names it -- which needs a
+  # NetBoxRefGrant there (see docs/reference/netboxracktype.md).
+  manufacturerRef:
+    name: minkels
+
+  model: MCS 42U 800x1000
+  slug: mcs-42u
+
+  # Required, and it may not be "". The shared RackFormFactor enum carries the empty string for
+  # NetBoxRack's sake, whose column is nullable; this one is NOT NULL with no default, and DRF
+  # would accept a create without it only for Postgres to refuse the INSERT.
+  formFactor: 4-post-cabinet
+
+  # The three defaulted RackBase dimensions, written out as NetBox's own defaults.
+  width: 19
+  uHeight: 42
+  startingUnit: 1
+
+  outerWidth: 800
+  outerHeight: 2000
+  outerDepth: 1000
+  outerUnit: mm
+
+  # Always millimetres, whatever outerUnit says.
+  mountingDepth: 900
+
+  maxWeight: 1200
+
+  # A string, not a number: NetBox returns `weight` padded to two places ("128.50"), and the
+  # engine compares the two numerically, so this produces no PATCH on the second reconcile.
+  weight: "128.5"
+  weightUnit: kg
+
+  description: 42U cabinet, 800 mm wide

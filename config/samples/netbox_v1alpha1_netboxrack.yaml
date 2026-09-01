@@ -1,0 +1,52 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxRack
+metadata:
+  name: a1
+  namespace: default
+spec:
+  endpointRef: homelab
+  onConflict: Fail
+  deletionPolicy: Delete
+
+  name: A1
+
+  # Required: `dcim.Rack.site` is a REQ foreign key, and every natural-key candidate reads
+  # `site_id` or `location_id`, so until this resolves nothing is written to NetBox rather than a
+  # rack being created in the wrong site. It is *not* a containment parent: `site` is
+  # on_delete=PROTECT, so NetBox refuses to delete a site that still has racks.
+  siteRef:
+    name: home
+
+  # The single most load-bearing optional field here. Both of NetBox's unique constraints are
+  # keyed on `location`, so setting it gets this rack a database-backed identity, `(location,
+  # name)`. Leave it out and the identity falls back to `(site, name)` with `location_id` pinned
+  # null -- a lookup convention the database will not enforce.
+  locationRef:
+    name: rack-row-1
+
+  roleRef:
+    name: compute
+  groupRef:
+    name: cage-1
+
+  # Naming a rack type makes NetBox copy that type's RackBase dimensions onto this rack
+  # server-side on create, so `width`, `uHeight` and the rest are left at their defaults here and
+  # the operator never re-sends them.
+  rackTypeRef:
+    name: mcs-42u
+
+  status: active
+  formFactor: 4-post-cabinet
+  facilityID: C3.14
+  serial: MK-2024-0091
+
+  # Globally UNIQUE across every rack in the NetBox, and deliberately not a natural-key candidate:
+  # it identifies a chassis, while this CR describes a rack position.
+  assetTag: ASSET-0001
+
+  # A string, not a number: NetBox returns `weight` padded to two places, and the engine compares
+  # the two numerically, so this produces no PATCH on the second reconcile.
+  weight: "128.5"
+  weightUnit: kg
+
+  description: First rack, front cage
