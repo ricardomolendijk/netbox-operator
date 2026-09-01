@@ -235,11 +235,7 @@ func TestDriftModeOffDoesNotResync(t *testing.T) {
 	// corrects the whole object, the human's edit included. That is the trade Off makes,
 	// and it is the half of it people are surprised by.
 	tag := mustFetchTag(t, ns, "unwatched")
-	tag.Spec.Color = "4caf50"
-
-	if err := k8sClient.Update(context.Background(), tag); err != nil {
-		t.Fatalf("editing spec.color: %v", err)
-	}
+	editSpec(t, tag, func(edited *netboxv1alpha1.NetBoxTag) { edited.Spec.Color = "4caf50" })
 
 	eventually(t, "the spec change reaching netbox", func() bool { return stub.get(id)["color"] == "4caf50" })
 }

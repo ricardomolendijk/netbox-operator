@@ -84,7 +84,7 @@ func makeVirtualMachine(t *testing.T, ns, name string, mutate func(*netboxv1alph
 		t.Fatalf("creating virtual machine %s/%s: %v", ns, name, err)
 	}
 
-	t.Cleanup(func() { _ = k8sClient.Delete(context.Background(), vm) })
+	t.Cleanup(func() { removeObject(t, vm) })
 }
 
 func fetchVirtualMachine(ns, name string) *netboxv1alpha1.NetBoxVirtualMachine {

@@ -241,7 +241,7 @@ func TestIPRangeAcceptsAnAddressInsideItsPrefix(t *testing.T) {
 
 	// The range's own controller takes a finalizer before it touches NetBox and drops it on
 	// its own deletion pass, so this cleanup completes without a NetBox behind it.
-	t.Cleanup(func() { _ = k8sClient.Delete(context.Background(), rng) })
+	t.Cleanup(func() { removeObject(t, rng) })
 
 	if rng.Spec.Status != netboxv1alpha1.IPRangeStatusActive {
 		t.Errorf("status defaulted to %q, want active", rng.Spec.Status)

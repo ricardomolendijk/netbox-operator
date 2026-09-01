@@ -88,10 +88,11 @@ func poke(t *testing.T, sweep *netboxv1alpha1.NetBoxSweep) {
 		t.Fatalf("sweep %s/%s has gone", sweep.Namespace, sweep.Name)
 	}
 
-	live.Annotations = map[string]string{"test.netbox.kubeforge.org/poke": time.Now().Format(time.RFC3339Nano)}
-	if err := k8sClient.Update(context.Background(), live); err != nil {
-		t.Fatalf("poking sweep %s/%s: %v", sweep.Namespace, sweep.Name, err)
-	}
+	editSpec(t, live, func(edited *netboxv1alpha1.NetBoxSweep) {
+		edited.Annotations = map[string]string{
+			"test.netbox.kubeforge.org/poke": time.Now().Format(time.RFC3339Nano),
+		}
+	})
 }
 
 // seedSite puts a site into NetBox that the operator did not create, carrying whatever stamp
@@ -317,10 +318,7 @@ func TestSweepSuspendKeepsTheReport(t *testing.T) {
 	awaitSweep(t, ns, "nightly", metav1.ConditionTrue, netboxv1alpha1.ReasonSweepComplete)
 
 	live := fetchSweep(ns, "nightly")
-	live.Spec.Suspend = true
-	if err := k8sClient.Update(context.Background(), live); err != nil {
-		t.Fatalf("suspending the sweep: %v", err)
-	}
+	editSpec(t, live, func(edited *netboxv1alpha1.NetBoxSweep) { edited.Spec.Suspend = true })
 
 	eventually(t, "the sweep reports Suspended", func() bool {
 		sweep := fetchSweep(ns, "nightly")

@@ -466,7 +466,7 @@ func makeTenantGroup(
 		t.Fatalf("creating tenant group %s/%s: %v", ns, name, err)
 	}
 
-	t.Cleanup(func() { _ = k8sClient.Delete(context.Background(), group) })
+	t.Cleanup(func() { removeObject(t, group) })
 }
 
 func fetchTenantGroup(ns, name string) *netboxv1alpha1.NetBoxTenantGroup {

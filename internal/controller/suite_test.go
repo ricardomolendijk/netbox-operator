@@ -11,11 +11,13 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -164,6 +166,17 @@ var nsSeq atomic.Uint64
 // newNamespaceSuffixed is newNamespace for a test that needs more than one. A NetBox slug
 // is unique globally while a CRD is namespaced, so "the same object claimed from two
 // namespaces" is a case that cannot be written with one namespace per test.
+//
+// A namespace per test is not what makes this suite slow, which is what #215 suspected. Timed
+// at the end of a full run, with all 138 of them and everything the suite created still in the
+// API server, and the control plane confined to 0.6 of one core, a namespace Create costs
+// 0.7-2.0ms. Pooling them would buy nothing and cost every test its isolation.
+//
+// If a Create here ever does take tens of seconds, the only client-side deadline of that order
+// on this path is client-go's HTTP/2 keepalive -- ReadIdleTimeout 30s plus PingTimeout 15s, in
+// k8s.io/apimachinery/pkg/util/net -- which closes the connection and fails whatever was in
+// flight on it. That is a transport failure rather than a queue, so no test deadline reaches it
+// and no amount of namespace pooling would either.
 func newNamespaceSuffixed(t *testing.T, suffix string) string {
 	t.Helper()
 	seq := fmt.Sprintf("-%d", nsSeq.Add(1))
@@ -191,6 +204,10 @@ func newNamespaceSuffixed(t *testing.T, suffix string) string {
 // lands on the first or second poll, and neither `-cpu 1` nor a load average of 78 on 11
 // cores moves any of them or produces a single timeout. A test here that fails is failing
 // for a reason, and a longer deadline would only make it slower to find out.
+//
+// Re-measured for #215 with the whole control plane -- test binary, kube-apiserver and etcd --
+// confined to a cgroup holding 0.6 of one core: 259 waits over a full run, none timed out, the
+// slowest 906ms. The margin is twenty-fold, so a timeout here is never the deadline's fault.
 func eventually(t *testing.T, what string, check func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(20 * time.Second)
@@ -201,6 +218,96 @@ func eventually(t *testing.T, what string, check func() bool) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	t.Fatalf("timed out waiting for %s", what)
+}
+
+// editSpec re-reads obj, applies mutate and updates it, and returns the object as the API
+// server stored it. It is how a test edits a CR the operator is already reconciling.
+//
+// Two things make the obvious `fetchX(); x.Spec.Y = z; k8sClient.Update(x)` lose under load.
+// An Update carries the resourceVersion it was read at as a precondition; and every fetch
+// helper here reads through the manager's cache, which lags the API server by however long the
+// manager is busy -- while the operator is concurrently patching finalizers, owner references
+// and status onto that same object on its one-second resync. The two together turn a spec edit
+// into a 409, and a test that treats 409 as fatal then fails for a reason with nothing to do
+// with what it asserts. Reproduced in TestClusterScopeMovesAsOnePair with the control plane
+// held to a fifth of a core.
+//
+// So the read and the write both go through apiClient: an optimistic-concurrency write must not
+// be based on a version that is stale before it is even sent, and retrying a *cached* read
+// cannot help, because the retry sees the same stale version. The retry that remains covers
+// only the operator writing in the moment between this Get and this Update, which is the
+// protocol working as designed rather than a slow operation being waited out -- and is why
+// three claim tests already spelled it out by hand before this helper collected it.
+func editSpec[T client.Object](t *testing.T, obj T, mutate func(T)) T {
+	t.Helper()
+
+	ctx := context.Background()
+	key := client.ObjectKeyFromObject(obj)
+	stored := obj
+
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		fresh, ok := obj.DeepCopyObject().(T)
+		if !ok {
+			return fmt.Errorf("%T does not deep-copy into its own type", obj)
+		}
+
+		if err := apiClient.Get(ctx, key, fresh); err != nil {
+			return err
+		}
+
+		mutate(fresh)
+
+		if err := apiClient.Update(ctx, fresh); err != nil {
+			return err
+		}
+
+		stored = fresh
+
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("editing %s: %v", key, err)
+	}
+
+	return stored
+}
+
+// removeObject deletes obj and does not return until the API server has dropped it. It is
+// the cleanup every helper that applies a NetBox-backed CR registers.
+//
+// The waiting is the whole point. Releasing the engine's finalizer costs a NetBox DELETE, so
+// it needs the namespace's NetBoxEndpoint and the httptest stub behind it -- both of which
+// t.Cleanup is about to take away, in that order, because it runs LIFO and the object was
+// registered last. A Delete that returns while the finalizer is still on gives that ordering
+// away: the endpoint goes next, and the object is left Terminating holding a finalizer it can
+// never release, because the client it would need is gone for good. It is then requeued every
+// endpointRetry for the remainder of the run, in a package where all ~190 tests share one
+// manager and one API server.
+//
+// Measured on the full suite before this existed: 106 deletions refused with
+// WaitingForEndpoint and 6 to 9 objects left permanently Terminating per run, a different set
+// each time -- which is the shape of a cross-test flake rather than a tidiness problem.
+//
+// It gives up rather than failing the test. A cleanup that fails reports the test that just
+// passed instead of the one that leaked, and an object whose deletion is deliberately blocked
+// (deletionPolicy: Retain) is a case some tests mean to create.
+func removeObject(t *testing.T, obj client.Object) {
+	t.Helper()
+
+	ctx := context.Background()
+	key := client.ObjectKeyFromObject(obj)
+
+	if err := k8sClient.Delete(ctx, obj); err != nil && !apierrors.IsNotFound(err) {
+		return
+	}
+
+	for range 100 {
+		if err := k8sClient.Get(ctx, key, obj); apierrors.IsNotFound(err) {
+			return
+		}
+
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 // endpointIsReady is the endpoint-side tagIsReady, and the gate to use before reading

@@ -42,7 +42,7 @@ func makeIP(t *testing.T, ns, name, address string, mutate func(*netboxv1alpha1.
 		t.Fatalf("creating ip %s/%s: %v", ns, name, err)
 	}
 
-	t.Cleanup(func() { _ = k8sClient.Delete(context.Background(), ip) })
+	t.Cleanup(func() { removeObject(t, ip) })
 }
 
 // fetchIP reads an address through the manager's cache, and returns nil when it is not there

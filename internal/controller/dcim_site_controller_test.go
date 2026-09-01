@@ -37,7 +37,7 @@ func makeSite(t *testing.T, ns, slug string, mutate func(*netboxv1alpha1.NetBoxS
 		t.Fatalf("creating site %s/%s: %v", ns, slug, err)
 	}
 
-	t.Cleanup(func() { _ = k8sClient.Delete(context.Background(), site) })
+	t.Cleanup(func() { removeObject(t, site) })
 
 	return site
 }

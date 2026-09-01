@@ -105,7 +105,7 @@ func makePrefix(t *testing.T, ns, name string, mutate func(*netboxv1alpha1.NetBo
 		t.Fatalf("creating prefix %s/%s: %v", ns, name, err)
 	}
 
-	t.Cleanup(func() { _ = k8sClient.Delete(context.Background(), prefix) })
+	t.Cleanup(func() { removeObject(t, prefix) })
 }
 
 func fetchPrefix(ns, name string) *netboxv1alpha1.NetBoxPrefix {
@@ -345,10 +345,9 @@ func TestPrefixScopeMovesAsOnePair(t *testing.T) {
 	writesBefore := len(stub.recorded())
 
 	prefix := fetchPrefix(ns, "moving")
-	prefix.Spec.Scope = &netboxv1alpha1.ScopeRef{SiteRef: &netboxv1alpha1.SiteRef{ID: idOf(41)}}
-	if err := k8sClient.Update(context.Background(), prefix); err != nil {
-		t.Fatalf("moving the scope: %v", err)
-	}
+	editSpec(t, prefix, func(edited *netboxv1alpha1.NetBoxPrefix) {
+		edited.Spec.Scope = &netboxv1alpha1.ScopeRef{SiteRef: &netboxv1alpha1.SiteRef{ID: idOf(41)}}
+	})
 
 	eventually(t, "the move to reach NetBox", func() bool {
 		return stub.get(prefix.Status.ID)["scope_type"] == "dcim.site"
