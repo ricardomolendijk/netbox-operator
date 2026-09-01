@@ -1,0 +1,36 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxMACAddress
+metadata:
+  # A DNS-1123 label, and unrelated to spec.macAddress below.
+  name: rtmap0003-wlan0
+  namespace: default
+spec:
+  # The NetBoxEndpoint to write through, in this namespace. There is no cluster-wide
+  # default endpoint; see config/samples/netbox_v1alpha1_netboxendpoint.yaml.
+  endpointRef: homelab
+
+  # NetBox's own canonical spelling: uppercase hex octets separated by colons. It normalises
+  # every MAC to this form on read (netbox/dcim/fields.py:46), and the differ compares
+  # strings, so a lowercase spec would PATCH on every pass and never converge. The CRD
+  # pattern rejects the other spellings so that hot loop cannot be written.
+  macAddress: AA:BB:CC:DD:EE:FF
+
+  # At most one member, and omitting the whole block leaves the MAC unattached -- which
+  # NetBox permits. The two members are the only two NetBox accepts here
+  # (netbox/dcim/constants.py:156-159), which is why this union is not IPAssignment.
+  #
+  # Both members cascade -- `mac_addresses` is a GenericRelation on dcim.Interface and on
+  # virtualization.VMInterface -- so this is the containment reference: deleting the
+  # interface CR takes this one with it.
+  #
+  # Both members resolve: NetBoxInterface ships with NBO-030 and NetBoxVMInterface with
+  # NBO-029, which are the two models deriving from dcim.BaseInterface.
+  assignedObject:
+    vmInterfaceRef:
+      name: dns-eth0
+
+  # NetBox enforces no uniqueness on this Kind at all -- no meta.constraints, only indexes
+  # (netbox/dcim/models/devices.py:1380-1385). Two CRs whose (mac_address, assigned_object)
+  # matches the same rows report Conflict and write nothing rather than guessing.
+  description: Mesh AP radio
+  comments: Managed by netbox-operator.

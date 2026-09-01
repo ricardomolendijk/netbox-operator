@@ -190,3 +190,11 @@ notes:
       the ConfigContextModel column on dcim.Device and virtualization.VirtualMachine. NBO-059
       added the ClassJSON field class it needs and stopped at the `extras` app; #241 adds the
       two spec fields, and nothing else blocks them
+  - kind: "*"
+    column: primary_mac_address
+    reason: >-
+      NBO-053 owns it. NBO-048 ships the forward half -- a NetBoxMACAddress names the
+      interface it is assigned to -- and the reverse half is a deferred field on the two
+      BaseInterface component specs, because modelling both directions as required
+      references is the unresolvable cycle NBO-016 rejects
+      (api/v1alpha1/dcim_macaddress.go)

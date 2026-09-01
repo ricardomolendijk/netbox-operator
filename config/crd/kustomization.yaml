@@ -46,3 +46,12 @@ resources:
 - bases/netbox.kubeforge.org_netboxfhrpgroupassignments.yaml
 - bases/netbox.kubeforge.org_netboxservices.yaml
 - bases/netbox.kubeforge.org_netboxservicetemplates.yaml
+- bases/netbox.kubeforge.org_netboxcustomfieldchoicesets.yaml
+- bases/netbox.kubeforge.org_netboxcustomfields.yaml
+- bases/netbox.kubeforge.org_netboxcustomlinks.yaml
+- bases/netbox.kubeforge.org_netboxsavedfilters.yaml
+- bases/netbox.kubeforge.org_netboxexporttemplates.yaml
+- bases/netbox.kubeforge.org_netboxconfigtemplates.yaml
+- bases/netbox.kubeforge.org_netboxconfigcontextprofiles.yaml
+- bases/netbox.kubeforge.org_netboxconfigcontexts.yaml
+- bases/netbox.kubeforge.org_netboxmacaddresses.yaml

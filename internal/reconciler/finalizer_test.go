@@ -616,6 +616,12 @@ var deletionDefaults = map[string]netboxv1alpha1.DeletionPolicy{
 	"NetBoxConfigTemplate":       netboxv1alpha1.DeletionDelete,
 	"NetBoxConfigContextProfile": netboxv1alpha1.DeletionDelete,
 	"NetBoxConfigContext":        netboxv1alpha1.DeletionDelete,
+
+	// A MAC address is a property of a component rather than an allocation: nothing hands it
+	// out and nothing else has to be told it was freed, so deleting one destroys no state a
+	// recreate does not restore. NetBox's own `GenericRelation` deletes it with its interface
+	// in any case, which is the shape the containment owner reference mirrors.
+	"NetBoxMACAddress": netboxv1alpha1.DeletionDelete,
 }
 
 // TestEveryKindsDeletionDefaultIsStated is criterion 2 of #186, and it is the test whose
