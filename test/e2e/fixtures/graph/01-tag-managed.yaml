@@ -1,0 +1,13 @@
+# A leaf with no references at all. It is in the graph to prove that an object with nothing
+# to wait for is not slowed down by the ones that are.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxTag
+metadata:
+  name: managed
+  namespace: netbox-catalog
+spec:
+  endpointRef: catalogue
+  name: e2e-managed
+  slug: e2e-managed
+  color: 00add8
+  description: Applied by the NBO-017 convergence gate

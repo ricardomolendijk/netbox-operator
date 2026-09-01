@@ -1,0 +1,15 @@
+# siteRef is **required** and both of this kind's natural-key candidates start at `site`, so
+# until it resolves there is no lookup to make and nothing at all is written to NetBox. That
+# is the assertion in the random-order runs: a waiting object writes nothing.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxLocation
+metadata:
+  name: hall-1
+  namespace: netbox-catalog
+spec:
+  endpointRef: catalogue
+  name: Hall 1
+  slug: e2e-hall-1
+  status: active
+  siteRef:
+    name: ams

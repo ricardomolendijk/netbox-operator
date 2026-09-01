@@ -1,0 +1,22 @@
+# Two things at once: the **scope union** -- (scope_type, scope_id), not a `region` column --
+# and a **cross-namespace** reference into the catalogue, which needs 00's grant.
+#
+# The scope is half of this object's identity: the lookup is
+# `?scope_type=dcim.region&scope_id=<id>&slug=e2e-acme-vlans`. So this object cannot even be
+# looked up until a region in another namespace has an id.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxVLANGroup
+metadata:
+  name: acme-vlans
+  namespace: team-a
+spec:
+  endpointRef: team
+  deletionPolicy: Delete
+  name: E2E ACME VLANs
+  slug: e2e-acme-vlans
+  scope:
+    regionRef:
+      namespace: netbox-catalog
+      name: nl
+  tenantRef:
+    name: acme

@@ -1,0 +1,14 @@
+# The to-many reference in the graph. NetBox replaces a many-to-many wholesale on PATCH, so
+# the listed set is the set -- and a list resolves whole or not at all, which is why one
+# unresolved entry has to leave the whole field unwritten rather than send a shorter list.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxContact
+metadata:
+  name: noc
+  namespace: netbox-catalog
+spec:
+  endpointRef: catalogue
+  name: E2E NOC
+  email: noc@e2e.invalid
+  groups:
+    - name: operations

@@ -1,0 +1,14 @@
+# The grant the three cross-namespace references in this graph need. It lives in the
+# namespace being *referenced*, and `namespaces: All` is the shared-catalogue shape.
+#
+# First in dependency order and therefore last in the reverse run, which is the case worth
+# having: every referrer sits at RefsResolved=False, Reason=RefDenied until this object
+# exists, and its creation has to wake them without a resync.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxRefGrant
+metadata:
+  name: catalogue-is-public
+  namespace: netbox-catalog
+spec:
+  from:
+    - namespaces: All

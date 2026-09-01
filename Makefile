@@ -15,6 +15,10 @@ KUSTOMIZE_VERSION        ?= v5.5.0
 GOLANGCI_LINT_VERSION    ?= v2.6.1
 ENVTEST_VERSION          ?= release-0.22
 ENVTEST_K8S_VERSION      ?= 1.34.0
+KIND_VERSION             ?= v0.30.0
+# Equal to the version .github/workflows/ci.yaml and release.yaml install, so the chart the
+# e2e suite deploys is never first rendered by a different Helm than the one that packages it.
+HELM_VERSION             ?= v3.16.3
 # Pulls mkdocs itself as a transitive pin, so a mkdocs release cannot change the site.
 MKDOCS_MATERIAL_VERSION  ?= 9.7.7
 MKDOCS                   ?= mkdocs
@@ -24,6 +28,8 @@ CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 KUSTOMIZE      ?= $(LOCALBIN)/kustomize
 GOLANGCI_LINT  ?= $(LOCALBIN)/golangci-lint
 ENVTEST        ?= $(LOCALBIN)/setup-envtest
+KIND           ?= $(LOCALBIN)/kind
+HELM_BIN       ?= $(LOCALBIN)/helm
 
 $(LOCALBIN):
 	mkdir -p $(LOCALBIN)
@@ -86,8 +92,12 @@ lint-fix: golangci-lint ## Run golangci-lint and apply fixes.
 
 .PHONY: test
 test: manifests generate fmt vet envtest ## Run unit tests and envtest.
+	@# The anchored pattern excludes the e2e *suite* -- which needs Docker, a kind cluster and
+	@# a live NetBox -- and keeps test/e2e/harness, whose canonical NetBox dump and fixture
+	@# ordering are pure functions and are the load-bearing half of the ordering gate. Those
+	@# have to be regression-tested where the tests run on every PR, not only nightly.
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" \
-		go test $$(go list ./... | grep -v /test/e2e) -coverprofile cover.out
+		go test $$(go list ./... | grep -v '/test/e2e$$') -coverprofile cover.out
 
 # The IR the generator reads. Committed and version-stamped, so `make gen-kinds` needs no
 # NetBox checkout and no network (docs/regenerating.md).
@@ -131,15 +141,32 @@ coverage: ## Regenerate docs/coverage.md and print the coverage summary.
 	@awk '/^## Summary/{f=1} /^## Uncovered/{f=0} f' docs/coverage.md
 	@echo "Full table: docs/coverage.md"
 
+# The suite applies the graph, tears it down and does it again for every permutation, against
+# a real NetBox. Twenty of those do not fit in `go test`'s 10-minute default.
+E2E_TIMEOUT ?= 150m
+
 .PHONY: test-e2e
 test-e2e: ## Run e2e tests against a kind cluster and a live NetBox.
 	@# One recipe line, not two. `exit 0` in a separate line's shell exits that shell and
-	@# make runs the next one anyway, so the skip printed its message and then failed on a
-	@# test/e2e that is not there -- which is every checkout until the harness lands (#29).
-	@if [ -z "$$(find test/e2e -name '*_test.go' 2>/dev/null)" ]; then \
-		echo "No e2e suite yet -- the harness lands with NBO-017 (#29). Skipping."; \
+	@# make runs the next one anyway, so the skip printed its message and then failed on the
+	@# step after it. The same shape now guards the Docker check: no daemon means skip, and
+	@# skip has to mean the target succeeds.
+	@#
+	@# kind and helm are installed inside the branch that is going to use them, so a machine
+	@# with no Docker skips without downloading 30 MB of tools it cannot use -- and so that a
+	@# failed download is a failure of a run that was going to happen anyway.
+	@# -maxdepth 1: the question is whether the *suite* package is here, and test/e2e/harness
+	@# has tests of its own that `make test` runs. Without the bound, a checkout carrying the
+	@# harness and no suite would run `go test ./test/e2e/` against a directory with no Go
+	@# files in it, which is a build error rather than a skip.
+	@if [ -z "$$(find test/e2e -maxdepth 1 -name '*_test.go' 2>/dev/null)" ]; then \
+		echo "No e2e suite in test/e2e. Skipping."; \
+	elif ! docker info >/dev/null 2>&1; then \
+		echo "e2e needs a Docker daemon for kind and for NetBox, and none is reachable."; \
+		echo "See docs/operations/e2e.md. Skipping."; \
 	else \
-		go test ./test/e2e/ -v -ginkgo.v; \
+		$(MAKE) kind helm-bin; \
+		go test ./test/e2e/ -v -ginkgo.v -timeout $(E2E_TIMEOUT); \
 	fi
 
 # Paths whose contents are produced by controller-gen. Listed explicitly so that a dirty
@@ -306,6 +333,33 @@ $(GOLANGCI_LINT): $(LOCALBIN)
 envtest: $(ENVTEST)
 $(ENVTEST): $(LOCALBIN)
 	$(call go-install-tool,$(ENVTEST),sigs.k8s.io/controller-runtime/tools/setup-envtest,$(ENVTEST_VERSION))
+
+.PHONY: kind
+kind: $(KIND) ## Install the pinned kind into ./bin.
+$(KIND): $(LOCALBIN)
+	$(call go-install-tool,$(KIND),sigs.k8s.io/kind,$(KIND_VERSION))
+
+.PHONY: helm-bin
+helm-bin: $(HELM_BIN) ## Install the pinned helm into ./bin, for the e2e suite.
+$(HELM_BIN): $(LOCALBIN)
+	@# A release tarball rather than `go install helm.sh/helm/v3/cmd/helm`: Helm's own module
+	@# pins a toolchain and building it from source is minutes to obtain the binary its
+	@# release page already has. The version is pinned like every other tool here.
+	@#
+	@# `helm` is left on PATH for the chart targets, which CI installs globally. This copy
+	@# exists so `make test-e2e` needs nothing installed by hand; the harness prefers ./bin.
+	@set -e; \
+	os=$$(uname -s | tr '[:upper:]' '[:lower:]'); \
+	case "$$(uname -m)" in \
+		x86_64|amd64) arch=amd64 ;; \
+		aarch64|arm64) arch=arm64 ;; \
+		*) echo "unsupported architecture $$(uname -m) for a helm release tarball"; exit 1 ;; \
+	esac; \
+	tmp=$$(mktemp -d); \
+	trap 'rm -rf "$$tmp"' EXIT; \
+	echo "Downloading helm $(HELM_VERSION) ($$os/$$arch)"; \
+	curl -fsSL "https://get.helm.sh/helm-$(HELM_VERSION)-$$os-$$arch.tar.gz" | tar xz -C "$$tmp"; \
+	install -m 0755 "$$tmp/$$os-$$arch/helm" "$(HELM_BIN)"
 
 # go-install-tool installs $2@$3 as $1, version-suffixing the binary so a version
 # bump reinstalls instead of silently reusing the old one.

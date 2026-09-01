@@ -1,0 +1,10 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxSite
+metadata:
+  name: ams
+  namespace: netbox-catalog
+spec:
+  endpointRef: catalogue
+  name: AMS1
+  slug: e2e-ams1
+  status: active

@@ -1,0 +1,9 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxContactGroup
+metadata:
+  name: operations
+  namespace: netbox-catalog
+spec:
+  endpointRef: catalogue
+  name: E2E Operations
+  slug: e2e-operations

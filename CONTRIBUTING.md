@@ -193,9 +193,19 @@ make lint test                 # golangci-lint, then unit tests + envtest
 make verify                    # fail if generated output is not committed
 make docs-check                # every relative link and anchor under docs/ resolves
 make docs-serve                # preview the docs site on :8000 (make docs-tools first)
-make test-e2e                  # kind + a real NetBox (harness lands with NBO-017)
+make test-e2e                  # kind + a real NetBox; skips with a reason without Docker
 make run                       # run against the current kubeconfig
 ```
 
 Tools install themselves into `./bin` at pinned versions on first use — there is nothing
-to install by hand, and your global toolchain cannot change generated output.
+to install by hand, and your global toolchain cannot change generated output. `make test-e2e`
+installs `kind` and `helm` the same way, and only when it is actually going to use them.
+
+`make test-e2e` is the one target that needs a Docker daemon: it creates a kind cluster,
+brings up NetBox 4.6.8 with its Postgres and Redis, deploys the chart and applies the
+ordering gate's graph in dependency, reverse and seeded random order. Without Docker it
+prints why and succeeds, so it is safe to include in a local pre-push loop. It is **not** in
+the per-PR CI pipeline — it runs nightly, on a PR labelled `area/refs`, and on demand
+(`.github/workflows/e2e.yaml`). [`docs/operations/e2e.md`](docs/operations/e2e.md) has the
+environment variables, how to reproduce a seeded failure, and how to build the next gate on
+the same harness.

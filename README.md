@@ -46,7 +46,9 @@ loop rather than a tree walk. Consequences:
 
 - Drift made by a human in the NetBox UI gets corrected, not just drift on apply.
 - Dependency ordering falls out of reference resolution instead of a hand-maintained
-  table, so you can apply a graph in any order and watch it converge.
+  table, so you can apply a graph in any order and watch it converge — proved against a real
+  NetBox in [the e2e ordering gate](docs/operations/e2e.md), which applies the same graph
+  forwards, backwards and in twenty seeded random orders and requires an identical end state.
 - Deletion is `kubectl delete`, with finalizers handling NetBox-side removal and
   `PROTECT` ordering.
 
