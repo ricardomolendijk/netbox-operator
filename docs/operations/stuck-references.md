@@ -13,6 +13,11 @@ Every reference outcome is on one condition on the referring object. `Ready` rep
 `WaitingForRef` for all of them, because that is what a `kubectl wait` is asking; the
 diagnosis is on `RefsResolved`.
 
+An object whose spec declares at least one reference **always** carries that condition —
+`True` once every reference has resolved, `False` with one of the reasons below while any has
+not — so `RefsResolved` missing from such an object is a defect in the operator rather than a
+state to wait out ([#243](https://github.com/ricardomolendijk/netbox-operator/issues/243)).
+
 ```console
 $ kubectl get netboxregion ams -o jsonpath='{.status.conditions[?(@.type=="RefsResolved")]}' | jq
 {

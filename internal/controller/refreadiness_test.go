@@ -64,12 +64,19 @@ func TestReportModeTargetDoesNotBlockItsReferrers(t *testing.T) {
 		r.Spec.ParentRef = &netboxv1alpha1.RegionRef{Name: "emea"}
 	})
 
-	eventually(t, "the referrer reaches Ready", func() bool { return regionIsReady(ns, "ams") })
+	// One snapshot, and the *first* one that reports Ready: every assertion below then reads
+	// the same object version, so a referrer that publishes Ready before it publishes
+	// RefsResolved fails here instead of being healed by a second read taken after the next
+	// pass. Two reads is how issue #243 stayed a flake -- the condition was genuinely absent
+	// from the version this wait accepted, and the version the assertions read was a later one.
+	var child *netboxv1alpha1.NetBoxRegion
 
-	child := fetchRegion(ns, "ams")
-	if child == nil {
-		t.Fatal("the referrer disappeared")
-	}
+	eventually(t, "the referrer reaches Ready", func() bool {
+		child = fetchRegion(ns, "ams")
+
+		return child != nil &&
+			conditionOfRegion(child, netboxv1alpha1.ConditionReady).Status == metav1.ConditionTrue
+	})
 
 	if got := readyReason(child); got != netboxv1alpha1.ReasonSynced {
 		t.Errorf("Ready reason = %q, want %q", got, netboxv1alpha1.ReasonSynced)

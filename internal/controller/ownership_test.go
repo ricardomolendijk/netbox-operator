@@ -8,6 +8,7 @@ import (
 
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	netboxv1alpha1 "github.com/ricardomolendijk/netbox-operator/api/v1alpha1"
@@ -637,6 +638,74 @@ func TestATenantGroupChildIsOwnedByItsCascadingParent(t *testing.T) {
 	t.Logf("the cascaded row came back as status.id %d (was %d): with `slug` the whole "+
 		"natural key, the owner reference is the only thing between the child CR and a row "+
 		"NetBox deleted on purpose", fetchTenantGroup(ns, "child").Status.ID, childID)
+}
+
+// TestMetadataPatchKeepsTheStatusTheEngineBuilt is issue #243, at the seam it happened at.
+//
+// Both metadata writers -- the finalizer and the containment owner reference -- send a merge
+// PATCH, and a PATCH is answered with the whole object. controller-runtime decodes that answer
+// into the object it was handed, status included, so the answer used to replace the status the
+// pass had built up in memory with the one the API server still held. The owner reference is
+// written *after* build() has set RefsResolved, so the pass that first owned an object
+// published Ready=Synced with that condition erased -- the condition
+// docs/operations/stuck-references.md tells people to read, missing from the object that most
+// needed it.
+//
+// A ChildFixture rather than one of the shipped Kinds for the reason children_test.go gives:
+// nothing in this suite reconciles it, so the only writer here is the one under test.
+func TestMetadataPatchKeepsTheStatusTheEngineBuilt(t *testing.T) {
+	ns := newNamespace(t)
+
+	obj := &unstructured.Unstructured{}
+	obj.SetGroupVersionKind(childFixtureGVK)
+	obj.SetNamespace(ns)
+	obj.SetName("patched")
+
+	if err := apiClient.Create(context.Background(), obj); err != nil {
+		t.Fatalf("creating the fixture: %v", err)
+	}
+
+	// What the API server holds: the status an earlier pass wrote.
+	if err := unstructured.SetNestedField(obj.Object, "an earlier pass", "status", "note"); err != nil {
+		t.Fatalf("setting the stored status: %v", err)
+	}
+
+	if err := apiClient.Status().Update(context.Background(), obj); err != nil {
+		t.Fatalf("storing the status: %v", err)
+	}
+
+	// What this pass has decided and not written yet, which in the engine is every condition
+	// set between build() and finish().
+	if err := unstructured.SetNestedField(obj.Object, "this pass", "status", "note"); err != nil {
+		t.Fatalf("setting the in-memory status: %v", err)
+	}
+
+	stale := obj.GetResourceVersion()
+	obj.SetFinalizers([]string{netboxv1alpha1.Finalizer})
+
+	writer := finalizerWriter{specGuard{client.WithFieldOwner(apiClient, reconciler.FieldManager)}}
+	if err := writer.UpdateFinalizers(context.Background(), obj); err != nil {
+		t.Fatalf("patching the finalizers: %v", err)
+	}
+
+	note, _, err := unstructured.NestedString(obj.Object, "status", "note")
+	if err != nil {
+		t.Fatalf("reading the in-memory status: %v", err)
+	}
+
+	if note != "this pass" {
+		t.Errorf("status.note = %q after the patch, want %q: the answer to a metadata patch "+
+			"replaced the status the pass had built up, so every condition it had set was lost",
+			note, "this pass")
+	}
+
+	// The other half of the contract, and the reason the answer is read at all: the caller
+	// still needs the resourceVersion the patch moved, or the status update at the end of the
+	// pass is rejected as stale.
+	if obj.GetResourceVersion() == stale {
+		t.Errorf("resourceVersion is still %s: the status write at the end of the pass would "+
+			"be rejected as stale", stale)
+	}
 }
 
 // regionRefsReason returns the RefsResolved reason, which is where a region whose parentRef
