@@ -39,6 +39,8 @@ func ipamIPAddressDescriptor() Descriptor {
 
 		// Decision #177, answered B. The spec field that makes several matches legal, and
 		// substitutes the provenance stamp for the uniqueness NetBox may not be enforcing.
+		// Decision #194 kept it on this kind rather than on the shared envelope, so this
+		// line is the whole of what a second kind would have to add here.
 		DuplicateSpec: "allowDuplicate",
 
 		// CR spec names on the left, NetBox API names on the right.

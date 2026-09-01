@@ -150,7 +150,9 @@ close on the whole class of gap is end-to-end coverage against a live instance
 ## Duplicate addresses, and what `allowDuplicate` does to the natural key
 
 **Decided** on
-[#177](https://github.com/ricardomolendijk/netbox-operator/issues/177), and not built yet.
+[#177](https://github.com/ricardomolendijk/netbox-operator/issues/177), and shipped on
+`NetBoxIPAddress` only — see [the recipe below](#giving-another-kind-allowduplicate) for what a
+second kind would add, and when it must not.
 
 `ipam.VRF.enforce_unique` is a boolean with **`default=True`** (`docs/netbox-schema.md` →
 `ipam.VRF`). In a VRF with it set, NetBox rejects a second identical address. With it false —
@@ -190,3 +192,50 @@ Rejected: **reading the VRF's `enforce_unique` and behaving accordingly.** It re
 cannot work — the flag is visible for a VRF and `ENFORCE_GLOBAL_UNIQUE` is not visible at all,
 so the operator would be right in the VRF case and guessing in the global one, with a silent
 failure and no way for a reader to tell the two apart.
+
+## Giving another kind `allowDuplicate`
+
+**Decided** on [#194](https://github.com/ricardomolendijk/netbox-operator/issues/194):
+`allowDuplicate` stays a **per-kind spec field** and does not move onto `NetBoxObjectSpec`, the
+envelope every kind embeds. The engine is already generic over it —
+[`Descriptor.DuplicateSpec`](../../internal/registry/registry.go) names the field and
+[`internal/reconciler`](../../internal/reconciler/duplicate.go) reads it off the decoded spec by
+that name, with no branch on Kind — so the field costs three additions per kind and no shared
+edit, which is the [extensibility contract](../../CONTRIBUTING.md) rather than an exception to
+it. On the envelope it would instead appear in `kubectl explain` for around 120 kinds where a
+duplicate is impossible, and per-kind truth would live somewhere the CRD schema cannot show it,
+which is the shape that made [#186](https://github.com/ricardomolendijk/netbox-operator/issues/186)
+awkward.
+
+The three additions, for a kind that needs it:
+
+1. **The spec field**, on that kind's own spec struct: an `+optional` `bool` tagged
+   `json:"allowDuplicate,omitempty"`. It documents no empty state — an `omitempty` bool has two
+   states, not three ([field ownership](field-ownership.md)).
+2. **`DuplicateSpec: "allowDuplicate"`** on that kind's `Descriptor`. That is the whole wiring:
+   the engine looks the field up by this name, and `internal/reconciler`'s payload builder keeps
+   it out of the NetBox body for the same reason it keeps the envelope's own fields out — it
+   configures the operator and describes no column, and NetBox drops a column it does not know
+   rather than rejecting it.
+3. **One sentence on the kind's reference page**, saying which NetBox configuration decides
+   whether the duplicate is legal for that model, and repeating the two consequences from
+   [`NetBoxIPAddress`](../reference/netboxipaddress.md#allowduplicate): it needs the endpoint's
+   `spec.managedBy`, and an unstamped match is refused rather than duplicated.
+
+**When not to: a kind whose natural key a `UNIQUE` constraint backs must never declare it.**
+`allowDuplicate` makes the [provenance stamp](../operations/provenance.md#what-gets-written) part
+of the natural key, which is worth doing only where nothing else tells two matching objects
+apart. Where the database keeps the key unique — every `OrganizationalModel.slug`, `ipam.VRF.rd`,
+anything with a `meta.constraints` entry (`docs/netbox-schema.md`) — the second row cannot exist,
+so the field could only ever turn a `Conflict` a reader can act on into a rejected write. That is
+also why `NetBoxContact` has no such field even though two contacts of one name are legal server
+state: only an index backs `name` there, but a duplicate contact is somebody declaring the same
+contact twice rather than something the data model requires
+([`NetBoxContact`](../reference/netboxcontact.md)).
+
+Both halves are checked at build time rather than at admission, in
+`internal/registry/duplicatespec_test.go`: for every registered kind, a non-empty
+`DuplicateSpec` has to name a `boolean` property of that kind's generated CRD, and the kind's
+natural key has to be one the schema digest records no `UNIQUE` constraint for. The check is
+against the `Descriptor` and not against the user, so a wrong declaration fails `make test`
+instead of somebody's manifest.
