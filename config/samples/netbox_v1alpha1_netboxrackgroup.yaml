@@ -1,0 +1,19 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxRackGroup
+metadata:
+  name: cage-1
+  namespace: default
+spec:
+  endpointRef: homelab
+  onConflict: Fail
+  deletionPolicy: Delete
+
+  name: Cage 1
+  slug: cage-1
+
+  # There is deliberately no `parentRef` here. Despite the name, dcim.RackGroup is an
+  # OrganizationalModel and not a NestedGroupModel -- it declares no `parent` column and no
+  # `site` column, and `dcim/rack-groups` registers no `parent_id` filter -- so a rack group is a
+  # flat label rather than a position in a tree. Its identity is `slug` alone.
+
+  description: Front cage, rows A through C

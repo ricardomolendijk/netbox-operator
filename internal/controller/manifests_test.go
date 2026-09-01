@@ -39,8 +39,14 @@ var shippedManifests = []string{
 	// `minItems`, `maxItems` and a `== 1` rule *per element*, so admission has to accept a
 	// one-entry list, a two-entry one, and every enum, pattern and bound around them
 	// (NBO-049).
-	filepath.Join("..", "..", "docs", "examples", "cables.yaml"),
-}
+	filepath.Join("..", "..", "docs", "examples", "cables.yaml"), filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxrackrole.yaml"),
+	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxracktype.yaml"),
+	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxrackgroup.yaml"),
+	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxrack.yaml"),
+	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxrackreservation.yaml"),
+	filepath.Join("..", "..", "docs", "examples", "tag.yaml"),
+	filepath.Join("..", "..", "docs", "examples", "contacts.yaml"),
+	filepath.Join("..", "..", "docs", "examples", "racks.yaml")}
 
 // TestShippedManifestsAreAccepted applies every sample and example against the real CRDs.
 //

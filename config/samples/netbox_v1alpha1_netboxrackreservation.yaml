@@ -1,0 +1,38 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxRackReservation
+metadata:
+  name: a1-network-block
+  namespace: default
+spec:
+  endpointRef: homelab
+  onConflict: Fail
+  deletionPolicy: Delete
+
+  # Required, and this kind's containment parent: `rack` is the only on_delete=CASCADE foreign key
+  # in the rack hierarchy, so NetBox deletes a rack's reservations with the rack and
+  # `kubectl delete netboxrack a1` garbage-collects this CR with it.
+  rackRef:
+    name: a1
+
+  # Required and non-empty. A Postgres ArrayField, and NetBox returns it in stored order, so the
+  # order is data: write the units sorted and reordering them never shows up as drift.
+  units:
+    - 20
+    - 21
+    - 22
+
+  # A literal NetBox primary key, not a reference. `dcim.RackReservation.user` is a REQ foreign key
+  # to NetBox's user model and the `users` app has no Kind for a ref to point at, so there is
+  # nothing for the resolver to dispatch against. Find the id with
+  # `GET /api/users/users/?username=<name>`; NetBox user ids are stable.
+  userID: 4
+
+  # Required here, unusually: dcim.RackReservation shadows PrimaryModel's own `description` to make
+  # it so. It is also half of this kind's lookup key, `(rack, description)`, so two reservations on
+  # one rack should not share one.
+  description: Reserved for the network team
+
+  status: active
+
+  comments: |
+    Held until the second uplink pair is installed.

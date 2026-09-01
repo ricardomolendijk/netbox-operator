@@ -386,8 +386,27 @@ type (
 	PowerFeedRef ObjectRef
 
 	// CircuitTerminationRef points at a NetBoxCircuitTermination
-	// (circuits.CircuitTermination, circuits/circuit-terminations).
+	// (circuits.CircuitTermination, circuits/circuit-terminations).	// RackRoleRef points at a NetBoxRackRole (dcim.RackRole, dcim/rack-roles).
+	RackRoleRef ObjectRef
+
+	// RackTypeRef points at a NetBoxRackType (dcim.RackType, dcim/rack-types).
 	//
+	// The hardware catalogue entry a rack is built from: setting it makes NetBox copy the
+	// type's `RackBase` dimensions onto the rack server-side
+	// (docs/netbox-schema.md -> dcim.Rack, `rack_type ForeignKey -> dcim.RackType`).
+	RackTypeRef ObjectRef
+
+	// RackGroupRef points at a NetBoxRackGroup (dcim.RackGroup, dcim/rack-groups).
+	//
+	// An OrganizationalModel rather than the NestedGroupModel its name suggests, so this
+	// points at a flat set of labels and never at a tree
+	// (docs/netbox-schema.md -> dcim.RackGroup, bases).
+	RackGroupRef ObjectRef
+
+	// RackRef points at a NetBoxRack (dcim.Rack, dcim/racks).
+	RackRef ObjectRef
+
+	// IPAddressRef points at a NetBoxIPAddress (ipam.IPAddress, ipam/ip-addresses).	//
 	// The one member of CableTerminationTarget outside `dcim`: a cable's far end may be the
 	// provider's circuit rather than another port.
 	CircuitTerminationRef ObjectRef
@@ -691,7 +710,43 @@ var (
 	_ RefTarget = PowerFeedRef{}
 	_ RefTarget = CircuitTerminationRef{}
 	_ RefTarget = WirelessLANGroupRef{}
+	_ RefTarget = RackRoleRef{}
+	_ RefTarget = RackTypeRef{}
+	_ RefTarget = RackGroupRef{}
+	_ RefTarget = RackRef{}
 )
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r RackRoleRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxRackRole")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r RackRoleRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r RackTypeRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxRackType")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r RackTypeRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r RackGroupRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxRackGroup")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r RackGroupRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r RackRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxRack")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r RackRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
 
 // TargetGVK reports the Kind this reference resolves against.
 func (r DeviceTypeRef) TargetGVK() schema.GroupVersionKind {

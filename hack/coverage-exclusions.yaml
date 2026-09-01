@@ -211,4 +211,13 @@ notes:
     column: wireless_lans
     reason: >-
       NBO-053 owns it, with the rest of dcim.Interface's component fields. NBO-050 ships
-      wireless.WirelessLAN, so the column is no longer blocked -- only unwritten
+      wireless.WirelessLAN, so the column is no longer blocked -- only unwritten    reason: NBO-059 owns it, with the rest of ConfigContextModel
+  - kind: dcim.Device
+    column: rack
+    reason: >-
+      NBO-051 ships NetBoxRack, so nothing blocks this any more -- but the column does not
+      arrive alone: `(rack, position, face)` is one of dcim.Device's UniqueConstraints
+      (docs/netbox-schema.md), so mounting a device in a rack means adding all three at once
+      and re-deriving that kind's natural keys. NBO-051's ticket calls it out of scope on the
+      belief the three were already on NetBoxDevice from NBO-030; they are not
+      (internal/registry/dcim_device.go, dcimDeviceFields)

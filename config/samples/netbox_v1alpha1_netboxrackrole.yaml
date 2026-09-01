@@ -1,0 +1,26 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxRackRole
+metadata:
+  name: compute
+  namespace: default
+spec:
+  endpointRef: homelab
+
+  # The default, spelled out. dcim.RackRole declares no meta.constraints, so the identity comes
+  # from OrganizationalModel's column-level UNIQUE on `slug` -- one NetBox role per slug, so the
+  # second namespace to claim `compute` loses, and Fail says so.
+  onConflict: Fail
+
+  # The default, spelled out. A rack role is configuration, not allocated state. NetBox refuses
+  # the delete while any rack carries this role (Rack.role is on_delete=PROTECT), which surfaces
+  # as Deleting=False, Reason=Protected.
+  deletionPolicy: Delete
+
+  name: Compute
+  slug: compute
+
+  # Defaulted to NetBox's own ColorChoices.COLOR_GREY. Written out because a defaulted field the
+  # operator never sends is a field it can never correct.
+  color: "0aa8a7"
+
+  description: Racks holding compute nodes

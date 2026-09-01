@@ -1,0 +1,247 @@
+# Racks, end to end: a role, a group, a catalogue type, two racks and a reservation.
+#
+#   kubectl create namespace homelab
+#   kubectl apply -f docs/examples/racks.yaml
+#   kubectl get nbrack,nbrackres -n homelab -w
+#
+# Replace the URL and the token before applying, and read the note on `userID` before applying
+# the reservation -- it is the one field in this file you cannot copy verbatim.
+#
+# What this file is really showing is an identity NetBox does not enforce. Both of
+# `dcim.Rack`'s unique constraints are keyed on `location`, which is *optional*, so `r1` below
+# -- which names a location -- is looked up by `(location, name)` and `r2` -- which does not --
+# by `(site, name)` with `location_id` pinned null. The second is a convention rather than a
+# constraint, and two same-named location-less racks in one site are legal server state: the
+# second CR would report Ready=False, Reason=Conflict rather than adopt one. See
+# docs/reference/netboxrack.md.
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: netbox-token
+  namespace: homelab
+  labels:
+    # Required. The operator's Secret cache selects on this label, so a Secret without it is
+    # invisible even when the name on the endpoint is right.
+    netbox.kubeforge.org/endpoint-credential: "true"
+type: Opaque
+stringData:
+  # A NetBox API token with write access to the dcim app.
+  token: "0123456789abcdef0123456789abcdef01234567"
+---
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxEndpoint
+metadata:
+  name: homelab
+  namespace: homelab
+spec:
+  url: https://netbox.home.arpa
+  tokenSecretRef:
+    name: netbox-token
+  resyncPeriod: 2m
+  mode: Apply
+---
+# The site every rack below stands in. `dcim.Rack.site` is a REQ foreign key, and every
+# natural-key candidate reads `site_id` or `location_id`, so a rack whose site has not resolved
+# writes nothing at all rather than landing in whichever site NetBox defaulted to.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxSite
+metadata:
+  name: home
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  name: Home
+  slug: home
+  status: active
+---
+# The room. Setting `locationRef` on a rack is what moves it from the `(site, name)` convention
+# to the `(location, name)` database constraint, which is why this object is worth creating even
+# for a single-room site.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxLocation
+metadata:
+  name: ground-floor
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  name: Ground floor
+  slug: ground-floor
+  siteRef:
+    name: home
+---
+# A rack role. `dcim.RackRole` declares no meta.constraints at all, so its identity comes from
+# `OrganizationalModel.slug`'s column-level UNIQUE: one candidate, `?slug=compute`.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxRackRole
+metadata:
+  name: compute
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  name: Compute
+  slug: compute
+  color: "4caf50"
+  description: Cabinets holding servers
+---
+# A rack group -- and the kind whose name is the trap. `dcim.RackGroup` is an
+# OrganizationalModel with no `parent` column, no `site` column and no meta.constraints, so
+# there is no `parentRef` here and no tree: it is a flat label, keyed on `slug` alone. See
+# docs/reference/netboxrackgroup.md.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxRackGroup
+metadata:
+  name: cage-1
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  name: Cage 1
+  slug: cage-1
+---
+# The manufacturer the rack type needs. Both of `dcim.RackType`'s natural keys start at
+# `manufacturer`, so an unresolved `manufacturerRef` leaves no applicable candidate and the rack
+# type writes nothing.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxManufacturer
+metadata:
+  name: minkels
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  name: Minkels
+  slug: minkels
+---
+# A catalogue entry. Setting `rackTypeRef` on a rack makes NetBox copy these RackBase
+# dimensions onto that rack server-side on create, so the rack does not restate them and the
+# operator does not re-send them.
+#
+# `formFactor` is required here and optional on a rack: `dcim.RackType.form_factor` is NOT NULL
+# with no default while `dcim.Rack.form_factor` is nullable.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxRackType
+metadata:
+  name: mcs-42u
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  manufacturerRef:
+    name: minkels
+
+  model: MCS 42U 600x1200
+  slug: mcs-42u
+  formFactor: 4-post-cabinet
+
+  width: 19
+  uHeight: 42
+  startingUnit: 1
+  outerWidth: 600
+  outerHeight: 2000
+  outerDepth: 1200
+  outerUnit: mm
+  mountingDepth: 1000
+  maxWeight: 1200
+  # A string, not a number: NetBox returns `weight` padded to two places, and the engine
+  # compares the two numerically, so this produces no PATCH on the second reconcile.
+  weight: "135.5"
+  weightUnit: kg
+
+  description: Standard 42U cabinet
+---
+# A rack in a location, so its identity is the database constraint `(location, name)`.
+#
+# Every dimension is left to `rackTypeRef`: NetBox fills them in on create. The three defaulted
+# fields (`width`, `uHeight`, `startingUnit`) are NetBox's own defaults, so a rack that names a
+# type and restates nothing is written with the values NetBox would have used anyway.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxRack
+metadata:
+  name: r1
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  name: R1
+  siteRef:
+    name: home
+  locationRef:
+    name: ground-floor
+  groupRef:
+    name: cage-1
+  roleRef:
+    name: compute
+  rackTypeRef:
+    name: mcs-42u
+
+  status: active
+  airflow: front-to-rear
+  facilityID: GF.01
+  serial: MC2024-0007
+  # Globally UNIQUE across every rack in the NetBox, and deliberately not a lookup key: the
+  # asset tag identifies a chassis and this CR describes a rack position.
+  assetTag: ASSET-0001
+  description: Compute cabinet, ground floor
+---
+# A rack with **no** location, which is the interesting case. Neither of NetBox's constraints
+# applies -- both are keyed on `location`, and Postgres treats NULLs as distinct -- so this is
+# looked up by `?site_id=<id>&name=R2&location_id=null`. The null is pinned rather than omitted:
+# omitting it would match a rack called R2 in any room of this site and adopt it.
+#
+# Nothing on the server side stops a second R2 here. A second CR claiming it reports
+# Ready=False, Reason=Conflict rather than adopting one of the two.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxRack
+metadata:
+  name: r2
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  name: R2
+  siteRef:
+    name: home
+  roleRef:
+    name: compute
+
+  status: planned
+  formFactor: 2-post-frame
+  uHeight: 24
+  description: Overflow frame, no room assigned yet
+---
+# A reservation on R1, and the only object in this file that takes an owner reference:
+# `dcim.RackReservation.rack` is the one on_delete=CASCADE in the whole rack hierarchy, so
+# `kubectl delete netboxrack r1` garbage-collects this CR with it.
+#
+# Two fields need reading before you apply this:
+#
+#   units   -- a Postgres array whose order is data. NetBox returns it in stored order, so
+#              reordering the list is a real change the operator PATCHes. Write it sorted.
+#   userID  -- a literal NetBox primary key. `user` is a REQ foreign key to Django's own user
+#              model and this operator has no NetBoxUser Kind, so there is nothing to resolve.
+#              Find yours with `GET /api/users/users/?username=<name>` and replace the 1 below.
+#              The operator will not guess the token's own user: that would silently book every
+#              reservation to its service account.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxRackReservation
+metadata:
+  name: r1-network
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  rackRef:
+    name: r1
+  units: [20, 21, 22]
+  userID: 1
+  # Required, unusually -- dcim.RackReservation shadows PrimaryModel's own `description` to make
+  # it so -- and it is half of this kind's lookup key, since the model has no unique constraint
+  # of any sort. Two reservations on one rack must not share a description.
+  description: Reserved for the network team
+  status: active
+  comments: |
+    Held until the Q3 switch refresh.
