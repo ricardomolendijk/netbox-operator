@@ -1,0 +1,27 @@
+{{- if include "netbox-operator.webhookEnabled" . }}
+{{- /*
+The Service the API server calls the validating webhook through.
+
+It selects every replica. The registration is deliberately outside the leader-election gate
+in cmd/manager, so both replicas serve -- and a Service that selected only the leader would
+leave the other one answering 404 to its share of the reviews, which under
+failurePolicy: Ignore is a silent bypass rather than an error. There is no leader-election
+label anywhere near this selector, and that is on purpose.
+*/ -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "netbox-operator.webhookServiceName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "netbox-operator.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+  - name: https
+    port: 443
+    targetPort: webhook
+    protocol: TCP
+  selector:
+    {{- include "netbox-operator.selectorLabels" . | nindent 4 }}
+{{- end }}

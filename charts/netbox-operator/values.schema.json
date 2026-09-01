@@ -116,6 +116,38 @@
       "additionalProperties": false,
       "properties": {"port": {"type": "integer", "minimum": 1, "maximum": 65535}}
     },
+    "webhook": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The validating admission webhook. cert-manager is the only certificate path; with its CRDs absent the whole webhook is skipped and the manager runs with --enable-webhooks=false (docs/operations/admission-webhooks.md).",
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+        "certManager": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "required": {
+              "type": "boolean",
+              "description": "Fail the install when cert-manager.io/v1 is absent, instead of degrading to no webhook."
+            },
+            "issuerRef": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "Empty renders the chart's own self-signed Issuer, which is what config/certmanager ships."
+                },
+                "kind": {"enum": ["Issuer", "ClusterIssuer"]}
+              }
+            },
+            "duration": {"type": "string", "pattern": "^[0-9]+(s|m|h)$"},
+            "renewBefore": {"type": "string", "pattern": "^[0-9]+(s|m|h)$"}
+          }
+        }
+      }
+    },
     "endpoint": {
       "type": "object",
       "additionalProperties": false,

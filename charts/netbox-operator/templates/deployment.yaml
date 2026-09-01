@@ -49,6 +49,18 @@ spec:
         - --metrics-bind-address=:{{ .Values.metrics.port }}
         - --metrics-secure={{ .Values.metrics.secure }}
         {{- end }}
+        {{- if include "netbox-operator.webhookEnabled" . }}
+        - --webhook-port={{ .Values.webhook.port }}
+        {{- else }}
+        {{- /*
+        Explicit, and the whole of #249. The manager serves the validating webhook by
+        default and exits when its serving certificate is not on disk, so a render that
+        contains no Certificate and mounts no Secret has to turn the server off -- otherwise
+        a default install CrashLoops on
+        "open /tmp/k8s-webhook-server/serving-certs/tls.crt: no such file or directory".
+        */}}
+        - --enable-webhooks=false
+        {{- end }}
         {{- with .Values.extraArgs }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -83,6 +95,12 @@ spec:
           containerPort: {{ .Values.metrics.port }}
           protocol: TCP
         {{- end }}
+        {{- if include "netbox-operator.webhookEnabled" . }}
+        {{- /* Named, because the webhook Service's targetPort is the name and not the number. */}}
+        - name: webhook
+          containerPort: {{ .Values.webhook.port }}
+          protocol: TCP
+        {{- end }}
         livenessProbe:
           httpGet:
             path: /healthz
@@ -99,6 +117,30 @@ spec:
           {{- toYaml .Values.securityContext | nindent 10 }}
         resources:
           {{- toYaml .Values.resources | nindent 10 }}
+        {{- if include "netbox-operator.webhookEnabled" . }}
+        volumeMounts:
+        - name: webhook-certs
+          {{- /*
+          The manager's --webhook-cert-dir default, so the flag stays unset and there is one
+          place this path is written rather than two that can disagree. readOnlyRootFilesystem
+          does not conflict with it: the mount supplies the path.
+          */}}
+          mountPath: /tmp/k8s-webhook-server/serving-certs
+          readOnly: true
+        {{- end }}
+      {{- if include "netbox-operator.webhookEnabled" . }}
+      volumes:
+      {{- /*
+      Issued by templates/webhook-certificate.yaml, and deliberately NOT optional. While
+      cert-manager has yet to write it the Pod stays in ContainerCreating, which is a visible
+      and self-clearing state. Mounted optionally it would instead start a replica that joins
+      the Service and cannot complete a TLS handshake -- and under failurePolicy: Ignore that
+      is a silent bypass rather than an error. Same reasoning as config/manager/manager.yaml.
+      */}}
+      - name: webhook-certs
+        secret:
+          secretName: {{ include "netbox-operator.webhookCertName" . }}
+      {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

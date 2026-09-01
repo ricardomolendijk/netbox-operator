@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
 #
-# Generates the parts of charts/netbox-operator/ that are copies of config/: the CRDs and
-# the manager ClusterRole's rules. Run by `make manifests`; `make verify` fails if the
-# output is not committed.
+# Generates the parts of charts/netbox-operator/ that are copies of config/: the CRDs, the
+# manager ClusterRole's rules and the validating webhook's rules. Run by `make manifests`;
+# `make verify` fails if the output is not committed.
 #
 # The alternative -- hand-maintaining 22 CRDs and a rule list that grows with every kind --
 # is wrong within one release, and wrong in the direction that matters: a ClusterRole the
 # chart forgot to widen is a controller that cannot watch its own kind, and one the chart
 # widened by hand is a privilege nobody reviewed. So both are a copy, and the copy is
-# checked.
+# checked. The webhook configuration is here for the third version of the same argument:
+# TestShippedWebhookConfiguration asserts failurePolicy, sideEffects and the rules' scope
+# against config/webhook/manifests.yaml, and a hand-written second copy in the chart would
+# be the one nothing checks.
 set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -63,4 +66,65 @@ metadata:
   labels:
     {{- include "netbox-operator.labels" . | nindent 4 }}
 $rules
+YAML
+
+# The validating webhook configuration. Only the `webhooks:` list is copied -- the metadata
+# is the chart's, because the name has to carry the release name and the CA-injection
+# annotation has to name the Certificate this chart renders.
+webhooks=$(sed -n '/^webhooks:/,$p' "$root/config/webhook/manifests.yaml")
+if [ -z "$webhooks" ]; then
+  echo "helm-sync: no webhooks block in config/webhook/manifests.yaml" >&2
+  exit 1
+fi
+
+# controller-gen writes the kustomize install's Service name and namespace into
+# clientConfig. The chart's are computed from the release, so they are substituted here --
+# and both substitutions are checked, because a clientConfig still pointing at
+# `webhook-service.system.svc` is a webhook the API server cannot reach, which
+# failurePolicy: Ignore turns into a silent bypass rather than an error.
+service_expr='{{ include "netbox-operator.webhookServiceName" . }}'
+namespace_expr='{{ .Release.Namespace }}'
+webhooks=$(printf '%s\n' "$webhooks" \
+  | sed -e "s|^      name: webhook-service\$|      name: $service_expr|" \
+        -e "s|^      namespace: system\$|      namespace: $namespace_expr|")
+
+if ! printf '%s' "$webhooks" | grep -qF "$service_expr"; then
+  echo "helm-sync: clientConfig.service in config/webhook/manifests.yaml no longer names" >&2
+  echo "helm-sync: webhook-service in namespace system, so the chart's copy would point at" >&2
+  echo "helm-sync: a Service that does not exist. Update the substitution above." >&2
+  exit 1
+fi
+if ! printf '%s' "$webhooks" | grep -qF "$namespace_expr"; then
+  echo "helm-sync: clientConfig.service in config/webhook/manifests.yaml no longer names" >&2
+  echo "helm-sync: namespace system, so the chart's copy would point outside the release." >&2
+  exit 1
+fi
+
+cat >"$chart/templates/webhook.yaml" <<YAML
+{{- if include "netbox-operator.webhookEnabled" . }}
+{{- /*
+$banner
+Source: config/webhook/manifests.yaml, which controller-gen generates from the
++kubebuilder:webhook marker in internal/webhook/admission. Regenerate with \`make manifests\`.
+
+One path matching \`resources: ["*"]\` inside this API group, so adding a Kind changes nothing
+here -- and no \`status\` subresource in the rules, so a controller's own status write does not
+pass back through admission. failurePolicy: Ignore is a decision, not an oversight; both it
+and the reasoning are in docs/operations/admission-webhooks.md and asserted by
+TestShippedWebhookConfiguration, which is why none of it is a chart value.
+
+The caBundle is filled in by cert-manager's CA injector from the Certificate this chart
+renders. Absent that annotation the API server would have no CA for the Service and every
+review would fail its TLS handshake -- silently, under Ignore.
+*/ -}}
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: {{ include "netbox-operator.fullname" . }}-validating-webhook
+  labels:
+    {{- include "netbox-operator.labels" . | nindent 4 }}
+  annotations:
+    cert-manager.io/inject-ca-from: {{ .Release.Namespace }}/{{ include "netbox-operator.webhookCertName" . }}
+$webhooks
+{{- end }}
 YAML

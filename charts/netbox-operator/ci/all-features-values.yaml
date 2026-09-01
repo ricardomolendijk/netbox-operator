@@ -62,6 +62,19 @@ metrics:
       regex: go_.*
       sourceLabels: [__name__]
 
+# The named-Issuer branch, which the default values do not take: they leave issuerRef.name
+# empty and the chart renders its own self-signed Issuer instead.
+webhook:
+  enabled: true
+  port: 9443
+  certManager:
+    required: false
+    issuerRef:
+      name: netbox-operator-ci
+      kind: ClusterIssuer
+    duration: 2160h
+    renewBefore: 720h
+
 endpoint:
   enabled: true
   name: netbox

@@ -91,3 +91,46 @@ golden-manifest check in CI would otherwise diff on Go's map order.
 {{- define "netbox-operator.endpointNamespace" -}}
 {{- default .Release.Namespace .Values.endpoint.namespace -}}
 {{- end -}}
+
+{{/*
+Whether the validating webhook is actually served: non-empty when the value asked for it
+*and* this cluster can hold its serving certificate.
+
+Gated on cert-manager's CRD and not on the value alone, for the reason the ServiceMonitor is
+gated on the Prometheus Operator's -- except that here the value is on by default, so getting
+it wrong is worse than a skipped scrape. cert-manager is the only certificate path by design
+(docs/operations/admission-webhooks.md#certificates), and the manager serves the webhook by
+default and *exits* when the certificate is not on disk. So a chart that rendered a
+Certificate on a cluster without cert-manager would fail the install, and one that rendered
+nothing while leaving the manager's default alone would CrashLoop it -- which is exactly what
+#249 was. Every template that renders a webhook object, and the manager's own
+--enable-webhooks, read this one answer, so the four cannot disagree.
+*/}}
+{{- define "netbox-operator.webhookEnabled" -}}
+{{- if .Values.webhook.enabled -}}
+{{- if .Capabilities.APIVersions.Has "cert-manager.io/v1" -}}
+true
+{{- else if .Values.webhook.certManager.required -}}
+{{- fail "webhook.certManager.required is set and cert-manager.io/v1 is not installed on this cluster, so the webhook's serving certificate cannot be issued. Install cert-manager, or set webhook.enabled=false to run without admission validation -- every rule it enforces has a reconcile-time backstop (docs/operations/admission-webhooks.md#what-breaks-when-it-is-off)." -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The webhook Service's name, and the Certificate's.
+
+Helpers rather than three literals, because the Certificate's dnsNames, the Service and the
+configuration's clientConfig all have to name the same thing: a mismatch is a failed TLS
+handshake on every review, which failurePolicy: Ignore absorbs without an error anybody sees.
+*/}}
+{{- define "netbox-operator.webhookServiceName" -}}
+{{- printf "%s-webhook" (include "netbox-operator.fullname" .) -}}
+{{- end -}}
+
+{{- define "netbox-operator.webhookCertName" -}}
+{{- printf "%s-webhook-cert" (include "netbox-operator.fullname" .) -}}
+{{- end -}}
+
+{{- define "netbox-operator.webhookIssuerName" -}}
+{{- printf "%s-webhook-selfsigned" (include "netbox-operator.fullname" .) -}}
+{{- end -}}

@@ -122,6 +122,43 @@ health:
   port: 8081
 
 # ---------------------------------------------------------------------------------------
+# The validating admission webhook.
+#
+# Three denials and three warnings, every one of which has a reconcile-time backstop, so
+# losing it costs fast feedback and never data -- the degradation table is in
+# docs/operations/admission-webhooks.md#what-breaks-when-it-is-off.
+#
+# cert-manager is the only certificate path, and that is a design decision rather than a
+# gap: a self-signed fallback would need `update` on validatingwebhookconfigurations, which
+# is patching cluster-wide admission, plus a rotation that publishes the new CA before the
+# new leaf. So on a cluster whose cert-manager CRDs are absent every object below is
+# skipped and the manager is started with --enable-webhooks=false -- which is what makes a
+# default `helm install` come up rather than CrashLoop on a certificate nothing issued
+# (#249). Install cert-manager and `helm upgrade` to turn admission on.
+# ---------------------------------------------------------------------------------------
+webhook:
+  enabled: true
+  port: 9443
+  certManager:
+    # Fail the install when cert-manager's CRDs are absent, instead of degrading to no
+    # webhook. Worth setting where admission is a control you rely on: with
+    # failurePolicy: Ignore a webhook that is quietly not there admits everything and logs
+    # nothing to say so.
+    required: false
+    # Empty renders the chart's own self-signed Issuer, which is what config/certmanager
+    # ships and all this certificate needs -- its only client is the API server, and the
+    # only CA that server trusts for it is the one the injected caBundle names. Name an
+    # Issuer in the release namespace, or a ClusterIssuer, to use that instead.
+    issuerRef:
+      name: ""
+      kind: Issuer           # Issuer | ClusterIssuer
+    # Renewed at two thirds of its lifetime, matching config/certmanager. The hard half of
+    # rotation -- the new CA in the bundle before the new leaf is served -- is cert-manager's
+    # CA injector, and getting it wrong makes every renewal a brief outage of admission.
+    duration: 8760h
+    renewBefore: 2920h
+
+# ---------------------------------------------------------------------------------------
 # An optional NetBoxEndpoint and its token Secret, so a demo install is one command.
 # Leave it off and manage endpoints in Git, which is what ADR-0005 assumes.
 # ---------------------------------------------------------------------------------------

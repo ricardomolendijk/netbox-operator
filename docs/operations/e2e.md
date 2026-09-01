@@ -80,14 +80,18 @@ Asserting that inside each pass would stop the suite at the forward run and leav
 permutations, the dump equality, the quiescence and the write economy unexecuted — which is
 most of the gate. One spec at the end names the defect once and lets the rest run.
 
-!!! warning "Two specs are expected to fail until two bugs are fixed"
+!!! warning "One spec is expected to fail until #252 is fixed"
 
-    - **#252**, above: the error-path spec fails. Everything about ordering passes.
-    - **[#249](https://github.com/ricardomolendijk/netbox-operator/issues/249)**: a default
-      `helm install` of the chart CrashLoops, because the manager serves the admission webhook
-      with no certificate and the chart renders neither. The harness works around it with
-      `--set-json 'extraArgs=["--enable-webhooks=false"]'`; that line comes out when the chart
-      grows a value for it.
+    **#252**, above: the error-path spec fails. Everything about ordering passes.
+
+    [#249](https://github.com/ricardomolendijk/netbox-operator/issues/249) — a default
+    `helm install` CrashLooping because the manager served the admission webhook with no
+    certificate — is fixed, and the harness no longer passes
+    `--set-json 'extraArgs=["--enable-webhooks=false"]'` to work around it. This kind cluster
+    has no cert-manager, so the chart skips the webhook and sets that flag itself: the suite
+    runs the same degraded path a default install without cert-manager gets, and the rules the
+    webhook would have enforced are asserted at reconcile time, which is where their authority
+    lives ([admission-webhooks.md](admission-webhooks.md#what-breaks-when-it-is-off)).
 
 ## Reproducing a failure
 

@@ -192,17 +192,13 @@ func (op *Operator) install(ctx context.Context, cfg Config) error {
 		// The namespaces holding endpoint token Secrets. Without them the manager builds no
 		// informer for those namespaces and every endpoint reports SecretMissing.
 		"--set", "credentialNamespaces={" + strings.Join(FixtureNamespaces, ",") + "}",
-		// The manager serves the validating webhook by default and exits when its serving
-		// certificate is not there. The chart renders no ValidatingWebhookConfiguration and
-		// mounts no certificate, so the server has nothing to serve and no key to serve it
-		// with -- and the manager CrashLoops on
-		// "open /tmp/k8s-webhook-server/serving-certs/tls.crt: no such file or directory".
-		// That is a chart bug rather than a fact about e2e, reported as #249; this flag is the
-		// workaround and comes out when the chart grows a value for it.
-		//
-		// --set-json rather than --set: the value contains an `=`, which Helm's --set parser
-		// reads as a key separator inside a list literal.
-		"--set-json", `extraArgs=["--enable-webhooks=false"]`,
+		// No webhook override. This kind cluster has no cert-manager, so the chart skips the
+		// whole webhook and starts the manager with --enable-webhooks=false itself (#249) --
+		// which means the suite exercises the same degraded path a default install on a
+		// cluster without cert-manager gets, rather than a flag only e2e passes. The rules
+		// the webhook would enforce are asserted at reconcile time by the convergence specs,
+		// which is where their authority lives anyway
+		// (docs/operations/admission-webhooks.md#what-breaks-when-it-is-off).
 	}
 	if _, err := run(ctx, cfg.Out, helm, args...); err != nil {
 		return fmt.Errorf("installing the chart into %s: %w", op.Namespace, err)

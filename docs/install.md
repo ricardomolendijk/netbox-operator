@@ -55,6 +55,8 @@ with a comment saying what it does. The ones that change behaviour rather than p
 | `allocation.identity.customField` | `k8s_allocation_identity` | `spec.managedBy.allocationIdentityField` on the rendered endpoint |
 | `metrics.enabled` | `true` | `--metrics-bind-address` and a `Service` |
 | `metrics.serviceMonitor.enabled` | `false` | A `ServiceMonitor`, if the Prometheus Operator CRD exists |
+| `webhook.enabled` | `true` | A `ValidatingWebhookConfiguration`, a `Service`, a cert-manager `Certificate` and `--enable-webhooks` — **if the cert-manager CRDs exist**, see below |
+| `webhook.certManager.required` | `false` | Nothing; it makes cert-manager's absence an install-time error instead of a degraded install |
 | `endpoint.enabled` | `false` | A `NetBoxEndpoint` and its token `Secret`, for a one-command demo |
 
 A typo fails at install time rather than at controller startup, because
@@ -98,8 +100,51 @@ Absent on purpose, so that "there is no value for it" is an answer rather than a
 | A cluster-wide Secret read | It would undo [#100](https://github.com/ricardomolendijk/netbox-operator/issues/100) with one `--set`. The overlay to add it yourself is in [rbac.md](operations/rbac.md#reading-secrets-cluster-wide-anyway) — deliberately two steps and outside the chart |
 | `crds.install` | Helm's `crds/` directory is not conditional; a value that pretended otherwise would lie. GitOps users template with `--include-crds`, below |
 | Per-Kind `deletionPolicy` defaults | They come off each Kind's Descriptor, not from configuration. The table is in [deletion](concepts/deletion.md#the-default-depends-on-the-kind) — and since [#186](https://github.com/ricardomolendijk/netbox-operator/issues/186) it is not in `kubectl explain` either, so the docs are where you read it |
-| Webhook `Certificate` | There is no webhook server yet ([#68](https://github.com/ricardomolendijk/netbox-operator/issues/68)). A cert-manager `Certificate` for a server that does not listen is a value that only fails later |
+| A second webhook certificate mechanism | cert-manager is the only certificate path, deliberately — [admission-webhooks.md](operations/admission-webhooks.md#certificates) has the reasoning. `webhook.certManager.*` configures that one path and there is no `webhook.tls.existingSecret` beside it |
+| `webhook.failurePolicy`, `timeoutSeconds`, the rules | Decisions with a written argument and a test holding them, not knobs. `Ignore` is only defensible because the rules never reach outside `netbox.kubeforge.org`, and a value that let one install widen them would break that argument silently ([admission-webhooks.md](operations/admission-webhooks.md#failurepolicy-ignore-and-why)) |
 | `onConflict` | Per object, in Git. `Adopt` on a rebuild is a property of the manifests, not of the install ([gitops.md](operations/gitops.md#rebuilding-a-cluster-from-git)) |
+
+### cert-manager, and what a default install does without it
+
+**cert-manager is optional, and the install tells you which of the two you got.** The
+[validating webhook](operations/admission-webhooks.md) needs a serving certificate, and
+cert-manager is the only path to one here — a decision with a written argument, not a gap.
+So the chart gates every webhook object on the `cert-manager.io/v1` CRDs actually existing:
+
+| cert-manager | What the chart renders | The manager |
+|---|---|---|
+| installed | `Certificate`, a self-signed `Issuer`, the webhook `Service`, the `ValidatingWebhookConfiguration` with `cert-manager.io/inject-ca-from` | serves admission; the `Pod` waits in `ContainerCreating` until cert-manager has written the `Secret`, which is seconds |
+| absent | none of it | started with `--enable-webhooks=false` |
+
+The second row is the fix for
+[#249](https://github.com/ricardomolendijk/netbox-operator/issues/249): the manager serves
+the webhook by default and **exits** when the certificate is not on disk, so a chart that
+rendered nothing and left that default alone CrashLooped a vanilla `helm install`. It now
+degrades instead, and `NOTES.txt` says so in as many words.
+
+A degraded install is a real loss, and a bounded one: three denials and three warnings move
+from apply time to reconcile time, where every one of them has a backstop and a blocked
+object performs **zero** NetBox writes. The table is
+[what breaks when it is off](operations/admission-webhooks.md#what-breaks-when-it-is-off).
+Everything the CRD schema and CEL enforce — `endpointRef` immutability, every one-of, the
+CIDR host-bits check — is enforced by the API server either way.
+
+To install cert-manager first and get admission from the start:
+
+```sh
+helm install cert-manager oci://quay.io/jetstack/charts/cert-manager \
+  --namespace cert-manager --create-namespace --set crds.enabled=true
+```
+
+Two things worth knowing about the gate:
+
+- **Installing cert-manager afterwards does not turn admission on by itself.** Helm reads
+  the cluster's API versions at render time, so run `helm upgrade` once cert-manager is
+  there. Nothing else changes.
+- **`webhook.certManager.required=true` refuses to install without it.** Set it where
+  admission is a control you rely on rather than a nicety — under `failurePolicy: Ignore`
+  a webhook that is quietly not there admits everything and logs nothing to say so, and a
+  loud install-time failure is the only way to not learn that later.
 
 ### The Secret blast radius
 
