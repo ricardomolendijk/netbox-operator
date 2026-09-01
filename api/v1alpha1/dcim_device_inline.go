@@ -73,6 +73,14 @@ const (
 //     one of those is either wireless-only or a column somebody setting up a chassis by hand
 //     is not setting. Write a NetBoxInterface for an interface that needs them; nothing about
 //     doing so is a downgrade, and it is one line longer.
+//
+// One thing an entry cannot do, and it follows from omitempty rather than from a decision here:
+// an inline field set to `""` **does not clear** NetBox's value. The child is applied through
+// server-side apply, `omitempty` drops the empty string from the request, so no manager claims
+// the field, so the child's own pass reads it as absent -- which means "do not manage" rather
+// than "clear" (docs/concepts/field-ownership.md). An inline entry can set a description and
+// leave one alone; clearing one is a NetBoxInterface, where the field is the user's own and the
+// distinction survives.
 type InlineInterface struct {
 	// Name is the interface's name, and this entry's key.
 	//

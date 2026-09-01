@@ -488,6 +488,14 @@ the longhand kind's own types, so every enum, pattern and length limit is declar
 `deviceRef` is **absent** from an entry, and so is an address's `assignedObject`: the
 materialiser sets both, and a field the user cannot meaningfully set does not exist.
 
+**An inline field has two states, not three.** Setting `description: ""` on an entry does *not*
+clear NetBox's description: the child is written with server-side apply, `omitempty` drops the
+empty string, no manager claims the field, and the child's own pass therefore reads it as
+absent — which means "leave NetBox alone"
+([field ownership](../concepts/field-ownership.md)). An inline entry can set a value and can
+leave one alone; clearing one is a `NetBoxInterface`, where the field is yours and the
+distinction survives.
+
 **The bounds.** 128 interfaces, 128 tagged VLANs per interface, 16 addresses per interface —
 narrower than the project's standard 256 for the two nested lists, because validation cost
 multiplies through every level: the API server costs `interfaces[].taggedVLANs[]`'s five
