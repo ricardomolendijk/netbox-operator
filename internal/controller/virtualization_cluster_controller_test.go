@@ -114,7 +114,7 @@ func makeCluster(t *testing.T, ns, name string, mutate func(*netboxv1alpha1.NetB
 		t.Fatalf("creating cluster %s/%s: %v", ns, name, err)
 	}
 
-	t.Cleanup(func() { _ = k8sClient.Delete(context.Background(), cluster) })
+	t.Cleanup(func() { removeObject(t, cluster) })
 }
 
 func fetchCluster(ns, name string) *netboxv1alpha1.NetBoxCluster {
@@ -224,10 +224,9 @@ func TestClusterScopeMovesAsOnePair(t *testing.T) {
 	writesBefore := len(stub.recorded())
 
 	cluster := fetchCluster(ns, "moving")
-	cluster.Spec.Scope = &netboxv1alpha1.ScopeRef{SiteRef: &netboxv1alpha1.SiteRef{ID: idOf(41)}}
-	if err := k8sClient.Update(context.Background(), cluster); err != nil {
-		t.Fatalf("moving the scope: %v", err)
-	}
+	editSpec(t, cluster, func(edited *netboxv1alpha1.NetBoxCluster) {
+		edited.Spec.Scope = &netboxv1alpha1.ScopeRef{SiteRef: &netboxv1alpha1.SiteRef{ID: idOf(41)}}
+	})
 
 	eventually(t, "the move to reach NetBox", func() bool {
 		return stub.get(cluster.Status.ID)["scope_type"] == "dcim.site"

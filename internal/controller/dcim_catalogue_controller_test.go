@@ -88,7 +88,7 @@ func TestManufacturerIsAdoptedNotDuplicated(t *testing.T) {
 		t.Fatalf("creating manufacturer: %v", err)
 	}
 
-	t.Cleanup(func() { _ = k8sClient.Delete(context.Background(), manufacturer) })
+	t.Cleanup(func() { removeObject(t, manufacturer) })
 
 	eventually(t, "the manufacturer to be Ready", func() bool {
 		return catalogueReady(t, &netboxv1alpha1.NetBoxManufacturer{}, ns, "ubiquiti")
@@ -135,7 +135,7 @@ func TestDeviceRoleWithAnUnresolvableParentWritesNothing(t *testing.T) {
 		t.Fatalf("creating device role: %v", err)
 	}
 
-	t.Cleanup(func() { _ = k8sClient.Delete(context.Background(), role) })
+	t.Cleanup(func() { removeObject(t, role) })
 
 	eventually(t, "the role to report that its parent does not exist", func() bool {
 		fetched := &netboxv1alpha1.NetBoxDeviceRole{}
@@ -185,7 +185,7 @@ func TestTopLevelDeviceRoleRoundTripsAndDoesNotHotLoop(t *testing.T) {
 		t.Fatalf("creating device role: %v", err)
 	}
 
-	t.Cleanup(func() { _ = k8sClient.Delete(context.Background(), role) })
+	t.Cleanup(func() { removeObject(t, role) })
 
 	eventually(t, "the device role to be Ready", func() bool {
 		return catalogueReady(t, &netboxv1alpha1.NetBoxDeviceRole{}, ns, "router")

@@ -49,7 +49,7 @@ func TestLocationWithAnUnresolvableSiteWritesNothing(t *testing.T) {
 		t.Fatalf("creating location: %v", err)
 	}
 
-	t.Cleanup(func() { _ = k8sClient.Delete(context.Background(), location) })
+	t.Cleanup(func() { removeObject(t, location) })
 
 	eventually(t, "the location to report that its site does not exist", func() bool {
 		return locationRefsReason(ns, "ground-floor") == netboxv1alpha1.ReasonRefNotFound

@@ -394,9 +394,7 @@ func bump(t *testing.T, ns string) {
 	t.Helper()
 
 	e := mustFetch(t, k8sClient, ns, "homelab")
-	e.Spec.Timeout = metav1.Duration{Duration: e.Spec.Timeout.Duration + 1}
-
-	if err := k8sClient.Update(context.Background(), e); err != nil {
-		t.Fatalf("bumping endpoint %s/homelab: %v", ns, err)
-	}
+	editSpec(t, e, func(edited *netboxv1alpha1.NetBoxEndpoint) {
+		edited.Spec.Timeout = metav1.Duration{Duration: edited.Spec.Timeout.Duration + 1}
+	})
 }

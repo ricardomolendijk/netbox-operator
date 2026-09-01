@@ -37,7 +37,7 @@ func applyTag(t *testing.T, ns, slug, specFields string) {
 		t.Fatalf("applying tag %s/%s: %v", ns, slug, err)
 	}
 
-	t.Cleanup(func() { removeTag(ns, slug) })
+	t.Cleanup(func() { removeTag(t, ns, slug) })
 }
 
 // TestServerSideApplyCanClearADescription is NBO-079's acceptance criterion against a real
@@ -113,7 +113,7 @@ func applySite(t *testing.T, ns, slug, specFields string) {
 		t.Fatalf("applying site %s/%s: %v", ns, slug, err)
 	}
 
-	t.Cleanup(func() { _ = k8sClient.Delete(context.Background(), site) })
+	t.Cleanup(func() { removeObject(t, site) })
 }
 
 // TestServerSideApplyCanClearALatitude is #170: a coordinate could be set and never unset,

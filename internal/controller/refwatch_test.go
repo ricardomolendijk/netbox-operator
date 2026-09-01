@@ -51,7 +51,7 @@ func makeRegion(t *testing.T, ns, name string, mutate func(*netboxv1alpha1.NetBo
 		t.Fatalf("creating region %s/%s: %v", ns, name, err)
 	}
 
-	t.Cleanup(func() { _ = k8sClient.Delete(context.Background(), region) })
+	t.Cleanup(func() { removeObject(t, region) })
 
 	return region
 }

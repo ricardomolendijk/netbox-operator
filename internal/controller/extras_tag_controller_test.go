@@ -11,7 +11,6 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -105,29 +104,19 @@ func makeTag(t *testing.T, ns, slug string, mutate func(*netboxv1alpha1.NetBoxTa
 		t.Fatalf("creating tag %s/%s: %v", ns, slug, err)
 	}
 
-	t.Cleanup(func() { removeTag(ns, slug) })
+	t.Cleanup(func() { removeTag(t, ns, slug) })
 
 	return tag
 }
 
-// removeTag deletes a tag and waits for the engine to release its finalizer. It reports
-// nothing: a cleanup that fails a test hides the failure the test actually found, and a
-// tag left terminating only costs some log noise once the stub has closed.
-func removeTag(ns, slug string) {
-	ctx := context.Background()
-	key := client.ObjectKey{Namespace: ns, Name: slug}
+// removeTag deletes a tag by name and waits for the engine to release its finalizer, for the
+// two tests that hold a slug rather than the object they applied.
+func removeTag(t *testing.T, ns, slug string) {
+	t.Helper()
 
-	_ = k8sClient.Delete(ctx, &netboxv1alpha1.NetBoxTag{
+	removeObject(t, &netboxv1alpha1.NetBoxTag{
 		ObjectMeta: metav1.ObjectMeta{Name: slug, Namespace: ns},
 	})
-
-	for range 100 {
-		if err := k8sClient.Get(ctx, key, &netboxv1alpha1.NetBoxTag{}); apierrors.IsNotFound(err) {
-			return
-		}
-
-		time.Sleep(50 * time.Millisecond)
-	}
 }
 
 func fetchTag(ns, slug string) *netboxv1alpha1.NetBoxTag {
@@ -322,11 +311,8 @@ func TestTagSpecEditPatchesOnlyTheChangedField(t *testing.T) {
 
 	tag := mustFetchTag(t, ns, "recoloured")
 	id := tag.Status.ID
-	tag.Spec.Color = "4caf50"
 
-	if err := k8sClient.Update(context.Background(), tag); err != nil {
-		t.Fatalf("editing spec.color: %v", err)
-	}
+	tag = editSpec(t, tag, func(edited *netboxv1alpha1.NetBoxTag) { edited.Spec.Color = "4caf50" })
 
 	generation := tag.Generation
 
