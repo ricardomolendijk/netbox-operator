@@ -326,12 +326,24 @@ successive bounds:
 | three such fields on one Kind | 57 803 each |
 | five | 46 619 each |
 | ten | 23 309 each |
+| two `[]CableTerminationTarget` fields — a list of a **nine-member union** | **~12 400** each |
 
 The first three rows are capped by the **per-rule** budget; from five fields on it is the
 **whole-schema** budget that binds, and the ceiling falls roughly as one over the number of
 fields sharing it. So 256 leaves about 90× of headroom even for a Kind with ten to-many
 reference fields, which is enough that [#185](https://github.com/ricardomolendijk/netbox-operator/issues/185)
 adding rules to `ObjectRef`, or wrapping it, cannot quietly make 256 unaffordable.
+
+The last row is the expensive shape, and it was measured because it looked as though it might
+not fit. A list of a polymorphic union multiplies: each of
+[`CableTerminationTarget`](../reference/genericref.md#cableterminationtarget)'s nine members is
+an `ObjectRef` with five rules, plus the union's own `== 1`, so one element carries 46 rules and
+[`NetBoxCable`](../reference/netboxcable.md) carries two such lists. It still fits with room to
+spare: the whole-schema budget binds at about **12 400** per list, so the shipped bound of 16 —
+chosen from NetBox's own connector geometry rather than from the budget — has roughly 775×
+headroom. Verified by installing mutated copies of the generated CRD into `envtest`
+(Kubernetes 1.34) at successive bounds; 12 400 was accepted and 12 410 refused with
+`exceeds budget by factor of 1.3201x`.
 
 `MaxItems=32`, applied when this was first hit on `NetBoxVRF.importTargets`/`exportTargets`
 ([#191](https://github.com/ricardomolendijk/netbox-operator/issues/191)), was a guess that

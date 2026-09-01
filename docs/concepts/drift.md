@@ -33,8 +33,9 @@ nothing to do.
 | 6 | Custom fields | *every* defined field | the managed subset | desired keys only |
 | 7 | Generic FK | `scope_type` + `scope_id` | same | **as a pair** |
 | 8 | `ArrayField` | `[80,443]` | same | order-**sensitive** |
+| 9 | To-many generic FK | `[{"object_type":…,"object_id":41,"object":{…}}]` | the pair only | pair set, order-independent |
 
-Rules 1–4 are carried over from `netbox-populator`, which got them right. 5–8 are new.
+Rules 1–4 are carried over from `netbox-populator`, which got them right. 5–9 are new.
 
 ### 6 — custom fields, and why the subset matters
 
@@ -57,6 +58,30 @@ these models use `CachedScopeMixin`, and `site` is a read-only cached column (`_
 Writing `site` silently no-ops, and keying drift on it is correct only by luck for
 site-scoped objects and wrong for anything scoped to a region, site group or location.
 Drift keys on `(scope_type, scope_id)` and never on the cached column.
+
+### 9 — a to-many generic FK is a set of pairs
+
+`a_terminations` and `b_terminations` on `dcim.Cable` are the case, and the only one so
+far ([`NetBoxCable`](../reference/netboxcable.md)). One field carries a **list** of
+`{object_type, object_id}` objects rather than two columns carrying one pair, so rule 7
+does not apply and neither does rule 3 — the elements are not ids.
+
+Two things make the read differ from the write, and both would be permanent drift:
+
+- **The order is NetBox's, not yours.** The elements are `dcim.CableTermination` rows,
+  returned in `('cable', 'cable_end', 'connector', 'pk')` order
+  ([`docs/netbox-schema.md`](../netbox-schema.md) → `dcim.CableTermination`,
+  `meta.ordering`) rather than in the order they were POSTed.
+- **The read carries a third key.** `GenericObjectSerializer` adds a read-only `object`
+  expansion of the target (`netbox/netbox/api/serializers/generic.py:15`) that the write
+  never sends.
+
+So the comparison reads **only the two written keys**, sorts, and deduplicates — the same
+argument rule 3 makes for an M2M, one level of nesting further in. Getting it wrong costs
+more here than anywhere else on this page: `dcim.Cable` is the one
+`UpdateStrategy: Recreate` kind and both these fields are in its `RecreateOn`, so a diff
+that never settles is not a `PATCH` loop but **a cable deleted and re-created on every
+resync** — which churns the changelog and rebuilds every `CablePath` through it each time.
 
 ### 8 — arrays are ordered, sets are not
 

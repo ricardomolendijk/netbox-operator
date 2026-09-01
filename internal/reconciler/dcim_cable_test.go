@@ -588,3 +588,77 @@ func conditionOfCable(obj *netboxv1alpha1.NetBoxCable, condType string) metav1.C
 
 	return metav1.Condition{}
 }
+
+// TestCableRetainRefusesARecreate is the one case where two spec fields contradict each other.
+//
+// `deletionPolicy: Retain` means "never destroy this NetBox object" and a recreate destroys it,
+// along with every `dcim.CablePath` traversing it. The operator refuses instead of picking one,
+// and refuses in this direction because a recreate is unrecoverable while a refusal is one edit
+// away from either outcome.
+//
+// Zero writes is the assertion that matters. A `Retain` cable whose terminations were edited
+// must still be in NetBox afterwards.
+func TestCableRetainRefusesARecreate(t *testing.T) {
+	live := liveCable()
+
+	nb := &fakeClient{get: live, list: []netbox.Object{live}, created: netbox.Object{"id": float64(9)}}
+	engine := cableEngine(t, nb, fourInterfaces()...)
+
+	obj := cableBetween(
+		[]netboxv1alpha1.CableTerminationTarget{onInterface("sw1-eth0")},
+		[]netboxv1alpha1.CableTerminationTarget{onInterface("sw2-eth1")},
+	)
+	obj.Status.ID = 7
+	obj.Spec.DeletionPolicy = netboxv1alpha1.DeletionRetain
+
+	if _, err := engine.Reconcile(context.Background(), obj); err != nil {
+		t.Fatalf("Reconcile() = %v", err)
+	}
+
+	for _, method := range nb.methods() {
+		if method == "DELETE" || method == "POST" || method == "PATCH" {
+			t.Errorf("the engine wrote (%v) against deletionPolicy: Retain", nb.methods())
+
+			break
+		}
+	}
+
+	if obj.Status.ID != 7 {
+		t.Errorf("status.id = %d, want 7 unchanged: nothing was replaced", obj.Status.ID)
+	}
+
+	ready := conditionOfCable(obj, netboxv1alpha1.ConditionReady)
+	if ready.Status != metav1.ConditionFalse || ready.Reason != netboxv1alpha1.ReasonInvalid {
+		t.Errorf("Ready = %s/%s, want False/%s", ready.Status, ready.Reason, netboxv1alpha1.ReasonInvalid)
+	}
+
+	// The message names the field that changed, because reverting it is half the fix.
+	if want := "b_terminations"; !strings.Contains(ready.Message, want) {
+		t.Errorf("Ready message = %q, want it to name %s", ready.Message, want)
+	}
+}
+
+// TestCableRetainStillPatches keeps the refusal narrow: `Retain` blocks the destructive path
+// and nothing else. Relabelling a retained cable is an ordinary PATCH.
+func TestCableRetainStillPatches(t *testing.T) {
+	live := liveCable()
+	live["label"] = "patch-13"
+
+	nb := &fakeClient{get: live, list: []netbox.Object{live}, patched: liveCable()}
+	engine := cableEngine(t, nb, fourInterfaces()...)
+
+	obj := cableBetween(
+		[]netboxv1alpha1.CableTerminationTarget{onInterface("sw1-eth0")},
+		[]netboxv1alpha1.CableTerminationTarget{onInterface("sw2-eth0")},
+	)
+	obj.Status.ID = 7
+	obj.Spec.DeletionPolicy = netboxv1alpha1.DeletionRetain
+
+	if _, err := engine.Reconcile(context.Background(), obj); err != nil {
+		t.Fatalf("Reconcile() = %v", err)
+	}
+
+	if got := nb.lastPayload(); got["label"] != "patch-14" {
+		t.Errorf("PATCH body = %v, want label patch-14", got)
+	}
+}

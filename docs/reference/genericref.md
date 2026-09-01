@@ -10,9 +10,9 @@ schema digest, how the pair is kept atomic and how a new union is added — see
 | | |
 |---|---|
 | API version | `netbox.kubeforge.org/v1alpha1` |
-| Go types | `IPAssignment`, `ScopeRef`, `ContactAssignmentTarget`, `FHRPInterface`, `ServiceParent` |
-| Milestone | M3 (NBO-018, NBO-019); `ContactAssignmentTarget` M10 (NBO-056); `FHRPInterface` and `ServiceParent` M10 (NBO-055) |
-| Status | The mechanism is built. Five unions ship, three of them with the `== 1` shape. |
+| Go types | `IPAssignment`, `ScopeRef`, `ContactAssignmentTarget`, `FHRPInterface`, `ServiceParent`, `CableTerminationTarget` |
+| Milestone | M3 (NBO-018, NBO-019); `ContactAssignmentTarget` M10 (NBO-056); `FHRPInterface` and `ServiceParent` M10 (NBO-055); `CableTerminationTarget` M10 (NBO-049) |
+| Status | The mechanism is built. Six unions ship: four with the `== 1` shape, and one of those **to-many**. |
 
 ## The shape
 
@@ -68,6 +68,7 @@ Some NetBox pairs are nullable and some are not, and the union follows the colum
 | `ContactAssignmentTarget` (`tenancy.ContactAssignment.object_*`) | `REQ` | **exactly** one | rejected at admission, and the field itself is required |
 | `FHRPInterface` (`ipam.FHRPGroupAssignment.interface_*`) | `REQ` | **exactly** one | rejected at admission, and the field itself is required |
 | `ServiceParent` (`ipam.Service.parent_object_*`) | `REQ` | **exactly** one | rejected at admission, and the field itself is required |
+| `CableTerminationTarget` (`dcim.CableTermination.termination_*`) | `REQ` | **exactly** one | rejected at admission; the *list* it sits in is required and `MinItems=1` |
 
 ## The unions
 
@@ -169,7 +170,7 @@ silently did nothing.
 ### `ContactAssignmentTarget`
 
 `spec.objectRef` on [`NetBoxContactAssignment`](netboxcontactassignment.md) — what a contact is
-assigned to. The widest union in the catalogue, and the only one on a `REQ` pair.
+assigned to. The widest union in the catalogue, and the first on a `REQ` pair.
 
 ```yaml
 spec:
@@ -199,7 +200,8 @@ arrive one `Members` entry at a time, with the Kinds they name.
 
 **The empty union is not an instruction.** On a nullable pair `assignedObject: {}` writes both
 columns `null`. Here the columns are `NOT NULL`, so there is nothing to clear and the `== 1` rule
-rejects `{}` at admission.
+rejects `{}` at admission. The same is true of
+[`CableTerminationTarget`](#cableterminationtarget), the second `REQ` pair to ship.
 
 `deviceRef` is the union's one unresolvable member: `dcim.device` carries `ContactsMixin` and
 `NetBoxDevice` lands in M4, so until then the member is admissible and reported as
@@ -242,15 +244,70 @@ each declare a `services` `GenericRelation` — so this union *is*
 [`NetBoxService`](netboxservice.md#ownership)'s containment parent. Note that
 `parent_object_type` is `on_delete=PROTECT`: that is about the ContentType row, not about the
 parent object, and it is not the cascade that decides ownership.
+### `CableTerminationTarget`
+
+`spec.aTerminations` and `spec.bTerminations` on [`NetBoxCable`](netboxcable.md) — what each
+end of a cable is plugged into. The **first to-many union**, and the one that is *used*
+differently rather than *shaped* differently.
+
+```yaml
+spec:
+  aTerminations:
+    - interfaceRef:
+        name: sw1-eth0
+  bTerminations:
+    - interfaceRef:
+        name: sw2-eth0
+```
+
+| | |
+|---|---|
+| Pair | `termination_type` / `termination_id`, both `REQ` |
+| Written as | `a_terminations` / `b_terminations`, one field per end carrying a list of `{object_type, object_id}` |
+| Rule | `== 1` per element; the lists are required, `MinItems=1`, `MaxItems=16` |
+| Members | `interfaceRef`, `consolePortRef`, `consoleServerPortRef`, `powerPortRef`, `powerOutletRef`, `frontPortRef`, `rearPortRef`, `powerFeedRef`, `circuitTerminationRef` |
+| Allowed types | 9 — every model mixing in `dcim.CabledObjectModel` in NetBox 4.6.8 |
+| Cached columns | none *reachable* — see below |
+| Containment | **no**; every member is `SET_NULL` in the direction that matters |
+
+Three things about it are unlike the other three unions.
+
+**It is to-many, and that is a fact about the field rather than about the union.** The struct
+is an ordinary one-of-N union with the `== 1` rule; the spec field is a bounded list of it,
+because NetBox 4.x permits several terminations per cable end. Order inside a list is **not
+data**: the operator sorts and deduplicates before writing and compares as a set, so
+reordering entries produces zero API writes. See [a to-many
+pair](../concepts/generic-refs.md#a-to-many-pair) for what that cost on the Descriptor side.
+
+**Its pair is not two columns of the referring object.** It is two keys *inside* a list
+element, named by `GenericObjectSerializer`
+(`netbox/netbox/api/serializers/generic.py:15`) rather than by the model — `object_type` and
+`object_id`, not `termination_type` and `termination_id`. The columns of those names live on
+`dcim.CableTermination`, whose whole serializer is read-only
+(`netbox/dcim/api/serializers_/cables.py:71`), which is why there is no
+`NetBoxCableTermination` Kind.
+
+**`AllowedTypes` and `Members` coincide, and both are nine.** Unlike
+`ContactAssignmentTarget`'s 25-against-11: the column is narrow enough that every legal target
+has a typed alias. `interfaceRef` is the one member whose Kind exists today; the other eight
+report [`RefKindUnavailable`](#conditions) in all four modes until their Kinds land.
+
+### What never appears in a cable's request body
+
+| Key | Why |
+|---|---|
+| `termination_a_type`, `termination_a_id`, `termination_b_type`, `termination_b_id` | `CableFilterSet` parameters, not columns. They are how the cable is *looked up* (`dcim/filtersets.py:2637`); NetBox would ignore them in a body |
+| `termination_type`, `termination_id`, `cable_end`, `cable` | columns of `dcim.CableTermination`, which the API refuses on write |
+| `connector`, `positions` | real columns of `dcim.CableTermination`, and **unreachable from the 4.6.8 REST API by any route**: the termination endpoint is read-only and `GenericObjectSerializer` carries only the pair |
+| `_abs_length` | a cache NetBox maintains from `length` and `length_unit` |
 
 ### Unions that are not written yet
 
-Deliberately absent rather than stubbed. Each is three lines of Descriptor data plus a
-struct, and each lands with the Kind that needs it:
-
-| Union | Pair | Shape | Lands with |
-|---|---|---|---|
-| `CableTerminationTarget` | `dcim.CableTermination.termination_*` | `== 1` | NBO-049 |
+There are none left. `ServiceParent` and `FHRPInterface` landed with NBO-055 and
+`CableTerminationTarget` with NBO-049, so every polymorphic pair NetBox 4.6.8 declares on a
+model this operator carries a Kind for now has a union. A pair on a model with no Kind yet gets
+its union with that Kind — three lines of Descriptor data plus a struct — rather than being
+stubbed ahead of it.
 
 ## Conditions
 
@@ -292,3 +349,5 @@ same point, before the target is read.
 - [`NetBoxRefGrant`](netboxrefgrant.md) — authorising a cross-namespace member
 - [`NetBoxContactAssignment`](netboxcontactassignment.md) — the `REQ` pair in use, and an
   identity built from one
+- [`NetBoxCable`](netboxcable.md) — the to-many pair in use, and an identity built from a
+  *representative element* of one

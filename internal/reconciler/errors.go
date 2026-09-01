@@ -59,6 +59,20 @@ var (
 	// errAdoptOnly is onConflict: AdoptOnly with nothing to adopt.
 	errAdoptOnly = errors.New("onConflict is AdoptOnly and nothing matched")
 
+	// errRecreateRetained is a change to an identity-bearing field on an
+	// `UpdateStrategy: Recreate` kind whose deletion policy is Retain.
+	//
+	// Retain means "never destroy this NetBox object" and a recreate destroys it, so the two
+	// instructions contradict each other and the operator refuses rather than picking one.
+	// Refusing in this direction specifically: a silent recreate would delete a
+	// dcim.Cable a user asked to be kept, and every dcim.CablePath through it, to satisfy an
+	// edit -- and there is no undo for that, while there is an obvious undo for a refusal.
+	//
+	// Classified as Invalid rather than as a wait: no event and no timer clears it, only an
+	// edit to the spec, which is either flipping the policy or reverting the field.
+	errRecreateRetained = errors.New(
+		"spec.deletionPolicy is Retain and this change can only be applied by deleting and re-creating the object")
+
 	// errUnmappedField is a spec field the descriptor's field map does not declare. A
 	// descriptor bug, and the reason the field map is explicit.
 	errUnmappedField = errors.New("spec field is not in the descriptor's field map")
@@ -286,6 +300,15 @@ func classifyInvalid(err error, resync time.Duration) (outcome, bool) {
 		errors.Is(err, errUnfilterable), errors.Is(err, errNoObjectID),
 		errors.Is(err, errDuplicateNeedsProvenance):
 		return invalid, true
+	// Two instructions in the spec that contradict each other. Invalid rather than Conflict:
+	// nothing about NetBox's contents is wrong, and the fix is in the manifest.
+	case errors.Is(err, errRecreateRetained):
+		return outcome{
+			reason: netboxv1alpha1.ReasonInvalid, requeue: resync,
+			event: netboxv1alpha1.EventInvalid, severe: true, result: metrics.ResultError,
+			remedy: "nothing was written; either set spec.deletionPolicy: Delete to allow the" +
+				" object to be replaced, or revert the field named above",
+		}, true
 	default:
 		return outcome{}, false
 	}

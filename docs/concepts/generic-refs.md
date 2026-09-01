@@ -5,7 +5,7 @@ new one is added without touching the engine.
 
 > **Status.** The mechanism is built (NBO-019): the union pattern, CEL validation of the
 > one-of-N shape, resolution to an `(object type, id)` pair, paired drift detection, and
-> ref watches over every allowed target. Three unions ship, all through that one mechanism:
+> ref watches over every allowed target. Four unions ship, all through that one mechanism:
 > [`IPAssignment`](../reference/genericref.md), now on a real CRD as
 > [`NetBoxIPAddress.spec.assignedObject`](../reference/netboxipaddress.md#assignedobject)
 > ([NBO-025](https://github.com/ricardomolendijk/netbox-operator/issues/37));
@@ -13,8 +13,11 @@ new one is added without touching the engine.
 > ([NBO-018](https://github.com/ricardomolendijk/netbox-operator/issues/30)); and
 > [`ContactAssignmentTarget`](../reference/netboxcontactassignment.md#objectref) — the widest
 > of the three at 11 members, and the first on a **`REQ`** pair
-> ([NBO-056](https://github.com/ricardomolendijk/netbox-operator/issues/57)). Several of
-> their target Kinds arrive in M4, so until then those members are reported
+> ([NBO-056](https://github.com/ricardomolendijk/netbox-operator/issues/57)); and
+> [`CableTerminationTarget`](../reference/genericref.md#cableterminationtarget) — the first
+> **to-many** pair, and the one that made `GenericFKSpec` grow a cardinality
+> ([NBO-049](https://github.com/ricardomolendijk/netbox-operator/issues/50)). Several of
+> their target Kinds arrive later, so until then those members are reported
 > `RefKindUnavailable` in all four modes. See [Kinds that do not exist
 > yet](#kinds-that-do-not-exist-yet).
 >
@@ -226,6 +229,152 @@ The Descriptor is what is missing, not merely the CRD: `slug`, `lookup` and `id`
 the target's NetBox endpoint, which only a Descriptor holds. So all four modes wait on the
 target Kind being registered, and only `name` additionally waits on its CRD being installed.
 
+## A to-many pair
+
+Every union above sits on **two columns holding one pair**. `dcim.Cable`'s terminations do
+not, and they are the reason `GenericFKSpec` grew a cardinality
+([NBO-049](https://github.com/ricardomolendijk/netbox-operator/issues/50)).
+
+A cable terminates on two ends, each polymorphic, and NetBox 4.x permits **several
+terminations per end**. The rows live on a separate model, `dcim.CableTermination`, with
+`cable`, `cable_end`, `termination_type`, `termination_id`, `connector`, `positions` and four
+denormalised `_device` / `_rack` / `_location` / `_site` caches
+([`docs/netbox-schema.md`](../netbox-schema.md) → `dcim.CableTermination`). None of that is
+writable: `CableTerminationSerializer.Meta` sets `read_only_fields = fields`
+(`netbox/dcim/api/serializers_/cables.py:71`), so **the whole `dcim/cable-terminations`
+endpoint is read-only** and there is no Kind for it
+([`coverage.md`](../coverage.md)).
+
+The writable form is on the cable itself:
+
+```
+a_terminations  GenericObjectSerializer(many=True, required=False)   dcim/api/serializers_/cables.py:40
+b_terminations  GenericObjectSerializer(many=True, required=False)   same
+```
+
+and `GenericObjectSerializer` is `{object_type, object_id}` plus a read-only `object`
+(`netbox/netbox/api/serializers/generic.py:15`). So the pair is **nested inside a list
+element**, under keys of its own, and there are no sibling columns of the cable at all.
+
+The to-one shape fits in neither respect, which is worth stating plainly because it is the
+verdict NBO-049 existed to reach:
+
+| | To-one pair | `dcim.Cable`'s terminations |
+|---|---|---|
+| Cardinality | one `(type, id)` | zero or more |
+| Where the pair lives | two top-level columns | two keys inside a list element |
+| What the payload carries | `scope_type`, `scope_id` | `a_terminations: [{object_type, object_id}]` |
+| Drift rule | [rule 7](drift.md), the pair as a unit | [rule 9](drift.md), a set of pairs |
+
+### The CR side did not change
+
+`CableTerminationTarget` is an ordinary union: one member per legal target, the `== 1` rule,
+and no discriminator — exactly the shape [`IPAssignment`](../reference/genericref.md) has. It
+is *used* to-many, as a bounded list, and that is a fact about the field rather than about the
+union:
+
+```go
+// +kubebuilder:validation:MinItems=1
+// +kubebuilder:validation:MaxItems=16
+ATerminations []CableTerminationTarget `json:"aTerminations"`
+```
+
+So a user who has read [the union shape](../reference/genericref.md) needs to learn nothing
+new, and the eight members whose Kinds have not landed report
+[`RefKindUnavailable`](#kinds-that-do-not-exist-yet) exactly as `deviceRef` does on a contact
+assignment.
+
+### The Descriptor side did
+
+One new field, and everything else about the pair is unchanged:
+
+```go
+GenericFKs: []registry.GenericFKSpec{{
+    // On a to-many pair these two are *filter* names rather than columns -- see below.
+    TypeField:    "termination_a_type",
+    IDField:      "termination_a_id",
+    Spec:         "aTerminations",
+    AllowedTypes: cabledObjectTypes(),
+    Members:      members,
+    List: &registry.GenericFKList{
+        APIField: "a_terminations",   // the one field the whole list is written as
+        TypeKey:  "object_type",      // the keys the pair takes *inside* an element
+        IDKey:    "object_id",
+    },
+}}
+```
+
+`GenericFKList.APIField` is what goes in `RecreateOn` and what
+[drift](drift.md) reports a change against, so a to-many pair's diff is **one change on one
+field** rather than N. `TypeKey` and `IDKey` are declared rather than constant because they
+are the *serializer's* names and not the model's — the columns behind them are
+`termination_type` and `termination_id` — and a second to-many pair on a serializer that
+spells them differently must not have to edit the struct.
+
+`Validate` refuses three shapes at boot: a `List` missing any of the three names (a list
+written under no field name reaches no payload, and an element missing either key is half a
+reference), a to-many pair declaring `Cached` (a cable's `_device`, `_rack`, `_location` and
+`_site` are columns of the *termination row* and not of the kind carrying the list, so the
+engine has nowhere to read or write them), and an `APIField` an ordinary `Field` also claims.
+
+### What the engine does with it
+
+Three places, and none of them is a branch on kind:
+
+- **Resolution.** `decodeUnions` is the only code in `internal/resolver` that reads
+  `List` at all: it turns the spec value into one union per element, and everything
+  downstream works a single union at a time. So a cable's list of terminations resolves
+  through exactly the code one prefix's scope does — same four modes, same grant check, same
+  typed errors. `resolver.FieldRefs` was already a slice, so the to-one case files a
+  one-element one and this files N; no new carrier was needed.
+- **All-or-nothing per field.** One of two ends resolving is worse than neither: NetBox
+  replaces the termination rows from what the field carries, so a half list is a cable
+  connected at one end — and on a `Recreate` kind, correcting that means delete-and-create
+  rather than a PATCH. The rule is [`resolveField`'s](references.md), applied to a union list.
+- **Rendering.** `applyGenericFKList` sorts by `(object type, id)` and deduplicates before
+  writing, for the reason `FieldRefs.IDs` does: NetBox does not preserve the order, so the
+  order the spec listed them in is not data and rendering it would invite a reader to believe
+  an order the comparison ignores. Duplicates collapse because
+  `unique(termination_type, termination_id)` makes two rows on one object impossible anyway.
+
+### A message names the element
+
+A blocked element reports under its **indexed** path, because a cable end may carry several
+and the union's own name would not say which:
+
+```
+RefsResolved  False  RefKindUnavailable
+  bTerminations[0].rearPortRef -> netboxrearport/team-a/panel-1-rear-14: target kind unavailable
+```
+
+Unindexed on a to-one pair, so no existing message changes.
+
+### A natural key over a to-many pair
+
+`ipam.VLANGroup` showed that a pair can be matched on by column name. `dcim.Cable` needs
+something harder: it has **no `meta.constraints` at all**, so the terminations are the only
+identity there is — and a *list* has no single value a filter could take.
+
+The answer is a **representative element**. `applyGenericFKList` files the first element
+after sorting under the pair's `TypeField` and `IDField`, which on a to-many pair are
+therefore *filterset parameter* names rather than columns:
+
+```
+termination_a_type  MultiValueContentTypeFilter over terminations__termination_type   dcim/filtersets.py:2637
+termination_a_id    MultiValueNumberFilter, method filter_by_cable_end_a              same
+termination_b_type  MultiValueContentTypeFilter over terminations__termination_type   same
+termination_b_id    MultiValueNumberFilter, method filter_by_cable_end_b              same
+```
+
+Two properties make that sound rather than a guess. **Sorted, so the question is stable**:
+the same cable written with its terminations in a different order asks the same query, which
+is what makes "reordering produces zero API writes" true of the lookup as well as of the diff.
+And **one element is enough**, because of a constraint on the other model:
+`unique(termination_type, termination_id)` means an object is terminated by at most one cable,
+globally — so an A-end termination names one cable or none. See
+[`reference/netboxcable.md`](../reference/netboxcable.md) for what a `Conflict` means when the
+key is a query rather than a constraint.
+
 ## The scope pair
 
 NetBox's scope is a generic FK like any other, and it is documented here rather than on a page
@@ -327,14 +476,23 @@ that ships today sits on a nullable pair, so the object is created with the colu
 and the reference PATCHed in later — it never blocks, and a ring through it is not a
 deadlock.
 
-A `REQ` pair does block, and the first one has now shipped:
-[`tenancy.ContactAssignment.object_*`](../reference/netboxcontactassignment.md). It still is not
-walked, and that is a fact about *that* pair rather than a gap left open --
-**nothing in NetBox points at a ContactAssignment**, so there is no `contactAssignmentRef`
-anywhere in this API and the object is a leaf in the reference graph. A ring through it is
-unconstructible rather than unchecked. The Descriptor flag that makes the walk follow a blocking
-pair is therefore still unwritten, and the union that needs it is `ipam.Service`'s
-`parent_object_*`, whose targets *are* pointed at by other Kinds.
+A `REQ` pair does block, and two have now shipped:
+[`tenancy.ContactAssignment.object_*`](../reference/netboxcontactassignment.md) and
+[`dcim.CableTermination.termination_*`](../reference/netboxcable.md). Neither is walked, and in
+both cases that is a fact about *that* pair rather than a gap left open — each object is a
+**leaf in the reference graph**, so a ring through it is unconstructible rather than unchecked:
+
+- **Nothing in NetBox points at a ContactAssignment**, so there is no `contactAssignmentRef`
+  anywhere in this API.
+- **Nothing points at a Cable that this API can write.** `dcim.CabledObjectModel.cable` is a
+  real column on every cabled component, and `CabledObjectSerializer` declares it
+  `read_only=True` (`netbox/dcim/api/serializers_/cables.py:110`) — NetBox sets it itself when
+  the cable is created. So there is no `cableRef` on any Kind here either, and the eight-plus
+  component Kinds that will point *at* a cable's terminations cannot point back.
+
+The Descriptor flag that makes the walk follow a blocking pair is therefore still unwritten, and
+the union that needs it is `ipam.Service`'s `parent_object_*`, whose targets *are* pointed at by
+other Kinds.
 
 **It contributes an owner reference exactly as a typed reference does.**
 [ADR-0003](../decisions/0003-ownership-and-references.md) rule 4 has a containment generic FK
@@ -409,9 +567,12 @@ Three edits, none of them in the engine:
 
 1. **`api/v1alpha1`** — the typed alias for any new target Kind (`TargetGVK`,
    `AsObjectRef`), the union struct with one member per legal target, and the CEL rule in
-   the `<= 1` or `== 1` shape.
+   the `<= 1` or `== 1` shape. A union used to-many is a bounded list of that struct, and
+   needs `+kubebuilder:validation:MaxItems` like any other list of references
+   ([a list needs a bound](references.md#a-list-needs-a-bound)).
 2. **`internal/registry`** — the `GenericFKSpec` on the referrer's Descriptor: the two
-   columns, the spec field, `AllowedTypes`, and one `Members` entry per union member.
+   columns, the spec field, `AllowedTypes`, and one `Members` entry per union member; plus a
+   [`GenericFKList`](#the-descriptor-side-did) if the pair is to-many.
 3. **Docs** — a row in [`reference/genericref.md`](../reference/genericref.md).
 
 A union more than one kind carries gets a constructor next to it, as

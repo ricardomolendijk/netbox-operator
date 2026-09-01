@@ -55,7 +55,7 @@ golden output contains no `{{if eq .Model "…"}}`.
 | `Deferred` | `[]DeferredField` | Fields kept out of the create payload and applied by a follow-up PATCH. | `{APIField: "primary_ip4", Mode: "Always"}` |
 | `ReadOnly` | `[]string` | Fields the operator must never write. | `["_depth", "_children", "created", "last_updated", "url", "display"]` |
 | `Fields` | `[]Field` | The spec-to-API map, and the field classes. See [field classes](#field-classes). | `{Spec: "importTargets", API: "import_targets", Class: RefMany, Target: …}` |
-| `GenericFKs` | `[]GenericFKSpec` | The polymorphic `*_type` / `*_id` column pairs on this kind. | `registry.ScopeFK("scope")` |
+| `GenericFKs` | `[]GenericFKSpec` | The polymorphic `*_type` / `*_id` column pairs on this kind, to-one or [to-many](#a-to-many-polymorphic-pair). | `registry.ScopeFK("scope")` |
 | `ContainmentRef` | `string` | The one spec ref whose target gets a non-controller owner reference — whichever ref the server cascades. Empty for a catalogue kind, and for any kind whose refs are all `PROTECT`. | `siteRef` |
 | `DataLossOnDelete` | `bool` | A `DELETE` of this kind's object destroys data held on *other* objects, and NetBox performs it without complaint. The finalizer then refuses by default. Set on `NetBoxCustomField` and nothing else. | `true` |
 | `ReservedKeySpec` | `string` | The CR spec field holding the key the provenance bootstrap looks *its own* objects up by, on the two kinds whose NetBox model the operator also writes. A CR whose key is reserved on its endpoint is refused with `ReservedByOperator` and never sent. | `name` on `NetBoxCustomField`, `slug` on `NetBoxTag` |
@@ -310,6 +310,45 @@ still PATCHes in place.
 declared on a kind that updates in place means one of the two is wrong, and it will not be
 obvious which.
 
+The kind that needs both has now shipped: [`NetBoxCable`](../reference/netboxcable.md).
+
+## A to-many polymorphic pair
+
+`GenericFKSpec` describes two columns holding one `(type, id)` pair. `dcim.Cable`'s
+terminations are neither: one API field carries a **list** of `{object_type, object_id}`
+objects, so the pair is nested inside a list element and there are no sibling columns of the
+cable to write. `GenericFKList` is that cardinality as data.
+
+| Field | Type | What it is | Example |
+|---|---|---|---|
+| `List` | `*GenericFKList` | Non-nil makes the pair to-many. Nil on every other pair. | see below |
+| `List.APIField` | `string` | The one NetBox field the whole list is written as. What goes in `RecreateOn` and what [drift](drift.md) reports a change against. | `a_terminations` |
+| `List.TypeKey` | `string` | The key the type half takes **inside** one element. The serializer's name, not the model's. | `object_type` |
+| `List.IDKey` | `string` | Likewise for the id half. | `object_id` |
+
+On a to-many pair `TypeField` and `IDField` stop being columns and become **filter** names:
+the engine files the first element, after sorting, under them so that a natural key can be
+stated over the pair at all. `dcim.Cable` is the kind that needs it — it has no
+`meta.constraints` whatsoever, so `?termination_a_type=&termination_a_id=` is the only
+identity available. `declaresSpecField` already accepted a pair's two names as natural-key
+spec fields, so this needed no change there.
+
+`Validate` refuses three shapes:
+
+- a `List` missing any of the three names — a list written under no field name reaches no
+  payload, and an element missing either key is half a reference
+  (`ErrInvalidGenericFKList`);
+- a to-many pair declaring `Cached` — the caches a cable's terminations do have
+  (`_device`, `_rack`, `_location`, `_site`) are columns of `dcim.CableTermination` and not of
+  the kind carrying the list, so the engine has nowhere to read or write them
+  (`ErrInvalidGenericFKList`);
+- a `List.APIField` an ordinary `Field` also claims — two renderings of one NetBox field,
+  and which one survives would depend on map iteration order
+  (`ErrGenericFKNotSpecField`).
+
+The whole of it, and why the union's own CR shape did not change, is in
+[a to-many pair](generic-refs.md#a-to-many-pair).
+
 ## `ContainmentRef` is singular
 
 `ContainmentRef` is the one spec field whose target gets a **non-controller** owner
@@ -515,6 +554,7 @@ by matching a message.
 | `ErrEmptyField` | an empty string in `ReadOnly` or `RecreateOn`, a `Deferred` entry with no `APIField`, or an empty column in `GenericFKSpec.Cached` |
 | `ErrInvalidGenericFK` | a `GenericFKSpec` missing its `TypeField`, its `IDField`, its `AllowedTypes` or its `Members` |
 | `ErrInvalidGenericFKMember` | a `Members` entry with no `Spec` or no target `Kind`, or the same member `Spec` declared twice |
+| `ErrInvalidGenericFKList` | a to-many pair whose `List` is missing its `APIField`, `TypeKey` or `IDKey`, or which also declares `Cached` columns |
 | `ErrMemberCascadePartial` | a union stating `CascadeOnDelete` for some members and leaving the rest unstated. The flags are supplied per referring kind and cannot be defaulted, so a member left out is a typo — and it reads as "does not cascade", which is the direction that leaves a CR behind to resurrect a row NetBox deleted |
 | `ErrCachedNotReadOnly` | a `GenericFKSpec.Cached` column that is not also in `ReadOnly` |
 | `ErrMemberTypeNotAllowed` | a union member whose **registered** target Kind reports an `ObjectType` the pair's `AllowedTypes` does not list. Reported by `Registry.Validate`, since the answer lives on another descriptor; a target with no descriptor yet is skipped |
