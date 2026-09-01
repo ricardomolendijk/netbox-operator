@@ -410,6 +410,15 @@ func gitOpsDefaults() *reconciler.GitOps {
 // One function for both fields so that the shape stays one decision. specGuard.Patch admits a
 // patch whose body is nothing but `metadata`, and a second hand-rolled patch body is a second
 // chance to put something else in there.
+//
+// It patches a copy and carries back nothing but the resourceVersion, because a PATCH is
+// answered with the *whole* object and controller-runtime decodes that answer into whatever
+// object it was handed -- status included. Patching obj directly therefore replaced the status
+// the engine had built up in memory with the one the API server still held, silently erasing
+// every condition an earlier step of the same pass had set. That is how a referrer reached
+// Ready=Synced carrying no RefsResolved at all: resolveRefs sets it during build(), the
+// containment owner reference is patched on afterwards, and finish() then wrote the status the
+// answer had brought back (issue #243).
 func patchMetadata(ctx context.Context, c client.Client, obj client.Object, field string, value any) error {
 	patch, err := json.Marshal(map[string]any{"metadata": map[string]any{
 		field:             value,
@@ -420,10 +429,23 @@ func patchMetadata(ctx context.Context, c client.Client, obj client.Object, fiel
 			field, obj.GetNamespace(), obj.GetName(), err)
 	}
 
-	if err := c.Patch(ctx, obj, client.RawPatch(types.MergePatchType, patch)); err != nil {
+	patched, ok := obj.DeepCopyObject().(client.Object)
+	if !ok {
+		return fmt.Errorf("%T does not deep-copy into a client.Object", obj)
+	}
+
+	if err := c.Patch(ctx, patched, client.RawPatch(types.MergePatchType, patch)); err != nil {
 		return fmt.Errorf("patching the %s of %s/%s: %w",
 			field, obj.GetNamespace(), obj.GetName(), err)
 	}
+
+	// The resourceVersion is the one thing the answer carries that the caller does not already
+	// have, and it is load-bearing: the status update at the end of the pass sends it as a
+	// precondition, so a pass that patched metadata and then wrote its status would otherwise
+	// be rejected as stale. The metadata the patch itself moved is what the caller sent, and
+	// the only other entry the API server touches is this manager's own managedFields entry --
+	// which ownershipOf skips by name, so leaving it a pass behind changes nothing.
+	obj.SetResourceVersion(patched.GetResourceVersion())
 
 	return nil
 }
