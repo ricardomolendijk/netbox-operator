@@ -8,6 +8,10 @@
 # "did the operator's privileges change", and a full render buries four lines of Role in
 # four hundred lines of Deployment. The cluster-wide Secret read this repository removed
 # (#100) is exactly the kind of regression that hides in a big diff.
+#
+# helm.sh/chart and app.kubernetes.io/version are stripped from every rendered object: both
+# are Chart.yaml's version string, not a privilege, and capturing them made every version
+# bump fail helm-verify with a diff that was 100% noise (#260).
 set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -31,5 +35,6 @@ for values in "$chart/values.yaml" "$chart/ci/all-features-values.yaml"; do
     -s templates/clusterrole.yaml \
     -s templates/clusterrolebinding.yaml \
     -s templates/credential-rbac.yaml \
-    -s templates/leader-election-rbac.yaml
+    -s templates/leader-election-rbac.yaml \
+    | grep -vE '^\s+(helm\.sh/chart|app\.kubernetes\.io/version):'
 done
