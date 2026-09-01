@@ -578,12 +578,24 @@ var deletionDefaults = map[string]netboxv1alpha1.DeletionPolicy{
 	"NetBoxPlatform":          netboxv1alpha1.DeletionDelete,
 	"NetBoxDevice":            netboxv1alpha1.DeletionDelete,
 	"NetBoxInterface":         netboxv1alpha1.DeletionDelete,
-	"NetBoxClusterType":       netboxv1alpha1.DeletionDelete,
-	"NetBoxClusterGroup":      netboxv1alpha1.DeletionDelete,
-	"NetBoxCluster":           netboxv1alpha1.DeletionDelete,
-	"NetBoxVirtualMachine":    netboxv1alpha1.DeletionDelete,
-	"NetBoxVMInterface":       netboxv1alpha1.DeletionDelete,
-	"NetBoxVirtualDisk":       netboxv1alpha1.DeletionDelete,
+
+	// The physical plant. A cable is a statement about a connection that the manifest is the
+	// record of, so re-creating one loses nothing that was not in Git -- and a bundle is a
+	// label whose deletion clears `dcim.Cable.bundle` (SET_NULL) and destroys no cables at
+	// all. Neither holds allocated state, so neither is a #176 carve-out.
+	//
+	// `Retain` is nonetheless load-bearing on NetBoxCable if a user sets it: the kind is
+	// `UpdateStrategy: Recreate`, and a recreate destroys the object, so the engine refuses
+	// the destructive write rather than violating the policy (docs/reference/netboxcable.md,
+	// "deletionPolicy: Retain refuses a recreate").
+	"NetBoxCable":          netboxv1alpha1.DeletionDelete,
+	"NetBoxCableBundle":    netboxv1alpha1.DeletionDelete,
+	"NetBoxClusterType":    netboxv1alpha1.DeletionDelete,
+	"NetBoxClusterGroup":   netboxv1alpha1.DeletionDelete,
+	"NetBoxCluster":        netboxv1alpha1.DeletionDelete,
+	"NetBoxVirtualMachine": netboxv1alpha1.DeletionDelete,
+	"NetBoxVMInterface":    netboxv1alpha1.DeletionDelete,
+	"NetBoxVirtualDisk":    netboxv1alpha1.DeletionDelete,
 
 	// `extras` -- NetBox's own configuration, and the app where "cheap to recreate" is most
 	// literally true: a link, a filter or a template holds no state, and deleting one loses a

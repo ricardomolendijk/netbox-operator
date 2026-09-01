@@ -123,6 +123,32 @@ It is also the case where `Delete` is least likely to lose anything by accident.
 [report the refusal](#what-protect-looks-like). The VLANs themselves default to `Retain` —
 which is the pair worth remembering: the container goes, the contents stay.
 
+### `Retain` also blocks a destructive *update*
+
+On one kind, `deletionPolicy` decides more than what happens at deletion time.
+[`NetBoxCable`](../reference/netboxcable.md) is the only `UpdateStrategy: Recreate` kind: some
+of its fields cannot be PATCHed, so changing one means `DELETE` then `POST`
+([the Descriptor](descriptor.md#updatestrategy-and-recreateon)).
+
+A recreate destroys the NetBox object, which is precisely what `Retain` says never to do. The
+two instructions contradict each other, so the operator **refuses the write** rather than
+picking one:
+
+```
+Ready         False   Invalid
+  spec.deletionPolicy is Retain and this change can only be applied by deleting and
+  re-creating the object: b_terminations
+```
+
+Zero writes, and the object is unchanged afterwards. The fix is either
+`deletionPolicy: Delete` or reverting the field the message names. The refusal is narrow —
+`Retain` blocks only the destructive path, and an ordinary PATCH to the same object still goes
+through.
+
+It refuses in this direction because the asymmetry is not close: a silent recreate deletes a
+cable and every `dcim.CablePath` through it to satisfy an edit, with no undo, while a refusal is
+one edit away from either outcome.
+
 ### `Delete` and refused are not the same axis
 
 `NetBoxCustomField` is the row that looks like a contradiction: its default is `Delete`, and
