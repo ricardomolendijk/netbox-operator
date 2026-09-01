@@ -300,7 +300,7 @@ func (p *pass) applyResolved(resolution resolver.Resolution) (resolved, notes []
 
 		p.applyGenericFK(pair, refs)
 		resolved = append(resolved, pair.Spec)
-		notes = append(notes, unreadyTargets(pair.Spec, false, refs)...)
+		notes = append(notes, unreadyTargets(pair.Spec, pair.ToMany(), refs)...)
 	}
 
 	return resolved, notes

@@ -63,7 +63,7 @@ func (req GenericRequest) path() string {
 		return req.Pair.Spec
 	}
 
-	return fmt.Sprintf("%s[%d]", req.Pair.Spec, req.Index)
+	return ElementPath(req.Pair.Spec, req.Index)
 }
 
 // ResolveGenericFK resolves one union to the (object type, id) pair its columns are written
@@ -167,7 +167,10 @@ func memberPath(pair registry.GenericFKSpec, index int, member string) string {
 		return pair.Spec + "." + member
 	}
 
-	return fmt.Sprintf("%s[%d].%s", pair.Spec, index, member)
+	// ElementPath rather than a second Sprintf: the indexed form appears in three messages a
+	// human greps for now -- a blocker's refusal, a resolved-but-unready note, and this -- and
+	// two spellings of one path is one of them being wrong.
+	return ElementPath(pair.Spec, index) + "." + member
 }
 
 // genericFKsOf reads the polymorphic unions out of obj's spec, in descriptor order.
