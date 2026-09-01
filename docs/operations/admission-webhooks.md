@@ -42,12 +42,13 @@ enforced, it is a marker in `api/v1alpha1`:
 
 ### What this webhook checks
 
-Four rules. Two deny, two warn.
+Five rules. Three deny, two warn.
 
-| Rule | Needs a second object because | Verdict |
+| Rule | Needs more than CEL because | Verdict |
 |---|---|---|
 | **Reference cycle** — `a.parentRef -> b`, `b.parentRef -> a`, and any longer ring | the chain has to be walked | **Deny** |
 | **Natural-key collision** — another CR of the same Kind, in the same namespace, at the same endpoint, identified by the same key | the siblings have to be listed | **Deny** |
+| **`spec.allowDuplicate` on an object the operator materialised** | which field declares duplicates is `Descriptor.DuplicateSpec`, and a CRD rule at the root sees only `metadata.name` — not the owner references | **Deny** |
 | **Missing grant** — a cross-namespace reference no `NetBoxRefGrant` covers | the grants in the target namespace have to be listed | **Warn** |
 | **Endpoint not usable** — `spec.endpointRef` names an endpoint that is absent or not `Ready` | the endpoint has to be read | **Warn** |
 
@@ -101,6 +102,7 @@ writes.
 |---|---|---|
 | reference cycle | rejected at apply | `RefsResolved=False, Reason=RefCycle`, no write |
 | same-namespace natural-key collision | rejected at apply | `Ready=False, Reason=Conflict` on the loser, no write |
+| `allowDuplicate` on a materialised child | rejected at apply | `Ready=False, Reason=Invalid`, no write — the engine refuses before the lookup ([#167](https://github.com/ricardomolendijk/netbox-operator/issues/167)) |
 | grant missing | warning | `Reason=RefDenied`, no write — unchanged, enforcement was never here |
 | endpoint absent or not `Ready` | warning | `Reason=WaitingForEndpoint` — unchanged |
 | grant naming an unknown Kind | warning | the grant silently permits nothing for that Kind |
@@ -109,7 +111,7 @@ writes.
 
 The last row is the important one. `spec.endpointRef` immutability, `spec.prefix`'s CIDR check,
 every enum and every one-of are enforced by the API server whether or not anything is serving
-admission. Turning this webhook off loses two rejections and three warnings, and nothing else.
+admission. Turning this webhook off loses three rejections and three warnings, and nothing else.
 
 To turn it off deliberately — a cluster without cert-manager, or one that has not installed the
 configuration — run the manager with `--enable-webhooks=false` and do not apply
@@ -127,7 +129,7 @@ broken operator costs the rest of the cluster.
    image-pull failure, an evicted pod, a node drain, an expired certificate or a stale
    `caBundle` would make *every* write to `netbox.kubeforge.org` fail — including the GitOps
    apply that would fix the operator, and including the `NetBoxEndpoint` edit that would unblock
-   it. That class of incident is far more likely than the mistakes these four rules catch.
+   it. That class of incident is far more likely than the mistakes these five rules catch.
 3. **`Ignore` has no blast radius outside this API group.** The rules match
    `apiGroups: [netbox.kubeforge.org]` only, so a bypassed webhook cannot weaken anything else
    in the cluster. Nothing outside this operator depends on it for its own safety.
@@ -209,7 +211,7 @@ It would need `update` and `patch` on `validatingwebhookconfigurations` — whic
 cluster-wide admission, a genuine privilege the operator otherwise does not hold anywhere — plus
 a CA rotation that publishes the new CA in the bundle *before* serving the new leaf, or every
 rotation is a brief total outage of admission. cert-manager already does all of that, correctly.
-A cluster without it runs `--enable-webhooks=false` and loses two rejections and three warnings,
+A cluster without it runs `--enable-webhooks=false` and loses three rejections and three warnings,
 every one of which has a backstop in the table above.
 
 Because there is no fallback, `config/rbac` grants nothing on `*webhookconfigurations`. That is

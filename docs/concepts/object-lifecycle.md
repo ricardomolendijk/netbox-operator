@@ -22,10 +22,22 @@ label on shipped code is worse than no label at all.
 | The shared `status` envelope | Built (NBO-006) | `api/v1alpha1/netboxobject_types.go` |
 | The deferred-field second pass | Built (NBO-015) | below |
 | Reference resolution: four modes, typed errors | Built (NBO-012) | [references](references.md) |
-| **Inline child materialisation** | **Designed, not implemented** | NBO-032 (#45) |
+| Inline child materialisation | Built (NBO-032, NBO-034, NBO-033) | [inline children](inline-children.md) |
+| **`NetBoxDevice`'s nine other component lists** | **Designed, not implemented** | NBO-052, NBO-053 |
 
 Nothing pending is stubbed. There is no hook that returns "nothing to do", because an empty
 hook reads as implemented and is not.
+
+**The inline row is precise about what shipped.** The materialiser is built, and two Kinds use
+it: `NetBoxDevice`'s `interfaces` and their `addresses` (NBO-034), and
+`NetBoxVirtualMachine`'s `interfaces`, their `addresses` and its `disks` (NBO-033). A VM's
+inline address additionally reaches the VM's own `primary_ip4` through the deferred field
+below, which is the one case where the sugar flows back up into its parent's payload.
+
+What is not built is the rest of a device's components: `consolePorts`, `powerPorts`,
+`frontPorts`, `rearPorts`, `deviceBays`, `moduleBays` and `inventoryItems` have no Kind to
+materialise yet, so declaring the fields would accept input the operator cannot honour. Each
+arrives as one more `InlineChildSet` from the same method. No other Kind carries an inline list.
 
 ## The deferred-field second pass
 

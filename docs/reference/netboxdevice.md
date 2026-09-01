@@ -161,8 +161,10 @@ spec:
 
 `primaryIP4Ref` names the address child the inline `eth0` entry materialised, by its derived
 name. That is the whole of how a device's primary address is set today: there is no `primary:
-true` flag on an inline address, and
-[`spec.interfaces[].addresses`](#specinterfacesaddresses) says why.
+true` flag on an inline address of a *device*, and
+[`spec.interfaces[].addresses`](#specinterfacesaddresses) says why. A
+[`NetBoxVirtualMachine`](netboxvirtualmachine.md#primary-and-the-ring-it-closes) has one, and
+what it uses is a general mechanism this Kind could adopt unchanged.
 
 ## `spec`
 
@@ -558,7 +560,7 @@ Four fields the longhand kind has are deliberately absent here:
 
 | Absent | Why |
 |---|---|
-| `primary` / `oob` | there is no mechanism yet to write the device's `primary_ip4`, `primary_ip6` or `oob_ip` from a child's identity: the payload is built from the spec, and the materialiser may not write a spec ([ADR-0005 §1](../decisions/0005-gitops-coexistence.md)). Set [`spec.primaryIP4Ref`](#specprimaryip4ref--specprimaryip6ref--specoobipref) to the child's derived name instead — `<device>-<interface>-ip-<slugified address>` |
+| `primary` / `oob` | the mechanism exists as of NBO-033 -- a Kind states the references its sugar derives through `DerivedRefs()`, and they are folded into the spec the payload is built from without the materialiser ever writing a spec ([ADR-0005 §1](../decisions/0005-gitops-coexistence.md), [inline children](../concepts/inline-children.md#the-one-place-the-sugar-flows-upward)) -- and this Kind does not use it yet. `NetBoxVirtualMachine` does. Until it does, set [`spec.primaryIP4Ref`](#specprimaryip4ref--specprimaryip6ref--specoobipref) to the child's derived name -- `<device>-<interface>-ip-<slugified address>` |
 | `claimFrom` | an inline address that names a pool instead of a literal materialises a `NetBoxIPAddressClaim`, which is [ADR-0004](../decisions/0004-claims-first-allocation.md)'s single allocation code path and NBO-036's ticket. `fromPrefixRef`, the spelling an older draft used, does not exist and never will |
 | `allowDuplicate` | it makes the provenance stamp part of the address's identity, so a materialised child that lost `status.id` would create a **second** NetBox address rather than adopting its own. An anycast or VRRP address that needs it is written as its own `NetBoxIPAddress` |
 | `tenantRef`, `role`, `natInsideRef`, `description`, `comments` | `NetBoxIPAddress` has no `tenantRef` to carry the first to, and the rest are the longhand kind's. Inline covers the common case; the standalone kind stays the complete one |

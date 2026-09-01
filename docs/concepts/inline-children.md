@@ -1,5 +1,15 @@
 # Inline children: the sugar, and the real CRs behind it
 
+> **Status: built.** The materialiser is NBO-032
+> ([#45](https://github.com/ricardomolendijk/netbox-operator/issues/45)), and two Kinds use it:
+> `NetBoxDevice`'s `interfaces` and their `addresses`, NBO-034
+> ([#47](https://github.com/ricardomolendijk/netbox-operator/issues/47)), and
+> `NetBoxVirtualMachine`'s `interfaces`, their `addresses` and its `disks`, NBO-033
+> ([#46](https://github.com/ricardomolendijk/netbox-operator/issues/46)). No other Kind carries
+> an inline list. Everything below describes shipped behaviour; the exceptions are marked where
+> they appear, and there are two — a device's other nine component relations have no Kind to
+> materialise yet, and `claimFrom: {ipRangeRef}` is NBO-064.
+
 Some kinds carry inline lists that the operator turns into **real child CRs**:
 
 ```yaml
@@ -305,17 +315,80 @@ addresses:
 
 The claim is an ordinary child: the same derived name, the same markers, the same prune rules.
 The materialiser needs no special case for it, which is the test of whether the mechanism is
-general enough. There is exactly one allocation code path and it is the claim controller's
+general enough — and it passed: the only thing the first claim child needed was for the
+inheritance step to know about `NetBoxClaimSpec` as well as `NetBoxObjectSpec`, since a claim
+is not an ordinary object and `endpointRef` on one is a required field. There is exactly one
+allocation code path and it is the claim controller's
 ([ADR-0004](../decisions/0004-claims-first-allocation.md)).
+
+**The claim entry's key is the pool**, so the derived name is `dns-eth0-claim-mgmt-net` and the
+discriminator is `claim` rather than the `ip` a literal address gets. The pool rather than an
+index, for the reason every key here is key-based: a claim's allocation identity is derived
+from its name, so a stable key is what makes a rebuilt cluster reclaim the same address. The
+cost is that two entries claiming from one pool on one interface derive one name, which is
+reported as a `Conflict`; the second one is written as its own `NetBoxIPAddressClaim`.
 
 The key is nested — `claimFrom: {prefixRef: …}` — so that allocating from an IP range later is
 another key (`claimFrom: {ipRangeRef: …}`) rather than a second sibling field plus a CEL rule
-saying exactly one of them may be set.
+saying exactly one of them may be set. `claimFrom: {ipRangeRef: …}` is NBO-064 and is not
+built.
 
 The inline form deliberately does not express everything. A claim that needs a specific VRF, a
 role, a DNS name or a non-default `deletionPolicy` is written as its own
 `NetBoxIPAddressClaim`. Inline covers the common case; the standalone kind stays the complete
 one, which is what keeps the sugar from growing into a mirror of the claim spec.
+
+**One thing an inline claim does not do yet, stated plainly: it does not attach the address it
+allocates to the interface it was written under.** `NetBoxIPAddressClaim` carries no
+`assignedObject` and does not yet materialise a `NetBoxIPAddress` of its own (NBO-036), so the
+claim allocates and records an address and stops there. That is exactly as complete as a
+standalone claim — which is the property that keeps this sugar equivalent to the longhand it
+stands for rather than a better version of it — but it is a real gap and not a subtlety. An
+address that has to be on the interface today is written as a literal `address`, and a
+`claimFrom` entry may not set `primary` for the same reason: there is no address CR for the
+parent to point at.
+
+## The one place the sugar flows upward
+
+Everything above flows downward: a parent declares a child and the materialiser writes it.
+`primary` on an inline address is the exception, and it is worth its own section because it is
+the only case where a child's identity ends up in its *parent's* payload.
+
+```yaml
+interfaces:
+  - name: eth0
+    addresses:
+      - address: 10.20.0.10/24
+        primary: true            # -> this VM's primary_ip4
+```
+
+The column is `virtualization.VirtualMachine.primary_ip4`, on the VM, and the value is the id
+of an address the VM materialised. Neither of the two obvious mechanisms is available: the
+materialiser may not write `spec.primaryIP4Ref`
+([ADR-0005 §1](../decisions/0005-gitops-coexistence.md#1-the-operator-never-writes-to-spec-ever)
+— Argo CD would revert it and the two would fight at the shorter resync interval), and
+`status.children` records names rather than ids.
+
+So the reference is **derived**, on every pass, from what the parent already knows: the child's
+name is deterministic, so the parent can name it before either object exists. A Kind states its
+derived references next to its inline ones —
+
+```go
+func (vm *NetBoxVirtualMachine) DerivedRefs() ([]DerivedRef, error)
+```
+
+— and the engine folds them into the spec it builds the payload from. From there they are
+indistinguishable from a reference somebody typed: the same resolution, the same deferral, the
+same `status.deferredPending`, the same one follow-up `PATCH`. That is what closes the
+`VM → IPAddress → VMInterface → VM` ring with no second write path
+([the deferred-field second pass](object-lifecycle.md#the-deferred-field-second-pass)).
+
+**Two declarations for one column is a refusal, not a precedence rule.** Two inline addresses
+of one family marked `primary`, or one beside an explicit `spec.primaryIP4Ref`, gets
+`Ready=False, Reason=Conflict` naming both declarations, with zero writes — because choosing
+one silently would make the other a lie that no condition mentions. It is enforced twice, by
+CEL at admission and by the controller, since the CEL half is a nested list comprehension whose
+cost the API server charges at the product of both lists' maxima.
 
 ## Adding inline children to a kind
 
@@ -343,6 +416,19 @@ merely intended (`forbidigo`).
 
 `InlineChildren()` is called on every reconcile, so it has to be pure: build the objects, do
 not read the API server, do not cache.
+
+**And nothing else on the Descriptor.** An inline list *is* a spec field no field map declares,
+and the payload builder refuses an unmapped field rather than dropping it — because NetBox
+ignores a column name it does not know, so a field the operator quietly dropped would report
+itself synced while writing nothing. What keeps the sugar out of the payload is
+`specFields.dropInlineChildren`, which removes exactly the fields `InlineChildren()` names: the
+same declaration the materialiser reads, so there is nothing to keep in sync and a Kind cannot
+declare an inline list the payload then tries to send.
+
+A Kind that also wants the upward direction adds a second method beside the first —
+`DerivedRefs()`, see [the one place the sugar flows
+upward](#the-one-place-the-sugar-flows-upward). Still no Descriptor field, and still one type
+assertion per capability.
 
 ## See also
 
