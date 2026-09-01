@@ -16,16 +16,16 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 | | count |
 |---|--:|
 | NetBox REST endpoints | 138 |
-| — implemented as a Kind | 47 |
-| — excluded, with a reason | 26 |
-| — **not implemented** | 65 |
-| in scope (endpoints − excluded) | 112 |
+| — implemented as a Kind | 49 |
+| — excluded, with a reason | 27 |
+| — **not implemented** | 62 |
+| in scope (endpoints − excluded) | 111 |
 | | |
-| writable columns on the implemented Kinds | 526 |
-| — written by a spec field, or engine-owned | 385 |
+| writable columns on the implemented Kinds | 544 |
+| — written by a spec field, or engine-owned | 399 |
 | — deliberately omitted, with a reason | 10 |
-| — blocked: a reference whose target model has no Kind | 62 |
-| — **MISSING**: nothing declares it and nothing blocks it | 69 |
+| — blocked: a reference whose target model has no Kind | 64 |
+| — **MISSING**: nothing declares it and nothing blocks it | 71 |
 | — of those, required on create (fails the audit) | 0 |
 | | |
 | natural-key candidates the IR calls unusable | 21 |
@@ -39,8 +39,8 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 
 | column | status | Kinds | detail |
 |---|---|--:|---|
-| `owner` | blocked | 44 | `users.Owner` is an excluded endpoint, so nothing will ever write this |
-| `tags` | MISSING | 39 | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
+| `owner` | blocked | 46 | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `tags` | MISSING | 41 | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `comments` | excluded | 6 | organisational kinds map name/slug/description only (api/v1alpha1/virtualization_clustertype.go) |
 | `tenant` | MISSING | 6 | deferred to NetBoxTenant (NBO-021), which now ships -- nothing blocks it any more |
 | `config_template` | MISSING | 4 | — |
@@ -115,6 +115,8 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 | `virtualization.VirtualMachine` | `local_context_data` | JSON | — | MISSING | the ConfigContextModel column on dcim.Device and virtualization.VirtualMachine. NBO-059 added the ClassJSON field class it needs and stopped at the `extras` app; #241 adds the two spec fields, and nothing else blocks them |
 | `dcim.Device` | `location` | Ref | — | MISSING | — |
 | `dcim.Interface` | `module` | Ref | — | blocked | waits on a Kind for `dcim.Module` |
+| `dcim.Cable` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `dcim.CableBundle` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `dcim.Device` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `dcim.DeviceRole` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `dcim.DeviceType` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
@@ -165,6 +167,8 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 | `dcim.Device` | `rack` | Ref | — | blocked | waits on a Kind for `dcim.Rack` |
 | `dcim.DeviceType` | `rear_image` | Scalar | — | MISSING | — |
 | `dcim.Site` | `region` | Ref | — | MISSING | deferred with dcim.Site's other optional foreign keys; NetBoxRegion now ships, so nothing blocks it any more (api/v1alpha1/dcim_site.go) |
+| `dcim.Cable` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
+| `dcim.CableBundle` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `dcim.Device` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `dcim.DeviceRole` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `dcim.DeviceType` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
@@ -277,9 +281,9 @@ each pinned column's class rather than from the IR's reason string.
 | `core/jobs` | `core.Job` | — | excluded | read-only; NetBox writes job records and nothing about one is declarative (plan.md 8) |
 | `core/object-changes` | `core.ObjectChange` | — | excluded | read-only append-only changelog (plan.md 8) |
 | `core/object-types` | `core.ObjectType` | — | excluded | read-only enumeration of NetBox's own content types (plan.md 8) |
-| `dcim/cable-bundles` | `dcim.CableBundle` | — | MISSING | — |
-| `dcim/cable-terminations` | `dcim.CableTermination` | — | MISSING | — |
-| `dcim/cables` | `dcim.Cable` | — | MISSING | — |
+| `dcim/cable-bundles` | `dcim.CableBundle` | `NetBoxCableBundle` | implemented | — |
+| `dcim/cable-terminations` | `dcim.CableTermination` | — | excluded | read-only: CableTerminationSerializer.Meta sets `read_only_fields = fields` (netbox/dcim/api/serializers_/cables.py:71), so every one of its twelve fields -- `cable`, `cable_end`, `termination_type`, `termination_id`, `connector`, `positions` included -- is refused on write. NBO-049 asked for a NetBoxCableTermination Kind; there is nothing for one to write. A termination is created and destroyed by writing dcim.Cable's own `a_terminations` / `b_terminations`, which NetBoxCable does, and `connector` / `positions` are unreachable from the REST API in 4.6.8 at all -- GenericObjectSerializer carries only `{object_type, object_id}` (netbox/netbox/api/serializers/generic.py:15) |
+| `dcim/cables` | `dcim.Cable` | `NetBoxCable` | implemented | — |
 | `dcim/connected-device` | `-` | — | excluded | not a model; a read-only lookup view over cable paths (plan.md 8) |
 | `dcim/console-port-templates` | `dcim.ConsolePortTemplate` | — | MISSING | — |
 | `dcim/console-ports` | `dcim.ConsolePort` | — | MISSING | — |

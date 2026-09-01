@@ -339,6 +339,23 @@ func fieldRules(d registry.Descriptor) netbox.FieldRules {
 	}
 
 	for _, generic := range d.GenericFKs {
+		// A to-many pair has no two columns to diff together: its whole value is one field
+		// carrying a list, and TypeField/IDField are filter names that never reach a payload
+		// (registry.GenericFKList). Listing it as a GenericFK would be harmless -- neither
+		// name is ever in `desired` -- and it would also be a claim about the payload that is
+		// not true, which is how the pair-atomicity rule stops meaning anything.
+		if generic.ToMany() {
+			if rules.GenericFKLists == nil {
+				rules.GenericFKLists = map[string]netbox.GenericFKItem{}
+			}
+
+			rules.GenericFKLists[generic.List.APIField] = netbox.GenericFKItem{
+				TypeKey: generic.List.TypeKey, IDKey: generic.List.IDKey,
+			}
+
+			continue
+		}
+
 		rules.GenericFKs = append(rules.GenericFKs,
 			netbox.GenericFK{TypeField: generic.TypeField, IDField: generic.IDField})
 	}

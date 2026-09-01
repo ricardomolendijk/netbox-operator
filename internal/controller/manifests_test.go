@@ -35,6 +35,11 @@ var shippedManifests = []string{
 	// One file carrying all nine kinds NBO-055 ships, so every enum value, pattern,
 	// bound and `== 1` union rule in them is dry-run through real admission.
 	filepath.Join("..", "..", "docs", "examples", "ipam-remainder.yaml"),
+	// The to-many union, which nothing else here carries: two required lists with
+	// `minItems`, `maxItems` and a `== 1` rule *per element*, so admission has to accept a
+	// one-entry list, a two-entry one, and every enum, pattern and bound around them
+	// (NBO-049).
+	filepath.Join("..", "..", "docs", "examples", "cables.yaml"),
 }
 
 // TestShippedManifestsAreAccepted applies every sample and example against the real CRDs.

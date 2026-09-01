@@ -107,6 +107,18 @@ var (
 	// a generic FK resolved against the wrong Kind.
 	ErrDuplicateObjectType = errors.New("duplicate object type")
 
+	// ErrInvalidGenericFKList is returned for a to-many generic FK whose list shape is
+	// incomplete, or which also declares denormalised caches.
+	//
+	// All three of APIField, TypeKey and IDKey are required together: a list written under no
+	// field name reaches no payload, and an element missing either key is half a reference --
+	// the exact failure the atomic pair exists to prevent, one level of nesting further in.
+	// Caches are refused outright because no to-many pair in NetBox 4.6.8 has any and the
+	// engine has nowhere to hang them: `_device`, `_rack`, `_location` and `_site` live on the
+	// dcim.CableTermination *rows*, not on the cable, so they are not columns of the kind
+	// carrying the list at all (docs/netbox-schema.md -> dcim.CableTermination).
+	ErrInvalidGenericFKList = errors.New("incomplete to-many generic-FK list shape")
+
 	// ErrCachedNotReadOnly is returned for a denormalised column a generic FK declares
 	// that is not also in ReadOnly.
 	//
@@ -213,15 +225,60 @@ type GenericFKMember struct {
 	CascadeOnDelete *bool
 }
 
+// GenericFKList makes a polymorphic reference **to-many**: one NetBox API field carrying a
+// list of nested `(type, id)` objects, rather than two columns carrying one pair.
+//
+// dcim.Cable is the model that needs it and the reason it exists. `a_terminations` and
+// `b_terminations` are single serializer fields declared
+// `GenericObjectSerializer(many=True, required=False)`
+// (netbox/dcim/api/serializers_/cables.py:40), and `GenericObjectSerializer` is
+// `{object_type, object_id}` (netbox/netbox/api/serializers/generic.py:15) -- so the pair is
+// *nested inside a list element* under keys of its own, and there are no two top-level
+// columns to write. Neither half of GenericFKSpec's to-one shape fits: not the cardinality,
+// and not the nesting.
+//
+// The alternative was `if kind == NetBoxCable` in reconciler.applyGenericFK. This is that
+// branch expressed as data, which is what CONTRIBUTING.md asks for -- but the shape is new,
+// so see docs/concepts/generic-refs.md, "A to-many pair".
+type GenericFKList struct {
+	// APIField is the one NetBox field the whole list is written as: `a_terminations`.
+	//
+	// It is what goes in Descriptor.RecreateOn and what netbox.Changes reports a diff
+	// against, so a to-many pair's drift is one change on one field rather than N.
+	APIField string
+
+	// TypeKey and IDKey are the keys the pair takes **inside one element** of the list:
+	// `object_type` and `object_id` for GenericObjectSerializer.
+	//
+	// Declared rather than constant. They are the serializer's names and not the model's --
+	// the columns behind them are `termination_type` and `termination_id`
+	// (docs/netbox-schema.md -> dcim.CableTermination) -- and a second to-many pair on a
+	// serializer that spells them differently must not have to edit this struct.
+	TypeKey string
+	IDKey   string
+}
+
 // GenericFKSpec describes one polymorphic foreign key: a `*_type` / `*_id` column pair
 // whose type half is written as an `app_label.model` string over the REST API
 // (docs/netbox-schema.md, generic-FK note).
 type GenericFKSpec struct {
 	// TypeField is the content-type column, e.g. `assigned_object_type`.
+	//
+	// On a **to-many** pair (List non-nil) there is no such column, and this is the *filter*
+	// name the representative element is filed under instead: `termination_a_type` on
+	// dcim.Cable, which is `CableFilterSet.termination_a_type`
+	// (MultiValueContentTypeFilter over `terminations__termination_type`,
+	// netbox/dcim/filtersets.py:2637). Nothing writes it into a payload -- it exists so a
+	// natural key can be stated over a to-many pair at all, which for dcim.Cable is the only
+	// identity there is. See GenericFKList.
 	TypeField string
 
-	// IDField is the object-id column, e.g. `assigned_object_id`.
+	// IDField is the object-id column, e.g. `assigned_object_id`. On a to-many pair it is
+	// the representative element's filter name -- see TypeField.
 	IDField string
+
+	// List makes this pair to-many, and is nil on every to-one pair. See GenericFKList.
+	List *GenericFKList
 
 	// AllowedTypes are the object types this pair may point at, in the same spelling as
 	// Descriptor.ObjectType. It drives resolver dispatch and ref watches, so a new union
@@ -252,6 +309,13 @@ type GenericFKSpec struct {
 	// declares `scope_type` / `scope_id` on the model itself and carries none either.
 	Cached []string
 }
+
+// ToMany reports whether this pair carries a list of polymorphic references rather than one.
+//
+// Read off List rather than declared beside it, for the reason FieldClass exists: cardinality
+// and payload shape are two readings of one fact, and two declarations that can disagree are
+// what NBO-088 removed from Field.
+func (g GenericFKSpec) ToMany() bool { return g.List != nil }
 
 // MemberFor returns the union member a CR spec field selects.
 //
@@ -683,10 +747,29 @@ func (d Descriptor) validateGenericFKs() error {
 			}
 		}
 
-		errs = append(errs, validateGenericFKMembers(generic), d.validateGenericFKCaches(generic))
+		errs = append(errs, validateGenericFKMembers(generic), d.validateGenericFKCaches(generic),
+			validateGenericFKList(generic))
 	}
 
 	return errors.Join(errs...)
+}
+
+// validateGenericFKList checks the to-many shape, and passes a to-one pair untouched.
+func validateGenericFKList(generic GenericFKSpec) error {
+	if !generic.ToMany() {
+		return nil
+	}
+
+	if generic.List.APIField == "" || generic.List.TypeKey == "" || generic.List.IDKey == "" {
+		return fmt.Errorf("%w: %+v on %s", ErrInvalidGenericFKList, *generic.List, generic.Spec)
+	}
+
+	if len(generic.Cached) > 0 {
+		return fmt.Errorf("%w: %s declares caches %v", ErrInvalidGenericFKList,
+			generic.Spec, generic.Cached)
+	}
+
+	return nil
 }
 
 // validateGenericFKMembers checks the union's dispatch table. A member with no name is

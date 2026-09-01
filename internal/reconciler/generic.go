@@ -674,6 +674,15 @@ func (p *pass) update(ctx context.Context, live netbox.Object) (ctrl.Result, err
 // is gone, so the replacement cannot be created first
 // (docs/netbox-schema.md -> dcim.Cable.meta.constraints).
 func (p *pass) recreate(ctx context.Context, id int, changes []netbox.Change) (ctrl.Result, error) {
+	// Retain means "never destroy this NetBox object", and a recreate destroys it. The two
+	// instructions contradict each other, so the operator refuses rather than silently
+	// picking one -- and refuses in this direction because a recreate is unrecoverable while a
+	// refusal is one edit away from either outcome. The message names the fields that changed,
+	// since reverting one of them is half the fix (errRecreateRetained).
+	if deletionPolicyOf(p.obj.NetBoxSpec().DeletionPolicy, p.desc.RetainOnDelete) == netboxv1alpha1.DeletionRetain {
+		return p.stop(ctx, fmt.Errorf("%w: %s", errRecreateRetained, renderChanges(changes)))
+	}
+
 	if _, err := p.endpoint.Client.Delete(ctx, p.desc.Endpoint, id); err != nil {
 		return p.stop(ctx, fmt.Errorf("deleting netbox %s/%d to recreate it: %w", p.desc.Endpoint, id, err))
 	}

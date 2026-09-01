@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 )
@@ -47,12 +48,33 @@ type FieldRules struct {
 	// diffed together. Examples: (scope_type, scope_id) on Prefix, Cluster, WirelessLAN
 	// and VLANGroup; (assigned_object_type, assigned_object_id) on IPAddress.
 	GenericFKs []GenericFK
+
+	// GenericFKLists are to-many polymorphic fields: one field carrying a list of nested
+	// (type, id) objects. `a_terminations` and `b_terminations` on dcim.Cable are the case.
+	//
+	// Compared as an order-independent set of pairs, for two reasons that both bite. NetBox
+	// does not preserve the order of the CableTermination rows behind the list -- they come
+	// back in `('cable', 'cable_end', 'connector', 'pk')` order
+	// (docs/netbox-schema.md -> dcim.CableTermination, meta.ordering) rather than the order
+	// they were POSTed in -- and the read representation carries a third key the write does
+	// not, GenericObjectSerializer's read-only `object`
+	// (netbox/netbox/api/serializers/generic.py:15). Compared as an ordered list of whole
+	// objects, a cable would therefore drift on every single resync, and on this kind drift
+	// means *delete and recreate* rather than PATCH.
+	GenericFKLists map[string]GenericFKItem
 }
 
 // GenericFK names the two columns behind one polymorphic reference.
 type GenericFK struct {
 	TypeField string
 	IDField   string
+}
+
+// GenericFKItem names the two keys the pair takes inside one element of a to-many
+// polymorphic field: `object_type` and `object_id` for GenericObjectSerializer.
+type GenericFKItem struct {
+	TypeKey string
+	IDKey   string
 }
 
 // Change is one field-level difference, kept in a form a renderer can align into
@@ -131,7 +153,66 @@ func fieldEqual(field string, have, want any, rules FieldRules) bool {
 	if rules.JSON[field] {
 		return sameJSON(have, want)
 	}
+	if item, ok := rules.GenericFKLists[field]; ok {
+		return samePairSet(have, want, item)
+	}
 	return scalarEqual(unwrapNested(have), want)
+}
+
+// samePairSet compares a to-many polymorphic field: a list of nested (type, id) objects on
+// both sides, order-independent, reading only the two keys that are written.
+//
+// Only those two keys, deliberately. NetBox's read adds a `object` expansion of the target
+// and would never equal the write, and dcim.Cable's terminations come back in row order
+// rather than the order they were sent -- so any stricter comparison is a permanent diff, and
+// on a UpdateRecreate kind a permanent diff is a cable deleted and recreated every resync.
+func samePairSet(have, want any, item GenericFKItem) bool {
+	haveSet, haveOK := pairSet(have, item)
+	wantSet, wantOK := pairSet(want, item)
+	if !haveOK || !wantOK {
+		return scalarEqual(have, want)
+	}
+
+	if len(haveSet) != len(wantSet) {
+		return false
+	}
+
+	for i := range haveSet {
+		if haveSet[i] != wantSet[i] {
+			return false
+		}
+	}
+
+	return true
+}
+
+// pairSet renders one side of a to-many polymorphic field as its sorted set of
+// `type/id` keys, and reports whether the value was a list at all.
+//
+// Deduplicated as well as sorted: two elements naming one object are one termination either
+// way, because `unique(termination_type, termination_id)` makes a second row on the same
+// object impossible (docs/netbox-schema.md -> dcim.CableTermination, meta.constraints).
+func pairSet(value any, item GenericFKItem) ([]string, bool) {
+	list, ok := value.([]any)
+	if !ok {
+		return nil, false
+	}
+
+	keys := make([]string, 0, len(list))
+
+	for _, element := range list {
+		nested, isObject := element.(map[string]any)
+		if !isObject {
+			return nil, false
+		}
+
+		id, _ := toFloat(unwrapNested(nested[item.IDKey]))
+		keys = append(keys, fmt.Sprintf("%v/%v", unwrapNested(nested[item.TypeKey]), id))
+	}
+
+	sort.Strings(keys)
+
+	return slices.Compact(keys), true
 }
 
 // customFieldsKey is NetBox's custom-field container, present on every PrimaryModel.
