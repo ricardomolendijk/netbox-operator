@@ -10,6 +10,23 @@ Actions are pinned to a commit SHA rather than a tag, because a tag can be moved
 |---|---|
 | `ci.yaml` | `make build vet lint test verify`, `kustomize build`, `ruff check hack/`, `make test-schema` |
 | `docs.yaml` | `make docs-check`, `make docs-build`; deploys to GitHub Pages on push to `main` only |
+| `e2e.yaml` | `make test-e2e`; nightly, on a pull request labelled `area/refs`, and on demand — **not** on every PR |
+
+## Why `e2e.yaml` is separate
+
+`make test-e2e` brings up a kind cluster and a real NetBox 4.6.8 with its Postgres and Redis,
+then applies the ordering gate's graph once per permutation. That is tens of minutes of real
+API round trips, and a gate that slow in the default pipeline is the first thing somebody
+switches off — so it is not in `ci.yaml`.
+
+The label filter is a **job-level `if`**, not an event filter: GitHub cannot filter a
+`pull_request` event by label, and a skipped job is green, so a pull request without
+`area/refs` is not blocked by a check that never ran.
+
+Nothing rots between runs. `ci.yaml`'s `make vet` compiles `test/e2e`, and its `make test`
+runs `test/e2e/harness`'s own unit tests — the canonical NetBox dump and the fixture ordering
+are pure functions and the load-bearing half of that gate. See
+[`docs/operations/e2e.md`](../../docs/operations/e2e.md).
 
 ## The docs site
 
