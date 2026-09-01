@@ -74,6 +74,7 @@ func ownerEngine(t *testing.T, resolution resolver.Resolution, owners *fakeOwner
 		},
 		Refs:       &fakeRefs{resolution: resolution},
 		Status:     &fakeStatus{},
+		LiveStatus: &fakeLiveStatus{},
 		Finalizers: &fakeFinalizers{},
 		Owners:     owners,
 		Scheme:     fakeScheme(t),

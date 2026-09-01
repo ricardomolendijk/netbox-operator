@@ -50,6 +50,7 @@ func TestNoRegisteredKindWritesOutsideStatus(t *testing.T) {
 					ready:    true,
 				},
 				Status:     status,
+				LiveStatus: &fakeLiveStatus{},
 				Finalizers: finalizers,
 				Scheme:     apiScheme(t),
 			}
@@ -292,6 +293,11 @@ func TestStatusWriterIsTheOnlyObjectWriter(t *testing.T) {
 		"Events":      true,
 		"Scheme":      true,
 
+		// LiveStatus is a reader, and the narrowest one on the list: it returns a status by
+		// value, so unlike every entry above it there is no object handed back through it that
+		// anything could be written to (issue #252, StatusReader).
+		"LiveStatus": true,
+
 		// Children is the one entry on this list that *can* write a spec, and it is here
 		// deliberately (NBO-032). The invariant is not "the operator never writes a spec" --
 		// it is "the operator never writes the spec of a CR it did not create"
@@ -323,6 +329,14 @@ func TestStatusWriterIsTheOnlyObjectWriter(t *testing.T) {
 	writer := reflect.TypeFor[StatusWriter]()
 	if writer.NumMethod() != 1 || writer.Method(0).Name != "UpdateStatus" {
 		t.Errorf("StatusWriter has %d methods, want only UpdateStatus", writer.NumMethod())
+	}
+
+	// The status *reader* is held to the same shape as the writer, and for a reason of its
+	// own: a second method is how a reader that answers one question becomes a route to the
+	// object it answered about.
+	reader := reflect.TypeFor[StatusReader]()
+	if reader.NumMethod() != 1 || reader.Method(0).Name != "LiveStatus" {
+		t.Errorf("StatusReader has %d methods, want only LiveStatus", reader.NumMethod())
 	}
 
 	// The resolver is the one collaborator handed whole CRs, so it is the one that has to be
@@ -378,6 +392,7 @@ func TestConditionsCarryObservedGeneration(t *testing.T) {
 			ready:    true,
 		},
 		Status:     &fakeStatus{},
+		LiveStatus: &fakeLiveStatus{},
 		Finalizers: &fakeFinalizers{},
 		Scheme:     fakeScheme(t),
 	}

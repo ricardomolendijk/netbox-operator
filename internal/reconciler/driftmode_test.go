@@ -221,6 +221,7 @@ func TestDriftModes(t *testing.T) {
 					DriftMode: test.driftMode,
 				}},
 				Status:     &fakeStatus{},
+				LiveStatus: &fakeLiveStatus{},
 				Finalizers: &fakeFinalizers{},
 				Events:     events,
 				Scheme:     fakeScheme(t),
@@ -310,6 +311,7 @@ func TestReportedDriftEventsOnChangeOnly(t *testing.T) {
 			DriftMode: netboxv1alpha1.DriftReport,
 		}},
 		Status:     status,
+		LiveStatus: &fakeLiveStatus{},
 		Finalizers: &fakeFinalizers{},
 		Events:     events,
 		Scheme:     fakeScheme(t),
@@ -382,6 +384,7 @@ func TestReportModeCountsDetectedButNotCorrected(t *testing.T) {
 			DriftMode: netboxv1alpha1.DriftReport,
 		}},
 		Status:     &fakeStatus{},
+		LiveStatus: &fakeLiveStatus{},
 		Finalizers: &fakeFinalizers{},
 		Scheme:     fakeScheme(t),
 	}

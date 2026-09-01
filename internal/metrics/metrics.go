@@ -72,8 +72,13 @@ const (
 	ResultReported = "reported"
 
 	// ResultWaiting is a reconcile that could not proceed and is not a failure: the
-	// endpoint is not Ready yet, no natural key is usable yet, or onConflict is
-	// AdoptOnly and there is nothing to adopt. Normal during a rollout.
+	// endpoint is not Ready yet, no natural key is usable yet, onConflict is AdoptOnly and
+	// there is nothing to adopt, or the status write lost an optimistic-concurrency race
+	// with another pass of the same object. Normal during a rollout.
+	//
+	// The last of those is here rather than under ResultError deliberately: the write that
+	// won the race carries a newer view of the same object, so the pass is redone rather
+	// than failed (issue #252, reconciler.staleStatusWrite).
 	ResultWaiting = "waiting"
 
 	// ResultError is a reconcile that failed: NetBox rejected the payload, was

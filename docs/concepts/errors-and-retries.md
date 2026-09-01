@@ -136,6 +136,48 @@ same reason: the request is not retryable at all, so the only thing that clears 
 person. It is deliberately not the endpoint's `resyncInterval`, which a cluster is free to
 set to seconds — that would poll a query that cannot succeed.
 
+## A cached read is not a conflict
+
+The engine reconciles the copy of a CR an informer cache handed it, and two reconciles of one
+key overlap routinely — a `kubectl apply` of a whole graph is exactly the shape that produces
+it. The second pass can begin before the cache has caught up with the status write the first
+one made, so it reads `status.id == 0` for an object that already has a NetBox id.
+
+Two things follow from that, and neither is a failure.
+
+**The natural-key match may be the operator's own object.** With no `status.id` the pass falls
+through to the [natural-key lookup](lookups.md) and finds the object it created milliseconds
+earlier. Before deciding anything about it, the engine re-reads *this CR's own status* straight
+from the API server, past the cache, and compares the id: `status.id` is written by this
+operator for this CR and by nothing else, so an id recorded there and matched by the natural
+key is one object seen twice. It is then updated as its own, with no `Conflict`, no `Adopted`
+Event and no change to `status.adopted`.
+
+That read costs one `GET`, on the natural-key path only — a settled object locates by id and
+never reaches it. It buys the correctness of the most consequential decision the engine makes:
+reporting `Conflict` on an object nothing else has touched tells the user to set
+`spec.onConflict: Adopt`, and [on a shared catalogue kind that advice makes things worse rather
+than better](../reference/netboxtenantgroup.md#two-namespaces-one-slug). An endpoint with
+`spec.managedBy` set has a second way to recognise its own objects — the [provenance
+stamp](../operations/provenance.md) — but running without a stamp is a supported configuration,
+so identity comes from the CR's own status instead.
+
+A match under **any other** id is still somebody else's object and is still refused: an id
+NetBox lost, whose natural key now matches something unrelated, reports `Conflict` exactly as
+before.
+
+**A status write that lost the race is retried, not failed.** A pass whose status was stale
+carries a `resourceVersion` the API server has already moved past, so its write comes back as a
+409. That is the ordinary outcome of reading from a cache: the write that won carries a *newer*
+view of the same object, so the pass is counted as `waiting`, logged at `debug`, and requeued
+after **one second** — by which time the winning copy is in the cache the next pass reads.
+Nothing is re-applied over it, because this pass's conclusions came from the read that turned
+out to be stale.
+
+A status write refused for any other reason is still an error, still returned into
+controller-runtime's backoff, and still counted as one: `observedGeneration` did not land, so
+`kubectl wait` would otherwise hang on a status that never arrives.
+
 ## Secrets
 
 Request and response bodies are logged at `debug` only, through a tested redaction pass —

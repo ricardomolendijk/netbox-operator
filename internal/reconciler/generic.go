@@ -150,6 +150,23 @@ type StatusWriter interface {
 	UpdateStatus(ctx context.Context, obj client.Object) error
 }
 
+// StatusReader reads back the status the API server holds for one object, past whatever
+// cache the reconcile itself was fed from.
+//
+// A reader with no route to a write, for the same reason RefResolver is one: it exists to
+// answer a question, and answering it must not come with the ability to change the answer. It
+// returns the status by value rather than filling the caller's object, so no pass can take a
+// whole CR -- spec included -- out of it, and so a read cannot silently discard the status the
+// pass is halfway through computing.
+type StatusReader interface {
+	// LiveStatus returns the engine-owned status the API server currently holds for obj.
+	//
+	// Every failure is an error, including a missing object: the engine only ever asks about
+	// an object it is in the middle of reconciling, so "it is not there" is news rather than
+	// an answer.
+	LiveStatus(ctx context.Context, obj Object) (netboxv1alpha1.NetBoxObjectStatus, error)
+}
+
 // Recorder emits Kubernetes Events, narrowed from record.EventRecorder so the engine is
 // testable without an event broadcaster.
 type Recorder interface {
@@ -185,6 +202,11 @@ type Engine struct {
 
 	// Status persists status updates.
 	Status StatusWriter
+
+	// LiveStatus re-reads an object's own status straight from the API server. Nil is a
+	// wiring bug rather than a mode, as a nil Owners is: the one decision that reads it
+	// refuses to be made from a cached status instead of guessing (issue #252, claim()).
+	LiveStatus StatusReader
 
 	// Finalizers persists the finalizer that keeps a CR alive until its NetBox object has
 	// been dealt with.
@@ -592,6 +614,22 @@ func (p *pass) claim(ctx context.Context, found match) (ctrl.Result, error) {
 		return p.stop(ctx, fmt.Errorf("%w: matched by %v", errNoObjectID, p.obj.NetBoxStatus().NaturalKey))
 	}
 
+	// Before the adoption question rather than inside it, because a match that is this CR's
+	// own object is not an adoption under any policy: onConflict: Fail would refuse the
+	// operator's own write, and Adopt would emit an Adopted Event and set status.adopted for
+	// an object nobody adopted.
+	own, err := p.ownsMatch(ctx, id)
+	if err != nil {
+		// Returned rather than routed through stop(): the API server did not answer, so
+		// there is no writing a condition about it either, and controller-runtime's backoff
+		// is the retry -- exactly as it is for a failed status write.
+		return ctrl.Result{}, err
+	}
+
+	if own {
+		return p.update(ctx, found.live)
+	}
+
 	// Adoption is opt-in. Finding an object somebody else made is not permission to take
 	// it over, because the very next step reconciles it towards this spec and there is no
 	// undo for that.
@@ -606,6 +644,64 @@ func (p *pass) claim(ctx context.Context, found match) (ctrl.Result, error) {
 		"adopted netbox %s/%d, matched by %v", p.desc.Endpoint, id, status.NaturalKey)
 
 	return p.update(ctx, found.live)
+}
+
+// ownsMatch reports whether the object a natural-key lookup matched is this CR's own, and
+// takes its recorded identity back onto this pass when it is.
+//
+// The engine reconciles the copy of a CR an informer cache handed it, and a second reconcile
+// of one key can begin before the cache has caught up with the status write the first one
+// made. Such a pass reads status.id == 0, falls through to the natural key, and finds the
+// object the operator itself created milliseconds earlier. Before this check that was
+// reported as a Conflict advising spec.onConflict: Adopt -- on an object nothing else had
+// ever touched, and on a shared catalogue kind that advice is actively harmful
+// (issue #252, docs/reference/netboxtenantgroup.md).
+//
+// The evidence is exact rather than a heuristic: status.id is written by this operator, for
+// this CR, and by nothing else, so an id the API server records there and the natural key has
+// just matched is one object seen twice. A stamped endpoint can reach the same conclusion from
+// the provenance stamp (duplicate.go), but an endpoint with no spec.managedBy is a supported
+// configuration and has no stamp to read (docs/operations/provenance.md), so the identity has
+// to come from the CR's own status.
+//
+// The answer is decisive rather than merely fresher, because controller-runtime runs at most
+// one reconcile per key at a time: the pass whose status write this one missed has already
+// finished, so there is no third write still in flight for the API server's copy to be behind.
+//
+// One live read, on the natural-key path only, where being wrong is the most expensive mistake
+// the engine makes. A settled object locates by id and never gets here.
+func (p *pass) ownsMatch(ctx context.Context, id int) (bool, error) {
+	if p.engine.LiveStatus == nil {
+		return false, fmt.Errorf("%w: no status reader, so a natural-key match cannot be told "+
+			"apart from this object's own netbox object", errNotConfigured)
+	}
+
+	live, err := p.engine.LiveStatus.LiveStatus(ctx, p.obj)
+	if err != nil {
+		return false, fmt.Errorf("re-reading the status of %s/%s past the cache: %w",
+			p.obj.GetNamespace(), p.obj.GetName(), err)
+	}
+
+	if live.ID != int64(id) {
+		return false, nil
+	}
+
+	logf.FromContext(ctx).V(1).Info("the natural key matched this object's own netbox object",
+		"netboxID", id, "action", "recover")
+
+	// Both fields, and from the live copy rather than from this one: update() PATCHes by the
+	// recorded id, and status.adopted belongs to whichever pass established that id -- this
+	// pass adopted nothing and must not say either way.
+	//
+	// Safe to carry on from here rather than abandon the pass, because the status write at the
+	// end of it cannot land: a status this pass read stale is one the API server has since
+	// moved past, so its resourceVersion is stale too and finish() sees the refusal
+	// (staleStatusWrite). Whatever this pass concludes from a stale read is therefore
+	// recomputed by the next one.
+	status := p.obj.NetBoxStatus()
+	status.ID, status.Adopted = live.ID, live.Adopted
+
+	return true, nil
 }
 
 // create writes a new object. AdoptOnly stops here: it exists for objects a human owns,

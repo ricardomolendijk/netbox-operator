@@ -1524,6 +1524,15 @@ func (p *claimPass) finish(ctx context.Context, requeue time.Duration) (ctrl.Res
 	}
 
 	if err := p.engine.Status.UpdateStatus(ctx, p.claim); err != nil {
+		// A claim is reconciled from the same informer cache an object is, from a controller
+		// that requeues on its own timers, so it loses the same race for the same reason and
+		// the answer is the same one (staleStatusWrite).
+		if staleStatusWrite(ctx, err) {
+			p.result = metrics.ResultWaiting
+
+			return ctrl.Result{RequeueAfter: Jitter(staleRetry)}, nil
+		}
+
 		p.result = metrics.ResultError
 
 		return ctrl.Result{}, fmt.Errorf("updating the status of %s/%s: %w",

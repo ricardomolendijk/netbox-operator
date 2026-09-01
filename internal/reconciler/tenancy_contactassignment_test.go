@@ -71,6 +71,7 @@ func contactAssignmentEngine(t *testing.T, nb NetBoxClient, targets ...*unstruct
 		Endpoints:   fakeEndpoints{endpoint: Endpoint{Client: nb, Resync: testResync}, ready: true},
 		Refs:        &resolver.Resolver{Objects: fakeCluster{objects: targets}, Kinds: reg},
 		Status:      &fakeStatus{},
+		LiveStatus:  &fakeLiveStatus{},
 		Finalizers:  &fakeFinalizers{},
 		Scheme:      scheme,
 	}

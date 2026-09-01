@@ -43,6 +43,7 @@ func stampedEngine(t *testing.T, d registry.Descriptor, client NetBoxClient) *En
 		Descriptors: fakeDescriptors{descriptor: d, registered: true},
 		Endpoints:   fakeEndpoints{endpoint: stampedEndpoint(client), ready: true},
 		Status:      &fakeStatus{},
+		LiveStatus:  &fakeLiveStatus{},
 		Finalizers:  &fakeFinalizers{},
 		Scheme:      fakeScheme(t),
 	}
@@ -187,6 +188,7 @@ func TestNoStampWithoutManagedBy(t *testing.T) {
 		Descriptors: fakeDescriptors{descriptor: stampableDescriptor(), registered: true},
 		Endpoints:   fakeEndpoints{endpoint: Endpoint{Client: client, Resync: testResync}, ready: true},
 		Status:      &fakeStatus{},
+		LiveStatus:  &fakeLiveStatus{},
 		Finalizers:  &fakeFinalizers{},
 		Scheme:      fakeScheme(t),
 	}
@@ -236,6 +238,7 @@ func TestStampIsClearedFromStatus(t *testing.T) {
 		Descriptors: fakeDescriptors{descriptor: stampableDescriptor(), registered: true},
 		Endpoints:   fakeEndpoints{endpoint: Endpoint{Client: client, Resync: testResync}, ready: true},
 		Status:      &fakeStatus{},
+		LiveStatus:  &fakeLiveStatus{},
 		Finalizers:  &fakeFinalizers{},
 		Scheme:      fakeScheme(t),
 	}

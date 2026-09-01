@@ -65,7 +65,7 @@ count of reconciles and anything can be divided by it.
 | `deleted` | The CR went away and the NetBox object with it. |
 | `dryrun` | Drift found on a `DryRun` endpoint, deliberately not corrected. |
 | `reported` | Drift found on a `driftMode: Report` endpoint, deliberately not corrected. Separate from `dryrun` because the two are set in different fields and mean different things about intent: `DryRun` is "this whole endpoint is a rehearsal", `Report` is "this endpoint is live and drift is somebody else's to fix". |
-| `waiting` | Endpoint not `Ready`, no usable natural key yet, or `AdoptOnly` with nothing to adopt. Normal during a rollout. |
+| `waiting` | Endpoint not `Ready`, no usable natural key yet, `AdoptOnly` with nothing to adopt, or the status write lost a race with another pass of the same object — see [a cached read is not a conflict](../concepts/errors-and-retries.md#a-cached-read-is-not-a-conflict). Normal during a rollout. |
 | `error` | NetBox rejected the payload, was unreachable, or holds an object this CR may not claim. |
 
 Adoption is not a result: it is not a terminal state — the same pass goes on to update or

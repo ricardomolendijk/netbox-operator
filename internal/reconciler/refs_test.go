@@ -379,6 +379,7 @@ func engineWith(t *testing.T, descriptor registry.Descriptor, nb NetBoxClient, r
 		Endpoints:   fakeEndpoints{endpoint: Endpoint{Client: nb, Resync: testResync}, ready: true},
 		Refs:        refs,
 		Status:      &fakeStatus{},
+		LiveStatus:  &fakeLiveStatus{},
 		Finalizers:  &fakeFinalizers{},
 		Scheme:      fakeScheme(t),
 	}

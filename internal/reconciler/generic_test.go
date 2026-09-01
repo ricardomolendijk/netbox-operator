@@ -401,6 +401,7 @@ func TestEngineReconcile(t *testing.T) {
 					ready:    !tc.notReady,
 				},
 				Status:     status,
+				LiveStatus: &fakeLiveStatus{},
 				Finalizers: &fakeFinalizers{},
 				Events:     events,
 				Scheme:     fakeScheme(t),
@@ -484,6 +485,7 @@ func TestEngineReconcileIsIdempotent(t *testing.T) {
 		Descriptors: fakeDescriptors{descriptor: fakeDescriptor(), registered: true},
 		Endpoints:   fakeEndpoints{endpoint: Endpoint{Client: client, Resync: testResync}, ready: true},
 		Status:      status,
+		LiveStatus:  &fakeLiveStatus{},
 		Finalizers:  &fakeFinalizers{},
 		Scheme:      fakeScheme(t),
 	}
@@ -534,6 +536,7 @@ func TestEngineReconcileUnregisteredKind(t *testing.T) {
 		Descriptors: fakeDescriptors{},
 		Endpoints:   fakeEndpoints{ready: false},
 		Status:      &fakeStatus{},
+		LiveStatus:  &fakeLiveStatus{},
 		Finalizers:  &fakeFinalizers{},
 		Scheme:      fakeScheme(t),
 	}
@@ -554,6 +557,7 @@ func TestEngineReconcileStatusWriteFails(t *testing.T) {
 			ready:    true,
 		},
 		Status:     &fakeStatus{err: errStatusWrite},
+		LiveStatus: &fakeLiveStatus{},
 		Finalizers: &fakeFinalizers{},
 		Scheme:     fakeScheme(t),
 	}
@@ -612,6 +616,7 @@ func TestTruncatedLookupCreatesNothing(t *testing.T) {
 			ready:    true,
 		},
 		Status:     &fakeStatus{},
+		LiveStatus: &fakeLiveStatus{},
 		Finalizers: &fakeFinalizers{},
 		Scheme:     fakeScheme(t),
 	}
@@ -660,6 +665,7 @@ func TestEndpointLookupIsCancellable(t *testing.T) {
 		Descriptors: fakeDescriptors{descriptor: fakeDescriptor(), registered: true},
 		Endpoints:   endpoints,
 		Status:      &fakeStatus{},
+		LiveStatus:  &fakeLiveStatus{},
 		Finalizers:  &fakeFinalizers{},
 		Scheme:      fakeScheme(t),
 	}

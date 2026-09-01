@@ -76,6 +76,7 @@ func newStopHarness(t *testing.T, client *fakeClient) *stopHarness {
 			ready:    true,
 		},
 		Status:     h.status,
+		LiveStatus: &fakeLiveStatus{},
 		Finalizers: &fakeFinalizers{},
 		Events:     h.events,
 		Scheme:     fakeScheme(t),

@@ -222,6 +222,7 @@ func TestDerivedRefConflictWritesNothing(t *testing.T) {
 		Endpoints:   fakeEndpoints{endpoint: Endpoint{Client: nb, Resync: testResync}, ready: true},
 		Refs:        &fakeRefs{resolution: resolver.Resolution{ByField: map[string]resolver.FieldRefs{}}},
 		Status:      &fakeStatus{},
+		LiveStatus:  &fakeLiveStatus{},
 		Finalizers:  &fakeFinalizers{},
 		Scheme:      derivingScheme(t),
 	}

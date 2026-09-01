@@ -50,6 +50,7 @@ func vrfEngine(t *testing.T, nb NetBoxClient, refs RefResolver) *Engine {
 		Endpoints:   fakeEndpoints{endpoint: Endpoint{Client: nb, Resync: testResync}, ready: true},
 		Refs:        refs,
 		Status:      &fakeStatus{},
+		LiveStatus:  &fakeLiveStatus{},
 		Finalizers:  &fakeFinalizers{},
 		Scheme:      scheme,
 	}

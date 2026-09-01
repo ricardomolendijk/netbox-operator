@@ -27,6 +27,7 @@ var (
 	_ Object       = (*fakeKind)(nil)
 	_ Endpoints    = fakeEndpoints{}
 	_ Endpoints    = (*blockingEndpoints)(nil)
+	_ StatusReader = (*fakeLiveStatus)(nil)
 )
 
 var fakeGVK = schema.GroupVersionKind{Group: "netbox.kubeforge.org", Version: "v1alpha1", Kind: "NetBoxFake"}
@@ -383,6 +384,36 @@ func (f *fakeStatus) UpdateStatus(_ context.Context, _ client.Object) error {
 
 	return f.err
 }
+
+// fakeLiveStatus is the API server's own copy of an object's status, which is what the engine
+// asks for rather than trusting the cached one it was handed (issue #252).
+//
+// The zero value answers with the status the pass is holding, which is the same answer a
+// caught-up cache would give: a case that is not about a stale read then behaves exactly as it
+// did before the live read existed, and the cases that *are* about one say so by setting
+// `status`.
+type fakeLiveStatus struct {
+	status *netboxv1alpha1.NetBoxObjectStatus
+	err    error
+	reads  int
+}
+
+func (f *fakeLiveStatus) LiveStatus(_ context.Context, obj Object) (netboxv1alpha1.NetBoxObjectStatus, error) {
+	f.reads++
+
+	if f.err != nil {
+		return netboxv1alpha1.NetBoxObjectStatus{}, f.err
+	}
+
+	if f.status != nil {
+		return *f.status, nil
+	}
+
+	return *obj.NetBoxStatus(), nil
+}
+
+// errLiveStatusRead stands in for an API server that would not answer a live status read.
+var errLiveStatusRead = errors.New("live status read refused")
 
 // fakeFinalizers records what the finalizer list looked like at each write, which is how a
 // test asserts the ordering that matters: the finalizer has to be persisted before the
