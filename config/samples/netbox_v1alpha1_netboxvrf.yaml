@@ -8,6 +8,10 @@ spec:
   # default endpoint; see config/samples/netbox_v1alpha1_netboxendpoint.yaml.
   endpointRef: homelab
 
+  # No deletionPolicy: this kind defaults to Retain, because a VRF is the table its prefixes
+  # and addresses are unique within and deleting one changes what every address inside it
+  # means. Write `deletionPolicy: Delete` to opt out (docs/concepts/deletion.md).
+
   # `name` is NOT unique in NetBox: ipam.VRF carries no UNIQUE on the column and declares
   # no meta.constraints, so two VRFs may share this name.
   name: Donkerslootstraat (RTM)

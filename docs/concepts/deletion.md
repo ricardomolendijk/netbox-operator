@@ -24,7 +24,7 @@ is a leak nobody asked for. `Retain` is for the cases where the NetBox object ou
 is the *point*: migrating off the operator, an object that is shared with something else, and
 the IPAM kinds below.
 
-### Except for IPAM, where the default is `Retain`
+### Except for IPAM, where the default is mostly `Retain`
 
 Deleting a tag or a site destroys *configuration*, which is cheap to recreate. Deleting an
 IPAM object destroys *state*: an `ipam.IPAddress` that is deleted is free for reallocation, so
@@ -34,21 +34,18 @@ namespace` would do it to a whole range at once. That asymmetry is real, so it i
 rather than averaged away (decision
 [#176](https://github.com/ricardomolendijk/netbox-operator/issues/176)).
 
-| Kind | Default | Why |
-|---|---|---|
-| [`NetBoxIPAddress`](../reference/netboxipaddress.md) | `Retain` | Deleting frees the address for reallocation, and if a claim allocated it that is destructive with no undo |
-| [`NetBoxIPAddressClaim`](../reference/netboxipaddressclaim.md) | `Delete` | The claim's CR is the only record its allocation exists, so retaining leaves an address nothing can attribute ([#225](https://github.com/ricardomolendijk/netbox-operator/issues/225)) |
-| [`NetBoxTag`](../reference/netboxtag.md), [`NetBoxSite`](../reference/netboxsite.md), [`NetBoxRegion`](../reference/netboxregion.md) | `Delete` | Configuration: cheap to delete, cheap to recreate |
-
-Every other Kind defaults to `Delete`, and the IPAM Kinds still to come
-(`NetBoxPrefix`, `NetBoxIPRange`, `NetBoxVLAN`, `NetBoxVRF`) will join the first row.
+"IPAM" is shorthand rather than the rule, and two kinds in `ipam` do not follow it:
+`NetBoxVLANGroup` and `NetBoxIPAddressClaim` both default to `Delete`. Which Kind gets which
+is [one table](#the-default-depends-on-the-kind), below — one table and not a paragraph per
+Kind, because the answer to "what does `kubectl delete` do to my NetBox object" has to be
+readable in a single place.
 
 The default is **not** a `+kubebuilder:default` marker, and cannot be: `deletionPolicy` is
 declared once, on the envelope every Kind embeds, so a marker there would give ~120 Kinds one
 answer. The per-Kind value is data on the Kind's Descriptor
 (`registry.Descriptor.RetainOnDelete`), which the engine reads when the spec states nothing.
 One consequence worth knowing: `kubectl explain <kind>.spec.deletionPolicy` prints no default,
-so this table is where the answer lives.
+so [the table below](#the-default-depends-on-the-kind) is where the answer lives.
 
 ```yaml
 spec:
@@ -75,19 +72,46 @@ field would not fail — it would just quietly travel over the wire forever.
 ## The default depends on the Kind
 
 **Decided** on
-[#176](https://github.com/ricardomolendijk/netbox-operator/issues/176): the IPAM kinds default
-to `Retain`, everything else defaults to `Delete`.
+[#176](https://github.com/ricardomolendijk/netbox-operator/issues/176): a Kind whose NetBox
+object holds *state* defaults to `Retain`, and everything else defaults to `Delete`. This is
+the table, and there is no second one.
 
-| Kind | Default `deletionPolicy` |
-|---|---|
-| `NetBoxPrefix` | `Retain` |
-| `NetBoxIPAddress` | `Retain` |
-| `NetBoxIPRange` | `Retain` |
-| `NetBoxVLAN` | `Retain` |
-| `NetBoxVLANGroup` | `Retain` |
-| `NetBoxVRF` | `Retain` |
-| `NetBoxIPAddressClaim` | **`Delete`** — the one IPAM kind that deletes, see below |
-| every other kind (`NetBoxTag`, `NetBoxSite`, the catalogue kinds, …) | `Delete` |
+| Kind | Default `deletionPolicy` | Why |
+|---|---|---|
+| [`NetBoxPrefix`](../reference/netboxprefix.md) | `Retain` | Deleting destroys the record of who a range of addresses belonged to, and recomputes its parents' hierarchy columns |
+| [`NetBoxIPAddress`](../reference/netboxipaddress.md) | `Retain` | Deleting frees the address for reallocation, and if a claim allocated it that is destructive with no undo |
+| [`NetBoxIPRange`](../reference/netboxiprange.md) | `Retain` | Deleting frees every address in the block at once |
+| [`NetBoxVLAN`](../reference/netboxvlan.md) | `Retain` | Deleting takes every prefix scoped to it and every termination hanging off it, and a fresh VLAN with the same `vid` is a different object |
+| [`NetBoxVRF`](../reference/netboxvrf.md) | `Retain` | A VRF is the table its prefixes and addresses are unique *within*, so deleting one changes what every address inside it means |
+| [`NetBoxVLANGroup`](../reference/netboxvlangroup.md) | **`Delete`** | A container, not an allocation — [see below](#netboxvlangroup-is-a-container-not-an-allocation) |
+| [`NetBoxIPAddressClaim`](../reference/netboxipaddressclaim.md) | **`Delete`** | The claim's CR is the only record its allocation exists — [see below](#the-claim-is-the-exception-to-the-exception) |
+| every other Kind (`NetBoxTag`, `NetBoxSite`, the catalogue kinds, …) | `Delete` | Configuration: cheap to delete, cheap to recreate |
+
+The table is checked rather than merely written down.
+`TestEveryKindsDeletionDefaultIsStated` (`internal/reconciler/finalizer_test.go`) reads the
+effective default of every registered Kind through the same `deletionPolicyOf` the finalizer
+calls, and fails on a registered Kind that states none — so adding a Kind means deciding, in
+writing, whether deleting its NetBox object destroys state.
+
+The test exists because for a while this page and the operator disagreed
+([#186](https://github.com/ricardomolendijk/netbox-operator/issues/186)). Six Kinds were
+listed here as `Retain`; only `NetBoxIPAddress` set the flag, so the docs promised `Retain`
+and five Kinds deleted. Four of those five are the `Retain` rows above and got the flag; the
+fifth was `NetBoxVLANGroup`, which the table was simply wrong about.
+
+### `NetBoxVLANGroup` is a container, not an allocation
+
+It is in `ipam` and it does not retain, which looks inconsistent until the rule is read as
+what it says. `Retain` protects *state*; `Delete` is fine for *configuration*. A VLAN group
+allocates nothing: it is an organisational box with a `vid_ranges` list, and deleting one
+frees no VLAN, no address and no range. So there is nothing for `Retain` to protect, and the
+group belongs with the catalogue kinds it behaves like.
+
+It is also the case where `Delete` is least likely to lose anything by accident.
+`ipam.VLAN.group` is `on_delete=PROTECT` (`docs/netbox-schema.md` → `ipam.VLAN`), so NetBox
+*refuses* to delete a group that still holds VLANs, and the operator can only
+[report the refusal](#what-protect-looks-like). The VLANs themselves default to `Retain` —
+which is the pair worth remembering: the container goes, the contents stay.
 
 ### The claim is the exception to the exception
 
@@ -153,9 +177,10 @@ Two things make the split liveable rather than confusing:
   `docs/netbox-schema.md`), so NetBox refuses many of these deletions anyway and the operator
   can only [report the refusal](#what-protect-looks-like). `Retain` is closer to what actually
   happens than `Delete` was.
-- **Each affected Kind states its own default in its field description**, so
-  `kubectl explain netboxprefix.spec.deletionPolicy` says `Retain` and says why. The table
-  lives here, once, rather than as prose repeated across five Kind pages.
+- **Each affected Kind states its own default in its `spec` description**, so
+  `kubectl explain netboxprefix.spec` says `Retain` and says why. It cannot be on the
+  `deletionPolicy` field itself — that description is the envelope's and is therefore shared —
+  which is why the table lives here, once, rather than as prose repeated across five Kind pages.
 
 The cost, accepted: the default is now something a user has to *learn* rather than infer, and
 `kubectl delete -f .` no longer undoes `kubectl apply -f .` for the IPAM kinds. The alternative

@@ -45,6 +45,12 @@ func ipamPrefixDescriptor() Descriptor {
 		Taggable:        true,
 		CustomFieldable: true,
 
+		// Decision #176: IPAM defaults to Retain. Deleting a prefix destroys the record of
+		// who a range of addresses belonged to, and a recreate does not restore it -- the
+		// change log, the journal entries and every child row go with it, and a fresh prefix
+		// at the same CIDR is a different object with a different id.
+		RetainOnDelete: true,
+
 		// `scope` is absent from this table on purpose: one spec field writing two columns
 		// is a GenericFKSpec, not a Field. So are `_depth` and `_children` -- NetBox
 		// maintains both from the prefix value itself, and they appear in ReadOnly below.

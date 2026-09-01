@@ -35,6 +35,12 @@ func ipamVLANDescriptor() Descriptor {
 		Taggable:        true,
 		CustomFieldable: true,
 
+		// Decision #176: IPAM defaults to Retain. A VLAN is state the network is carrying:
+		// deleting one takes every prefix scoped to it and every termination hanging off it
+		// with it, and a fresh VLAN with the same `vid` is a different object with a
+		// different id.
+		RetainOnDelete: true,
+
 		// `qinqSVLANRef` -> `qinq_svlan` and `qinqRole` -> `qinq_role` are the entries that
 		// earn an explicit table: NetBox ignores a field name it does not know rather than
 		// rejecting it, so `qinqRole` sent verbatim would write nothing and report success.

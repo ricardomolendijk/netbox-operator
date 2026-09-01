@@ -174,7 +174,7 @@ references are declared and unresolved.
 
 ## `deletionPolicy` defaults to `Delete`
 
-Unlike [`NetBoxVRF`](netboxvrf.md#deletionpolicy-and-issue-176), and that is deliberate.
+Unlike [`NetBoxVRF`](netboxvrf.md#deletionpolicy-defaults-to-retain), and that is deliberate.
 
 Issue #176 decided (option B) that **IPAM kinds holding allocated state** default to `Retain`,
 and enumerated them: `NetBoxPrefix`, `NetBoxIPAddress`, `NetBoxIPRange`, `NetBoxVLAN`,

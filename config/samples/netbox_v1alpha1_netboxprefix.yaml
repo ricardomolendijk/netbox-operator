@@ -8,10 +8,9 @@ spec:
   # default endpoint; see config/samples/netbox_v1alpha1_netboxendpoint.yaml.
   endpointRef: homelab
 
-  # Set explicitly on every IPAM object. The envelope's default is Delete, and deleting a
-  # prefix destroys the record of who a range of addresses belonged to -- which is not
-  # recoverable by re-creating it.
-  deletionPolicy: Retain
+  # No deletionPolicy: this kind defaults to Retain, because deleting a prefix destroys the
+  # record of who a range of addresses belonged to and re-creating it does not bring that
+  # back. Write `deletionPolicy: Delete` to opt out (docs/concepts/deletion.md).
 
   # Required. IPv4 or IPv6, host bits clear: `10.0.20.5/24` is rejected at admission
   # naming the network address, because NetBox would silently rewrite it.

@@ -6,12 +6,9 @@ metadata:
 spec:
   endpointRef: homelab
 
-  # Retain, explicitly. Deleting a range destroys the record of who a block of addresses
-  # belonged to, and that record is not recoverable by re-creating the object: the change
-  # log, the journal entries and the id go with it. The default is still Delete because
-  # deletionPolicy is declared once on the shared envelope -- see the type comment on
-  # NetBoxIPRange -- so every IPAM manifest should say this.
-  deletionPolicy: Retain
+  # No deletionPolicy: this kind defaults to Retain, because deleting a range frees every
+  # address in it for reallocation at once and destroys the record of who the block belonged
+  # to. Write `deletionPolicy: Delete` to opt out (docs/concepts/deletion.md).
 
   # Both endpoints, with a mask, and the two masks must match: NetBox's IPRange.clean()
   # rejects a mismatched pair. The mask is the containing prefix's, not /32: these are
