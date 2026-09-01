@@ -496,20 +496,42 @@ func (m *materialisation) markers(path string) map[string]string {
 // endpointRef and deletionPolicy, and deliberately nothing else. Not tags, not customFields,
 // not description: inheriting free text and tag sets makes a drift report lie about where a
 // value came from, and the child's own entry is the only place a reader would think to look.
+// A claim child gets the same two fields out of a different accessor, and it is not optional
+// for it: NetBoxClaimSpec.endpointRef carries MinLength=1, so a materialised claim with no
+// endpoint is refused by the API server rather than merely under-configured. That is the one
+// thing the first real parent Kind found missing here (NBO-033) -- a claim is not an
+// engine Object, it has no NetBoxObjectSpec, and the type assertion above returned early for
+// it.
 func (m *materialisation) inherit(obj client.Object) {
-	child, ok := obj.(Object)
-	if !ok {
-		return
-	}
+	parent := m.p.obj.NetBoxSpec()
 
-	spec, parent := child.NetBoxSpec(), m.p.obj.NetBoxSpec()
+	switch child := obj.(type) {
+	case Object:
+		spec := child.NetBoxSpec()
 
-	if spec.EndpointRef == "" {
-		spec.EndpointRef = parent.EndpointRef
-	}
+		if spec.EndpointRef == "" {
+			spec.EndpointRef = parent.EndpointRef
+		}
 
-	if spec.DeletionPolicy == "" {
-		spec.DeletionPolicy = parent.DeletionPolicy
+		if spec.DeletionPolicy == "" {
+			spec.DeletionPolicy = parent.DeletionPolicy
+		}
+
+	case Claim:
+		spec := child.ClaimSpec()
+
+		if spec.EndpointRef == "" {
+			spec.EndpointRef = parent.EndpointRef
+		}
+
+		// A claim's own default is Delete where an IPAM object's is Retain (#225), and
+		// inheriting the parent's is what makes the chain honest either way: a VM deleted with
+		// deletionPolicy: Delete frees the addresses its claims were handed, and one with
+		// Retain leaves them -- as orphans, which docs/concepts/deletion.md says plainly
+		// rather than sells.
+		if spec.DeletionPolicy == "" {
+			spec.DeletionPolicy = parent.DeletionPolicy
+		}
 	}
 }
 
@@ -753,13 +775,22 @@ func describeController(obj client.Object) string {
 
 // childReady is the child's own Ready condition, read off the object the apply returned -- so
 // status.children carries this pass's answer rather than the previous one's.
+//
+// Both status shapes, for the reason inherit() reads both spec shapes: a claim is a materialised
+// child like any other and its conditions live on NetBoxClaimStatus, so reading only
+// NetBoxObjectStatus would leave every claim child permanently not-Ready and every parent that
+// declared one permanently PendingChildren (NBO-033).
 func childReady(obj client.Object) bool {
-	child, ok := obj.(Object)
-	if !ok {
-		return false
+	switch child := obj.(type) {
+	case Object:
+		return meta.IsStatusConditionTrue(
+			child.NetBoxStatus().Conditions, netboxv1alpha1.ConditionReady)
+	case Claim:
+		return meta.IsStatusConditionTrue(
+			child.ClaimStatus().Conditions, netboxv1alpha1.ConditionReady)
 	}
 
-	return meta.IsStatusConditionTrue(child.NetBoxStatus().Conditions, netboxv1alpha1.ConditionReady)
+	return false
 }
 
 // overlay returns base with add's entries on top, without mutating base.

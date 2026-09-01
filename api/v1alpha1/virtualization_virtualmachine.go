@@ -92,7 +92,18 @@ const (
 // the IPAM kinds: a deleted VM record is re-creatable from the manifest that described it,
 // and a prefix's history is not (docs/reference/netboxprefix.md).
 //
+// **The two `primary` rules are enforced twice on purpose.** `primary_ip4` has exactly one
+// source: either `primaryIP4Ref` or one inline address marked `primary`, never both and never
+// two of the latter. The rules below count the sources and refuse a second at admission; the
+// controller counts them again and reports `Conflict` writing nothing
+// (virtualization_virtualmachine_inline.go, DerivedRefs). Defence in depth because the CEL
+// half is a nested list comprehension, which the API server costs at the product of both
+// lists' maxima -- a rule that grows out of its cost budget stops being installed, and a rule
+// that silently is not evaluated is worse than no rule at all.
+//
 // +kubebuilder:validation:XValidation:rule="has(self.clusterRef) || has(self.siteRef) || has(self.deviceRef)",message="a virtual machine must set at least one of clusterRef, siteRef or deviceRef"
+// +kubebuilder:validation:XValidation:rule="!has(self.interfaces) || self.interfaces.filter(i, has(i.addresses) && i.addresses.exists(a, has(a.primary) && a.primary && has(a.address) && !a.address.contains(':'))).size() + (has(self.primaryIP4Ref) ? 1 : 0) <= 1",message="primary_ip4 has one source: set primaryIP4Ref, or mark exactly one inline IPv4 address primary, not both"
+// +kubebuilder:validation:XValidation:rule="!has(self.interfaces) || self.interfaces.filter(i, has(i.addresses) && i.addresses.exists(a, has(a.primary) && a.primary && has(a.address) && a.address.contains(':'))).size() + (has(self.primaryIP6Ref) ? 1 : 0) <= 1",message="primary_ip6 has one source: set primaryIP6Ref, or mark exactly one inline IPv6 address primary, not both"
 type NetBoxVirtualMachineSpec struct {
 	NetBoxObjectSpec `json:",inline"`
 
@@ -323,6 +334,53 @@ type NetBoxVirtualMachineSpec struct {
 	// (docs/concepts/field-ownership.md).
 	// +optional
 	Comments string `json:"comments,omitempty"`
+
+	// Interfaces are the VM's network interfaces, each materialised as its own
+	// NetBoxVMInterface CR owned by this VM -- and each of their `addresses` as a
+	// NetBoxIPAddress or a NetBoxIPAddressClaim
+	// (docs/concepts/inline-children.md, docs/decisions/0003-ownership-and-references.md rule
+	// 5). Nothing is hidden: the children appear in `kubectl get`, carry their own conditions
+	// and write their own NetBox objects, and `kubectl delete` on this VM takes them with it.
+	//
+	// A **map list keyed by name**, which is what makes two entries named `eth0` a rejection
+	// by the API server rather than a Conflict discovered at reconcile time: the key is what
+	// makes the derived child name and the owned-by path unique, so a duplicate is not a
+	// state the operator can be in. It also gives server-side apply per-entry ownership, so
+	// two writers editing different interfaces of one VM do not fight.
+	//
+	// Bounded at 32. Unlike a to-many reference's 256, this is a real-world maximum rather
+	// than a convention: VMware caps a VM at 10 vNICs and a virtio guest at ~31 slots, so 32
+	// is past every hypervisor's own limit -- and it is also a bound the *nested* lists below
+	// are multiplied by when the API server costs their CEL rules
+	// (docs/concepts/references.md, "A list needs a bound").
+	//
+	// Omit it and this VM materialises no interfaces. `[]` is the same statement -- the sugar
+	// declares no children -- and prunes the ones a previous revision declared; it does not
+	// touch a hand-written NetBoxVMInterface that points at this VM, which is never
+	// materialised, never pruned and never appears in `status.children`.
+	// +kubebuilder:validation:MaxItems=32
+	// +listType=map
+	// +listMapKey=name
+	// +optional
+	Interfaces []InlineVMInterface `json:"interfaces,omitempty"`
+
+	// Disks are the VM's virtual disks, each materialised as its own NetBoxVirtualDisk CR
+	// owned by this VM. A map list keyed by name and bounded at 32, for the reasons
+	// `interfaces` is.
+	//
+	// NetBox fills this VM's `disk` column from the aggregate of these when `spec.disk` is
+	// unset, and **rejects** a `spec.disk` that disagrees with the aggregate
+	// (`netbox/virtualization/models/virtualmachines.py` lines 330-341, NetBox 4.6.8) -- a
+	// loud 400 reported as `Ready=False, Reason=Invalid` naming both numbers, not a PATCH
+	// loop. Setting both consistently is legal, so nothing here forbids the combination.
+	//
+	// Omit it and this VM materialises no disks; `[]` prunes the ones a previous revision
+	// declared.
+	// +kubebuilder:validation:MaxItems=32
+	// +listType=map
+	// +listMapKey=name
+	// +optional
+	Disks []InlineVirtualDisk `json:"disks,omitempty"`
 }
 
 // NetBoxVirtualMachine is one virtualization.VirtualMachine in NetBox.

@@ -893,7 +893,55 @@ func SpecMap(obj client.Object) (map[string]json.RawMessage, error) {
 		return nil, fmt.Errorf("decoding the spec of %s/%s: %w", obj.GetNamespace(), obj.GetName(), err)
 	}
 
-	return decoded.Spec, nil
+	spec, err := foldDerivedRefs(obj, decoded.Spec)
+	if err != nil {
+		return nil, err
+	}
+
+	return spec, nil
+}
+
+// foldDerivedRefs adds the references an object's inline sugar derives to its spec.
+//
+// Here, in SpecMap, because SpecMap is *the* representation both readings of a spec go through
+// -- the reference set and the polymorphic pairs -- and a derived reference the payload builder
+// declares while the resolver cannot see it is a field that is deferred forever over a column
+// nothing will ever write (NBO-033, netboxv1alpha1.DerivedSpecRefs).
+//
+// A field the spec already holds is left alone rather than refused. Two declarations for one
+// column is a real conflict and it is the *engine's* to report, with both locations named and
+// zero writes; refusing it here would turn it into "the operator could not read this spec",
+// which is what the admission webhook says when a check could not be run at all.
+func foldDerivedRefs(
+	obj client.Object, spec map[string]json.RawMessage,
+) (map[string]json.RawMessage, error) {
+	derived, err := netboxv1alpha1.DerivedSpecRefs(obj)
+	if err != nil || len(derived) == 0 {
+		// The error is dropped deliberately, for the reason above: this reading of the spec has
+		// no way to report a conflict that is not misleading, and the pass that does report it
+		// runs first.
+		return spec, nil //nolint:nilerr // the engine reports the clash; see the doc comment
+	}
+
+	if spec == nil {
+		spec = make(map[string]json.RawMessage, len(derived))
+	}
+
+	for _, ref := range derived {
+		if _, written := spec[ref.Field]; written {
+			continue
+		}
+
+		raw, err := json.Marshal(ref.Ref)
+		if err != nil {
+			return nil, fmt.Errorf("encoding the derived spec.%s of %s/%s: %w",
+				ref.Field, obj.GetNamespace(), obj.GetName(), err)
+		}
+
+		spec[ref.Field] = raw
+	}
+
+	return spec, nil
 }
 
 // refsIn decodes one field's value into the references it carries, in the shape its class

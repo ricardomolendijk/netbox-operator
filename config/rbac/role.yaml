@@ -46,7 +46,6 @@ rules:
   - netboxexporttemplates
   - netboxfhrpgroupassignments
   - netboxfhrpgroups
-  - netboxipaddressclaims
   - netboxiprangeclaims
   - netboxipranges
   - netboxmanufacturers
@@ -57,9 +56,7 @@ rules:
   - netboxsavedfilters
   - netboxservices
   - netboxservicetemplates
-  - netboxvirtualdisks
   - netboxvirtualmachines
-  - netboxvminterfaces
   verbs:
   - get
   - list
@@ -198,6 +195,7 @@ rules:
   - netbox.kubeforge.org
   resources:
   - netboxinterfaces
+  - netboxipaddressclaims
   - netboxipaddresses
   - netboxlocations
   - netboxprefixes
@@ -208,8 +206,10 @@ rules:
   - netboxtags
   - netboxtenantgroups
   - netboxtenants
+  - netboxvirtualdisks
   - netboxvlangroups
   - netboxvlans
+  - netboxvminterfaces
   - netboxvrfs
   verbs:
   - create

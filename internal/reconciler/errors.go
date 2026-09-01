@@ -284,6 +284,13 @@ func classifyInvalid(err error, resync time.Duration) (outcome, bool) {
 	// first, and the same request will fail identically until it does.
 	case errors.As(err, &protected):
 		return conflict, true
+	// Two declarations for one column -- an explicit spec.primaryIP4Ref beside an inline
+	// address marked primary, or two of the latter (NBO-033). A Conflict rather than an
+	// Invalid, because the payload NetBox would have been sent is not malformed: the spec
+	// holds two answers to one question and the operator refuses to pick, which is the same
+	// shape as two NetBox rows matching one natural key.
+	case errors.Is(err, netboxv1alpha1.ErrDerivedRefConflict):
+		return conflict, true
 	case errors.As(err, &validation):
 		return invalid, true
 	// Reserved by the operator's own bootstrap. Its own reason rather than Invalid or
@@ -298,7 +305,8 @@ func classifyInvalid(err error, resync time.Duration) (outcome, bool) {
 		}, true
 	case errors.Is(err, errUnmappedField), errors.Is(err, errNoCustomFields),
 		errors.Is(err, errUnfilterable), errors.Is(err, errNoObjectID),
-		errors.Is(err, errDuplicateNeedsProvenance):
+		errors.Is(err, errDuplicateNeedsProvenance),
+		errors.Is(err, errDuplicateOnGeneratedChild):
 		return invalid, true
 	// Two instructions in the spec that contradict each other. Invalid rather than Conflict:
 	// nothing about NetBox's contents is wrong, and the fix is in the manifest.

@@ -6,6 +6,11 @@ import (
 	"slices"
 	"strings"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	netboxv1alpha1 "github.com/ricardomolendijk/netbox-operator/api/v1alpha1"
 	"github.com/ricardomolendijk/netbox-operator/internal/netbox"
 )
 
@@ -63,6 +68,23 @@ var errDuplicateNeedsProvenance = errors.New(
 	"spec.allowDuplicate needs the endpoint's spec.managedBy: without a provenance stamp " +
 		"there is nothing that could tell this object's address apart from an identical one")
 
+// errDuplicateOnGeneratedChild is spec.allowDuplicate on an object the operator materialised.
+//
+// The same double-allocation shape as the sentinel above, reached from the other direction and
+// worse. A materialised child is re-created from an unchanged manifest by design -- that is what
+// deriving its name deterministically is *for* -- so it is the object most likely to be created
+// again after losing status.id, which with the flag set means a second NetBox object rather than
+// its own. Refused before the lookup, so nothing is created either way.
+//
+// The inline sugar has no such field, so a parent cannot ask for one (NBO-033), and the
+// admission webhook refuses a hand edit that adds it at apply time. This is the reconcile-time
+// backstop that keeps the webhook's failurePolicy: Ignore honest
+// (docs/operations/admission-webhooks.md): with the webhook down, the edit is admitted and the
+// object stops rather than duplicating.
+var errDuplicateOnGeneratedChild = errors.New(
+	"spec.allowDuplicate may not be set on an object the operator materialised: a child that " +
+		"lost status.id would create a second netbox object rather than find its own")
+
 // duplicate turns one candidate's lookup result into the object this pass may act on.
 //
 // It is a pass-through for every kind whose Descriptor declares no DuplicateSpec, and for
@@ -72,6 +94,10 @@ var errDuplicateNeedsProvenance = errors.New(
 func (p *pass) duplicate(live netbox.Object, err error) (match, error) {
 	if !p.allowsDuplicate() {
 		return match{live: live, byNaturalKey: live != nil}, err
+	}
+
+	if generatedChild(p.obj) {
+		return match{}, errDuplicateOnGeneratedChild
 	}
 
 	if !p.stampIdentifies() {
@@ -157,6 +183,26 @@ func (p *pass) claimOwnStamp(live netbox.Object) (match, error) {
 	p.obj.NetBoxStatus().ID = int64(id)
 
 	return match{live: live}, nil
+}
+
+// generatedChild reports whether the operator materialised obj, which it can tell from the
+// *controller* owner reference naming one of its own Kinds.
+//
+// The controller reference specifically, and the distinction is the same one specGuard makes:
+// ADR-0003 has the operator set two kinds of owner reference in this group, and only the
+// controller one means "the operator created this". A *non-controller* containment reference is
+// on an ordinary hand-written CR whose parent happens to be in the same namespace, and treating
+// that as generated would refuse a legitimate anycast address the moment its interface moved
+// into the same namespace.
+func generatedChild(obj client.Object) bool {
+	owner := metav1.GetControllerOf(obj)
+	if owner == nil {
+		return false
+	}
+
+	group, err := schema.ParseGroupVersion(owner.APIVersion)
+
+	return err == nil && group.Group == netboxv1alpha1.GroupName
 }
 
 // allowsDuplicate reports whether this object has asked for duplicate handling.

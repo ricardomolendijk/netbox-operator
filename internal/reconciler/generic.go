@@ -391,6 +391,14 @@ func (p *pass) build(ctx context.Context) error {
 	// list is not a NetBox column and must not reach a payload (payload.go).
 	spec.dropInlineChildren(p.obj)
 
+	// The opposite direction, and the only window that works for it: a reference the inline
+	// sugar *derives* has to be in the map desired() reads, so that it lands in state.Declared
+	// and is deferred and resolved exactly as a written one is -- and it must not be in the map
+	// restoreEmpty compares against, which is about what the user wrote (NBO-033).
+	if err := spec.derive(p.obj); err != nil {
+		return err
+	}
+
 	desired, state, refs, err := spec.desired(p.desc)
 	if err != nil {
 		return err
