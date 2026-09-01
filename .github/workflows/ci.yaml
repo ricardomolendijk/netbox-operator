@@ -117,11 +117,11 @@ jobs:
       - name: Package the chart
         run: make helm-package
 
-      # `make test-e2e` self-skips until the harness lands (#29). When it does, this is
-      # where a kind-based install/upgrade/uninstall smoke test hangs off -- the chart is
-      # the natural place for it, and the acceptance criteria in the issue name it.
-      - name: e2e placeholder
-        run: make test-e2e
+      # No e2e step here. The suite that landed with NBO-017 (#29) brings up a kind cluster
+      # and a real NetBox in docker-compose and runs for tens of minutes, which is too slow
+      # to sit in front of every PR -- so it lives in e2e.yaml, on a schedule, on a label
+      # and on demand. `make vet` in the build job already compiles test/e2e, so the suite
+      # cannot rot unnoticed between runs.
 
   python:
     name: lint the schema extractors

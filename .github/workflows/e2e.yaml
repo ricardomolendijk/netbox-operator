@@ -1,0 +1,90 @@
+name: e2e
+
+# Deliberately not on every pull request. The suite brings up a kind cluster and a real
+# NetBox 4.6.8 with its Postgres and Redis, then applies the convergence graph once per
+# permutation -- tens of minutes of real API round trips. Putting that in front of every PR
+# would make the ordering gate the slowest thing in the repository and the first thing
+# somebody switched off.
+#
+# So: nightly, on a pull request that carries the label whose area it covers, and on demand.
+on:
+  schedule:
+    # 03:17 UTC. Off the hour, because every scheduled workflow on GitHub fires on the hour
+    # and the runner queue at :00 is minutes long.
+    - cron: "17 3 * * *"
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+  workflow_dispatch:
+    inputs:
+      permutations:
+        description: How many seeded random permutations to run.
+        required: false
+        default: "20"
+      seed:
+        description: Reproduce a previous run by pasting its printed seed.
+        required: false
+        default: ""
+
+concurrency:
+  group: e2e-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  convergence:
+    name: random/reverse-order convergence
+    # A pull_request run only proceeds when the PR is labelled for the area this gate covers.
+    # The `if` is on the job rather than the trigger because GitHub cannot filter a
+    # pull_request event by label, and a skipped job is green -- so a PR without the label is
+    # not blocked by a check that never ran.
+    if: >-
+      github.event_name != 'pull_request' ||
+      contains(github.event.pull_request.labels.*.name, 'area/refs')
+    runs-on: ubuntu-latest
+    # Well above the suite's own 150m `go test -timeout`, so a hung run is killed by the test
+    # binary -- which prints Ginkgo's progress report -- rather than by the runner, which
+    # prints nothing.
+    timeout-minutes: 180
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up Go
+        uses: actions/setup-go@41dfa10bad2bb2ae585af6ee5bb4d7d973ad74ed # v5.1.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Cache tool binaries
+        uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
+        with:
+          path: bin
+          key: tools-${{ runner.os }}-${{ hashFiles('Makefile') }}
+
+      # Pulled before the suite runs so that a registry hiccup is a legible failure here
+      # rather than a compose timeout thirty minutes in. The tags are the compose file's
+      # defaults; keep them equal to it.
+      - name: Pre-pull the NetBox stack
+        run: |
+          docker pull netboxcommunity/netbox:v4.6.8
+          docker pull postgres:17-alpine
+          docker pull valkey/valkey:8.1-alpine
+
+      # One `make` target, like every other job here: a CI failure is reproducible locally
+      # with the same command. The target installs kind and helm into ./bin itself and skips
+      # cleanly when there is no Docker daemon.
+      - name: Run the convergence gate
+        env:
+          NBO_E2E_PERMUTATIONS: ${{ github.event.inputs.permutations || '20' }}
+          NBO_E2E_SEED: ${{ github.event.inputs.seed || '' }}
+        run: make test-e2e
+
+      # No artifact upload. `-ginkgo.v` puts the whole transcript in the job log -- the seed,
+      # every applied order, the per-object conditions on a timeout and the dump diff on a
+      # mismatch -- and the only other file a run produces is a kubeconfig for a cluster that
+      # no longer exists.
+      #
+      # The manager's own log is the one thing not in there, and it is not collected because
+      # the assertion that reads it already puts the offending lines in the failure message.
