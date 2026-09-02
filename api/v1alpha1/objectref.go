@@ -419,6 +419,43 @@ type (
 	// `wireless.WirelessLAN.group` points at -- so one alias serves both the tree edge and
 	// the SSID's group.
 	WirelessLANGroupRef ObjectRef
+
+	// The five aliases below are NBO-057's catalogue slice of the `circuits` app. Unlike
+	// CircuitTerminationRef above, every one of them has a Descriptor in this build, so every
+	// one of them resolves rather than reporting RefKindUnavailable.
+
+	// ProviderRef points at a NetBoxProvider (circuits.Provider, circuits/providers).
+	//
+	// The root of the `circuits` app: `ProviderAccount`, `ProviderNetwork` and `Circuit` each
+	// carry a required foreign key to it, all three `on_delete=PROTECT`
+	// (docs/netbox-schema.md -> circuits.Provider and the three models naming it).
+	ProviderRef ObjectRef
+
+	// ProviderAccountRef points at a NetBoxProviderAccount (circuits.ProviderAccount,
+	// circuits/provider-accounts).
+	ProviderAccountRef ObjectRef
+
+	// ProviderNetworkRef points at a NetBoxProviderNetwork (circuits.ProviderNetwork,
+	// circuits/provider-networks).
+	//
+	// The provider's own network on the far side of the demarcation point. Also one member of
+	// the generic foreign key on `circuits.CircuitTermination`, which NBO-057 defers -- the
+	// alias is declared now because the Kind ships now, not because that union does.
+	ProviderNetworkRef ObjectRef
+
+	// CircuitTypeRef points at a NetBoxCircuitType (circuits.CircuitType,
+	// circuits/circuit-types).
+	//
+	// Distinct from VirtualCircuitTypeRef, which does not exist yet: `circuits.CircuitType`
+	// and `circuits.VirtualCircuitType` are two models over one `BaseCircuitType`, with two
+	// endpoints and two tables, so one alias could not serve both.
+	CircuitTypeRef ObjectRef
+
+	// CircuitRef points at a NetBoxCircuit (circuits.Circuit, circuits/circuits).
+	//
+	// What `circuits.CircuitTermination.circuit` points at -- `on_delete=CASCADE`, so when
+	// that Kind ships it takes this as its containment parent.
+	CircuitRef ObjectRef
 )
 
 // TargetGVK reports the Kind this reference resolves against.
@@ -716,7 +753,52 @@ var (
 	_ RefTarget = RackTypeRef{}
 	_ RefTarget = RackGroupRef{}
 	_ RefTarget = RackRef{}
+	_ RefTarget = ProviderRef{}
+	_ RefTarget = ProviderAccountRef{}
+	_ RefTarget = ProviderNetworkRef{}
+	_ RefTarget = CircuitTypeRef{}
+	_ RefTarget = CircuitRef{}
 )
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r ProviderRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxProvider")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r ProviderRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r ProviderAccountRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxProviderAccount")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r ProviderAccountRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r ProviderNetworkRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxProviderNetwork")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r ProviderNetworkRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r CircuitTypeRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxCircuitType")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r CircuitTypeRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r CircuitRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxCircuit")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r CircuitRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
 
 // TargetGVK reports the Kind this reference resolves against.
 func (r RackRoleRef) TargetGVK() schema.GroupVersionKind {
