@@ -398,7 +398,7 @@ The honest table, because "the identity is deterministic" is necessary and not s
 | Cluster torn down, namespace deleted, finalizers stripped | survives | **reclaims the same address** |
 | Claim deleted with `kubectl delete`, `deletionPolicy: Retain` | survives | **reclaims the same address** |
 | Claim deleted with `kubectl delete`, default `deletionPolicy: Delete` | **freed, and may already be somebody else's** | allocates whatever is free now — the same address only if nothing took it |
-| Claim renamed, `spec.allocationIdentity` set to the old identity | survives | **reclaims the same address** |
+| Claim renamed, `spec.allocationIdentity` set to the old identity | survives | **reclaims the same address, once the object's owner stamp names the new claim** — see [`ForeignAllocation`](#foreignallocation--the-identity-names-an-object-this-claim-cannot-be-shown-to-own) |
 | Claim renamed, nothing set | survives, now orphaned and reported | allocates a **new** address; the old one stays until somebody deletes it |
 | The NetBox object deleted in NetBox | gone | allocates a new address — there is nothing left to reclaim |
 | NetBox restored from empty | gone | allocates a new address; see [restoring NetBox from backup](../operations/gitops.md#restoring-netbox-from-backup) |
@@ -429,10 +429,11 @@ accepting the out-of-pool object would make `prefixRef` a lie.
 **Fix:** either delete the stale NetBox object, or set `spec.allocationIdentity` to the
 identity of the object this claim should keep.
 
-### `ForeignAllocation` — the identity names somebody else's object
+### `ForeignAllocation` — the identity names an object this claim cannot be shown to own
 
 Only reachable with `spec.allocationIdentity` set. The object carrying the identity this claim
-was *given* is stamped as belonging to a different CR, or to a different cluster.
+was *given* is either stamped as belonging to a different CR or cluster, or carries no
+provenance this endpoint can read at all.
 
 The identity is the whole of a claim's ownership proof: one custom field is matched and the
 match is adopted. That is safe for a derived identity, which is
@@ -442,12 +443,29 @@ they would need is printed in the other claim's `status.allocationIdentity`. Wit
 refusal a claim in one namespace could adopt another namespace's address, report it as its own,
 and delete the live NetBox object with itself under the default `deletionPolicy: Delete`.
 
-Note what stays allowed: an object with **no** owner stamp is unattributable rather than
-foreign, so pointing a given identity at a pre-existing NetBox object — the case the field
-exists for — still reclaims it.
+**Why an unreadable stamp is refused too.** A stamp is read back by the field names of the
+endpoint doing the reading, and for a claim in another namespace that is an endpoint that
+namespace wrote. Rename `uidField`, `clusterField` and `ownerField` in its `spec.managedBy` —
+keeping `allocationIdentityField`, which has to match or nothing would be found — and every
+object the endpoint next door stamped reads back as unstamped. So "unstamped" cannot be read as
+"unowned": that made the guard switchable off by the party it guards against
+([#299](https://github.com/ricardomolendijk/netbox-operator/issues/299)), and an object
+carrying somebody's allocation identity that this endpoint cannot attribute is now refused
+rather than adopted.
 
-**Fix:** unset `spec.allocationIdentity` and let the claim derive its own, or have the owner
-release the object first.
+This is a fail-closed choice with a cost, and the cost falls on one case: a **given** identity
+pointed at an object nobody stamped — a pre-existing NetBox address being migrated, or the
+object a claim held under an earlier name. Both are refused until the object is stamped for the
+claim that should have it. Nothing is written, deleted or lost in the meantime, and every
+**derived** identity is untouched: cluster rebuilds, re-applied manifests and recovery from a
+lost status write never reach this check.
+
+**Fix:** either unset `spec.allocationIdentity` and let the claim derive its own and allocate;
+or have the other owner release the object; or — when the object really is this claim's — hand
+it over explicitly in NetBox by setting the endpoint's owner custom field (`k8s_owner` by
+default) on it to `<lowercased kind>/<namespace>/<name>`, e.g.
+`netboxipaddressclaim/homelab/dns-eth0`. The refusal message names the field and the value to
+use. The next pass reclaims the object.
 
 ### `IdempotencyKeyUnavailable` — nowhere to store an identity
 

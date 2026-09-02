@@ -99,7 +99,9 @@ const (
 	ReasonAllocationConflict = "AllocationConflict"
 
 	// ReasonForeignAllocation is on Allocated and on Ready: the object this claim's
-	// spec.allocationIdentity names is stamped as belonging to a different CR or cluster.
+	// spec.allocationIdentity names is not one this endpoint can attribute to this claim --
+	// either it is stamped as belonging to a different CR or cluster, or it carries no
+	// provenance this endpoint can read at all.
 	//
 	// Only a *given* identity reaches it. A derived identity contains the claim's own
 	// namespace, so no namespace can compute another's and the derived path cannot produce
@@ -109,9 +111,13 @@ const (
 	// The refusal exists because the identity is the claim engine's whole ownership proof: it
 	// is matched on one custom field and the match is then adopted, so a free-text override
 	// pointed at somebody else's identity would adopt their address and, under
-	// deletionPolicy: Delete, delete their NetBox object on the way out. An unstamped object
-	// is not foreign and is still reclaimable, which is the migration the field was added
-	// for.
+	// deletionPolicy: Delete, delete their NetBox object on the way out.
+	//
+	// The unreadable case is refused too (issue #299) because a stamp is read by the field
+	// names of the endpoint doing the reading: an endpoint that renames uidField, clusterField
+	// and ownerField reads its neighbour's stamps as absent, so "unstamped" cannot be taken as
+	// "unowned" without handing the guard's off switch to the party it guards against. The
+	// message names the custom field to set to hand such an object over deliberately.
 	ReasonForeignAllocation = "ForeignAllocation"
 
 	// ReasonIdempotencyKeyUnavailable is on Allocated and on Ready: this endpoint has no
@@ -242,13 +248,20 @@ type NetBoxClaimSpec struct {
 	// that adding it is allowed and changing it is not: an identity that moves is a claim
 	// pointed at somebody else's address.
 	//
-	// It may not point at an object another CR is stamped as owning. Unlike the derived
-	// value -- which contains this claim's own namespace, so no namespace can compute
-	// another's -- this is a string anybody may type, and the identity is the only thing a
-	// reclaim matches on. So a given identity whose object carries a foreign owner or
-	// cluster stamp is refused with Reason=ForeignAllocation rather than adopted. An
-	// object carrying no stamp is unattributable rather than foreign and is still
-	// reclaimable, which is the pre-existing-NetBox-object case this field exists for.
+	// It may only point at an object this endpoint can attribute to this claim. Unlike the
+	// derived value -- which contains this claim's own namespace, so no namespace can
+	// compute another's -- this is a string anybody may type, and the identity is the only
+	// thing a reclaim matches on. So a given identity is refused with
+	// Reason=ForeignAllocation, rather than adopted, both when the object carries a foreign
+	// owner or cluster stamp and when it carries no provenance this endpoint can read: an
+	// unreadable stamp is an object stamped under another endpoint's field names as much as
+	// it is an unmanaged one, and the two cannot be told apart from here (issue #299).
+	//
+	// Pointing this at an object this claim did not allocate itself therefore takes one step
+	// in NetBox first -- a pre-existing object, or the object the claim held under its
+	// previous name, alike: stamp it for this claim by setting the endpoint's ownerField on
+	// it to `<lowercased kind>/<namespace>/<name>`, and the reclaim goes through. The
+	// refusal message spells out the field and the value.
 	//
 	// Absent and empty mean the same thing here -- derive it -- so this field has two states
 	// rather than the three of docs/concepts/field-ownership.md. Nothing is written to NetBox

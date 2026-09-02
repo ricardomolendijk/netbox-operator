@@ -751,8 +751,9 @@ func (p *claimPass) reclaim(ctx context.Context, live netbox.Object) (ctrl.Resul
 	})
 }
 
-// refuseForeignReclaim stops a *given* identity from reclaiming an object another CR is
-// stamped as owning.
+// refuseForeignReclaim stops a *given* identity from reclaiming any object this endpoint
+// cannot attribute to this CR: one another CR is stamped as owning, and one carrying no stamp
+// this endpoint can read.
 //
 // The gap this closes. An allocation identity is the whole of the claim engine's ownership
 // proof: findByIdentity matches one custom field, and reclaim then adopts whatever came back.
