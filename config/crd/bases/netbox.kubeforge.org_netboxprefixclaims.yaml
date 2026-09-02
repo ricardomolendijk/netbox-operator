@@ -400,6 +400,24 @@ spec:
                   retained before whatever blocked it had a chance to clear.
                 format: date-time
                 type: string
+              lastVerifiedAt:
+                description: |-
+                  LastVerifiedAt is when NetBox last confirmed that the value in this status is still
+                  held by an object carrying this claim's allocation identity
+                  (https://github.com/ricardomolendijk/netbox-operator/issues/167).
+
+                  A status field rather than a timer in memory, for the reason DeletionAttempts is one:
+                  a controller has no memory between passes, so a schedule has to survive a requeue, a
+                  leader election and a restart. It is also what keeps the verification a *periodic*
+                  read rather than a per-reconcile one -- a settled claim is woken by its own status
+                  writes, by its pool changing and by every informer resync, and a check keyed on
+                  wake-ups rather than on the clock would put a NetBox request behind each of them.
+
+                  Written by the allocating pass too: the read-after-write it already does proves the
+                  same three facts this field dates, so a freshly allocated claim is not re-read a
+                  moment later to learn what it has just been told.
+                format: date-time
+                type: string
               netboxID:
                 description: |-
                   NetBoxID is the allocated object's NetBox primary key. Zero until an allocation is

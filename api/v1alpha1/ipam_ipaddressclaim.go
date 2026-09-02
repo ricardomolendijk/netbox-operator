@@ -89,14 +89,43 @@ const (
 	// UID-keyed identity never could.
 	ReasonReclaimedOutsidePool = "ReclaimedOutsidePool"
 
-	// ReasonAllocationConflict is on Allocated and on Ready: more than one NetBox object
-	// carries this claim's allocation identity.
+	// ReasonAllocationConflict is on Allocated and on Ready: NetBox holds an object this
+	// claim cannot prove is its own where its own should be.
 	//
-	// The claim never allocates and never deletes. Two objects sharing one identity means a
-	// previous over-allocation, and the operator cannot prove which of them is unused -- a
-	// NIC or a DNS record may be pointing at either. The message names every match, because
-	// the next step is a human choosing.
+	// Two ways in, and they are the same finding at two points in a claim's life.
+	//
+	// Before an allocation: more than one NetBox object carries this claim's allocation
+	// identity, which means a previous over-allocation. The claim never allocates and never
+	// deletes -- it cannot prove which of them is unused, and a NIC or a DNS record may be
+	// pointing at either. The message names every match, because the next step is a human
+	// choosing.
+	//
+	// After one: the periodic verification of a settled claim's pin found the value in
+	// status held by an object carrying a *different* allocation identity, or none at all
+	// (https://github.com/ricardomolendijk/netbox-operator/issues/167). Ready goes False and
+	// Allocated stays True -- the allocation did happen, and this condition is about who
+	// holds it now. Nothing is written and nothing is deleted, for the same reason: both
+	// claims are entitled to the address and only a human knows which NIC, DNS record or
+	// firewall rule is already using it.
 	ReasonAllocationConflict = "AllocationConflict"
+
+	// ReasonAllocationLost is on Ready: no NetBox object holds the value this claim reports,
+	// and none carries its allocation identity.
+	//
+	// The post-restore half of https://github.com/ricardomolendijk/netbox-operator/issues/167.
+	// A NetBox restored from a snapshot predating the allocation has no record of it, so the
+	// claim's status.address is a pin backed by nothing -- and NetBox is free to hand that
+	// same value to the next claim that asks, which is how one address ends up under two
+	// claims that both report Ready. It is also what a hand-deleted allocation looks like.
+	//
+	// Separate from AllocationConflict because the remedy differs. Nothing holds the value,
+	// so nothing is at risk from acting: the claim can be deleted and re-applied under a new
+	// name, or the NetBox object re-created. When something else *does* hold it, acting on
+	// the wrong one of the two takes an address that is in service.
+	//
+	// Allocated is left True, as it is for every state after an allocation: the address was
+	// allocated, and ADR-0004 has no event that un-allocates it.
+	ReasonAllocationLost = "AllocationLost"
 
 	// ReasonForeignAllocation is on Allocated and on Ready: the object this claim's
 	// spec.allocationIdentity names is not one this endpoint can attribute to this claim --
@@ -154,8 +183,16 @@ const (
 	// the pool.
 	EventReclaimedOutsidePool = "ReclaimedOutsidePool"
 
-	// EventAllocationConflict is two or more objects carrying one identity.
+	// EventAllocationConflict is two or more objects carrying one identity, or -- since #167
+	// -- a settled claim's address found in the hands of a different allocation identity.
 	EventAllocationConflict = "AllocationConflict"
+
+	// EventAllocationLost is a settled claim whose allocation is no longer in NetBox at all.
+	//
+	// A Warning, and its own reason rather than a second AllocationConflict: an operator
+	// paging on "somebody else has my address" and an operator paging on "my address is gone"
+	// are answering different questions, and the safe remedies are not the same one.
+	EventAllocationLost = "AllocationLost"
 
 	// EventForeignAllocation is a spec.allocationIdentity naming an object that is stamped as
 	// belonging to another CR or another cluster. It names the other writer, because the next
@@ -380,6 +417,23 @@ type NetBoxClaimStatus struct {
 	// afterwards.
 	// +optional
 	AllocatedAt *metav1.Time `json:"allocatedAt,omitempty"`
+
+	// LastVerifiedAt is when NetBox last confirmed that the value in this status is still
+	// held by an object carrying this claim's allocation identity
+	// (https://github.com/ricardomolendijk/netbox-operator/issues/167).
+	//
+	// A status field rather than a timer in memory, for the reason DeletionAttempts is one:
+	// a controller has no memory between passes, so a schedule has to survive a requeue, a
+	// leader election and a restart. It is also what keeps the verification a *periodic*
+	// read rather than a per-reconcile one -- a settled claim is woken by its own status
+	// writes, by its pool changing and by every informer resync, and a check keyed on
+	// wake-ups rather than on the clock would put a NetBox request behind each of them.
+	//
+	// Written by the allocating pass too: the read-after-write it already does proves the
+	// same three facts this field dates, so a freshly allocated claim is not re-read a
+	// moment later to learn what it has just been told.
+	// +optional
+	LastVerifiedAt *metav1.Time `json:"lastVerifiedAt,omitempty"`
 
 	// Provenance is the stamp the allocated object carries in NetBox: the tag and the
 	// custom fields written with the allocating POST, as they were written.

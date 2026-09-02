@@ -1597,6 +1597,10 @@ func (in *NetBoxClaimStatus) DeepCopyInto(out *NetBoxClaimStatus) {
 		in, out := &in.AllocatedAt, &out.AllocatedAt
 		*out = (*in).DeepCopy()
 	}
+	if in.LastVerifiedAt != nil {
+		in, out := &in.LastVerifiedAt, &out.LastVerifiedAt
+		*out = (*in).DeepCopy()
+	}
 	if in.Provenance != nil {
 		in, out := &in.Provenance, &out.Provenance
 		*out = new(ProvenanceStatus)
