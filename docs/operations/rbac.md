@@ -44,9 +44,49 @@ object names. So the credential label narrows *what the operator caches and can 
 the namespaced `Role`s narrow *what its ServiceAccount is permitted to read*. Both are
 needed, and they fail differently — see below.
 
+### The grant is every Secret in the namespace, labelled or not
+
+Said plainly, because the label and the `Role` are easy to read as one mechanism: the label
+is a cache filter, not a permission boundary. What the `Role` above says is `get`, `list`
+and `watch` on `secrets` in that namespace, and that means all of them. Anything holding
+the operator's ServiceAccount token can read **every** Secret in **every** listed
+namespace — unlabelled ones, and ones belonging to other applications, included.
+
+`resourceNames` looks like the way to narrow that to the Secrets an endpoint actually
+names, and it cannot be used here. RBAC matches `resourceNames` against the name in the
+request, and a `LIST` or a `WATCH` over a collection carries no name: a rule with
+`resourceNames` authorises neither. The informer LISTs and then WATCHes, so the rule has to
+cover the collection, so it covers every Secret in the namespace. That is Kubernetes RBAC,
+not a shortcut taken here — and it is why the namespace, not the Secret, is the unit this
+whole page is about.
+
+Two things follow, and both are worth acting on:
+
+- **List namespaces that hold credentials, not namespaces that hold workloads.** A
+  namespace dedicated to endpoint credentials keeps the grant to Secrets you meant to
+  share. Listing a busy application namespace hands the operator its TLS keys and its
+  database passwords too, and no label on them changes that.
+- **The chart's default is `credentialNamespaces: [default]`**, which on most clusters is
+  exactly such a busy namespace. It is a default to replace, not one to accept — see
+  [installing](../install.md#the-secret-blast-radius).
+
+`kubectl auth can-i --list -n <namespace> --as=$SA` prints what the grant really is. Note
+that it says nothing about labels, because the grant does not.
+
 ## Adding a namespace
 
-One line, then regenerate:
+**A Helm install adds it to the value**, whole list at a time, because Helm replaces a list
+rather than appending to it — and the namespace has to exist first, since a `Role` cannot
+be created in one that does not:
+
+```sh
+kubectl create namespace team-a
+helm upgrade netbox-operator ./charts/netbox-operator \
+  --namespace netbox-operator-system --reuse-values \
+  --set credentialNamespaces={default,team-a}
+```
+
+**A kustomize install** takes the same list from a file. One line, then regenerate:
 
 ```sh
 echo team-a >> config/rbac/credential-namespaces/namespaces.txt
@@ -151,14 +191,20 @@ Both are `Ready=False` with reason `SecretMissing`, because to the reader they a
 problem — the operator cannot read that Secret — and the message says which:
 
 **A namespace that is not in the list.** Caught before the read is attempted, so the
-message can name the namespace and the file:
+message can name the namespace, what is granted instead, and the fix in both install
+paths' terms — the operator cannot tell which one deployed it, and the artefact to change
+is different in each:
 
 ```
-reading token secret team-a/netbox-token: credential namespace not granted: the operator
-has no Role for Secrets in namespace "team-a" and is granted default; add "team-a" to
-config/rbac/credential-namespaces/namespaces.txt, run `make manifests` and redeploy
+credential namespace not granted: the operator has no Role for Secrets in namespace
+"team-a" and is granted default; grant it and redeploy -- Helm: `--set
+credentialNamespaces={default,team-a}`; kustomize: add "team-a" to
+config/rbac/credential-namespaces/namespaces.txt and run `make manifests`
 (see docs/operations/rbac.md)
 ```
+
+The `--set` carries the whole list rather than the missing entry because Helm replaces a
+list value: `{team-a}` alone would revoke every namespace already granted.
 
 **A Secret without the label.** The Secret is not in the informer's store, so the read
 comes back `NotFound` — indistinguishable, at the API level, from a Secret that does not
@@ -179,8 +225,9 @@ A third, rarer message covers the namespace being listed while the cluster disag
 
 ```
 reading token secret team-a/netbox-token: secrets "netbox-token" is forbidden: ...; the
-operator's namespace list includes team-a but the cluster grants it nothing there: apply
-the Role and RoleBinding from config/rbac/credential-namespaces (see ...)
+operator's namespace list includes team-a but the cluster grants it nothing there, so the
+Role the list promised was never applied or has been deleted: `helm upgrade` re-renders
+it, or apply the Role and RoleBinding from config/rbac/credential-namespaces (see ...)
 ```
 
 Reading any of them:

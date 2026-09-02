@@ -56,6 +56,11 @@ serviceAccount:
 # namespace listed here is a namespace in which a compromised operator can read every
 # Secret, so keep the list to the ones that actually hold NetBoxEndpoint credentials.
 #
+# "every Secret" is literal, and the endpoint-credential label does not narrow it: RBAC
+# cannot match a label, and `resourceNames` cannot narrow a `list` or a `watch`, which
+# carry no resource name. So `default` below is a placeholder to replace rather than a
+# recommendation -- on most clusters it holds other applications' credentials too.
+#
 # `*` is rejected by values.schema.json. Reading Secrets cluster-wide needs a cluster-wide
 # grant this chart does not ship and will not render from a value; the overlay to add it
 # yourself is in docs/operations/rbac.md#reading-secrets-cluster-wide-anyway.

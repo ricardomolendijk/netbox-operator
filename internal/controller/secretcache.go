@@ -140,12 +140,26 @@ func (s SecretScope) CacheOptions() map[client.Object]cache.ByObject {
 // so the cache rejects the Get with a message about its own internals, and an uncached
 // read would return a bare `Forbidden`. Both are the same misconfiguration -- a namespace
 // missing from the deploy-time list -- and this is the only place that can name it.
+//
+// The message names both install paths because the operator cannot tell which one
+// deployed it, and the fix is a different artefact in each: a Helm install has no
+// config/rbac to edit, so naming only the file sent most readers looking for a checkout
+// they do not have (#300).
 func (s SecretScope) Check(namespace string) error {
 	if s.ClusterWide() || slices.Contains(s.namespaces, namespace) {
 		return nil
 	}
 	return fmt.Errorf("%w: the operator has no Role for Secrets in namespace %q and is "+
-		"granted %s; add %q to config/rbac/credential-namespaces/namespaces.txt, run "+
-		"`make manifests` and redeploy (see docs/operations/rbac.md)",
-		errNamespaceNotGranted, namespace, s, namespace)
+		"granted %s; grant it and redeploy -- Helm: `--set credentialNamespaces={%s}`; "+
+		"kustomize: add %q to config/rbac/credential-namespaces/namespaces.txt and run "+
+		"`make manifests` (see docs/operations/rbac.md)",
+		errNamespaceNotGranted, namespace, s, s.plus(namespace), namespace)
+}
+
+// plus renders the granted list with namespace added: sorted, deduplicated and
+// comma-separated, which is the whole literal a `--set credentialNamespaces={...}` needs.
+// The whole list, because Helm replaces a list value rather than appending to it -- a
+// message suggesting `{team-a}` alone would revoke every namespace already granted.
+func (s SecretScope) plus(namespace string) string {
+	return strings.Join(NewSecretScope(append(s.Namespaces(), namespace)).namespaces, ",")
 }
