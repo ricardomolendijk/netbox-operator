@@ -1133,18 +1133,6 @@ func (p *claimPass) settled(ctx context.Context, value string) (ctrl.Result, err
 // and lowering it the other way.
 const claimDeleteAttempts = 8
 
-// claimRetainsByDefault is what deletionPolicyOf falls back to for a claim with no
-// spec.deletionPolicy: Delete (#225, reversing #182).
-//
-// A constant rather than a field on registry.ClaimDescriptor, where the object engine's
-// equivalent lives, and the difference is not laziness. RetainOnDelete is on Descriptor
-// because it genuinely varies -- #176 made the IPAM kinds retain and left the catalogue kinds
-// deleting. This does not vary: the reason a claim frees its allocation is that a claim's CR
-// is the only record the allocation exists, which is true of NBO-064's prefix and ip-range
-// claims for exactly the same reason it is true of this one. A per-kind knob no kind would
-// ever set differently is a knob.
-const claimRetainsByDefault = false
-
 // claimRelease is the finalizer coming off a claim, and what to say about it.
 type claimRelease struct {
 	// event is the Event reason recorded for it. Empty says nothing, which is the right
@@ -1226,7 +1214,7 @@ func (p *claimPass) releaseWithoutDeleting() (claimRelease, bool) {
 		}, true
 	}
 
-	if deletionPolicyOf(p.claim.ClaimSpec().DeletionPolicy, claimRetainsByDefault) ==
+	if deletionPolicyOf(p.claim.ClaimSpec().DeletionPolicy) ==
 		netboxv1alpha1.DeletionRetain {
 		return claimRelease{
 			event:    netboxv1alpha1.EventAddressRetained,

@@ -267,9 +267,9 @@ set. See [provenance](../operations/provenance.md).
 
 ## `deletionPolicy` defaults to `Delete`
 
-A cluster is not IPAM: nothing is allocated from it and deleting one destroys no record of who
-owned a range (#176 option B, #186 option A). `Delete` is both the expected Kubernetes
-behaviour and the correct one.
+Nothing is allocated from a cluster and deleting one destroys no record of who owned a range,
+so `Delete` is both the expected Kubernetes behaviour and the correct one — as it now is for
+every kind ([#304](https://github.com/ricardomolendijk/netbox-operator/issues/304)).
 
 NetBox makes the destructive case hard to reach anyway — `virtualization.VirtualMachine.cluster`
 and `dcim.Device.cluster` are `on_delete=SET_NULL`, so deleting a cluster with VMs in it does

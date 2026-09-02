@@ -311,7 +311,7 @@ the priority. Both columns are `REQ`, so a payload without them is one NetBox wo
 
 ## `deletionPolicy` defaults to `Delete`
 
-Not an IPAM kind, so `Delete` (#176 option B). Deleting the CR deletes the row; both foreign
+`Delete`, like every kind since [#304](https://github.com/ricardomolendijk/netbox-operator/issues/304). Deleting the CR deletes the row; both foreign
 keys out of it are `PROTECT`, and nothing points *at* it, so the delete is never refused.
 
 ## Printer columns

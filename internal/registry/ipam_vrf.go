@@ -32,12 +32,6 @@ func ipamVRFDescriptor() Descriptor {
 		Taggable:        true,
 		CustomFieldable: true,
 
-		// Decision #176: IPAM defaults to Retain. A VRF is the table its prefixes and
-		// addresses are unique *within*, so deleting one changes what every address inside it
-		// means -- and `vrf` is on_delete=PROTECT throughout ipam (docs/netbox-schema.md), so
-		// NetBox refuses the delete anyway in every case that has addresses in it.
-		RetainOnDelete: true,
-
 		// `enforceUnique` needs no field class: it is a bool, compared as a value. The
 		// pointer in the CRD is about telling "omitted" from "false" before the payload is
 		// built (api/v1alpha1/ipam_vrf.go), which is a spec-representation question rather

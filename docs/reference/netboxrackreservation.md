@@ -355,10 +355,9 @@ A reservation reads like allocated state — it holds units the way an
 What it holds is a promise about rack units, recorded nowhere else and recreated verbatim from
 this manifest. Deleting an `ipam.IPAddress` frees an address for somebody else to allocate and
 destroys the record of who had it; deleting a reservation frees units the manifest can re-claim
-with no loss. So `Delete`, per #176 option B. See [deletion](../concepts/deletion.md).
-
-`RetainOnDelete` is asserted false for all five NBO-051 kinds in
-`registry.TestRackDescriptorsAreRegisteredAndValid`.
+with no loss. So `Delete` -- which is now every kind's default
+([#304](https://github.com/ricardomolendijk/netbox-operator/issues/304)), so this is no longer
+a per-kind decision at all. See [deletion](../concepts/deletion.md#the-two-policies).
 
 ### What is not here yet
 

@@ -32,11 +32,6 @@ func ipamIPAddressDescriptor() Descriptor {
 		Taggable:        true,
 		CustomFieldable: true,
 
-		// Decision #176: IPAM defaults to Retain. Deleting an address frees it for
-		// reallocation, and if a claim allocated it (ADR-0004) that hands somebody else an
-		// address this cluster believes it owns.
-		RetainOnDelete: true,
-
 		// Decision #177, answered B. The spec field that makes several matches legal, and
 		// substitutes the provenance stamp for the uniqueness NetBox may not be enforcing.
 		// Decision #194 kept it on this kind rather than on the shared envelope, so this

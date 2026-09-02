@@ -33,10 +33,6 @@ func ipamServiceTemplateDescriptor() Descriptor {
 		Taggable:        true,
 		CustomFieldable: true,
 
-		// Decision #176: IPAM defaults to Retain, and the whole app takes the same default
-		// rather than a per-kind judgement about how expensive each row is to lose.
-		RetainOnDelete: true,
-
 		Fields: []Field{
 			{Spec: "name", API: "name"},
 			{Spec: "protocol", API: "protocol"},

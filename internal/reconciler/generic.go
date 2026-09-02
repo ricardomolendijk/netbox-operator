@@ -244,6 +244,16 @@ type Engine struct {
 	// object instead of quietly materialising nothing.
 	Children ChildWriter
 
+	// Referrers answers "which CRs point at this one", which is what a cascading delete
+	// deletes (cascade.go, #304).
+	//
+	// Nil is supported and means the annotation does nothing: a refused delete is reported
+	// as Protected exactly as it was before cascading existed. That is the wiring every
+	// test that does not exercise a cascade gets, and it is also the safe direction for a
+	// collaborator somebody forgets -- the failure is "the annotation had no effect", not
+	// "the operator deleted objects it could not account for".
+	Referrers Referrers
+
 	// GitOps is the annotation set every materialised child carries so a GitOps tool does
 	// not treat it as drift. Nil means DefaultGitOps -- Argo CD on, Flux off -- so an engine
 	// wired without an opinion gets the documented default rather than a silent nothing.
@@ -871,7 +881,7 @@ func (p *pass) recreate(ctx context.Context, id int, changes []netbox.Change) (c
 	// picking one -- and refuses in this direction because a recreate is unrecoverable while a
 	// refusal is one edit away from either outcome. The message names the fields that changed,
 	// since reverting one of them is half the fix (errRecreateRetained).
-	if deletionPolicyOf(p.obj.NetBoxSpec().DeletionPolicy, p.desc.RetainOnDelete) == netboxv1alpha1.DeletionRetain {
+	if deletionPolicyOf(p.obj.NetBoxSpec().DeletionPolicy) == netboxv1alpha1.DeletionRetain {
 		return p.stop(ctx, fmt.Errorf("%w: %s", errRecreateRetained, renderChanges(changes)))
 	}
 
