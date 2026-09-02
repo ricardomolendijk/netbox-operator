@@ -71,7 +71,16 @@ var shippedManifests = []string{
 	// the API server, and the only way to know it is is to dry-run one.
 	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxvlantranslationpolicy.yaml"),
 	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxvlantranslationrule.yaml"),
-	filepath.Join("..", "..", "docs", "examples", "vlan-translation.yaml")}
+	filepath.Join("..", "..", "docs", "examples", "vlan-translation.yaml")
+	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxmoduletypeprofile.yaml"),
+	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxmoduletype.yaml"),
+	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxmodulebay.yaml"),
+	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxmodule.yaml"),
+	// One file carrying all four module kinds, so the `attributes` and `schema` JSON
+	// documents -- the only x-kubernetes-preserve-unknown-fields columns in the block -- are
+	// dry-run through real admission alongside every enum and bound around them (#54).
+	filepath.Join("..", "..", "docs", "examples", "modules.yaml"),
+}
 
 // TestShippedManifestsAreAccepted applies every sample and example against the real CRDs.
 //
