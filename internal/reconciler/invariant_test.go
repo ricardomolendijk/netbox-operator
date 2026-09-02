@@ -298,6 +298,13 @@ func TestStatusWriterIsTheOnlyObjectWriter(t *testing.T) {
 		// anything could be written to (issue #252, StatusReader).
 		"LiveStatus": true,
 
+		// IDs writes one int64 into one status field and hands nothing back, which is
+		// narrower than Status: it cannot carry a spec because it never holds one. It is a
+		// second writer rather than a second method on StatusWriter because it deliberately
+		// omits the resourceVersion precondition, and that property must not be reachable by
+		// anything that writes more than the id (issues #289 and #291, IDWriter).
+		"IDs": true,
+
 		// Children is the one entry on this list that *can* write a spec, and it is here
 		// deliberately (NBO-032). The invariant is not "the operator never writes a spec" --
 		// it is "the operator never writes the spec of a CR it did not create"
@@ -329,6 +336,14 @@ func TestStatusWriterIsTheOnlyObjectWriter(t *testing.T) {
 	writer := reflect.TypeFor[StatusWriter]()
 	if writer.NumMethod() != 1 || writer.Method(0).Name != "UpdateStatus" {
 		t.Errorf("StatusWriter has %d methods, want only UpdateStatus", writer.NumMethod())
+	}
+
+	// The id writer is held to the same shape for the same reason, and for one more: it is
+	// the write that cannot be refused for being stale, so a second method on it would be a
+	// route to overwriting somebody else's fresher value.
+	ids := reflect.TypeFor[IDWriter]()
+	if ids.NumMethod() != 1 || ids.Method(0).Name != "RecordID" {
+		t.Errorf("IDWriter has %d methods, want only RecordID", ids.NumMethod())
 	}
 
 	// The status *reader* is held to the same shape as the writer, and for a reason of its

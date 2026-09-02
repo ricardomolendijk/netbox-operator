@@ -261,8 +261,14 @@ func TestStatusWriteThatLostARaceIsNotAnError(t *testing.T) {
 // has already moved past. Built by apierrors so that the engine's classification is exercised
 // against the real Status body rather than a copy of its shape.
 func lostStatusRace(obj *fakeKind) error {
+	return lostStatusRaceOn(obj.Name)
+}
+
+// lostStatusRaceOn is the same answer, for a caller that has the object's name and not the
+// object -- a StatusWriter is handed a client.Object.
+func lostStatusRaceOn(name string) error {
 	return apierrors.NewConflict(
-		schema.GroupResource{Group: fakeGVK.Group, Resource: "netboxfakes"}, obj.Name,
+		schema.GroupResource{Group: fakeGVK.Group, Resource: "netboxfakes"}, name,
 		apierrors.NewBadRequest("the object has been modified; please apply your changes to the latest version"))
 }
 

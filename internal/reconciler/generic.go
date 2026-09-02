@@ -150,6 +150,21 @@ type StatusWriter interface {
 	UpdateStatus(ctx context.Context, obj client.Object) error
 }
 
+// IDWriter persists the one thing in a status that a later pass cannot work out again: the
+// NetBox id of an object this operator has just created.
+//
+// A second writer beside StatusWriter, narrowed to that single field, because the two writes
+// want opposite things from optimistic concurrency. A status update has to lose a race -- a
+// pass that read a stale copy must not put its stale conclusions back over a fresher one
+// (issue #252, staleStatusWrite) -- whereas an id is a fact a POST has already proven
+// server-side, for this CR, and no concurrent writer can hold a better one. So this write
+// carries no resourceVersion and cannot be refused for being behind, which is exactly what
+// makes it unfit for anything else and the reason it is not a second method on StatusWriter.
+type IDWriter interface {
+	// RecordID persists status.id for obj, and nothing else.
+	RecordID(ctx context.Context, obj client.Object, id int64) error
+}
+
 // StatusReader reads back the status the API server holds for one object, past whatever
 // cache the reconcile itself was fed from.
 //
@@ -202,6 +217,12 @@ type Engine struct {
 
 	// Status persists status updates.
 	Status StatusWriter
+
+	// IDs persists status.id on its own, for the one pass whose status write must not be
+	// allowed to lose. Nil is a wiring bug rather than a mode, as a nil LiveStatus is: without
+	// it a create whose status write loses the #252 race is forgotten, and the object it made
+	// is refused as a stranger for ever (issues #289 and #291, recordID()).
+	IDs IDWriter
 
 	// LiveStatus re-reads an object's own status straight from the API server. Nil is a
 	// wiring bug rather than a mode, as a nil Owners is: the one decision that reads it
@@ -393,6 +414,13 @@ type pass struct {
 	// result is this pass's outcome, one of the metrics.Result* values. Written by
 	// whichever step decided, read once by the deferred observation in Reconcile.
 	result string
+
+	// newID is a NetBox id this pass proved server-side and the stored status does not carry
+	// yet -- the id of an object it created or recreated. It is the one conclusion a pass may
+	// not drop when its status write is refused, because nothing recomputes it: see
+	// recordID(). Zero on every other path, an adoption included, since those reach the same
+	// object by the same natural key on the next pass.
+	newID int64
 }
 
 // build renders the spec into a payload and turns its references into ids.
@@ -863,6 +891,16 @@ func (p *pass) applyWrite(ctx context.Context, written netbox.Object, event, act
 
 	if hasID {
 		status.ID = int64(id)
+
+		// Noted rather than written here, and the placement is the decision. This is the only
+		// step in the engine that learns an id nothing else could work out again -- NetBox has
+		// just minted it for a POST that cannot be undone -- and finish() is where a status
+		// write can be refused. Recording it there rather than here keeps the healthy path at
+		// one status write per pass and asks for a second only when the first did not land
+		// (recordID).
+		if int64(id) != p.before.ID {
+			p.newID = int64(id)
+		}
 	}
 
 	// Only when the response carried one: a 204 with an empty body would otherwise blank a
