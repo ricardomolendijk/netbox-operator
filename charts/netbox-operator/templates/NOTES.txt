@@ -11,13 +11,18 @@ An endpoint anywhere else reports Ready=False/SecretMissing. Widen it with
 --set credentialNamespaces={a,b} and note that a chart upgrade does not delete the Roles
 it no longer renders (docs/operations/rbac.md).
 
-CRDs: Helm installs charts/netbox-operator/crds/ once and never upgrades them. After
-upgrading this release, upgrade the CRDs yourself:
+CRDs: this chart does not contain them and Helm does not manage them (#265 -- 2.7 MB of
+CRDs put the release Secret over the API server's 1 MiB cap and failed every install). You
+applied them before this install; apply them again after every upgrade, before the upgrade:
 
-  make upgrade-crds        # or: kubectl apply --server-side -f <chart>/crds/
+  make upgrade-crds        # from a checkout
 
-`helm uninstall` deliberately leaves them, because deleting a CRD deletes every CR of that
-kind and their finalizers would then delete the NetBox objects. docs/install.md.
+  kubectl apply --server-side --force-conflicts -f \
+    https://github.com/ricardomolendijk/netbox-operator/releases/download/v{{ .Chart.Version }}/netbox-operator-crds-{{ .Chart.Version }}.yaml
+
+CRDs first, because a manager that reconciles a field the old CRD prunes fails in a way that
+looks like a bug in the operator. Nothing deletes them -- deleting a CRD deletes every CR of
+that kind and their finalizers would then delete the NetBox objects. docs/install.md.
 {{- if .Values.metrics.enabled }}
 
 Metrics: {{ if .Values.metrics.secure }}https{{ else }}http{{ end }}://{{ include "netbox-operator.fullname" . }}-metrics.{{ .Release.Namespace }}:{{ .Values.metrics.port }}/metrics

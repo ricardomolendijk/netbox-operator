@@ -172,9 +172,11 @@ test-e2e: ## Run e2e tests against a kind cluster and a live NetBox.
 # Paths whose contents are produced by controller-gen. Listed explicitly so that a dirty
 # working tree does not read as stale codegen: the two failures have different fixes, and
 # conflating them makes the target useless locally.
+# charts/netbox-operator/crds is deliberately absent: the chart no longer contains the CRDs
+# (#265), and hack/helm-sync.sh fails outright if one reappears.
 GENERATED_PATHS ?= config/crd config/rbac config/webhook/manifests.yaml \
                   api/v1alpha1/zz_generated.deepcopy.go \
-                  charts/netbox-operator/crds charts/netbox-operator/templates/clusterrole.yaml \
+                  charts/netbox-operator/templates/clusterrole.yaml \
                   charts/netbox-operator/templates/webhook.yaml
 
 .PHONY: verify
@@ -262,28 +264,42 @@ undeploy: kustomize ## Remove the manager from the current cluster.
 CHART ?= charts/netbox-operator
 HELM  ?= helm
 
+# Chart.yaml is the one place the version is written (see .github/workflows/release.yaml),
+# so the packaged filename and the CRD bundle's read it from there rather than repeat it.
+CHART_VERSION = $(shell sed -n 's/^version: *//p' $(CHART)/Chart.yaml)
+
+# The API group the CRDs register. Rendering off a cluster has to be told it exists, because
+# templates/crds-precondition.yaml refuses to render an install whose CRDs are missing and
+# `helm template` sees no discovery.
+CRD_API_VERSION ?= netbox.kubeforge.org/v1alpha1
+
 # The value files `helm lint` and `helm template` run over in CI: the defaults, and
 # everything switched on at once. Between them every `if` in templates/ is taken both ways.
 CHART_VALUES ?= $(CHART)/values.yaml $(CHART)/ci/all-features-values.yaml
 
 .PHONY: helm-lint
 helm-lint: ## helm lint the chart over the default and the all-features values.
+	@# crds.check=false because `helm lint` has no --api-versions flag -- unlike
+	@# `helm template` it cannot be told the operator's CRDs exist, so the precondition
+	@# would fail every lint on every machine. helm-template below covers the check itself,
+	@# both ways round.
 	@for values in $(CHART_VALUES); do \
 		echo "==> $$values"; \
-		$(HELM) lint $(CHART) -f $$values || exit 1; \
+		$(HELM) lint $(CHART) -f $$values --set crds.check=false || exit 1; \
 	done
 
 .PHONY: helm-template
 helm-template: ## Render the chart over both value files, to /dev/null.
 	@# --api-versions so the branches gated on a CRD existing are rendered rather than
-	@# skipped: the ServiceMonitor is gated on the Prometheus Operator's and the webhook on
-	@# cert-manager's, and `helm template` off a cluster otherwise reports both as absent and
-	@# never exercises either branch.
+	@# skipped: the ServiceMonitor is gated on the Prometheus Operator's, the webhook on
+	@# cert-manager's and the whole render on the operator's own, and `helm template` off a
+	@# cluster otherwise reports all three as absent and never exercises those branches.
 	@for values in $(CHART_VALUES); do \
 		echo "==> $$values"; \
 		$(HELM) template netbox-operator $(CHART) -n netbox-operator-system \
 			-f $$values --api-versions monitoring.coreos.com/v1 \
-			--api-versions cert-manager.io/v1 >/dev/null || exit 1; \
+			--api-versions cert-manager.io/v1 \
+			--api-versions $(CRD_API_VERSION) >/dev/null || exit 1; \
 	done
 	@# And once with cert-manager absent, which is the other half of the webhook gate and the
 	@# render a default install on a cluster without cert-manager actually gets: no
@@ -291,7 +307,25 @@ helm-template: ## Render the chart over both value files, to /dev/null.
 	@# up rather than CrashLooping (#249).
 	@echo "==> $(CHART)/values.yaml, cert-manager absent"
 	@$(HELM) template netbox-operator $(CHART) -n netbox-operator-system \
-		-f $(CHART)/values.yaml --api-versions monitoring.coreos.com/v1 >/dev/null
+		-f $(CHART)/values.yaml --api-versions monitoring.coreos.com/v1 \
+		--api-versions $(CRD_API_VERSION) >/dev/null
+	@# The CRD precondition, asserted rather than assumed. A guard that silently stopped
+	@# firing would hand back exactly the failure it exists to replace -- an install that
+	@# succeeds and a manager that CrashLoops on "no matches for kind" -- and nothing else
+	@# in this repository would notice, because every other render here passes
+	@# --api-versions and therefore takes the passing branch.
+	@echo "==> $(CHART)/values.yaml, CRDs absent (must fail)"
+	@if $(HELM) template netbox-operator $(CHART) -n netbox-operator-system \
+		-f $(CHART)/values.yaml >/dev/null 2>&1; then \
+		echo "The chart rendered with $(CRD_API_VERSION) absent from Capabilities."; \
+		echo "templates/crds-precondition.yaml is not firing, so an install that skipped"; \
+		echo "'make install-crds' would succeed and CrashLoop instead (#265)."; \
+		exit 1; \
+	fi
+	@# And the escape hatch that render needs, for anyone templating away from a cluster.
+	@echo "==> $(CHART)/values.yaml, CRDs absent and crds.check=false"
+	@$(HELM) template netbox-operator $(CHART) -n netbox-operator-system \
+		-f $(CHART)/values.yaml --set crds.check=false >/dev/null
 
 # Every RBAC object the chart renders, over both value files. Committed, so an accidental
 # widening -- a `secrets` rule that became cluster-scoped, a Role that became a ClusterRole
@@ -311,16 +345,61 @@ helm-verify: helm-lint helm-template helm-golden ## Fail if the chart's rendered
 		echo "commit the result. See docs/operations/rbac.md."; \
 		exit 1; }
 
+# The ceiling the packaged chart may not cross, and the check that stops #265 coming back.
+#
+# Helm 3 stores the whole chart, the rendered manifest and the values gzipped and
+# base64-encoded in one release Secret, and the API server rejects a Secret whose data
+# exceeds 1048576 bytes. Bundling the CRDs made the package 424168 bytes, which crossed that
+# line and failed every install of this chart; without them it is under 20 KB.
+#
+# 262144 is deliberately nowhere near either number. It is more than a dozen times the chart
+# as it stands, so ordinary growth never trips it, and a fraction of what a returning crds/
+# directory or an equivalently large addition would be -- which is the only failure this is
+# trying to catch, and the one that grows with the catalogue (NBO-052/053/057/058/068).
+CHART_MAX_BYTES ?= 262144
+
 .PHONY: helm-package
-helm-package: ## Package the chart into dist/. Does not publish.
+helm-package: ## Package the chart into dist/, and fail if it got big enough to break installs.
 	@mkdir -p dist
 	$(HELM) package $(CHART) --destination dist
+	@# wc -c rather than stat: BSD and GNU stat disagree on the flag for a file's size.
+	@tgz=dist/netbox-operator-$(CHART_VERSION).tgz; \
+	size=$$(wc -c <"$$tgz" | tr -d ' '); \
+	echo "$$tgz is $$size bytes (ceiling $(CHART_MAX_BYTES))"; \
+	if [ "$$size" -gt "$(CHART_MAX_BYTES)" ]; then \
+		echo ""; \
+		echo "The packaged chart is over $(CHART_MAX_BYTES) bytes. Helm stores it in the release"; \
+		echo "Secret, the API server caps that Secret at 1 MiB, and a chart this size is how"; \
+		echo "every 'helm install' came to fail in #265. Ship the bulk out of the chart --"; \
+		echo "the CRDs travel as 'make crd-bundle' -- rather than raising this ceiling."; \
+		exit 1; \
+	fi
+
+##@ CRDs
+
+# The CRDs are not in the chart (#265) and are not installed by Helm. These two targets are
+# the supported way in, and both server-side apply: these CRDs are large enough that the
+# kubectl.kubernetes.io/last-applied-configuration annotation a client-side apply stores
+# inside each object is a problem of its own. --force-conflicts because the field manager
+# that owns them changes with the tool somebody last used.
+CRD_BUNDLE ?= dist/netbox-operator-crds-$(CHART_VERSION).yaml
+
+.PHONY: install-crds
+install-crds: ## Apply the CRDs to the current cluster. Do this before installing the chart.
+	@# config/crd/bases rather than `kustomize build config/crd`, so this needs nothing but
+	@# kubectl: it is the step a user follows, not part of the dev loop (`make install` is).
+	kubectl apply --server-side --force-conflicts -f config/crd/bases/
 
 .PHONY: upgrade-crds
-upgrade-crds: ## Apply the chart's CRDs. Helm never upgrades crds/ itself; this is that step.
-	@# Server-side apply, because a CRD of this size exceeds the annotation
-	@# kubectl.kubernetes.io/last-applied-configuration that client-side apply stores in it.
-	kubectl apply --server-side --force-conflicts -f $(CHART)/crds/
+upgrade-crds: install-crds ## Apply the CRDs after a chart upgrade. Same apply as install-crds.
+	@# Kept as its own name because installing and upgrading the CRDs are the same command
+	@# and two different moments, and docs/install.md and NOTES.txt name the moment.
+
+.PHONY: crd-bundle
+crd-bundle: ## Write every CRD into one applyable file in dist/, for release and for URLs.
+	@mkdir -p dist
+	@./hack/crd-bundle.sh >$(CRD_BUNDLE)
+	@echo "$(CRD_BUNDLE) ($$(wc -c <$(CRD_BUNDLE) | tr -d ' ') bytes)"
 
 ##@ Tools
 

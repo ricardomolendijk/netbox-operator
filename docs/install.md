@@ -1,8 +1,9 @@
 # Installing
 
-Three ways in, and one thing to know about all of them: **a chart upgrade does not upgrade
-the CRDs.** That is a Helm 3 property, not a bug here, and the section below says what to do
-about it.
+Three ways in, and one thing to know about all of them: **the CRDs are not part of the Helm
+release.** They are applied first, by their own command, on install and on every upgrade.
+[Why](#crds-and-why-they-are-not-in-the-chart) is a hard limit in Kubernetes rather than a
+preference, and the chart refuses to install if you skip the step.
 
 | Path | For |
 |---|---|
@@ -12,12 +13,17 @@ about it.
 
 ## Helm
 
+Two commands, in this order. The first is the CRDs; the second is everything else.
+
 `--create-namespace` only creates the *release* namespace (`netbox-operator-system` below) —
 it says nothing about the namespaces listed in `credentialNamespaces`. The chart renders a
 `Role`/`RoleBinding` into each of those, and Helm refuses to create either in a namespace that
 does not exist yet, so create it first:
 
 ```sh
+kubectl apply --server-side --force-conflicts \
+  -f https://github.com/ricardomolendijk/netbox-operator/releases/download/v0.0.6/netbox-operator-crds-0.0.6.yaml
+
 kubectl create namespace homelab
 
 helm install netbox-operator oci://ghcr.io/ricardomolendijk/netbox-operator/charts/netbox-operator \
@@ -25,16 +31,27 @@ helm install netbox-operator oci://ghcr.io/ricardomolendijk/netbox-operator/char
   --set credentialNamespaces={homelab}
 ```
 
+`netbox-operator-crds-<version>.yaml` is attached to every GitHub release, and it is what
+replaces the `crds/` directory an OCI chart no longer has. Use the file from the release
+whose version you are installing — the chart and its CRDs are one artefact split in two, not
+two independently versioned things.
+
 Nothing is published yet — the chart lives in `charts/netbox-operator/` and installs from a
-checkout in the meantime:
+checkout in the meantime, where the CRD step is a make target:
 
 ```sh
+make install-crds        # kubectl apply --server-side -f config/crd/bases/
+
 kubectl create namespace homelab
 
 helm install netbox-operator ./charts/netbox-operator \
   --namespace netbox-operator-system --create-namespace \
   --set credentialNamespaces={homelab}
 ```
+
+Skipping the first command is an install-time error naming the command you missed, not a
+manager that CrashLoops twenty seconds later — see
+[the precondition](#the-precondition-and-when-to-turn-it-off).
 
 `credentialNamespaces` is the one value most installs have to set, and it is worth
 understanding before you do — see [the Secret blast radius](#the-secret-blast-radius).
@@ -46,6 +63,7 @@ with a comment saying what it does. The ones that change behaviour rather than p
 
 | Value | Default | What it reaches |
 |---|---|---|
+| `crds.check` | `true` | Nothing rendered. It fails the install when the operator's CRDs are not on the cluster — [below](#the-precondition-and-when-to-turn-it-off) |
 | `credentialNamespaces` | `[default]` | A `Role`/`RoleBinding` per namespace **and** `NETBOX_CREDENTIAL_NAMESPACES` on the manager |
 | `drift.mode` | `Correct` | `NetBoxEndpoint.spec.driftMode` on the endpoint the chart renders |
 | `drift.resyncPeriod` | `10m` | `NetBoxEndpoint.spec.resyncPeriod`, ditto |
@@ -98,7 +116,7 @@ Absent on purpose, so that "there is no value for it" is an answer rather than a
 | Not a value | Why |
 |---|---|
 | A cluster-wide Secret read | It would undo [#100](https://github.com/ricardomolendijk/netbox-operator/issues/100) with one `--set`. The overlay to add it yourself is in [rbac.md](operations/rbac.md#reading-secrets-cluster-wide-anyway) — deliberately two steps and outside the chart |
-| `crds.install` | Helm's `crds/` directory is not conditional; a value that pretended otherwise would lie. GitOps users template with `--include-crds`, below |
+| `crds.install` | The chart has no CRDs to install — they are [a separate artefact](#crds-and-why-they-are-not-in-the-chart) and a value that pretended Helm managed them would lie. `crds.check` exists and only decides whether a render *asserts* they are there |
 | Per-Kind `deletionPolicy` defaults | They come off each Kind's Descriptor, not from configuration. The table is in [deletion](concepts/deletion.md#the-default-depends-on-the-kind) — and since [#186](https://github.com/ricardomolendijk/netbox-operator/issues/186) it is not in `kubectl explain` either, so the docs are where you read it |
 | A second webhook certificate mechanism | cert-manager is the only certificate path, deliberately — [admission-webhooks.md](operations/admission-webhooks.md#certificates) has the reasoning. `webhook.certManager.*` configures that one path and there is no `webhook.tls.existingSecret` beside it |
 | `webhook.failurePolicy`, `timeoutSeconds`, the rules | Decisions with a written argument and a test holding them, not knobs. `Ignore` is only defensible because the rules never reach outside `netbox.kubeforge.org`, and a value that let one install widen them would break that argument silently ([admission-webhooks.md](operations/admission-webhooks.md#failurepolicy-ignore-and-why)) |
@@ -170,32 +188,81 @@ but a `Role` applied by an earlier `kubectl apply` or by `make deploy` is not th
 remove. `kubectl delete role,rolebinding -l app.kubernetes.io/name=netbox-operator -n <ns>`
 is the check.
 
-### CRDs, and why an upgrade does not touch them
+### CRDs, and why they are not in the chart
 
-The chart ships all CRDs in `crds/`, which means:
+The chart used to ship all 64 CRDs in Helm's `crds/` directory, and that made **every**
+`helm install` of it fail:
 
-- **`helm install` installs them.** No separate step, no `--skip-crds` dance.
-- **`helm upgrade` does not update them.** Helm 3 installs `crds/` once and never looks at
-  it again. This is the trap; it is stated rather than worked around.
-- **`helm uninstall` leaves them.** Deliberate, and the more important half: deleting a CRD
-  deletes every CR of that kind, and their finalizers would then delete the NetBox objects
-  those CRs describe. An uninstall that emptied somebody's NetBox would be a catastrophe
-  with a plausible-looking command in front of it.
+```
+Error: INSTALLATION FAILED: create: failed to create: Secret
+"sh.helm.release.v1.netbox-operator.v1" is invalid: data: Too long:
+may not be more than 1048576 bytes
+```
 
-So upgrading is two commands:
+Helm 3 stores the *whole chart* in the release `Secret` — `crds/` included, because `crds/`
+is chart content even though it is never templated — alongside the rendered manifest and the
+values, gzipped and base64-encoded. The API server rejects any `Secret` whose data exceeds
+1 MiB. 2.7 MB of CRDs packaged to a 424168-byte `.tgz`, and that did not come back under the
+limit. Without them the same chart packages to under 20 KB.
+
+That is a hard ceiling and the catalogue only grows, so the CRDs left the release rather than
+being squeezed under it ([#265](https://github.com/ricardomolendijk/netbox-operator/issues/265),
+[#268](https://github.com/ricardomolendijk/netbox-operator/issues/268)). `make helm-package`
+now fails if the packaged chart crosses 256 KB, so this cannot come back quietly.
+
+What that changes, in three lines:
+
+- **You install the CRDs.** `make install-crds` from a checkout, or the
+  `netbox-operator-crds-<version>.yaml` attached to the release. Both are one `kubectl apply
+  --server-side`; server-side because a CRD this size exceeds the
+  `last-applied-configuration` annotation a client-side apply stores inside it.
+- **You upgrade them too, before the chart.** Helm never touched them and still does not,
+  so this is the same trap it always was, now with the step in front of you rather than
+  hidden behind an install that quietly did it once.
+- **Nothing ever deletes them.** `helm uninstall` could not remove them before and cannot
+  now. Deliberate, and the more important half: deleting a CRD deletes every CR of that
+  kind, and their finalizers would then delete the NetBox objects those CRs describe. An
+  uninstall that emptied somebody's NetBox would be a catastrophe with a plausible-looking
+  command in front of it.
+
+So upgrading is two commands, in this order:
 
 ```sh
-make upgrade-crds        # kubectl apply --server-side -f charts/netbox-operator/crds/
+make upgrade-crds        # kubectl apply --server-side -f config/crd/bases/
 helm upgrade netbox-operator ./charts/netbox-operator
 ```
 
-CRDs first, because a new chart whose manager reconciles a field the old CRD prunes is the
-failure that looks like a bug in the operator. Server-side apply, because a CRD this size
-exceeds the annotation client-side apply stores inside it.
+or, against a release:
 
-The alternative, for anyone who would rather have one tool own everything, is to stop using
-`crds/` and template them in — see
-[gitops.md](operations/gitops.md#chart-values) for the `--include-crds` form.
+```sh
+kubectl apply --server-side --force-conflicts \
+  -f https://github.com/ricardomolendijk/netbox-operator/releases/download/v0.0.6/netbox-operator-crds-0.0.6.yaml
+helm upgrade netbox-operator oci://ghcr.io/ricardomolendijk/netbox-operator/charts/netbox-operator --version 0.0.6
+```
+
+CRDs first, because a new chart whose manager reconciles a field the old CRD prunes is the
+failure that looks like a bug in the operator.
+
+For anyone who would rather have one tool own everything, the CRD bundle is an ordinary
+multi-document YAML: commit it, or point Argo CD or Flux at its URL, and the ordering above
+becomes a sync wave. See [gitops.md](operations/gitops.md#crds-and-argo-cd).
+
+### The precondition, and when to turn it off
+
+Taking the CRDs out of the release buys a working install and costs one ordering constraint,
+and an ordering constraint nothing enforces is a footgun. So the chart checks: if
+`netbox.kubeforge.org/v1alpha1` is not among the cluster's API versions, `helm install` fails
+immediately with the command you missed in the message.
+
+Without it the install would succeed, the `Deployment` would roll out, and the manager would
+exit while building its caches — `no matches for kind "NetBoxEndpoint"`, in a container log,
+several minutes and one `kubectl logs` away from the command that caused it.
+
+`crds.check=false` turns it off, and there is exactly one reason to: a render that happens
+away from the cluster cannot see discovery and will fail even when the CRDs are installed.
+That is `helm template` without `--api-versions netbox.kubeforge.org/v1alpha1`, `helm lint`
+(which has no such flag), and GitOps renderers that do the same. It is a render-time
+assertion and nothing else — switching it off changes nothing about what gets installed.
 
 ### Uninstalling
 

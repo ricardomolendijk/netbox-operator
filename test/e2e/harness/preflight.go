@@ -52,7 +52,7 @@ func missingAssets(cfg Config) []string {
 		path string
 	}{
 		{"the operator's Helm chart", filepath.Join(cfg.RootDir, "charts", "netbox-operator", "Chart.yaml")},
-		{"the chart's CRD directory", filepath.Join(cfg.RootDir, "charts", "netbox-operator", "crds")},
+		{"the CRD directory", filepath.Join(append([]string{cfg.RootDir}, crdDir...)...)},
 		{"the kind cluster config", filepath.Join(cfg.RootDir, "test", "e2e", "kind", "cluster.yaml")},
 		{"the NetBox compose project", filepath.Join(cfg.RootDir, "test", "e2e", "netbox", "docker-compose.yaml")},
 	}

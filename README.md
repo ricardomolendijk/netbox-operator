@@ -91,14 +91,16 @@ operator can read and the label every credential Secret needs:
 ## Installing
 
 ```sh
+make install-crds        # the CRDs are their own artefact, not part of the Helm release
+
 helm install netbox-operator ./charts/netbox-operator \
   --namespace netbox-operator-system --create-namespace \
   --set credentialNamespaces={homelab}
 ```
 
 Nothing is published yet, so the chart installs from a checkout. Full instructions,
-every value, and the one thing to know before you upgrade — Helm 3 installs CRDs once and
-never updates them — are in [`docs/install.md`](docs/install.md). The chart values that
+every value, and the one thing to know before you upgrade — the CRDs are applied by you,
+before the chart, every time — are in [`docs/install.md`](docs/install.md). The chart values that
 change GitOps and drift behaviour are documented alongside the behaviour, in
 [`docs/operations/gitops.md`](docs/operations/gitops.md#chart-values).
 

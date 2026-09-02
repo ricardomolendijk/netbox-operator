@@ -4,10 +4,21 @@
   "description": "A typo in drift.mode fails at `helm install` rather than at controller startup. additionalProperties is false throughout for the same reason: `--set drift.mod=Report` is otherwise accepted and silently ignored.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["image", "credentialNamespaces", "drift", "gitops", "allocation", "metrics"],
+  "required": ["crds", "image", "credentialNamespaces", "drift", "gitops", "allocation", "metrics"],
   "properties": {
     "nameOverride": {"type": "string"},
     "fullnameOverride": {"type": "string"},
+    "crds": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The chart does not contain the CRDs (#265: they made the Helm release Secret exceed 1 MiB). Apply them first with `make install-crds` or the release's netbox-operator-crds-<version>.yaml.",
+      "properties": {
+        "check": {
+          "type": "boolean",
+          "description": "Fail the render when netbox.kubeforge.org/v1alpha1 is absent from the cluster's API versions, instead of installing a manager that CrashLoops on 'no matches for kind'. Set false only where the render cannot see discovery -- `helm template` without --api-versions, or a GitOps renderer that does the same."
+        }
+      }
+    },
     "replicaCount": {"type": "integer", "minimum": 1},
     "leaderElection": {"type": "boolean"},
     "priorityClassName": {"type": "string"},
