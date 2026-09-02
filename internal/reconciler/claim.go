@@ -1125,13 +1125,19 @@ func (p *claimPass) settled(ctx context.Context, value string) (ctrl.Result, err
 // claimDeleteAttempts bounds the retry on a delete that will not go through, after which the
 // claim releases its finalizer anyway.
 //
-// Eight, with protectedBackoff's intervals, is a little over twenty minutes of trying. The
+// Eleven, with protectedBackoff's intervals, is a little over eighteen minutes of trying. The
 // number is a judgement rather than a derivation: long enough that a NetBox restart, a
 // certificate rotation or a dependent object being deleted in the same sweep all resolve
 // inside it, short enough that a `kubectl delete namespace` is not indistinguishable from a
 // hang. Raising it trades namespaces that take longer to delete for fewer leaked addresses,
 // and lowering it the other way.
-const claimDeleteAttempts = 8
+//
+// It was eight, which was the same eighteen minutes at the ten-second base protectedRetryBase
+// used to have; both moved together in #289 so that the bound stays a bound on time. What
+// #289 also fixed is that the count was not being spent on *attempts* at all -- every wake-up
+// of a blocked claim spent one, so all of them went inside a millisecond and the address was
+// reported retained before anything had a chance to unblock.
+const claimDeleteAttempts = 11
 
 // claimRetainsByDefault is what deletionPolicyOf falls back to for a claim with no
 // spec.deletionPolicy: Delete (#225, reversing #182).
@@ -1187,6 +1193,21 @@ func (p *claimPass) releasing(ctx context.Context) (ctrl.Result, error) {
 
 	if out, ok := p.releaseWithoutDeleting(); ok {
 		return p.release(ctx, out)
+	}
+
+	// Before both blocked paths below, because both of them count against the bound: this is
+	// what keeps eleven attempts eleven attempts *over eighteen minutes* rather than eleven
+	// passes in as many milliseconds, each woken by the status write the last one made
+	// (#289, deletionHold). Without it a claim deleted while its endpoint is briefly not
+	// Ready reports its address retained before the endpoint has had a chance to come back.
+	status := p.claim.ClaimStatus()
+	if remaining, holding := deletionHold(
+		status.DeletionAttempts, status.LastDeletionAttempt, time.Now(),
+	); holding {
+		logf.FromContext(ctx).V(1).Info("holding off the next delete attempt",
+			"action", "delete", "netboxID", status.NetBoxID, "in", remaining.String())
+
+		return p.finish(ctx, remaining)
 	}
 
 	endpoint, ok := p.engine.Endpoints.Endpoint(ctx,
@@ -1361,6 +1382,11 @@ func (p *claimPass) deleteBlocked(ctx context.Context, reason string, cause erro
 	status := p.claim.ClaimStatus()
 	status.DeletionAttempts++
 	p.result = metrics.ResultWaiting
+
+	// The time goes with the count, for the reason deletionHold gives: a count nothing can
+	// date is a count every wake-up increments.
+	now := metav1.Now()
+	status.LastDeletionAttempt = &now
 
 	if status.DeletionAttempts >= claimDeleteAttempts {
 		return p.release(ctx, claimRelease{

@@ -641,6 +641,13 @@ func TestADeleteThatCannotSucceedStillReleasesTheClaim(t *testing.T) {
 					t.Fatalf("pass %d kept the finalizer and asked for no requeue, so nothing"+
 						" will ever try again", pass)
 				}
+
+				// Each pass is meant to be the next attempt. Since #289 that takes the
+				// backoff having run out -- which is the whole point of the bound being a
+				// bound on *time*: without the rewind these twelve passes are twelve
+				// wake-ups in one tick, which is precisely what used to spend the claim's
+				// whole allowance before anything could unblock.
+				claim.Status.LastDeletionAttempt = rewound(claim.Status.LastDeletionAttempt)
 			}
 
 			if len(claim.Finalizers) != 0 {
@@ -663,6 +670,45 @@ func TestADeleteThatCannotSucceedStillReleasesTheClaim(t *testing.T) {
 	}
 }
 
+// TestABlockedClaimDoesNotSpendItsAllowanceOnWakeUps is #289 on the allocation side, and the
+// consequence there is worse than a slow teardown: the bound is what decides when the address
+// is abandoned, so a count spent on wake-ups rather than on attempts abandons it immediately.
+//
+// The endpoint case is the one to picture. A NetBoxEndpoint is briefly not Ready -- its token
+// is being rotated -- and a claim is deleted in that window. Every pass wrote a status, every
+// status write woke the next pass, and the eleven attempts the claim is allowed were gone
+// inside a millisecond: the finalizer came off and the address was reported retained, before
+// the endpoint had any chance to come back.
+func TestABlockedClaimDoesNotSpendItsAllowanceOnWakeUps(t *testing.T) {
+	claim, engine, _ := newClaimFixture(t)
+
+	if _, err := engine.Reconcile(context.Background(), claim); err != nil {
+		t.Fatal(err)
+	}
+
+	engine.Endpoints = fakeEndpoints{ready: false}
+	claim.DeletionTimestamp = &metav1.Time{Time: metav1.Now().Time}
+
+	// Comfortably more passes than the bound allows attempts. Without the hold-off every one
+	// of them counted, so this loop alone used to release the finalizer.
+	for pass := range claimDeleteAttempts * 3 {
+		if _, err := engine.Reconcile(context.Background(), claim); err != nil {
+			t.Fatalf("pass %d = %v", pass, err)
+		}
+	}
+
+	if claim.Status.DeletionAttempts != 1 {
+		t.Errorf("status.deletionAttempts = %d after %d passes, want 1: a wake-up is not an"+
+			" attempt", claim.Status.DeletionAttempts, claimDeleteAttempts*3)
+	}
+
+	if len(claim.Finalizers) == 0 {
+		t.Errorf("the finalizer came off and the address was abandoned inside one tick, which"+
+			" is the %d-attempt bound being spent on wake-ups rather than on retries",
+			claimDeleteAttempts)
+	}
+}
+
 // TestARefusedDeleteIsReportedBeforeItIsGivenUpOn checks the middle of that sequence, not just
 // its end. A block that is only visible once the operator has stopped trying is a block nobody
 // could have intervened in.
@@ -680,6 +726,9 @@ func TestARefusedDeleteIsReportedBeforeItIsGivenUpOn(t *testing.T) {
 		if _, err := engine.Reconcile(context.Background(), claim); err != nil {
 			t.Fatal(err)
 		}
+
+		// One attempt per pass, which takes the interval having run out (#289, deletionHold).
+		claim.Status.LastDeletionAttempt = rewound(claim.Status.LastDeletionAttempt)
 	}
 
 	if len(claim.Finalizers) == 0 {
