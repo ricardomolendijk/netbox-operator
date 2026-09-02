@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
@@ -187,7 +188,7 @@ func newObjectController(mgr ctrl.Manager, endpoints reconciler.Endpoints, kind 
 			Children: childWriter{writer},
 			GitOps:   gitOpsDefaults(),
 
-			Events: mgr.GetEventRecorderFor(kind.name),
+			Events: mgr.GetEventRecorderFor(kind.name), //nolint:staticcheck // SA1019: the events-API migration is #294 group 1
 			Scheme: mgr.GetScheme(),
 			// Descriptors is left nil deliberately: the engine then reads the
 			// package-level registry, which is the one every kind's init() filled.
@@ -416,11 +417,32 @@ type childWriter struct{ client.Client }
 // own the fields it sets on a child and leave the rest to whoever set them. It also keeps the
 // invariant readable from outside -- `f:spec` under netbox-operator/children is the
 // materialiser's own output, `f:spec` under netbox-operator would be a broken promise.
-func (w childWriter) Apply(ctx context.Context, obj client.Object, opts ...client.PatchOption) error {
+func (w childWriter) Apply(ctx context.Context, obj client.Object, opts ...client.ApplyOption) error {
 	opts = append(opts, client.FieldOwner(reconciler.ChildFieldManager))
 
-	if err := w.Patch(ctx, obj, client.Apply, opts...); err != nil {
+	// Client.Apply takes an apply configuration rather than an object, and a CRD kind here
+	// has none generated for it, so the object goes through the unstructured route the
+	// client provides for exactly that case. What is sent does not change: the deprecated
+	// client.Apply patch this replaces used json.Marshal of this same object as its body,
+	// which is what ToUnstructured produces. Force is still unset unless the caller passes
+	// client.ForceOwnership, so the unforced-first apply in reconciler's write() still gets
+	// the conflict that names the fields.
+	content, err := runtime.DefaultUnstructuredConverter.ToUnstructured(obj)
+	if err != nil {
+		return fmt.Errorf("encoding %s/%s to apply: %w", obj.GetNamespace(), obj.GetName(), err)
+	}
+
+	applied := &unstructured.Unstructured{Object: content}
+
+	if err := w.Client.Apply(ctx, client.ApplyConfigurationFromUnstructured(applied), opts...); err != nil {
 		return fmt.Errorf("applying %s/%s: %w", obj.GetNamespace(), obj.GetName(), err)
+	}
+
+	// The server's answer, back into obj. The patch this replaces did that for free, and the
+	// materialiser reads it: the applied child's status is how it decides the child is ready
+	// (reconciler/children.go).
+	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(applied.Object, obj); err != nil {
+		return fmt.Errorf("decoding the apply of %s/%s: %w", obj.GetNamespace(), obj.GetName(), err)
 	}
 
 	return nil

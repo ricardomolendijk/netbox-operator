@@ -208,7 +208,7 @@ func applyYAMLFile(ctx context.Context, c client.Client, path string) (string, e
 	if err := yaml.Unmarshal(body, obj); err != nil {
 		return "", fmt.Errorf("parsing %s: %w", path, err)
 	}
-	if err := c.Patch(ctx, obj, client.Apply,
+	if err := c.Apply(ctx, client.ApplyConfigurationFromUnstructured(obj),
 		client.ForceOwnership, client.FieldOwner("nbo-e2e")); err != nil {
 		return "", fmt.Errorf("applying %s: %w", path, err)
 	}

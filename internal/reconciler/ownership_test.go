@@ -231,7 +231,7 @@ func TestOwnershipIgnoresTheOperatorsOwnEntries(t *testing.T) {
 	ownedBy(obj, FieldManager, "description")
 	obj.ManagedFields = append(obj.ManagedFields, metav1.ManagedFieldsEntry{
 		Manager: "flux", Operation: metav1.ManagedFieldsOperationUpdate, Subresource: "status",
-		FieldsV1: &metav1.FieldsV1{Raw: []byte(`{"f:spec":{"f:color":{}}}`)},
+		FieldsV1: metav1.NewFieldsV1(`{"f:spec":{"f:color":{}}}`),
 	})
 
 	owned := ownershipOf(obj)
@@ -343,7 +343,7 @@ func ownedBy(obj *fakeKind, manager string, fields ...string) {
 	obj.ManagedFields = append(obj.ManagedFields, metav1.ManagedFieldsEntry{
 		Manager:   manager,
 		Operation: metav1.ManagedFieldsOperationApply,
-		FieldsV1:  &metav1.FieldsV1{Raw: raw},
+		FieldsV1:  metav1.NewFieldsV1(string(raw)),
 	})
 }
 

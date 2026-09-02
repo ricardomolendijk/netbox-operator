@@ -9,10 +9,12 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 
 	netboxv1alpha1 "github.com/ricardomolendijk/netbox-operator/api/v1alpha1"
 	"github.com/ricardomolendijk/netbox-operator/internal/reconciler"
@@ -27,6 +29,7 @@ type recordingClient struct {
 	scheme  *runtime.Scheme
 	updates int
 	patches int
+	applies int
 }
 
 func (c *recordingClient) Scheme() *runtime.Scheme { return c.scheme }
@@ -39,6 +42,12 @@ func (c *recordingClient) Update(_ context.Context, _ client.Object, _ ...client
 
 func (c *recordingClient) Patch(_ context.Context, _ client.Object, _ client.Patch, _ ...client.PatchOption) error {
 	c.patches++
+
+	return nil
+}
+
+func (c *recordingClient) Apply(_ context.Context, _ runtime.ApplyConfiguration, _ ...client.ApplyOption) error {
+	c.applies++
 
 	return nil
 }
@@ -72,6 +81,31 @@ func specPatch(t *testing.T) client.Patch {
 	}
 
 	return client.RawPatch(types.MergePatchType, body)
+}
+
+// applyConfiguration is the apply the materialiser makes, in the shape objectcontroller.go's
+// childWriter makes it: the child as unstructured, wrapped so that client.Client.Apply takes
+// it. Reproduced here rather than shared for the same reason finalizerPatch is -- the guard
+// has to keep working against the write as it is actually written.
+func applyConfiguration(t *testing.T, obj client.Object) runtime.ApplyConfiguration {
+	t.Helper()
+
+	// TypeMeta set explicitly, as the materialiser sets it (reconciler/children.go): a typed
+	// object's is empty unless somebody fills it, and an apply carries its own apiVersion
+	// and kind.
+	gvk, err := apiutil.GVKForObject(obj, scheme)
+	if err != nil {
+		t.Fatalf("looking up the kind of %T: %v", obj, err)
+	}
+
+	obj.GetObjectKind().SetGroupVersionKind(gvk)
+
+	content, err := runtime.DefaultUnstructuredConverter.ToUnstructured(obj)
+	if err != nil {
+		t.Fatalf("encoding %s/%s to apply: %v", obj.GetNamespace(), obj.GetName(), err)
+	}
+
+	return client.ApplyConfigurationFromUnstructured(&unstructured.Unstructured{Object: content})
 }
 
 // TestSpecGuardRefusesSpecWrites is the runtime half of the never-write-spec invariant:
@@ -147,8 +181,8 @@ func TestSpecGuardRefusesSpecWrites(t *testing.T) {
 					Controller: ptr.To(true),
 				}},
 			}},
-			write: func(_ *testing.T, guard specGuard, obj client.Object) error {
-				return guard.Patch(context.Background(), obj, client.Apply,
+			write: func(t *testing.T, guard specGuard, obj client.Object) error {
+				return guard.Apply(context.Background(), applyConfiguration(t, obj),
 					client.FieldOwner(reconciler.ChildFieldManager))
 			},
 		},
@@ -160,8 +194,8 @@ func TestSpecGuardRefusesSpecWrites(t *testing.T) {
 			obj: &netboxv1alpha1.NetBoxTag{ObjectMeta: metav1.ObjectMeta{
 				Namespace: "team-a", Name: "handwritten",
 			}},
-			write: func(_ *testing.T, guard specGuard, obj client.Object) error {
-				return guard.Patch(context.Background(), obj, client.Apply,
+			write: func(t *testing.T, guard specGuard, obj client.Object) error {
+				return guard.Apply(context.Background(), applyConfiguration(t, obj),
 					client.FieldOwner(reconciler.ChildFieldManager))
 			},
 			wantRefused: true,
@@ -235,7 +269,7 @@ func TestSpecGuardRefusesSpecWrites(t *testing.T) {
 					t.Fatalf("write = %v, want ErrSpecWriteForbidden", err)
 				}
 
-				if recorder.updates+recorder.patches != 0 {
+				if recorder.updates+recorder.patches+recorder.applies != 0 {
 					t.Errorf("the refused write still reached the API server")
 				}
 
@@ -254,7 +288,7 @@ func TestSpecGuardRefusesSpecWrites(t *testing.T) {
 				t.Fatalf("write = %v, want it allowed", err)
 			}
 
-			if recorder.updates+recorder.patches != 1 {
+			if recorder.updates+recorder.patches+recorder.applies != 1 {
 				t.Errorf("the allowed write did not reach the API server")
 			}
 		})
@@ -278,5 +312,40 @@ func TestSpecGuardRefusesAnUnreadablePatch(t *testing.T) {
 
 	if recorder.patches != 0 {
 		t.Error("the refused patch still reached the API server")
+	}
+}
+
+// opaqueApplyConfiguration is an apply configuration that is not an object: client.Client.Apply
+// accepts any of them, and a generated one carries no owner references for the guard to read.
+type opaqueApplyConfiguration struct{}
+
+func (opaqueApplyConfiguration) IsApplyConfiguration() {}
+
+// TestSpecGuardRefusesAnUnreadableApply is the same argument as the patch above, for the write
+// that replaced the apply patch. Apply takes a runtime.ApplyConfiguration rather than an
+// object, so there are two shapes the guard cannot read the kind and the owner out of, and
+// both are refused rather than delegated.
+func TestSpecGuardRefusesAnUnreadableApply(t *testing.T) {
+	tests := map[string]runtime.ApplyConfiguration{
+		"an apply configuration that is not an object": opaqueApplyConfiguration{},
+		"an object carrying no apiVersion or kind": client.ApplyConfigurationFromUnstructured(
+			&unstructured.Unstructured{Object: map[string]any{
+				"metadata": map[string]any{"namespace": "team-a", "name": "managed"},
+			}}),
+	}
+
+	for name, config := range tests {
+		t.Run(name, func(t *testing.T) {
+			recorder := &recordingClient{scheme: scheme}
+			guard := specGuard{recorder}
+
+			if err := guard.Apply(context.Background(), config); !errors.Is(err, ErrSpecWriteForbidden) {
+				t.Fatalf("apply = %v, want ErrSpecWriteForbidden", err)
+			}
+
+			if recorder.applies != 0 {
+				t.Error("the refused apply still reached the API server")
+			}
+		})
 	}
 }

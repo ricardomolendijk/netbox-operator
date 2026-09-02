@@ -89,7 +89,12 @@ type ChildWriter interface {
 	// Apply server-side-applies obj under ChildFieldManager. Called first without
 	// client.ForceOwnership and again with it, which is how the fields a conflict is about
 	// reach the Event -- see write().
-	Apply(ctx context.Context, obj client.Object, opts ...client.PatchOption) error
+	//
+	// The options are client.ApplyOption rather than client.PatchOption because the
+	// implementation is now client.Client.Apply rather than a patch of type apply
+	// (objectcontroller.go, childWriter). client.ForceOwnership is both, so what this
+	// interface is handed here is unchanged.
+	Apply(ctx context.Context, obj client.Object, opts ...client.ApplyOption) error
 
 	// List reads every object of list's kind matching opts.
 	List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error
