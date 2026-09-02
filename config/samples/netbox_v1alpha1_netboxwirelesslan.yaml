@@ -43,7 +43,7 @@ spec:
 
   # There is deliberately no `authPSK` field. A pre-shared key may never be inline in a
   # spec, and `authPSKSecretRef` needs the engine to source a payload value from a Secret --
-  # shared machinery rather than descriptor data (NBO-050, plan.md §15). Until it lands the
+  # shared machinery rather than descriptor data (NBO-050). Until it lands the
   # operator does not manage `auth_psk` at all, so NetBox keeps whatever key it holds; it is
   # already masked in every log line (internal/netbox/do.go, secretFields).
 

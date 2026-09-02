@@ -20,7 +20,7 @@ decides nothing about the identity. One base class, three different natural keys
 | [`NetBoxTenantGroup`](netboxtenantgroup.md) | none; column `UNIQUE` on `name` and `slug` | `slug` alone, no `parent` filter |
 | **`NetBoxContactGroup`** | `(parent, name)` **only** | `(parent, name)` + a pinned variant no constraint backs |
 
-`plan.md` §8.1 claims every MPTT kind is `(parent, name)` plus a `parent IS NULL` variant. It
+An MPTT kind is usually assumed to be `(parent, name)` plus a `parent IS NULL` variant. That
 is right about the first half here and wrong about the second, and the difference is visible in
 NetBox's own source: `dcim.Region` and `dcim.SiteGroup` declare the conditional constraint
 (`netbox/dcim/models/sites.py:62-67` and `:133-143`), `tenancy.ContactGroup` declares one
@@ -94,7 +94,7 @@ group is [`NetBoxContact.spec.groups`](netboxcontact.md#groups) — which is a m
 by the contact, not by the group.
 
 `owner` is absent: `ForeignKey -> users.Owner`, and the `users` app is deferred whole
-(`plan.md` §8).
+([coverage](../coverage.md#endpoints)).
 
 ## Natural key
 

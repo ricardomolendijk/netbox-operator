@@ -173,10 +173,11 @@ type NetBoxClusterSpec struct {
 //
 // Namespaced like every kind in v1alpha1 (docs/decisions/0002-crd-scoping.md).
 //
-// No inline children, now or later. plan.md §7 lists Cluster among the kinds that get inline
-// expansion but names no lists, and a cluster's plausible children -- Devices and
-// VirtualMachines -- have independent lifecycles and are not components of it. Materialising
-// them would make this the composite topology kind plan.md §2 principle 1 forbids.
+// No inline children, now or later. Cluster was an early candidate for inline expansion
+// (docs/concepts/inline-children.md) and no lists were ever named, and a cluster's plausible
+// children -- Devices and VirtualMachines -- have independent lifecycles and are not
+// components of it. Materialising them would make this a composite topology kind, which this
+// API deliberately does not have.
 //
 // The SITE printer column reads the *intent* (`.spec.scope.siteRef.name`) rather than
 // `status`, which is deliberately a narrower promise than NetBoxPrefix's SCOPE column: a

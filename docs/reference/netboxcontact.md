@@ -88,7 +88,7 @@ which are the column widths: the schema digest prints no `len=` for either becau
 passes no `max_length`.
 
 `owner` is absent: `ForeignKey -> users.Owner`, and the `users` app is deferred whole
-(`plan.md` §8). `assignments` is absent: it is the reverse of
+([coverage](../coverage.md#endpoints)). `assignments` is absent: it is the reverse of
 `ContactAssignment.contact`, a read-only view, and the way to create one is a
 [`NetBoxContactAssignment`](netboxcontactassignment.md).
 

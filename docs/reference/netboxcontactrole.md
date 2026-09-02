@@ -56,7 +56,7 @@ Every kind shares the envelope — `endpointRef`, `onConflict`, `deletionPolicy`
 to `""` to clear it ([field ownership](../concepts/field-ownership.md)).
 
 `owner` is absent. It is `ForeignKey -> users.Owner`, and the `users` app is deferred whole
-(`plan.md` §8), so there is no Kind to point at.
+([coverage](../coverage.md#endpoints)), so there is no Kind to point at.
 
 ## Natural key
 

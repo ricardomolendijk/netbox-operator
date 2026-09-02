@@ -184,7 +184,7 @@ the work:
   makes a name globally unique. It adds nothing to the identity.
 - `slug` is column-unique, so it identifies at most one group whatever its parent is.
 
-Adding the `?parent_id__empty=true` pin that plan.md §8.1 asserts every MPTT kind needs would be
+Adding the `?parent_id__empty=true` pin an MPTT kind is usually assumed to need would be
 wrong the same two ways it would be wrong on a `NetBoxTenantGroup`: it would make a **nested**
 group's slug unfindable — the request would match nothing and the engine would create a second
 row — and it would express a constraint the database does not have.

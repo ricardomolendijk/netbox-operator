@@ -20,8 +20,9 @@ NBO-025, so `ipam.fhrpgroup` becomes resolvable in `name` mode here.
 `docs/netbox-schema.md` → `ipam.FHRPGroup` declares `auth_key CharField len=255`, and this API
 does not expose it.
 
-`plan.md` §15 permits the value only as `spec.authKeySecretRef`, never inline — a pre-shared key
-inline in a CR is readable by anyone who can `get` the namespace. Reading a Secret into a NetBox
+A pre-shared key may never be inline in a spec, so the only permitted shape is
+`spec.authKeySecretRef` → a key of a Secret: a key inline in a CR is readable by anyone who can
+`get` the namespace, and it lands in whatever git repository the manifest lives in. Reading a Secret into a NetBox
 payload field is a capability the engine does not have: there is no `FieldClass` for it and
 `internal/reconciler/payload.go` has nowhere to fetch one from. Adding one is a change to shared
 logic, which [adding a Kind is not allowed to be](../concepts/descriptor.md).
