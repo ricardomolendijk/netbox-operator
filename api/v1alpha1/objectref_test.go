@@ -53,6 +53,13 @@ func TestRefAliasTargets(t *testing.T) {
 		// `name` alone (docs/netbox-schema.md), so a slug-mode ref matches nothing there
 		// either.
 		{"vlanTranslationPolicy", VLANTranslationPolicyRef{}, "NetBoxVLANTranslationPolicy"}} {
+		{"provider", ProviderRef{}, "NetBoxProvider"},
+		{"providerAccount", ProviderAccountRef{}, "NetBoxProviderAccount"},
+		{"providerNetwork", ProviderNetworkRef{}, "NetBoxProviderNetwork"},
+		// Two models over one BaseCircuitType, two endpoints, two tables: `circuitType` is
+		// circuits.CircuitType and never circuits.VirtualCircuitType.
+		{"circuitType", CircuitTypeRef{}, "NetBoxCircuitType"},
+		{"circuit", CircuitRef{}, "NetBoxCircuit"}} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := tc.ref.TargetGVK()
 
