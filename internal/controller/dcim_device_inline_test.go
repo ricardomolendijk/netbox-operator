@@ -642,7 +642,7 @@ func assertMaterialised(t *testing.T, child client.Object, parent *netboxv1alpha
 		}
 
 		if entry.Manager == reconciler.FieldManager && entry.Subresource == "" && entry.FieldsV1 != nil {
-			if strings.Contains(string(entry.FieldsV1.Raw), `"f:spec"`) {
+			if strings.Contains(entry.FieldsV1.GetRawString(), `"f:spec"`) {
 				t.Errorf("%s has spec fields owned by %s, which would mean the operator wrote a "+
 					"spec under its plain manager", child.GetName(), reconciler.FieldManager)
 			}

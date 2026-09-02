@@ -308,13 +308,13 @@ func TestOperatorOwnsOwnerReferencesAndNeverSpec(t *testing.T) {
 		ours++
 
 		var fields map[string]json.RawMessage
-		if err := json.Unmarshal(entry.FieldsV1.Raw, &fields); err != nil {
+		if err := json.Unmarshal(entry.FieldsV1.GetRawBytes(), &fields); err != nil {
 			t.Fatalf("decoding the operator's managed fields: %v", err)
 		}
 
 		if _, spec := fields["f:spec"]; spec {
 			t.Errorf("%s owns %s under subresource %q; the operator wrote a spec",
-				reconciler.FieldManager, entry.FieldsV1.Raw, entry.Subresource)
+				reconciler.FieldManager, entry.FieldsV1.GetRawString(), entry.Subresource)
 		}
 
 		if metadata, ok := fields["f:metadata"]; ok &&

@@ -633,7 +633,7 @@ func TestClaimedButAbsentGenericFKWritesNeitherColumn(t *testing.T) {
 		Operation:  metav1.ManagedFieldsOperationApply,
 		APIVersion: fakeGVK.GroupVersion().String(),
 		FieldsType: "FieldsV1",
-		FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:spec":{"f:scope":{}}}`)},
+		FieldsV1:   metav1.NewFieldsV1(`{"f:spec":{"f:scope":{}}}`),
 	}}
 
 	nb := &fakeClient{created: liveTag(7)}

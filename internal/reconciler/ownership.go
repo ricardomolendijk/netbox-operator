@@ -73,7 +73,7 @@ func ownershipOf(obj client.Object) specOwnership {
 		}
 
 		var decoded managedFieldsSpec
-		if err := json.Unmarshal(entry.FieldsV1.Raw, &decoded); err != nil || decoded.Spec == nil {
+		if err := json.Unmarshal(entry.FieldsV1.GetRawBytes(), &decoded); err != nil || decoded.Spec == nil {
 			// Unreadable ownership is no ownership, not a failed reconcile: the fallback is
 			// exactly the behaviour the operator had before it read this at all, and
 			// refusing to reconcile over metadata nobody asked for would be worse than the

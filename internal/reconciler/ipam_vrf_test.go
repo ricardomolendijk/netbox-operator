@@ -82,7 +82,7 @@ func vrfObject(targets []netboxv1alpha1.RouteTargetRef, claimed ...string) *netb
 		raw, _ := json.Marshal(map[string]any{"f:spec": fields})
 		vrf.ManagedFields = []metav1.ManagedFieldsEntry{{
 			Manager: "kubectl", Operation: metav1.ManagedFieldsOperationApply,
-			FieldsType: "FieldsV1", FieldsV1: &metav1.FieldsV1{Raw: raw},
+			FieldsType: "FieldsV1", FieldsV1: metav1.NewFieldsV1(string(raw)),
 		}}
 	}
 
