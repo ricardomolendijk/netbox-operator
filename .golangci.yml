@@ -103,6 +103,26 @@ linters:
       # main() legitimately wires flags and exits.
       - path: cmd/
         linters: [wrapcheck]
+      # SA1019 (use of a deprecated symbol), excluded TEMPORARILY -- see #294.
+      #
+      # The v2.13.2 bump in #293 carries a newer staticcheck, which knows about upstream
+      # deprecations the old pin did not: controller-runtime's scheme.Builder,
+      # Manager.GetEventRecorderFor, client.Apply, and apimachinery's FieldsV1.Raw. Twelve
+      # sites, none of them a defect in this repository -- every one is an upstream API that
+      # still works and has not been removed.
+      #
+      # Excluded rather than migrated because two of the four are not mechanical:
+      # GetEventRecorderFor -> GetEventRecorder crosses to the new events API and changes the
+      # recorder's *type*, which reaches every Events/Recorder field in the tree, and
+      # client.Apply -> Client.Apply() is a migration of the engine's write path. Neither
+      # belongs in a PR whose subject is a linter pin: a toolchain bump that also rewrites the
+      # write path is a bump nobody can review.
+      #
+      # #294 lists all twelve sites grouped by migration and ends with re-deleting this
+      # block. Until then SA1019 is off everywhere, which is the cost: a *new* use of a
+      # deprecated API will not be caught either.
+      - linters: [staticcheck]
+        text: "^SA1019:"
 
 formatters:
   enable:
