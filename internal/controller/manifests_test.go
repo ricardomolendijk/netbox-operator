@@ -71,7 +71,9 @@ var shippedManifests = []string{
 	// the API server, and the only way to know it is is to dry-run one.
 	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxvlantranslationpolicy.yaml"),
 	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxvlantranslationrule.yaml"),
-	filepath.Join("..", "..", "docs", "examples", "vlan-translation.yaml")
+	filepath.Join("..", "..", "docs", "examples", "vlan-translation.yaml"),
+	// The NBO-057 circuits catalogue: a provider, its two peer kinds, a circuit type and a circuit,
+	// and their collective sample (carriers.yaml).
 	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxprovider.yaml"),
 	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxprovideraccount.yaml"),
 	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxprovidernetwork.yaml"),

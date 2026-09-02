@@ -81,8 +81,9 @@ func circuitsProviderDescriptor() Descriptor {
 		// `on_delete=PROTECT`, so deleting a provider in use is refused rather than cascading,
 		// reported here as Deleting=False, Reason=Protected.
 		//
-		// RetainOnDelete is left false: a provider is configuration a manifest can recreate,
-		// not allocated state, so `deletionPolicy` defaults to Delete (#176,
+		// Deletes, like every kind since #304 retired the per-kind Retain default. A provider
+		// is configuration a manifest can recreate, not allocated state, so there is nothing
+		// for DataLossOnDelete to protect and it stays false (#176, #304,
 		// docs/concepts/deletion.md).
 
 		// The four columns every ChangeLoggedModel carries, plus the counter this serializer

@@ -52,7 +52,7 @@ func TestRefAliasTargets(t *testing.T) {
 		// The second target with no slug column: ipam.VLANTranslationPolicy is unique on
 		// `name` alone (docs/netbox-schema.md), so a slug-mode ref matches nothing there
 		// either.
-		{"vlanTranslationPolicy", VLANTranslationPolicyRef{}, "NetBoxVLANTranslationPolicy"}} {
+		{"vlanTranslationPolicy", VLANTranslationPolicyRef{}, "NetBoxVLANTranslationPolicy"},
 		{"provider", ProviderRef{}, "NetBoxProvider"},
 		{"providerAccount", ProviderAccountRef{}, "NetBoxProviderAccount"},
 		{"providerNetwork", ProviderNetworkRef{}, "NetBoxProviderNetwork"},

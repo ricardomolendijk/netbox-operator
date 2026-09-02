@@ -75,11 +75,13 @@ func TestCircuitsDescriptorsAreRegisteredAndValid(t *testing.T) {
 			}
 
 			// A provider, an account and a circuit are configuration a manifest recreates;
-			// nothing here frees a resource when it is deleted, which is what #176 reserved
-			// Retain for.
-			if d.RetainOnDelete {
-				t.Errorf("RetainOnDelete = true; a circuit is configuration a manifest " +
-					"recreates (#176, docs/concepts/deletion.md)")
+			// nothing here frees a resource when it is deleted, which is what #176 decided.
+			// Since #304 every kind defaults to Delete, and DataLossOnDelete is the only
+			// per-kind deletion flag left.
+			if d.DataLossOnDelete {
+				t.Errorf("DataLossOnDelete = true; a circuit is configuration a manifest " +
+					"recreates, so deleting one destroys no data NetBox would not recreate " +
+					"from the manifest (#176, #304, docs/concepts/deletion.md)")
 			}
 		})
 	}

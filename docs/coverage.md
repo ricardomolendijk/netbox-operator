@@ -16,26 +16,16 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 | | count |
 |---|--:|
 | NetBox REST endpoints | 138 |
-| — implemented as a Kind | 70 |
+| — implemented as a Kind | 75 |
 | — excluded, with a reason | 27 |
-| — **not implemented** | 41 |
+| — **not implemented** | 36 |
 | in scope (endpoints − excluded) | 111 |
 | | |
-| writable columns on the implemented Kinds | 760 |
-| — written by a spec field, or engine-owned | 578 |
+| writable columns on the implemented Kinds | 803 |
+| — written by a spec field, or engine-owned | 611 |
 | — deliberately omitted, with a reason | 10 |
-| — blocked: a reference whose target model has no Kind | 78 |
-| — **MISSING**: nothing declares it and nothing blocks it | 94 |
-| — implemented as a Kind | 63 |
-| — excluded, with a reason | 27 |
-| — **not implemented** | 48 |
-| in scope (endpoints − excluded) | 111 |
-| | |
-| writable columns on the implemented Kinds | 700 |
-| — written by a spec field, or engine-owned | 527 |
-| — deliberately omitted, with a reason | 10 |
-| — blocked: a reference whose target model has no Kind | 74 |
-| — **MISSING**: nothing declares it and nothing blocks it | 89 |
+| — blocked: a reference whose target model has no Kind | 83 |
+| — **MISSING**: nothing declares it and nothing blocks it | 99 |
 | — of those, required on create (fails the audit) | 0 |
 | | |
 | natural-key candidates the IR calls unusable | 21 |
@@ -49,10 +39,8 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 
 | column | status | Kinds | detail |
 |---|---|--:|---|
-| `owner` | blocked | 66 | `users.Owner` is an excluded endpoint, so nothing will ever write this |
-| `tags` | MISSING | 60 | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
-| `owner` | blocked | 60 | `users.Owner` is an excluded endpoint, so nothing will ever write this |
-| `tags` | MISSING | 55 | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
+| `owner` | blocked | 71 | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `tags` | MISSING | 65 | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `comments` | excluded | 6 | organisational kinds map name/slug/description only (api/v1alpha1/virtualization_clustertype.go) |
 | `tenant` | MISSING | 6 | deferred to NetBoxTenant (NBO-021), which now ships -- nothing blocks it any more |
 | `config_template` | MISSING | 4 | — |

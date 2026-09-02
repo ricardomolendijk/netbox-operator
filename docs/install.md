@@ -226,7 +226,7 @@ is the check.
 
 ### CRDs, and why they are not in the chart
 
-The chart used to ship all 64 CRDs in Helm's `crds/` directory, and that made **every**
+The chart used to ship all 69 CRDs in Helm's `crds/` directory, and that made **every**
 `helm install` of it fail:
 
 ```
@@ -254,7 +254,7 @@ What that changes, in three lines:
   a client-side apply stores inside every object, which for these CRDs is 55% of the stored
   size again — `netboxcables` is 191,094 bytes applied server-side and 295,197 bytes applied
   client-side. Note this is etcd bloat and *not* a limit: measured against a real 1.34 API
-  server, the largest annotation is 98,381 bytes against a 262,144 byte cap, so all 64 CRDs
+  server, the largest annotation is 98,381 bytes against a 262,144 byte cap, so all 69 CRDs
   fit client-side with 2.66x headroom. Earlier wording here claimed they exceeded it; they
   do not. The 1 MiB limit this project actually hit was the Helm release Secret, an
   aggregate over the whole chart, which is a different limit on a different object.
