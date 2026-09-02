@@ -23,6 +23,13 @@ import (
 // writes custom fields onto the ipam.ipaddress it allocates, so `ipam.ipaddress` is in the
 // stamped set with no Descriptor of its own behind it (registry.ClaimObjectTypes).
 var stampedObjectTypes = []string{
+	// NBO-057's catalogue slice. All five are PrimaryModels, or an OrganizationalModel through
+	// BaseCircuitType in circuits.circuittype's case (docs/netbox-schema.md, bases), so all
+	// five mix in CustomFieldsMixin and all five are stamped. The six circuits kinds this
+	// milestone defers are absent because they have no Descriptor, not because they would not
+	// be stamped.
+	"circuits.circuit", "circuits.circuittype", "circuits.provider",
+	"circuits.provideraccount", "circuits.providernetwork",
 	"dcim.cable", "dcim.cablebundle",
 	"dcim.device", "dcim.devicerole", "dcim.devicetype", "dcim.interface",
 	"dcim.location", "dcim.macaddress", "dcim.manufacturer", "dcim.platform",

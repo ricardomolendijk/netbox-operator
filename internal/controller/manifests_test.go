@@ -71,7 +71,13 @@ var shippedManifests = []string{
 	// the API server, and the only way to know it is is to dry-run one.
 	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxvlantranslationpolicy.yaml"),
 	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxvlantranslationrule.yaml"),
-	filepath.Join("..", "..", "docs", "examples", "vlan-translation.yaml")}
+	filepath.Join("..", "..", "docs", "examples", "vlan-translation.yaml")
+	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxprovider.yaml"),
+	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxprovideraccount.yaml"),
+	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxprovidernetwork.yaml"),
+	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxcircuittype.yaml"),
+	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxcircuit.yaml"),
+	filepath.Join("..", "..", "docs", "examples", "circuits.yaml")}
 
 // TestShippedManifestsAreAccepted applies every sample and example against the real CRDs.
 //
