@@ -218,8 +218,14 @@ What that changes, in three lines:
 
 - **You install the CRDs.** `make install-crds` from a checkout, or the
   `netbox-operator-crds-<version>.yaml` attached to the release. Both are one `kubectl apply
-  --server-side`; server-side because a CRD this size exceeds the
-  `last-applied-configuration` annotation a client-side apply stores inside it.
+  --server-side`. Server-side because it avoids the `last-applied-configuration` annotation
+  a client-side apply stores inside every object, which for these CRDs is 55% of the stored
+  size again — `netboxcables` is 191,094 bytes applied server-side and 295,197 bytes applied
+  client-side. Note this is etcd bloat and *not* a limit: measured against a real 1.34 API
+  server, the largest annotation is 98,381 bytes against a 262,144 byte cap, so all 64 CRDs
+  fit client-side with 2.66x headroom. Earlier wording here claimed they exceeded it; they
+  do not. The 1 MiB limit this project actually hit was the Helm release Secret, an
+  aggregate over the whole chart, which is a different limit on a different object.
 - **You upgrade them too, before the chart.** Helm never touched them and still does not,
   so this is the same trap it always was, now with the step in front of you rather than
   hidden behind an install that quietly did it once.
