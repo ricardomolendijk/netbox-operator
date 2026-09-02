@@ -24,8 +24,9 @@ func init() { MustRegister(dcimSiteDescriptor()) }
 //     compares two numeric strings numerically, so they need no field class either.
 //
 // A field class exists for a difference the comparison cannot infer from the value -- an
-// order-independent id set, an order-sensitive array -- and dcim.Site has none of those
-// once its foreign keys are out of scope.
+// order-independent id set, an order-sensitive array -- and dcim.Site has exactly one of
+// those: `asns`, whose ClassRefMany is the declaration that its two ends are a set of ids
+// written and a list of nested objects read.
 func dcimSiteDescriptor() Descriptor {
 	return Descriptor{
 		GVK:        netboxv1alpha1.GroupVersion.WithKind("NetBoxSite"),
@@ -45,16 +46,29 @@ func dcimSiteDescriptor() Descriptor {
 		// name it does not know rather than rejecting it, so a wrong one writes nothing and
 		// reports success.
 		//
-		// No Ref entries at all. dcim.Site's `region`, `group`, `tenant` and `asns` are
-		// optional foreign keys (docs/netbox-schema.md -> dcim.Site) that this milestone
-		// leaves out of the CRD entirely rather than declaring and dropping, so the field
-		// map has nothing to declare for them either -- and the kind therefore reports
-		// RefsResolved=True/AllResolved rather than NotImplemented.
+		// One Ref entry. dcim.Site's `region`, `group` and `tenant` are optional foreign keys
+		// (docs/netbox-schema.md -> dcim.Site) still left out of the CRD entirely rather than
+		// declared and dropped, so the field map has nothing to declare for them either --
+		// and the kind therefore reports RefsResolved=True/AllResolved rather than
+		// NotImplemented when none of them is set.
+		//
+		// `asns` is the exception, and it is a to-many rather than a foreign key:
+		// docs/netbox-schema.md -> dcim.Site records `asns ManyToManyField -> ipam.ASN`, and
+		// the schema IR records `class: M2M`, `api.many: true`,
+		// `api.serializer_field: SerializedPKRelatedField` and `in_write_path: true`
+		// (hack/testdata/ir-4.6.8.json.gz). ClassRefMany is what that shape needs: the write
+		// is a list of ids, the read is a list of nested objects, and M2MFields() is what
+		// makes internal/netbox compare the two as sets so that a reordered manifest produces
+		// no PATCH.
 		Fields: []Field{
 			{Spec: "name", API: "name"},
 			{Spec: "slug", API: "slug"},
 			{Spec: "status", API: "status"},
 			{Spec: "facility", API: "facility"},
+			{
+				Spec: "asns", API: "asns", Class: ClassRefMany,
+				Target: netboxv1alpha1.ASNRef{}.TargetGVK(),
+			},
 			{Spec: "physicalAddress", API: "physical_address"},
 			{Spec: "shippingAddress", API: "shipping_address"},
 			// EmptyIsNull on both: they are the only nullable non-text columns this kind
