@@ -115,44 +115,101 @@ func buildAndLoadImage(ctx context.Context, cfg Config) error {
 	return nil
 }
 
-// installCRDs server-side applies the chart's crds/ directory.
+// crdDir is where the CRDs live, relative to the repository root. config/crd/bases and no
+// longer the chart's crds/: the chart stopped carrying them in #265, because Helm 3 stores
+// the whole chart in the release Secret and 2.7 MB of CRDs pushed that Secret past the API
+// server's 1 MiB cap -- which failed `helm upgrade --install` below and took the entire
+// convergence gate with it. This directory is what `make install-crds` applies.
+var crdDir = []string{"config", "crd", "bases"}
+
+// installCRDs server-side applies every CRD and waits for the API server to serve them.
 //
-// Server-side, for the reason `make upgrade-crds` gives: a CRD of this size exceeds the
+// Server-side, for the reason `make install-crds` gives: a CRD of this size exceeds the
 // last-applied-configuration annotation a client-side apply stores in it. Applied through
 // the Go client rather than kubectl, so the suite needs one fewer external binary.
+//
+// The wait is not decoration. The chart refuses to render when netbox.kubeforge.org/v1alpha1
+// is missing from discovery (templates/crds-precondition.yaml), and discovery only lists a
+// CRD once the apiextensions controller has marked it Established -- so applying 64 CRDs and
+// immediately running `helm install` is a race the suite would lose intermittently, with a
+// failure that reads like the precondition being wrong rather than early.
 func installCRDs(ctx context.Context, cfg Config, cluster *Cluster) error {
-	dir := filepath.Join(cfg.RootDir, "charts", "netbox-operator", "crds")
+	dir := filepath.Join(append([]string{cfg.RootDir}, crdDir...)...)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return fmt.Errorf("reading the chart's crds directory %s: %w", dir, err)
+		return fmt.Errorf("reading the CRD directory %s: %w", dir, err)
 	}
 
 	logf(cfg.Out, "applying %d CRDs from %s", len(entries), dir)
+	var names []string
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".yaml") {
 			continue
 		}
-		if err := applyYAMLFile(ctx, cluster.Client, filepath.Join(dir, entry.Name())); err != nil {
+		name, err := applyYAMLFile(ctx, cluster.Client, filepath.Join(dir, entry.Name()))
+		if err != nil {
 			return err
 		}
+		names = append(names, name)
 	}
-	return nil
+	return waitCRDsEstablished(ctx, cfg, cluster, names)
 }
 
-func applyYAMLFile(ctx context.Context, c client.Client, path string) error {
+// waitCRDsEstablished waits until every applied CRD reports Established.
+func waitCRDsEstablished(ctx context.Context, cfg Config, cluster *Cluster, names []string) error {
+	return WaitFor(ctx, "the CRDs to be established", cfg.ReadyTimeout,
+		func(ctx context.Context) (bool, string, error) {
+			for _, name := range names {
+				crd := &unstructured.Unstructured{}
+				crd.SetAPIVersion("apiextensions.k8s.io/v1")
+				crd.SetKind("CustomResourceDefinition")
+				if err := cluster.Client.Get(ctx, types.NamespacedName{Name: name}, crd); err != nil {
+					return transient(err)
+				}
+				if !crdEstablished(crd) {
+					return false, name + " is not Established yet", nil
+				}
+			}
+			return true, "", nil
+		})
+}
+
+// crdEstablished reads status.conditions for Established=True. Unstructured rather than the
+// apiextensions types, because that is the only client the harness has wired up and one
+// condition lookup is not worth a second scheme.
+func crdEstablished(crd *unstructured.Unstructured) bool {
+	conditions, found, err := unstructured.NestedSlice(crd.Object, "status", "conditions")
+	if err != nil || !found {
+		return false
+	}
+	for _, entry := range conditions {
+		condition, ok := entry.(map[string]any)
+		if !ok {
+			continue
+		}
+		if condition["type"] == "Established" && condition["status"] == "True" {
+			return true
+		}
+	}
+	return false
+}
+
+// applyYAMLFile applies one manifest and returns the name of the object it applied, which
+// is what the caller then waits on.
+func applyYAMLFile(ctx context.Context, c client.Client, path string) (string, error) {
 	body, err := os.ReadFile(path)
 	if err != nil {
-		return fmt.Errorf("reading %s: %w", path, err)
+		return "", fmt.Errorf("reading %s: %w", path, err)
 	}
 	obj := &unstructured.Unstructured{}
 	if err := yaml.Unmarshal(body, obj); err != nil {
-		return fmt.Errorf("parsing %s: %w", path, err)
+		return "", fmt.Errorf("parsing %s: %w", path, err)
 	}
 	if err := c.Patch(ctx, obj, client.Apply,
 		client.ForceOwnership, client.FieldOwner("nbo-e2e")); err != nil {
-		return fmt.Errorf("applying %s: %w", path, err)
+		return "", fmt.Errorf("applying %s: %w", path, err)
 	}
-	return nil
+	return obj.GetName(), nil
 }
 
 // install runs `helm upgrade --install`, so a retained cluster is upgraded in place.
