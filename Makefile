@@ -301,12 +301,17 @@ undeploy: kustomize ## Remove the manager from the current cluster.
 ##@ Chart
 
 CHART ?= charts/netbox-operator
-# The pinned Helm, not whatever is on PATH. `make helm-verify` compares against a golden RBAC
-# render, and Helm 4 emits trailing blank lines Helm 3 does not -- so with an ambient
-# v4.2.4 the target fails on formatting for anyone who happens to have Helm 4 installed,
-# while CI (which installs the pinned v3.16.3) passes. A target that depends on a pinned tool
-# has to name it. Override HELM= to render with something else deliberately.
-HELM  ?= $(HELM_BIN)
+# The pinned Helm when there is one, otherwise whatever is on PATH.
+#
+# `make helm-verify` compares against a golden RBAC render, and Helm 4 emits trailing blank
+# lines Helm 3 does not -- so an ambient v4.2.4 fails the target on pure formatting while CI,
+# which installs the pinned v3.16.3 onto PATH, passes. Preferring ./bin/helm fixes that for
+# anyone who has run `make helm-bin` once.
+#
+# Conditional rather than a hard $(HELM_BIN): CI installs Helm to /usr/local/bin and never
+# populates ./bin, so pointing at it unconditionally breaks the chart job with "No such file
+# or directory" -- which is exactly what happened on the first attempt at this change.
+HELM  ?= $(shell test -x "$(HELM_BIN)" && echo "$(HELM_BIN)" || echo helm)
 
 # Chart.yaml is the one place the version is written (see .github/workflows/release.yaml),
 # so the packaged filename and the CRD bundle's read it from there rather than repeat it.
