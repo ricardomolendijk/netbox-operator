@@ -181,10 +181,19 @@ They have to agree or the operator is broken in one of two ways, which is why on
 produces both. `*` is rejected by the schema *and* by the template, because the schema is
 skipped by an older Helm and this is not a check to lose.
 
+**`[default]` is a placeholder, not a recommendation.** The `Role` grants `get`, `list` and
+`watch` on *every* Secret in each listed namespace — `resourceNames` cannot narrow a `list`
+or a `watch`, which have no resource name in them — so listing a namespace that also holds
+other applications' credentials hands those to the operator's ServiceAccount as well. List
+a namespace that holds endpoint credentials and little else, and on most clusters `default`
+is not it:
+[the grant is every Secret in the namespace](operations/rbac.md#the-grant-is-every-secret-in-the-namespace-labelled-or-not).
+
 Every Secret an endpoint references must also carry
 `netbox.kubeforge.org/endpoint-credential: "true"`, or it is invisible to the operator even
-when the namespace is granted. Both failure modes, and their exact condition messages, are
-in [rbac.md](operations/rbac.md).
+when the namespace is granted. That label is a cache filter and not a second permission
+boundary: it decides what the operator reads, not what it is allowed to read. Both failure
+modes, and their exact condition messages, are in [rbac.md](operations/rbac.md).
 
 Note that `helm upgrade` with a **shorter** list does not delete the `Role`s it no longer
 renders — Helm removes resources it previously owned, so it does in fact clean up on upgrade,

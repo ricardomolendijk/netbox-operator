@@ -240,8 +240,10 @@ func unreadableSecret(what string, name types.NamespacedName, err error) error {
 		// cluster does not agree, so the Role the list promised is missing or names other
 		// verbs. Nothing the operator can fix, and worth saying plainly.
 		return fmt.Errorf("reading %s secret %s: %w; the operator's namespace list "+
-			"includes %s but the cluster grants it nothing there: apply the Role and "+
-			"RoleBinding from config/rbac/credential-namespaces (see docs/operations/rbac.md)",
+			"includes %s but the cluster grants it nothing there, so the Role the list "+
+			"promised was never applied or has been deleted: `helm upgrade` re-renders "+
+			"it, or apply the Role and RoleBinding from config/rbac/credential-namespaces "+
+			"(see docs/operations/rbac.md)",
 			what, name, err, name.Namespace)
 	}
 	if !apierrors.IsNotFound(err) {
