@@ -60,6 +60,10 @@ rules:
   - netboxipranges
   - netboxmacaddresses
   - netboxmanufacturers
+  - netboxmodulebays
+  - netboxmodules
+  - netboxmoduletypeprofiles
+  - netboxmoduletypes
   - netboxplatforms
   - netboxprefixclaims
   - netboxrackgroups
@@ -117,6 +121,10 @@ rules:
   - netboxlocations/finalizers
   - netboxmacaddresses/finalizers
   - netboxmanufacturers/finalizers
+  - netboxmodulebays/finalizers
+  - netboxmodules/finalizers
+  - netboxmoduletypeprofiles/finalizers
+  - netboxmoduletypes/finalizers
   - netboxplatforms/finalizers
   - netboxprefixclaims/finalizers
   - netboxprefixes/finalizers
@@ -184,6 +192,10 @@ rules:
   - netboxlocations/status
   - netboxmacaddresses/status
   - netboxmanufacturers/status
+  - netboxmodulebays/status
+  - netboxmodules/status
+  - netboxmoduletypeprofiles/status
+  - netboxmoduletypes/status
   - netboxplatforms/status
   - netboxprefixclaims/status
   - netboxprefixes/status

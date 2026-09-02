@@ -1,0 +1,41 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxModuleType
+metadata:
+  name: cisco-sfp-10g-lr
+  namespace: default
+spec:
+  endpointRef: homelab
+  onConflict: Fail
+  deletionPolicy: Delete
+
+  # Required: `dcim.ModuleType.manufacturer` is a REQ foreign key and the only natural key
+  # starts at it, so until this resolves the object writes nothing at all. In a real deployment
+  # the manufacturer lives in a shared catalogue namespace and this ref names it -- which needs
+  # a NetBoxRefGrant there (see docs/reference/netboxmoduletype.md).
+  manufacturerRef:
+    name: cisco
+
+  # The other half of `(manufacturer, model)`. There is no `slug` on this model, so there is no
+  # second candidate to fall back to and a rename is a new object to the lookup.
+  model: SFP-10G-LR
+
+  # Optional, and not part of the identity even though meta.ordering leads with it.
+  profileRef:
+    name: optic
+
+  partNumber: SFP-10G-LR=
+
+  # Validated server-side against profileRef's schema, and nowhere else.
+  attributes:
+    form_factor: "SFP+"
+    reach_km: 10
+    wavelength_nm: 1310
+
+  airflow: passive
+
+  # A string, not a number: NetBox returns `weight` padded to two places ("0.08"), and the
+  # engine compares the two numerically, so this produces no PATCH on the second reconcile.
+  weight: "0.08"
+  weightUnit: kg
+
+  description: 10GBASE-LR SFP+ transceiver, 1310 nm, 10 km
