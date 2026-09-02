@@ -48,6 +48,9 @@ type netboxStubServer struct {
 	// refKeys are the extra `<column>_id` filters this stub honours; see stubKind.refKeys.
 	refKeys []string
 
+	// altKeys are the extra plain scalar filters this stub honours; see stubKind.altKeys.
+	altKeys []string
+
 	mu      sync.Mutex
 	objects map[int64]netbox.Object
 	writes  []stubWrite
@@ -109,6 +112,17 @@ type stubKind struct {
 	// whose natural key is *two* references and therefore the first for which matching one
 	// field is matching the wrong row.
 	refKeys []string
+
+	// altKeys are further plain scalar columns the stub matches exactly, beside `key`.
+	//
+	// Also opt-in, and the reason is ipam.VLANTranslationRule: it is the first kind with two
+	// natural-key *candidates over different columns* -- `(policy, local_vid)` and
+	// `(policy, remote_vid)` -- rather than one candidate and its reverse. `key` covers
+	// `local_vid`, and without `remote_vid` here the second candidate's query would narrow to
+	// `policy_id` alone and match whichever rule of that policy the stub iterated first. A
+	// test asserting the second candidate found the right row would then pass for the wrong
+	// reason, which is worse than not having one.
+	altKeys []string
 }
 
 // newNetBoxStub returns a running stub and its URL.
@@ -116,7 +130,8 @@ func newNetBoxStub(t *testing.T, kind stubKind) (*netboxStubServer, string) {
 	t.Helper()
 
 	s := &netboxStubServer{
-		t: t, endpoint: kind.endpoint, key: kind.key, refKeys: kind.refKeys,
+		t: t, endpoint: kind.endpoint, key: kind.key,
+		refKeys: kind.refKeys, altKeys: kind.altKeys,
 		objects: map[int64]netbox.Object{}, nextID: 100,
 	}
 
@@ -569,7 +584,7 @@ func (s *netboxStubServer) stubMatches(obj netbox.Object, query url.Values) bool
 			if stubCustomField(obj, strings.TrimPrefix(name, "cf_")) != values[0] {
 				return false
 			}
-		case name == s.key:
+		case name == s.key, slices.Contains(s.altKeys, name):
 			if fmt.Sprint(obj[name]) != values[0] {
 				return false
 			}

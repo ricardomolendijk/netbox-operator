@@ -419,6 +419,20 @@ type (
 	// `wireless.WirelessLAN.group` points at -- so one alias serves both the tree edge and
 	// the SSID's group.
 	WirelessLANGroupRef ObjectRef
+
+	// VLANTranslationPolicyRef points at a NetBoxVLANTranslationPolicy
+	// (ipam.VLANTranslationPolicy, ipam/vlan-translation-policies).
+	//
+	// Three fields point at one: `ipam.VLANTranslationRule.policy` (`REQ`, CASCADE) and
+	// `vlan_translation_policy` on both `dcim.Interface` and `virtualization.VMInterface`
+	// (both PROTECT) (docs/netbox-schema.md). So a policy in use by an interface refuses to be
+	// deleted, while deleting one takes its own rules with it -- the same alias either way,
+	// because the cascade is a property of the *column* rather than of the target.
+	//
+	// The target has no `slug` column, so `slug` mode matches nothing here and reports
+	// NotFound. Name the CR, or use `lookup: {name: "dc1-to-dc2"}` for a policy the operator
+	// does not manage.
+	VLANTranslationPolicyRef ObjectRef
 )
 
 // TargetGVK reports the Kind this reference resolves against.
@@ -716,6 +730,7 @@ var (
 	_ RefTarget = RackTypeRef{}
 	_ RefTarget = RackGroupRef{}
 	_ RefTarget = RackRef{}
+	_ RefTarget = VLANTranslationPolicyRef{}
 )
 
 // TargetGVK reports the Kind this reference resolves against.
@@ -845,3 +860,11 @@ func (r WirelessLANGroupRef) TargetGVK() schema.GroupVersionKind {
 
 // AsObjectRef returns the underlying reference.
 func (r WirelessLANGroupRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r VLANTranslationPolicyRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxVLANTranslationPolicy")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r VLANTranslationPolicyRef) AsObjectRef() ObjectRef { return ObjectRef(r) }

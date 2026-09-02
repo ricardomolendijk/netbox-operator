@@ -241,14 +241,19 @@ func TestInterfaceReadOnlyCoversTheCachesTheCableAndEveryReverseRelation(t *test
 // column this Kind cannot yet write would report success while writing nothing -- which is
 // strictly worse than the field not being there. Each of these waits on a Kind: dcim.Module
 // (NBO-053), dcim.VirtualDeviceContext (NBO-060), wireless.WirelessLink and
-// wireless.WirelessLAN (NBO-050), ipam.VLANTranslationPolicy (NBO-055), dcim.MACAddress
-// (NBO-048).
+// wireless.WirelessLAN (NBO-050), dcim.MACAddress (NBO-048).
+//
+// `vlan_translation_policy` was on this list and is deliberately off it: NBO-068 landed
+// NetBoxVLANTranslationPolicy, so the column stopped waiting and the entry became a rule
+// against writing a field the operator now can write.
+// ipam_vlantranslation_test.go's TestBothInterfaceKindsWriteTheTranslationPolicy is the
+// assertion that replaced it -- a list like this one is only as honest as its removals.
 func TestInterfaceOmitsTheColumnsWhoseKindsDoNotExist(t *testing.T) {
 	d := descriptorFor(t, "NetBoxInterface")
 
 	for _, api := range []string{
 		"module", "vdcs", "wireless_link", "wireless_lans",
-		"vlan_translation_policy", "primary_mac_address", "mac_address",
+		"primary_mac_address", "mac_address",
 	} {
 		if slices.ContainsFunc(d.Fields, func(f Field) bool { return f.API == api }) {
 			t.Errorf("the field map writes %q, whose target Kind does not exist yet", api)

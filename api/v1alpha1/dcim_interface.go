@@ -125,7 +125,6 @@ type WirelessChannel string
 //     `ManyToManyField` renders; an empty set satisfies it. dcim.VirtualDeviceContext has no
 //     ticket (NBO-060 audits it).
 //   - `wireless_link`, `wireless_lans` -- NBO-050.
-//   - `vlan_translation_policy` -- NBO-055.
 //   - MAC addresses. NetBox 4.2 moved the MAC to `dcim.MACAddress` behind a generic FK, and
 //     this model's own entry lists only `mac_addresses GenericRelation` -- a reverse
 //     relation, never a column. NBO-048 lands the Kind.
@@ -415,6 +414,22 @@ type NetBoxInterfaceSpec struct {
 	// dcim.Interface, `vrf ForeignKey -> ipam.VRF on_delete=SET_NULL`).
 	// +optional
 	VRFRef *VRFRef `json:"vrfRef,omitempty"`
+
+	// VLANTranslationPolicyRef is the table of VLAN ID rewrites applied to this interface
+	// (docs/netbox-schema.md -> dcim.Interface, `vlan_translation_policy (BaseInterface)
+	// ForeignKey -> ipam.VLANTranslationPolicy on_delete=PROTECT`).
+	//
+	// The column NBO-030 left out because there was no Kind to point at; NBO-068 lands it and
+	// this field is the whole of what changes here. Not deferred, unlike `qinqSVLANRef`: a
+	// policy is a standalone object with no dependency on this interface, so there is no
+	// ordering problem to solve and NetBox cross-validates nothing about it.
+	//
+	// PROTECT, so this reference is not a containment parent and never could be
+	// (docs/decisions/0003-ownership-and-references.md rule 4) -- and pointing at a policy is
+	// what stops it being deleted, reported on the *policy* as
+	// Deleting=False, Reason=Protected.
+	// +optional
+	VLANTranslationPolicyRef *VLANTranslationPolicyRef `json:"vlanTranslationPolicyRef,omitempty"`
 
 	// Description is free text shown next to the interface. Declared on
 	// dcim.ComponentModel rather than on dcim.Interface (docs/netbox-schema.md ->

@@ -16,15 +16,15 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 | | count |
 |---|--:|
 | NetBox REST endpoints | 138 |
-| — implemented as a Kind | 58 |
+| — implemented as a Kind | 60 |
 | — excluded, with a reason | 27 |
-| — **not implemented** | 53 |
+| — **not implemented** | 51 |
 | in scope (endpoints − excluded) | 111 |
 | | |
-| writable columns on the implemented Kinds | 657 |
-| — written by a spec field, or engine-owned | 494 |
+| writable columns on the implemented Kinds | 665 |
+| — written by a spec field, or engine-owned | 503 |
 | — deliberately omitted, with a reason | 10 |
-| — blocked: a reference whose target model has no Kind | 69 |
+| — blocked: a reference whose target model has no Kind | 68 |
 | — **MISSING**: nothing declares it and nothing blocks it | 84 |
 | — of those, required on create (fails the audit) | 0 |
 | | |
@@ -39,7 +39,7 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 
 | column | status | Kinds | detail |
 |---|---|--:|---|
-| `owner` | blocked | 55 | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `owner` | blocked | 56 | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `tags` | MISSING | 50 | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `comments` | excluded | 6 | organisational kinds map name/slug/description only (api/v1alpha1/virtualization_clustertype.go) |
 | `tenant` | MISSING | 6 | deferred to NetBoxTenant (NBO-021), which now ships -- nothing blocks it any more |
@@ -49,7 +49,6 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 | `data_file` | blocked | 3 | `core.DataFile` is an excluded endpoint, so nothing will ever write this |
 | `auth_psk` | MISSING | 2 | deliberately unmapped on both wireless kinds and NOT excused: a pre-shared key may never be inline in a spec, so the field has to be `authPSKSecretRef` -> a Secret key, which needs a Secret read in the payload path and a Secret informer scoped to the object's own namespace. That is shared machinery and an RBAC decision (NBO-072), so it owes its own ticket rather than riding along with the kinds (api/v1alpha1/wireless_auth.go) |
 | `primary_mac_address` | MISSING | 2 | NBO-053 owns it. NBO-048 ships the forward half -- a NetBoxMACAddress names the interface it is assigned to -- and the reverse half is a deferred field on the two BaseInterface component specs, because modelling both directions as required references is the unresolvable cycle NBO-016 rejects (api/v1alpha1/dcim_macaddress.go) |
-| `vlan_translation_policy` | blocked | 2 | waits on a Kind for `ipam.VLANTranslationPolicy` |
 | `asns` | MISSING | 1 | deferred with dcim.Site's other optional foreign keys; NetBoxASN ships with NBO-055, so nothing blocks it any more (api/v1alpha1/dcim_site.go) |
 | `auth_key` | MISSING | 1 | a pre-shared key, permitted only as spec.authKeySecretRef and never inline; the engine has no FieldClass that reads a Secret into a payload, so the column is unmapped rather than written, and it is in internal/netbox/do.go's redaction set because NetBox returns it (api/v1alpha1/ipam_fhrpgroup.go, docs/reference/netboxfhrpgroup.md) |
 | `auto_sync_enabled` | MISSING | 1 | — |
@@ -155,6 +154,7 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 | `ipam.ServiceTemplate` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `ipam.VLAN` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `ipam.VLANGroup` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `ipam.VLANTranslationPolicy` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `ipam.VRF` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `tenancy.Contact` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `tenancy.ContactGroup` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
@@ -239,8 +239,6 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 | `dcim.Interface` | `vdcs` | M2M | — | blocked | waits on a Kind for `dcim.VirtualDeviceContext` |
 | `dcim.Device` | `virtual_chassis` | Ref | — | blocked | waits on a Kind for `dcim.VirtualChassis` |
 | `virtualization.VirtualMachine` | `virtual_machine_type` | Ref | — | blocked | waits on a Kind for `virtualization.VirtualMachineType` |
-| `dcim.Interface` | `vlan_translation_policy` | Ref | — | blocked | waits on a Kind for `ipam.VLANTranslationPolicy` |
-| `virtualization.VMInterface` | `vlan_translation_policy` | Ref | — | blocked | waits on a Kind for `ipam.VLANTranslationPolicy` |
 | `dcim.DeviceType` | `weight` | Decimal | — | MISSING | — |
 | `dcim.DeviceType` | `weight_unit` | Enum | — | MISSING | — |
 | `dcim.Interface` | `wireless_lans` | M2M | — | MISSING | NBO-053 owns it, with the rest of dcim.Interface's component fields. NBO-050 ships wireless.WirelessLAN, so the column is no longer blocked -- only unwritten    reason: NBO-059 owns it, with the rest of ConfigContextModel |
@@ -381,8 +379,8 @@ each pinned column's class rather than from the IR's reason string.
 | `ipam/service-templates` | `ipam.ServiceTemplate` | `NetBoxServiceTemplate` | implemented | — |
 | `ipam/services` | `ipam.Service` | `NetBoxService` | implemented | — |
 | `ipam/vlan-groups` | `ipam.VLANGroup` | `NetBoxVLANGroup` | implemented | — |
-| `ipam/vlan-translation-policies` | `ipam.VLANTranslationPolicy` | — | MISSING | — |
-| `ipam/vlan-translation-rules` | `ipam.VLANTranslationRule` | — | MISSING | — |
+| `ipam/vlan-translation-policies` | `ipam.VLANTranslationPolicy` | `NetBoxVLANTranslationPolicy` | implemented | — |
+| `ipam/vlan-translation-rules` | `ipam.VLANTranslationRule` | `NetBoxVLANTranslationRule` | implemented | — |
 | `ipam/vlans` | `ipam.VLAN` | `NetBoxVLAN` | implemented | — |
 | `ipam/vrfs` | `ipam.VRF` | `NetBoxVRF` | implemented | — |
 | `tenancy/contact-assignments` | `tenancy.ContactAssignment` | `NetBoxContactAssignment` | implemented | — |

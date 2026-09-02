@@ -1,0 +1,266 @@
+# VLAN translation, end to end: one policy with three inline rules, one rule written by hand,
+# and the two interface columns the policy unblocks.
+#
+#   kubectl create namespace homelab
+#   kubectl apply -f docs/examples/vlan-translation.yaml
+#   kubectl get nbvtp,nbvtr -n homelab -w
+#
+# Replace the URL and the token before applying.
+#
+# What this file is really showing is a Kind with **two identities at once**.
+# `ipam.VLANTranslationRule` carries two unique constraints inside one policy --
+# `(policy, local_vid)` and `(policy, remote_vid)` -- and both are enforced. So the three
+# inline rules below are keyed on `localVID`, which the API server checks; a colliding
+# `remoteVID` is not checked here at all and comes back from NetBox as
+# Ready=False, Reason=Conflict naming `unique_policy_remote_vid`. Duplicating that second
+# constraint in the CRD is how the two would drift apart. See
+# docs/reference/netboxvlantranslationrule.md.
+#
+# The policy's own identity is the other thing worth reading. `ipam.VLANTranslationPolicy`
+# declares no `meta.constraints`, so the schema IR records `natural_keys: []` -- and the key is
+# nevertheless `name`, from the column-level UNIQUE that `natural_keys` does not carry.
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: netbox-token
+  namespace: homelab
+  labels:
+    # Required. The operator's Secret cache selects on this label, so a Secret without it is
+    # invisible even when the name on the endpoint is right.
+    netbox.kubeforge.org/endpoint-credential: "true"
+type: Opaque
+stringData:
+  # A NetBox API token with write access to the ipam and dcim apps.
+  token: "0123456789abcdef0123456789abcdef01234567"
+---
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxEndpoint
+metadata:
+  name: homelab
+  namespace: homelab
+spec:
+  url: https://netbox.home.arpa
+  tokenSecretRef:
+    name: netbox-token
+  resyncPeriod: 2m
+  mode: Apply
+---
+# The policy, with its rules inline. Three NetBoxVLANTranslationRule CRs are materialised from
+# this one object, named `dci-dc1-dc2-100`, `-101` and `-102`: the parent's metadata.name, then
+# the entry's `localVID`, with no discriminator between them because `rules` is the only inline
+# list on this Kind.
+#
+# `kubectl delete nbvtp dci-dc1-dc2` takes all three with it -- by Kubernetes garbage collection
+# on the way out, which matches NetBox's own `on_delete=CASCADE` on the way in.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxVLANTranslationPolicy
+metadata:
+  name: dci-dc1-dc2
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  # The default, spelled out. `name` is column-unique in NetBox and a namespace boundary does
+  # not partition that, so the second namespace to claim it reports Conflict.
+  onConflict: Fail
+
+  # The default, spelled out, and the second carve-out inside ipam after NetBoxVLANGroup: a
+  # translation table is configuration a manifest recreates, and deleting one frees no address,
+  # no VLAN ID and no range.
+  deletionPolicy: Delete
+
+  name: DC1 to DC2
+  description: VLAN numbering translation across the DCI
+  comments: |
+    Owned by the network team. Do not renumber without a change window.
+
+  rules:
+    - localVID: 100
+      remoteVID: 2100
+      description: Management
+    - localVID: 101
+      remoteVID: 2101
+      description: Storage
+    - localVID: 102
+      remoteVID: 2102
+      description: vMotion
+---
+# The same thing written longhand. A standalone rule is not a lesser form of an inline one --
+# it is the complete one, and the form to reach for when a rule needs its own `deletionPolicy`,
+# its own `endpointRef`, or a `description` whose "leave NetBox's own value alone" state has to
+# be expressible. An inline entry is rewritten wholesale by its parent and cannot say that.
+#
+# Nothing in `kubectl get nbvtr` distinguishes this from the three above, on purpose. To select
+# only the materialised ones:
+#
+#   kubectl get nbvtr -n homelab \
+#     -l netbox.kubeforge.org/owner-uid=$(kubectl get nbvtp dci-dc1-dc2 -n homelab -o jsonpath='{.metadata.uid}')
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxVLANTranslationRule
+metadata:
+  name: dci-dc1-dc2-voice
+  namespace: homelab
+spec:
+  endpointRef: homelab
+  onConflict: Fail
+  deletionPolicy: Delete
+
+  # Required, and the containment parent: `policy` is on_delete=CASCADE, so this CR takes an
+  # owner reference to the policy and is garbage-collected with it -- exactly as if it had been
+  # declared inline.
+  #
+  # `name` mode, naming the CR. `slug` mode would report NotFound: ipam.VLANTranslationPolicy
+  # has no slug column at all.
+  policyRef:
+    name: dci-dc1-dc2
+
+  localVID: 110
+  remoteVID: 2110
+  description: Voice
+---
+# The other half of what this ticket unblocks. Both `dcim.Interface` and
+# `virtualization.VMInterface` carry `vlan_translation_policy` on `dcim.BaseInterface`, and both
+# shipped without the field because there was nothing for it to point at.
+#
+# `on_delete=PROTECT`, so once either of these exists the policy above cannot be deleted:
+# NetBox refuses, and the *policy* reports Deleting=False, Reason=Protected.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxManufacturer
+metadata:
+  name: generic
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  name: Generic
+  slug: generic
+---
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxDeviceType
+metadata:
+  name: dci-router
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  manufacturerRef:
+    name: generic
+  model: DCI Router
+  slug: dci-router
+---
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxDeviceRole
+metadata:
+  name: border
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  name: Border
+  slug: border
+---
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxSite
+metadata:
+  name: dc1
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  name: DC1
+  slug: dc1
+  status: active
+---
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxDevice
+metadata:
+  name: dci1
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  name: dci1
+  siteRef:
+    name: dc1
+  deviceTypeRef:
+    name: dci-router
+  roleRef:
+    name: border
+  status: active
+---
+# The physical interface. `vlanTranslationPolicyRef` is not deferred, unlike `qinqSVLANRef`: a
+# policy has no dependency on the interface pointing at it, so the reference goes in the create.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxInterface
+metadata:
+  name: dci1-et1
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  deviceRef:
+    name: dci1
+  name: et-0/0/1
+  type: 100gbase-x-qsfp28
+  description: DCI trunk to DC2
+  mode: tagged
+
+  vlanTranslationPolicyRef:
+    name: dci-dc1-dc2
+---
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxClusterType
+metadata:
+  name: kvm
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  name: KVM
+  slug: kvm
+---
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxCluster
+metadata:
+  name: dc1-kvm
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  name: dc1-kvm
+  typeRef:
+    name: kvm
+---
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxVirtualMachine
+metadata:
+  name: gw1
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  name: gw1
+  clusterRef:
+    name: dc1-kvm
+  status: active
+---
+# The same column on the virtual side, pointing at the same policy. That is the whole of why one
+# alias serves both: `vlan_translation_policy` is declared once, on dcim.BaseInterface, and both
+# interface models inherit it.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxVMInterface
+metadata:
+  name: gw1-eth1
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  virtualMachineRef:
+    name: gw1
+  name: eth1
+  mode: tagged
+  description: Overlay uplink
+
+  vlanTranslationPolicyRef:
+    name: dci-dc1-dc2

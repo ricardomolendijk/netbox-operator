@@ -93,6 +93,8 @@ the table, and there is no second one.
 | [`NetBoxService`](../reference/netboxservice.md) | `Retain` | Deleting loses which addresses and ports a service was actually bound to |
 | [`NetBoxServiceTemplate`](../reference/netboxservicetemplate.md) | `Retain` | Backs real `NetBoxService` objects created from it; deleting the template should not imply deleting what it stamped out |
 | [`NetBoxVLANGroup`](../reference/netboxvlangroup.md) | **`Delete`** | A container, not an allocation — [see below](#netboxvlangroup-is-a-container-not-an-allocation) |
+| [`NetBoxVLANTranslationPolicy`](../reference/netboxvlantranslationpolicy.md) | **`Delete`** | A table of VLAN ID rewrites: configuration, not an allocation. Deleting one frees no address, no VLAN ID and no range — the same reading as `NetBoxVLANGroup` |
+| [`NetBoxVLANTranslationRule`](../reference/netboxvlantranslationrule.md) | **`Delete`** | One row of that table. `Retain` would be incoherent here in any case: NetBox cascades a policy's rules away with the policy, so retaining one leaves a CR pointing at a row that no longer exists |
 | [`NetBoxIPAddressClaim`](../reference/netboxipaddressclaim.md) | **`Delete`** | The claim's CR is the only record its allocation exists — [see below](#the-claim-is-the-exception-to-the-exception) |
 | [`NetBoxCustomField`](../reference/netboxcustomfield.md) | **`Delete`**, and refused | Deleting one destroys data and NetBox does not refuse it, so the *finalizer* does — [see below](#delete-and-refused-are-not-the-same-axis) |
 | every other Kind (`NetBoxTag`, `NetBoxSite`, the catalogue kinds, the `extras` kinds, …) | `Delete` | Configuration: cheap to delete, cheap to recreate |

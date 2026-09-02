@@ -88,7 +88,6 @@ spec:
                   `ManyToManyField` renders; an empty set satisfies it. dcim.VirtualDeviceContext has no
                   ticket (NBO-060 audits it).
                 - `wireless_link`, `wireless_lans` -- NBO-050.
-                - `vlan_translation_policy` -- NBO-055.
                 - MAC addresses. NetBox 4.2 moved the MAC to `dcim.MACAddress` behind a generic FK, and
                   this model's own entry lists only `mac_addresses GenericRelation` -- a reverse
                   relation, never a column. NBO-048 lands the Kind.
@@ -1342,6 +1341,94 @@ spec:
                   UntaggedVLANRef is the interface's native VLAN (docs/netbox-schema.md ->
                   dcim.Interface, `untagged_vlan (BaseInterface) ForeignKey -> ipam.VLAN
                   on_delete=SET_NULL`).
+                properties:
+                  id:
+                    description: |-
+                      ID is a literal NetBox primary key: the escape hatch, and the only place in the API
+                      where a raw id is accepted.
+
+                      A pointer so that `id: 0` is distinguishable from unset. NetBox primary keys start
+                      at 1, so zero is never a real object and has to be rejected rather than silently
+                      treated as "no id".
+                    format: int64
+                    minimum: 1
+                    type: integer
+                  lookup:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      Lookup is a raw NetBox API filter, for an object no slug identifies -- a VLAN is
+                      `{vid: "20", site: "home"}` because its identity is a pair.
+
+                      `q` is rejected by the CEL rules along with the pagination and formatting
+                      parameters. It is NetBox's fuzzy search, and a fuzzy filter behind a reference that
+                      must identify exactly one object would make ambiguity the normal case rather than
+                      an error.
+                    maxProperties: 8
+                    type: object
+                  name:
+                    description: |-
+                      Name of a CR of the target Kind, resolved through that CR's `.status.id`.
+
+                      This is the mode to prefer: it is the only one that expresses a dependency the
+                      operator can wait on, which is what lets a graph applied in any order converge.
+                    maxLength: 253
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                    type: string
+                  namespace:
+                    description: |-
+                      Namespace of that CR. Defaults to the referring object's namespace.
+
+                      Load-bearing on the common path rather than an edge case: every Kind is namespaced
+                      in v1alpha1 (docs/decisions/0002-crd-scoping.md), so a team namespace pointing at a
+                      shared catalogue namespace is the normal shape. Crossing a namespace requires a
+                      NetBoxRefGrant in the target namespace (NBO-014).
+                    maxLength: 63
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                    type: string
+                  slug:
+                    description: |-
+                      Slug looks the object up in NetBox directly, for objects the operator does not
+                      manage. No CR needs to exist.
+
+                      Bounded at 100 characters because that is what NetBox's own column allows:
+                      `slug SlugField len=100` on every OrganizationalModel, NestedGroupModel and
+                      PrimaryModel (docs/netbox-schema.md -> dcim.Site, dcim.Region, extras.Tag).
+                    maxLength: 100
+                    pattern: ^[-a-zA-Z0-9_]+$
+                    type: string
+                type: object
+                x-kubernetes-validations:
+                - message: exactly one of name, slug, lookup or id must be set
+                  rule: '[has(self.name) && size(self.name) > 0, has(self.slug) &&
+                    size(self.slug) > 0, has(self.lookup) && size(self.lookup) > 0,
+                    has(self.id)].filter(x, x).size() == 1'
+                - message: namespace may only be set together with name
+                  rule: '!has(self.namespace) || (has(self.name) && size(self.name)
+                    > 0)'
+                - message: lookup keys must be lowercase NetBox filter names
+                  rule: '!has(self.lookup) || self.lookup.all(k, k.matches(''^[a-z][a-z0-9_]*$''))'
+                - message: lookup may not set pagination, formatting or fuzzy-search
+                    parameters
+                  rule: '!has(self.lookup) || self.lookup.all(k, !(k in [''limit'',''offset'',''format'',''brief'',''ordering'',''q'']))'
+                - message: lookup values are limited to 200 characters
+                  rule: '!has(self.lookup) || self.lookup.all(k, size(self.lookup[k])
+                    <= 200)'
+              vlanTranslationPolicyRef:
+                description: |-
+                  VLANTranslationPolicyRef is the table of VLAN ID rewrites applied to this interface
+                  (docs/netbox-schema.md -> dcim.Interface, `vlan_translation_policy (BaseInterface)
+                  ForeignKey -> ipam.VLANTranslationPolicy on_delete=PROTECT`).
+
+                  The column NBO-030 left out because there was no Kind to point at; NBO-068 lands it and
+                  this field is the whole of what changes here. Not deferred, unlike `qinqSVLANRef`: a
+                  policy is a standalone object with no dependency on this interface, so there is no
+                  ordering problem to solve and NetBox cross-validates nothing about it.
+
+                  PROTECT, so this reference is not a containment parent and never could be
+                  (docs/decisions/0003-ownership-and-references.md rule 4) -- and pointing at a policy is
+                  what stops it being deleted, reported on the *policy* as
+                  Deleting=False, Reason=Protected.
                 properties:
                   id:
                     description: |-

@@ -1,0 +1,39 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxVLANTranslationPolicy
+metadata:
+  name: dc1-to-dc2
+  namespace: default
+spec:
+  endpointRef: homelab
+
+  # The default, spelled out. ipam.VLANTranslationPolicy declares no meta.constraints, so the
+  # identity comes from the column-level UNIQUE on `name` -- one NetBox policy per name, so the
+  # second namespace to claim `dc1-to-dc2` loses, and Fail says so.
+  onConflict: Fail
+
+  # The default, spelled out, and the exception among the ipam kinds (#186): a translation
+  # policy is configuration a manifest recreates, not allocated state. It is still often
+  # refused -- both interface kinds point here with on_delete=PROTECT, so a policy in use comes
+  # back as Deleting=False, Reason=Protected rather than taking the interfaces with it.
+  deletionPolicy: Delete
+
+  name: DC1 to DC2
+  description: VLAN numbering translation across the DCI
+
+  # Inline rules: three NetBoxVLANTranslationRule children, materialised as
+  # dc1-to-dc2-100, dc1-to-dc2-101 and dc1-to-dc2-102. Each is a real CR with its own
+  # conditions, owned by this policy and garbage-collected with it.
+  #
+  # `localVID` is the list's map key, so a duplicate is refused by the API server. `remoteVID`
+  # is not: NetBox enforces (policy, remote_vid) as a second constraint of its own, and letting
+  # it surface as a Conflict is one statement of the rule instead of two.
+  rules:
+    - localVID: 100
+      remoteVID: 2100
+      description: Management
+    - localVID: 101
+      remoteVID: 2101
+      description: Storage
+    - localVID: 102
+      remoteVID: 2102
+      description: vMotion

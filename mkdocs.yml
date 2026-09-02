@@ -75,6 +75,8 @@ nav:
       - '`NetBoxRouteTarget`': reference/netboxroutetarget.md
       - '`NetBoxVLAN`': reference/netboxvlan.md
       - '`NetBoxVLANGroup`': reference/netboxvlangroup.md
+      - '`NetBoxVLANTranslationPolicy`': reference/netboxvlantranslationpolicy.md
+      - '`NetBoxVLANTranslationRule`': reference/netboxvlantranslationrule.md
       - '`NetBoxClusterType`': reference/netboxclustertype.md
       - '`NetBoxClusterGroup`': reference/netboxclustergroup.md
       - '`NetBoxCluster`': reference/netboxcluster.md

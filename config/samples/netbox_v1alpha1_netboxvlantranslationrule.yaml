@@ -1,0 +1,32 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxVLANTranslationRule
+metadata:
+  name: dc1-to-dc2-voice
+  namespace: default
+spec:
+  endpointRef: homelab
+
+  # The default, spelled out. This kind has two identities of equal standing --
+  # (policy, local_vid) and (policy, remote_vid) -- so a rule that collides with an existing
+  # one on *either* side is found by the lookup rather than rejected by NetBox, and Fail
+  # reports which. Adopt would PATCH the other rule onto this one's numbering instead.
+  onConflict: Fail
+
+  # The default, spelled out. A rewrite is configuration a manifest recreates. NetBox cascades
+  # a policy's rules away with the policy anyway, so Retain here would only leave a CR pointing
+  # at a row that no longer exists.
+  deletionPolicy: Delete
+
+  # Required, and the containment parent: ipam.VLANTranslationRule.policy is
+  # on_delete=CASCADE, so this CR carries an owner reference to the policy and is
+  # garbage-collected with it.
+  #
+  # This rule is written standalone rather than inline in the policy's `spec.rules`, which is
+  # the form to use when a rule needs its own endpoint, its own deletion policy, or a
+  # description whose "leave NetBox's alone" state has to be expressible.
+  policyRef:
+    name: dc1-to-dc2
+
+  localVID: 110
+  remoteVID: 2110
+  description: Voice

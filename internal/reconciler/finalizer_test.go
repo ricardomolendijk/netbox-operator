@@ -752,6 +752,14 @@ var deletionDefaults = map[string]netboxv1alpha1.DeletionPolicy{
 	// the rule the table turns on puts it with the configuration kinds.
 	"NetBoxVLANGroup": netboxv1alpha1.DeletionDelete,
 
+	// NBO-068: the same carve-out, twice more. A VLAN translation policy is a table of
+	// rewrites and a rule is one row of it; neither hands anything out, so deleting one frees
+	// no address, no VLAN ID and no range. The rule would be incoherent as `Retain` in any
+	// case: NetBox cascades a policy's rules away with the policy, so retaining one leaves a
+	// CR pointing at a row that no longer exists.
+	"NetBoxVLANTranslationPolicy": netboxv1alpha1.DeletionDelete,
+	"NetBoxVLANTranslationRule":   netboxv1alpha1.DeletionDelete,
+
 	// NBO-051: racks are configuration a manifest recreates, not allocated state -- see each
 	// kind's own RetainOnDelete comment in internal/registry/dcim_rack*.go.
 	"NetBoxRack":            netboxv1alpha1.DeletionDelete,

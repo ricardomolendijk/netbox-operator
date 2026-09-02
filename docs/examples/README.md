@@ -13,7 +13,7 @@ kubectl get nbep,nbsite -n netbox-demo
 ```
 
 Every kind ships a short name (`nbep`, `nbsite`, `nbtag`, …), and `kubectl api-resources
---api-group=netbox.kubeforge.org` lists all 64 of them with theirs.
+--api-group=netbox.kubeforge.org` lists all 66 of them with theirs.
 
 ## What is here
 
@@ -25,6 +25,7 @@ Every kind ships a short name (`nbep`, `nbsite`, `nbtag`, …), and `kubectl api
 | [`extras.yaml`](extras.yaml) | NetBox's own configuration: a custom field, its choices, a link, a filter, two templates and a config context |
 | [`racks.yaml`](racks.yaml) | A rack role, a flat rack group, a catalogue rack type, one rack in a location and one deliberately without, and a reservation on the first |
 | [`ipam-remainder.yaml`](ipam-remainder.yaml) | The allocation registry, an address role, an FHRP group with its assignment, and services |
+| [`vlan-translation.yaml`](vlan-translation.yaml) | A translation policy with three inline rules and one written longhand, plus the physical and virtual interfaces that point at it -- the two columns this Kind unblocks |
 | [`cables.yaml`](cables.yaml) | A bundle, a patch lead, and a two-strand trunk landing on two ports at one end |
 
 ## What is not here yet
