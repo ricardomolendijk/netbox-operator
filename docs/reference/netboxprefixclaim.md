@@ -254,6 +254,7 @@ resolve.
 |---|---|---|---|
 | `PREFIX` empty, `READY` False forever | `Reason=IdempotencyKeyUnavailable` | the endpoint has no identity store | set `spec.managedBy.clusterID` on the `NetBoxEndpoint` |
 | `PREFIX` empty, message names another cr | `Reason=ForeignAllocation` | `spec.allocationIdentity` names a prefix somebody else owns | unset it, or have the owner release it |
+| `PREFIX` empty, message names a custom field to set | `Reason=ForeignAllocation` | `spec.allocationIdentity` names a prefix this endpoint cannot attribute to this claim | stamp it for this claim in NetBox as the message says, or unset the field |
 | `PREFIX` empty, `PARENT` empty | `Reason=WaitingForRef` | the parent does not exist, has no `status.id`, or is denied across namespaces | create it, or write the [`NetBoxRefGrant`](netboxrefgrant.md) the message names |
 | `PREFIX` empty, message names two lengths | `Reason=Invalid` | `prefixLength` is not smaller than the parent, or is outside its family | ask for a longer mask; a claim's length is immutable, so this is a new claim |
 | `PREFIX` empty, retrying every 10m | `Reason=PoolExhausted` | no free block of that size is left | widen the container (the claim wakes immediately), or delete a child prefix in NetBox (up to 10m) |

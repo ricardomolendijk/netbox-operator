@@ -152,6 +152,14 @@ The one case for it is a **rename**: the name is in the hash, so a renamed claim
 identity and allocates a new address. Copy the old claim's `status.allocationIdentity` into
 here and the renamed claim reclaims the original address instead.
 
+That reclaim takes one step in NetBox as well. A given identity may only take an object this
+endpoint can attribute to *this* claim, so the object — still stamped with the old claim's
+name, or never stamped at all — is refused with [`ForeignAllocation`](#foreignallocation) until
+its owner custom field (`k8s_owner` by default) is set to
+`netboxipaddressclaim/<namespace>/<name>` of the claim that should have it. The refusal message
+names the field and the value. The identity alone is not proof of ownership: it is a string
+anybody may type, and it is printed in the owning claim's own status.
+
 Immutable in a specific sense: **addable, not changeable.** A transition rule is only
 evaluated when the field is present in both the old and the new object, so setting it on a
 claim that had none is allowed and editing it afterwards is rejected. An identity that moves is
@@ -302,8 +310,13 @@ be pointing at either. A human chooses.
 #### `ForeignAllocation`
 
 On `Allocated` and on `Ready`. This claim sets `spec.allocationIdentity`, an object carrying
-that identity exists, and it is stamped as belonging to a different CR or a different cluster.
-Zero POSTs, zero deletes, and the message names the other writer.
+that identity exists, and this endpoint cannot attribute it to this claim. Zero POSTs, zero
+deletes. Two shapes reach it:
+
+- the object is stamped as belonging to a **different CR or cluster**, and the message names
+  that writer;
+- the object carries **no provenance this endpoint can read**, and the message names the custom
+  field to set to hand it over.
 
 Only a **given** identity reaches this state. A derived one is
 `sha256(url, namespace, kind, name)`, so it already contains the claim's own namespace and no
@@ -312,12 +325,21 @@ and re-applied, both of which re-derive the same identity, never see it.
 
 The refusal is what keeps `spec.allocationIdentity` from being a way to take somebody else's
 address: the identity is the only thing a reclaim matches on, and an adopted object is reported
-as this claim's and deleted with it under the default `deletionPolicy: Delete`. An object with
-**no** owner stamp is unattributable rather than foreign and is still reclaimable, which is the
-pre-existing-NetBox-object case the field was added for.
+as this claim's and deleted with it under the default `deletionPolicy: Delete`.
 
-Fix: unset `spec.allocationIdentity` and let the claim derive its own, or have the owner
-release that object first.
+The unreadable case is refused rather than adopted because a stamp is read by the field names
+of the endpoint doing the reading. An endpoint whose `spec.managedBy` renames `uidField`,
+`clusterField` and `ownerField` — while keeping `allocationIdentityField`, which has to match
+or nothing would be found — reads every object its neighbour stamped as unstamped. Treating
+"unstamped" as "unowned" therefore let the namespace being guarded against switch the guard
+off ([#299](https://github.com/ricardomolendijk/netbox-operator/issues/299)), so an object this
+endpoint cannot attribute is suspicious rather than free.
+
+Fix: unset `spec.allocationIdentity` and let the claim derive its own; or have the owner
+release that object; or, when the object is genuinely yours — one this claim held under an
+earlier name, or a pre-existing NetBox object you are migrating — stamp it for this claim in
+NetBox by setting its owner custom field (`k8s_owner` by default) to
+`netboxipaddressclaim/<namespace>/<name>`, and the next pass reclaims it.
 
 #### `IdempotencyKeyUnavailable`
 
@@ -485,6 +507,7 @@ side by side. `nbipclaim` and `nbipc` both resolve.
 | `ADDRESS` empty, refused immediately | `Ready=False, Reason=PoolNotAllocatable` | the prefix is a `container`, or has `mark_utilized` | allocate out of a child prefix, or clear the flag |
 | `ADDRESS` empty, message names two ids | `Ready=False, Reason=AllocationConflict` | two objects carry one identity | delete the one that is not in service |
 | `ADDRESS` empty, message names another cr | `Ready=False, Reason=ForeignAllocation` | `spec.allocationIdentity` names an object somebody else owns | unset it, or have the owner release the object |
+| `ADDRESS` empty, message names a custom field to set | `Ready=False, Reason=ForeignAllocation` | `spec.allocationIdentity` names an object this endpoint cannot attribute to this claim | stamp the object for this claim in NetBox as the message says, or unset the field |
 | `ADDRESS` empty, message names an address outside the prefix | `Ready=False, Reason=ReclaimedOutsidePool` | the claim was repointed, or its name reused | delete the stale NetBox object, or set `spec.allocationIdentity` |
 | `kubectl apply` rejected: "prefixRef is immutable" | — | a claim allocates once | write a new claim; delete the old one when the address is no longer wanted |
 | a re-applied manifest got a **different** address | — | the previous NetBox object was deleted, or the claim was renamed | see [what reclaim can and cannot recover](../concepts/claims.md#what-reclaim-can-and-cannot-recover) |
