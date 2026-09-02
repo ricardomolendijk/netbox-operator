@@ -238,7 +238,14 @@ func (p *pass) recordDeferred(live netbox.Object) []string {
 // An unresolved reference wins the reason, because it is the more specific answer to "why":
 // the engine has nothing to write, rather than something it has not sent yet. Both states
 // populate status.deferredPending, so the field list is there either way.
+//
+// It is also the one place a NetBox-computed column is read back, and it is here for the same
+// reason the deferred list is: this is the single funnel every pass that reached a live object
+// goes through, on both the no-drift path and the after-a-write one, and the status write that
+// carries it is the one this pass was already going to make.
 func (p *pass) settle(ctx context.Context, live netbox.Object) (ctrl.Result, error) {
+	p.observed = netboxv1alpha1.ObserveColumns(p.obj, live) || p.observed
+
 	pending := p.recordDeferred(live)
 	if len(pending) == 0 || p.refs.message != "" {
 		return p.ready(ctx)

@@ -19,12 +19,11 @@ and do not. Its descriptor declares no field class at all: NetBox returns a choi
 engine's existing comparison covers both. If either were wrong, the operator would find a
 difference on every reconcile and PATCH forever.
 
-**Its foreign keys are deliberately absent.** `dcim.Site` has optional references to a
-region, a site group, a tenant and a list of ASNs. They are not in this CRD, because the
-reference system does not exist yet ([NBO-011](https://github.com/ricardomolendijk/netbox-operator/issues/23),
-[NBO-012](https://github.com/ricardomolendijk/netbox-operator/issues/24)). They are left out
-rather than accepted and ignored — a field that does nothing is worse than a missing one,
-because it looks like it works.
+**Most of its foreign keys are still absent.** `dcim.Site` has optional references to a
+region, a site group, a tenant and a list of ASNs. Only [`asns`](#asns) is in this CRD; the
+other three are left out rather than accepted and ignored — a field that does nothing is worse
+than a missing one, because it looks like it works. Each is per-field work on this Kind, so
+each arrives on its own change rather than with the Kind it points at.
 
 ## Minimal example
 
@@ -69,6 +68,9 @@ spec:
   latitude: "51.9244"
   longitude: "4.4777"
   timeZone: Europe/Amsterdam
+  asns:
+    - name: as64512               # a NetBoxASN in this namespace
+    - lookup: {asn: "65000"}      # an ASN this operator does not manage
   comments: Managed by netbox-operator.
 ```
 
@@ -197,6 +199,38 @@ spelling in YAML and `null` is what goes over the wire (`registry.Field.EmptyIsN
 Validated by NetBox, not by the CRD, so an invalid zone surfaces as
 `Ready=False, Reason=Invalid` with NetBox's own message naming the field.
 
+### `asns`
+
+| | |
+|---|---|
+| Type | `[]ASNRef`, up to 256 items |
+| NetBox column | `asns` (`docs/netbox-schema.md` → `dcim.Site`, `asns ManyToManyField -> ipam.ASN`) |
+| Target Kind | [`NetBoxASN`](netboxasn.md) |
+| Required | no |
+
+The autonomous system numbers this site announces. A **many-to-many**, and the only reference
+of any kind on this Kind, which is why the descriptor's one field class is on it: NetBox takes
+the column as a list of ids and returns it as a list of nested objects, in an order nobody
+chose ([references](../concepts/references.md)).
+
+It behaves the way every to-many reference in this API does:
+
+- It is a **full replacement.** The list is the whole membership, so removing an entry removes
+  the assignment. Omit the field to leave NetBox's own value alone; set it to `[]` to clear it.
+  The two are different instructions ([field ownership](../concepts/field-ownership.md)).
+- It is **written sorted and deduplicated**, and compared as an order-independent id set, so
+  reordering the entries in a manifest produces zero API writes
+  ([drift detection](../concepts/drift.md)).
+- It **writes nothing at all when any element fails to resolve.** Writing the entries that did
+  resolve would be a full-list replacement with a shorter list, which is a deletion reported as
+  a success. The object reports `RefsResolved=False` naming the element that failed.
+- It is bounded at **256** ([a list needs a bound](../concepts/references.md#a-list-needs-a-bound)).
+
+`ASNRef` is the one reference alias whose target has **no `slug`**: `ipam.ASN` is unique on
+`asn` (`docs/netbox-schema.md` → `ipam.ASN`) and declares no slug of any kind, so `slug` mode
+matches nothing and reports `NotFound`. Use `name` for a sibling CR, or
+`lookup: {asn: "64512"}` for an ASN this operator does not manage.
+
 ### `onConflict`
 
 | | |
@@ -310,13 +344,19 @@ difference the comparison cannot infer from the value — an order-independent i
 order-sensitive array — and a choice or a decimal is not one of those. See
 [drift detection](../concepts/drift.md).
 
+The one class this Kind does declare is `RefMany` on [`asns`](#asns), and it is the other half
+of the same argument: a to-many arrives as a JSON list, and so does an order-sensitive array.
+No normalisation can tell the two apart from the value, so the descriptor has to say which it
+is.
+
 ### What is not here yet
 
-`region`, `group`, `tenant` and `asns` need the reference system (NBO-011, NBO-012). `tags`
-needs that too — the field itself is described in
-[the schema reference](../netbox-schema.md) now that NBO-073 emits it, but the CR still has
-no way to name a `NetBoxTag`.
-Custom fields need NBO-059.
+`region`, `group` and `tenant`. Nothing blocks any of them — the reference system landed in M2
+and `NetBoxRegion`, `NetBoxSiteGroup` and `NetBoxTenant` all ship — so what is left is the
+per-field work on this Kind, which is what [`asns`](#asns) already had. `tags` is in the same
+position: the field is described in [the schema reference](../netbox-schema.md) now that
+NBO-073 emits it, but the CR still has no way to name a `NetBoxTag`.
+`docs/coverage.md` records all four.
 
 ## Printer columns
 

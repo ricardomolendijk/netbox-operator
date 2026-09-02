@@ -99,7 +99,7 @@ Four rules are NetBox's rather than the CRD's, and all four surface as
 None of them is re-implemented as CEL. The fourth cannot be — CEL cannot see the other ranges
 — and a rule that caught three of four would read as if it caught all of them.
 
-### There is no `spec.size`
+### There is no `spec.size` — it is `status.size`
 
 `ipam.IPRange.size` is `editable=False` and computed in `IPRange.save()` as
 `end - start + 1` (`netbox/ipam/models/ip.py`, NetBox 4.6.8). It is not in the write
@@ -108,11 +108,12 @@ drift comparison would be a PATCH that changes nothing, recomputed on every resy
 
 The schema digest records it as `REQ` because the *column* is not nullable, which is the same
 trap [the scope pair](../concepts/generic-refs.md#the-req-trap-in-the-schema-digest) sets. The
-two endpoints are the input; the count is NetBox's answer, and it appears in
-`status.naturalKey` and in NetBox rather than in this file.
+two endpoints are the input; the count is NetBox's answer.
 
-`size` is in the descriptor's `ReadOnly` list, which is what stops a future field map from
-mapping onto it.
+`size` is in the descriptor's `ReadOnly` list, which is what stops a field map from mapping
+onto it. It is also in `ipam.IPRange`'s serializer field list, so *every* response the operator
+already reads carries it — which is why it is reported in
+[`status.size`](#status) rather than left to a trip to NetBox.
 
 ### `spec.vrfRef`
 
@@ -212,22 +213,38 @@ constraint — so it is reported as `Ready=False, Reason=Conflict` and nothing i
 
 ## `status`
 
-The standard [object status](../concepts/object-lifecycle.md). `status.naturalKey` records the
-lookup that located the object, filter by filter, which is where the derived `size` becomes
-visible from Kubernetes.
+The standard [object status](../concepts/object-lifecycle.md), plus one field.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `size` | integer | how many addresses the range covers, as NetBox counts them, inclusive of both endpoints |
+
+`status.size` is the read-back half of the rule that keeps `size` out of the spec. The operator
+never sends it; it copies the value out of the object NetBox answered with, on the pass that
+created the range and on every pass afterwards. A pass that learns a count the status did not
+already carry writes it, which is what fills the field in on a range that was reconciled by an
+earlier operator version; a pass where the count is unchanged writes nothing, so a quiet resync
+still costs no `resourceVersion`. A response that does not mention the column — a
+`mode: DryRun` write, a 204 with an empty body — leaves the last known count alone rather than
+blanking it.
+
+This is the only Kind in `v1alpha1` whose status is not the plain object status. The shared
+envelope is embedded inline, so `status.id`, `status.conditions` and everything else are at
+exactly the paths they are on every other Kind.
 
 ## Printer columns
 
 ```console
 $ kubectl get nbrange -n homelab
-NAME           START            END              VRF        STATUS   ID   READY   ADOPTED   AGE
-dhcp-clients   10.0.30.128/24   10.0.30.191/24   vrf-home   active   31   True    false     4m
+NAME           START            END              SIZE   VRF        STATUS   ID   READY   ADOPTED   AGE
+dhcp-clients   10.0.30.128/24   10.0.30.191/24   64     vrf-home   active   31   True    false     4m
 ```
 
 | Column | JSONPath |
 |---|---|
 | `START` | `.spec.startAddress` |
 | `END` | `.spec.endAddress` |
+| `SIZE` | `.status.size` |
 | `VRF` | `.spec.vrfRef.name` |
 | `STATUS` | `.spec.status` |
 | `ID` | `.status.id` |
@@ -235,8 +252,8 @@ dhcp-clients   10.0.30.128/24   10.0.30.191/24   vrf-home   active   31   True  
 | `ADOPTED` | `.status.adopted` |
 | `AGE` | `.metadata.creationTimestamp` |
 
-There is no `SIZE` column, for the reason there is no `size` field: it would read the spec, and
-the spec does not have it.
+`SIZE` reads `.status.size` and not the spec, because the spec does not have it and must not.
+It is empty until the first pass that reached NetBox, which is the same point `ID` fills in.
 
 ## Ownership
 
