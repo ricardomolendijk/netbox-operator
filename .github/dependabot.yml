@@ -1,0 +1,100 @@
+# Dependabot, scoped to the three ecosystems it can actually see.
+#
+# What it covers and what it does not is the whole design here. This repository pins
+# *everything*, on purpose -- the Makefile's header says a `@latest` anywhere in it is a
+# reproducibility bug -- but those pins live in three different places and Dependabot
+# reaches only two of them:
+#
+#   go.mod                        gomod, below
+#   .github/workflows/*.yaml      github-actions, below -- SHA pins with a `# vX.Y.Z`
+#                                 comment, which Dependabot understands and rewrites in
+#                                 place, comment included
+#   Dockerfile                    docker, below
+#   Makefile tool versions        NOT COVERED. CONTROLLER_TOOLS_VERSION, KUSTOMIZE_VERSION,
+#                                 GOLANGCI_LINT_VERSION, ENVTEST_VERSION, KIND_VERSION,
+#                                 HELM_VERSION and MKDOCS_MATERIAL_VERSION are `?=`
+#                                 variables in a Makefile. No Dependabot ecosystem parses
+#                                 that, so they stay a manual bump.
+#
+# That last row is not a footnote. GOLANGCI_LINT_VERSION going stale is what made `make
+# lint` unrunnable against a current Go toolchain, which let a lint failure reach `main`
+# in #275. A tool pin nobody is reminded about is a tool pin that rots.
+version: 2
+
+updates:
+  # Go modules. Grouped, because this repository's dependency graph moves in lockstep:
+  # k8s.io/* and sigs.k8s.io/controller-runtime are released together and mixing minors
+  # across them produces build failures that read as unrelated type errors.
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Amsterdam
+    open-pull-requests-limit: 5
+    labels:
+      - kind/chore
+      - area/ci
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      kubernetes:
+        patterns:
+          - "k8s.io/*"
+          - "sigs.k8s.io/*"
+      # Ginkgo and Gomega are a matched pair; Gomega's matchers assume the reporter.
+      test-tooling:
+        patterns:
+          - "github.com/onsi/*"
+      prometheus:
+        patterns:
+          - "github.com/prometheus/*"
+    ignore:
+      # controller-runtime majors change the manager and webhook surfaces; that is a
+      # deliberate migration, not a dependency bump.
+      - dependency-name: sigs.k8s.io/controller-runtime
+        update-types: [version-update:semver-major]
+      - dependency-name: k8s.io/*
+        update-types: [version-update:semver-major]
+
+  # Workflow actions. Every `uses:` in this repository is pinned to a 40-character commit
+  # SHA with a trailing `# vX.Y.Z`; Dependabot updates both halves, which is the only way
+  # a SHA pin stays legible without being hand-maintained.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Amsterdam
+    open-pull-requests-limit: 5
+    labels:
+      - kind/chore
+      - area/ci
+    commit-message:
+      prefix: "ci(deps)"
+    groups:
+      # actions/* move together often enough that five separate PRs a week is noise.
+      github-actions:
+        patterns:
+          - "actions/*"
+
+  # The manager image: the golang builder and the distroless runtime.
+  #
+  # distroless/static:nonroot is a moving tag rather than a version, so Dependabot will
+  # only ever propose a digest change for it -- which is the useful thing to be told about,
+  # since that tag is how CVE fixes arrive in the runtime layer.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Amsterdam
+    open-pull-requests-limit: 3
+    labels:
+      - kind/chore
+      - area/ci
+    commit-message:
+      prefix: "build(deps)"
