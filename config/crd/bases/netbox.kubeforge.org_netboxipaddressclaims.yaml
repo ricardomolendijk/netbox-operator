@@ -99,6 +99,14 @@ spec:
                   that adding it is allowed and changing it is not: an identity that moves is a claim
                   pointed at somebody else's address.
 
+                  It may not point at an object another CR is stamped as owning. Unlike the derived
+                  value -- which contains this claim's own namespace, so no namespace can compute
+                  another's -- this is a string anybody may type, and the identity is the only thing a
+                  reclaim matches on. So a given identity whose object carries a foreign owner or
+                  cluster stamp is refused with Reason=ForeignAllocation rather than adopted. An
+                  object carrying no stamp is unattributable rather than foreign and is still
+                  reclaimable, which is the pre-existing-NetBox-object case this field exists for.
+
                   Absent and empty mean the same thing here -- derive it -- so this field has two states
                   rather than the three of docs/concepts/field-ownership.md. Nothing is written to NetBox
                   from it directly, so there is no NetBox value for an empty string to clear.
