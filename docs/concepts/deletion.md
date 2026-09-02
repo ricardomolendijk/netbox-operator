@@ -281,7 +281,8 @@ unreachable**. An escape hatch that only works when it is not needed is not an e
 |---|---|---|
 | 1 | The `netbox.kubeforge.org/skip-finalizer=true` annotation | Drop the finalizer, `Warning`/`FinalizerSkipped`. No NetBox call. |
 | 2 | `spec.deletionPolicy: Retain` | Drop the finalizer, `Normal`/`Retained`. No NetBox call. |
-| 3 | `status.id == 0` | Drop the finalizer, `Normal`/`NothingToDelete`. No NetBox call. |
+| 3 | `status.id == 0`, and this Kind cannot carry a provenance stamp | Drop the finalizer, `Normal`/`NothingToDelete`. No NetBox call. |
+| 3a | `status.id == 0` on a stamped endpoint | Search `?cf_k8s_uid=<this CR's uid>`. A match is deleted from step 7; no match drops the finalizer with `Normal`/`NothingToDelete`. See [step 3](#step-3--why-an-unset-statusid-deletes-nothing). |
 | 4 | The Kind destroys data on delete and `netbox.kubeforge.org/allow-data-loss` is not `"true"` | `Deleting=False, Reason=DataLossBlocked`. Keep the finalizer. No NetBox call. |
 | 5 | A child CR this object [materialised](inline-children.md) is still in the cluster | `Deleting=False, Reason=PendingDependents` naming it. Keep the finalizer, requeue in 15s. **This is what orders the NetBox deletes**, not `blockOwnerDeletion` — see below. |
 | 6 | The endpoint is not `Ready` | `Deleting=False, Reason=WaitingForEndpoint`. Keep the finalizer, requeue in 30s. |
@@ -375,18 +376,48 @@ else's data.
 An object adopted under `spec.onConflict: Adopt` *is* owned — adoption records the id — and
 is deleted normally. An object this CR never wrote is not.
 
-The honest part: two different things produce an unset id, and the operator cannot tell them
-apart.
+Two different things produce an unset id:
 
 - Nothing was ever created. The overwhelmingly common case: the endpoint was never `Ready`,
   or the spec never resolved.
 - A create succeeded and the status write recording its id did not.
 
-They are indistinguishable because `status.id` and `status.lastAppliedHash` are written in
-the same update — the one that failed. So the `NothingToDelete` Event says both, and names
-the natural key from `status.naturalKey` when there is one, because that is the only lead
-anyone has. This is the single place where the operator can leave behind an object it will
-never find again, and it says so rather than picking the flattering reading.
+`status.id` and `status.lastAppliedHash` are written in the same update — the one that
+failed — so nothing in the CR's own status can tell the two apart.
+
+**The provenance stamp can.** On an endpoint with `spec.managedBy`, and on a Kind whose NetBox
+model carries `custom_fields`, every object the operator creates carries `k8s_uid` holding the
+creating CR's `metadata.uid` — written in the POST body itself, so there is no window in which
+the object exists without it. `metadata.uid` is assigned by the API server, is never reused,
+and is written into that field by this operator for one CR only, so `?cf_k8s_uid=<uid>` is not
+a natural-key lookup in disguise: **a match was created by this CR and by nothing else.** That
+is the same evidence [duplicate handling](../reference/netboxipaddress.md) uses to pick one
+address out of several, and the same shape of recovery the allocation engine already performs
+against a lost allocation.
+
+So on a stamped endpoint the operator searches, and the two cases separate:
+
+| Search result | What happens |
+|---|---|
+| One match | `status.id` is recovered from it and the delete goes out normally (step 7 onwards). |
+| No match | The finalizer comes off with `NothingToDelete`, and the Event says so **definitively**: nothing was ever created and nothing is left behind. |
+| The search fails, or matches several | `Deleting=False`, the finalizer stays on, requeued. "There may be an object of mine out there and I could not check" has one reversible answer, and orphaning is not it. |
+
+The search needs a client, so a CR with no recorded id still releases without one — step 6
+does not block it. A deletion that needs no NetBox call must not start needing one.
+
+Without a stamp nothing has changed and nothing can. The `NothingToDelete` Event names both
+possibilities and names the natural key from `status.naturalKey` when there is one, because
+that is the only lead anyone has. An endpoint with no `spec.managedBy` therefore keeps the one
+place where the operator can leave behind an object it will never find again — which is one
+more reason to set it.
+
+The same stamp closes the hole from the other side, and earlier: a natural-key match carrying
+this CR's own `k8s_uid` is [recognised as the operator's own
+object](errors-and-retries.md#a-cached-read-is-not-a-conflict) rather than
+reported as somebody else's and advised for adoption. So a lost status write is normally
+repaired on the very next pass, and the deletion-time search is the backstop for a CR deleted
+before that pass ran.
 
 ### Step 5 — the endpoint-unavailable decision
 

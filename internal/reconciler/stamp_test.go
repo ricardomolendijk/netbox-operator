@@ -286,3 +286,77 @@ func TestStampSurvivesADryRun(t *testing.T) {
 		t.Errorf("Ready = %q, want False on a suppressed write", ready.Status)
 	}
 }
+
+// TestOwnStampRecoversALostStatusID is the root cause of the orphan finalizer.go can now only
+// clean up: a create that reached NetBox whose status write never landed. status.id is 0, the
+// natural key matches the operator's own object, and before this the engine called that
+// somebody else's and advised adoption -- on the object it had made itself, forever, because
+// nothing about the next pass is any different.
+//
+// The uid stamp is what settles it. It is on the object because the POST carried it, it holds
+// this CR's metadata.uid, and no other CR can be carrying that value.
+func TestOwnStampRecoversALostStatusID(t *testing.T) {
+	live := liveTag(9)
+	live["custom_fields"] = map[string]any{"k8s_uid": "6f1a-uid"}
+
+	client := &fakeClient{list: []netbox.Object{live}, patched: liveTag(9)}
+	events := &fakeRecorder{}
+
+	engine := stampedEngine(t, stampableDescriptor(), client)
+	engine.Events = events
+
+	// No spec.onConflict: recognising your own object must not need a policy about
+	// somebody else's.
+	obj := stampedObject()
+	if _, err := engine.Reconcile(context.Background(), obj); err != nil {
+		t.Fatalf("Reconcile() = %v", err)
+	}
+
+	if obj.Status.ID != 9 {
+		t.Fatalf("status.id = %d, want 9 recovered from the stamp", obj.Status.ID)
+	}
+
+	// A PATCH, not a POST. Creating here is the double-write this recovery exists to stop.
+	if got := client.methods(); !slices.Equal(got, []string{"GETONE", "PATCH"}) {
+		t.Fatalf("netbox calls = %v, want GETONE then PATCH", got)
+	}
+
+	// Recognised, not adopted: this pass took over nothing, and an Adopted Event on an
+	// object the operator created itself is a false report of a takeover.
+	if obj.Status.Adopted {
+		t.Error("status.adopted = true, want false: the object was the operator's own")
+	}
+
+	if slices.Contains(events.events, "Normal/Adopted") {
+		t.Errorf("events = %v, want no Adopted event", events.events)
+	}
+}
+
+// TestAForeignStampIsStillAnAdoption is the boundary of the recovery above, and the case that
+// keeps it from being a way to take over other people's objects: a stamp naming a different
+// uid is a different CR's object -- including this manifest's own previous incarnation, since
+// `kubectl delete && kubectl apply` issues a new uid -- so the adoption question is asked
+// exactly as it was.
+func TestAForeignStampIsStillAnAdoption(t *testing.T) {
+	live := liveTag(9)
+	live["custom_fields"] = map[string]any{"k8s_uid": "somebody-else"}
+
+	client := &fakeClient{list: []netbox.Object{live}, patched: liveTag(9)}
+	events := &fakeRecorder{}
+
+	engine := stampedEngine(t, stampableDescriptor(), client)
+	engine.Events = events
+
+	obj := stampedObject()
+	if _, err := engine.Reconcile(context.Background(), obj); err != nil {
+		t.Fatalf("Reconcile() = %v", err)
+	}
+
+	if obj.Status.ID != 0 {
+		t.Errorf("status.id = %d, want 0: nothing was adopted", obj.Status.ID)
+	}
+
+	if got := conditionOf(obj, netboxv1alpha1.ConditionReady).Reason; got != netboxv1alpha1.ReasonConflict {
+		t.Errorf("Ready reason = %q, want %q", got, netboxv1alpha1.ReasonConflict)
+	}
+}

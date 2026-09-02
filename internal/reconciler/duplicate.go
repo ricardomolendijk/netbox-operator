@@ -229,8 +229,20 @@ func (p *pass) allowsDuplicate() bool {
 func (p *pass) stampIdentifies() bool {
 	stamp := p.endpoint.Provenance
 
-	return stamp.Applicable() && p.desc.CustomFieldable && stamp.UIDField != "" &&
-		slices.Contains(stamp.Fields, stamp.UIDField) && p.obj.GetUID() != ""
+	return stamp.Applicable() && stamp.UIDField != "" &&
+		slices.Contains(stamp.Fields, stamp.UIDField) && p.mayBeStamped()
+}
+
+// mayBeStamped is the half of stampIdentifies that is knowable without an endpoint: whether
+// this CR could be named by a stamp at all.
+//
+// Split out because the deletion sequence answers everything it can before resolving the
+// endpoint (finalizer.go), and whether *this endpoint* stamps is not knowable there. A false
+// here is final rather than provisional -- a kind whose NetBox model has no `custom_fields`
+// column can never carry a uid, and neither can a CR the API server never gave one -- so it
+// is enough to decide whether a search is worth deferring an answer for.
+func (p *pass) mayBeStamped() bool {
+	return p.desc.CustomFieldable && p.obj.GetUID() != ""
 }
 
 // matchedObjects are the objects one lookup matched: the several an ambiguity carries, or
