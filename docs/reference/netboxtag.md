@@ -7,7 +7,6 @@
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbtag` |
 | Status subresource | yes |
-| Lands with | NBO-008 (M1) |
 
 A `NetBoxTag` is one `extras.Tag` in NetBox: a label with a colour, a sort weight, and an
 optional list of the models it may be applied to.

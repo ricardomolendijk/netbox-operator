@@ -7,7 +7,6 @@
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbcable` |
 | Status subresource | yes |
-| Lands with | NBO-049 (M10) |
 
 A `NetBoxCable` is one `dcim.Cable` in NetBox: a physical link between two things that can be
 plugged into.

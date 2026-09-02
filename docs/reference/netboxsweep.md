@@ -7,7 +7,6 @@
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbsweep` |
 | Status subresource | **yes** |
-| Lands with | NBO-046 (M8) |
 
 A `NetBoxSweep` reports NetBox objects that carry this cluster's provenance stamp and have no
 CR left to reconcile them. It describes **no** NetBox object of its own.

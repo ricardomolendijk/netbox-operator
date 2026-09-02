@@ -7,7 +7,6 @@
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbep`, `nbendpoint` |
 | Status subresource | yes |
-| Lands with | NBO-004 (M1); `spec.managedBy` with NBO-075 |
 
 A `NetBoxEndpoint` is a connection to one NetBox instance: a URL, a token, and the result
 of probing them. Every object CR points at one through `endpointRef`, and gets a client
@@ -102,7 +101,7 @@ spec:
 
 Both Secrets and the `NetBoxEndpoint` must be in the **same namespace** — `SecretKeyRef`
 has no `namespace` field, deliberately. A namespace that needs its own endpoint creates its
-own Secret. See [Secret RBAC](#secret-rbac-and-the-current-blast-radius) for why, and for
+own Secret. See [Secret RBAC](#secret-rbac-and-the-blast-radius) for why, and for
 what the operator's Secret permissions currently are.
 
 ## `spec`
@@ -800,19 +799,32 @@ works too.
 | `READY=True`, `ProvenanceReady` absent, nothing stamped | no `ProvenanceReady` condition at all | `spec.managedBy` is unset, which is the default | Set `spec.managedBy.clusterID`; see [provenance](../operations/provenance.md) |
 | One kind is stamped, another is not | both `Ready=True` | the unstamped kind's NetBox model has no `tags` or `custom_fields` column — `extras.Tag` is one | Expected and permanent. A sweep reports such an object rather than deleting it |
 
-## Secret RBAC, and the current blast radius
+## Secret RBAC, and the blast radius
 
 The Secret reference is same-namespace only, and that is deliberate: `SecretKeyRef` has no
 `namespace` field because reading a Secret across namespaces is a privilege escalation, and
 supporting it would force the operator's Secret permissions to be cluster-wide.
 
-Be aware that today they are anyway. The controller's RBAC marker generates a `ClusterRole`
-granting `get`, `list` and `watch` on Secrets **cluster-wide**, rather than a `Role` per
-namespace that actually contains a `NetBoxEndpoint`. NBO-004's design note calls for the
-narrower grant; narrowing it is tracked as
-[issue #100](https://github.com/ricardomolendijk/netbox-operator/issues/100). Until that
-lands, deploying this operator gives it read access to every Secret in the cluster — worth
-knowing before you install it in a shared cluster.
+They are not. The generated `ClusterRole` carries **no `secrets` rule at all**
+([#100](https://github.com/ricardomolendijk/netbox-operator/issues/100)). Secret access is
+granted one namespace at a time, by a `Role` and `RoleBinding` per namespace named in the
+chart's `credentialNamespaces` — or, on the kustomize path, in
+`config/rbac/credential-namespaces/namespaces.txt`. The same list becomes
+`NETBOX_CREDENTIAL_NAMESPACES` on the manager, which is what it builds its Secret informers
+from, so the grant and the cache cannot disagree.
+
+Two consequences worth knowing before you install:
+
+- **An endpoint in a namespace nobody granted reports `Ready=False`, `Reason=SecretMissing`**,
+  naming the namespace. That is the same reason an absent or unlabelled Secret produces,
+  because the operator cannot tell the three apart without the uncached read it exists to
+  avoid.
+- **Every credential Secret must carry `netbox.kubeforge.org/endpoint-credential: "true"`.**
+  The informer is label-scoped, so an unlabelled Secret is invisible even in a granted
+  namespace.
+
+[rbac.md](../operations/rbac.md) has the `kubectl auth can-i` checks, and the overlay to add
+a cluster-wide read back if you genuinely want one.
 
 ## Related
 

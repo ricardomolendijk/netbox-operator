@@ -7,7 +7,6 @@
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbdev` |
 | Status subresource | yes |
-| Lands with | NBO-030 (M4) |
 
 A `NetBoxDevice` is one `dcim.Device` in NetBox: a named piece of hardware, of a type, in a
 role, at a site.
@@ -425,9 +424,9 @@ Deferral is *legal* here because none of the three columns is matched on by any 
 candidate: stripping them from the create cannot change the identity the lookup decided on.
 The registry enforces that (`validateDeferred`).
 
-`NetBoxIPAddress` is [#199](https://github.com/ricardomolendijk/netbox-operator/pull/199); until
-it lands, `name` mode reports `RefKindUnavailable` and `slug`/`lookup`/`id` resolve against
-NetBox.
+`NetBoxIPAddress` ships
+([#199](https://github.com/ricardomolendijk/netbox-operator/pull/199)), so all four ref modes
+resolve: `name` against a sibling CR, and `slug`/`lookup`/`id` against NetBox.
 
 ### `spec.description` / `spec.comments`
 
@@ -620,10 +619,9 @@ a field that is accepted and silently discarded reports success while writing no
 
 | Column | Why | Arrives with |
 |---|---|---|
-| `location` | the reference exists ([`NetBoxLocation`](netboxlocation.md)) and the rest of the physical plant does not; adding it alone would be half a rack model | NBO-048 |
-| `rack`, `position`, `face` | `dcim.Rack` has no Kind, and `position`/`face` are meaningless without one — which also makes the `('rack', 'position', 'face')` constraint unreachable | NBO-051 |
+| `location`, `rack`, `position`, `face` | [`NetBoxLocation`](netboxlocation.md) and [`NetBoxRack`](netboxrack.md) both ship now, so nothing external blocks these. What is left is the `('rack', 'position', 'face')` constraint, which is a three-column identity this Kind's natural key does not model — mounting a device in a rack is its own change, not a field addition | a ticket of its own |
 | `virtual_chassis`, `vc_position`, `vc_priority` | `dcim.VirtualChassis` has no Kind, so the `('virtual_chassis', 'vc_position')` constraint is unreachable too | NBO-053 |
-| `config_template` | rendering is its own feature, and it references a Kind this one cannot yet name. `local_context_data` was in this row until [#241](https://github.com/ricardomolendijk/netbox-operator/issues/241) and is now [`spec.localContextData`](#speclocalcontextdata): it references nothing, so nothing was blocking it | NBO-059 |
+| `config_template` | rendering is its own feature, and it references a Kind this one cannot yet name. `local_context_data` was in this row until [#277](https://github.com/ricardomolendijk/netbox-operator/pull/277) and is now [`spec.localContextData`](#speclocalcontextdata): it references nothing, so nothing was blocking it | a ticket of its own |
 | `tags` | written by the engine as the provenance stamp; a user-facing tag list needs `NetBoxTag` references on every kind at once | NBO-055 |
 | inline `consolePorts`, `consoleServerPorts`, `powerPorts`, `powerOutlets` | the same sugar as [`spec.interfaces`](#specinterfaces), for components whose Kind does not exist yet. Declaring the field first would accept input the operator cannot honour | NBO-052 |
 | inline `frontPorts`, `rearPorts`, `deviceBays`, `moduleBays`, `inventoryItems` | as above | NBO-053 |

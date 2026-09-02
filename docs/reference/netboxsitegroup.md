@@ -7,7 +7,6 @@
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbsitegroup` |
 | Status subresource | yes |
-| Lands with | NBO-066 (M3) |
 
 A `NetBoxSiteGroup` is one `dcim.SiteGroup` in NetBox: a named, nestable **functional**
 grouping of sites — branch, campus, colo — and a valid target for

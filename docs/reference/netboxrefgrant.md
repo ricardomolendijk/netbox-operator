@@ -7,7 +7,6 @@
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbgrant` |
 | Status subresource | **no** |
-| Lands with | NBO-014 (M2) |
 
 A `NetBoxRefGrant` permits references **from other namespaces into the namespace it lives
 in**. Without one, a `name` reference that names another namespace is refused:

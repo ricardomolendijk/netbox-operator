@@ -7,7 +7,6 @@
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nblocation` |
 | Status subresource | yes |
-| Lands with | NBO-066 (M3) |
 
 A `NetBoxLocation` is one `dcim.Location` in NetBox: a nestable subdivision **within a site** —
 a floor, a room, a rack row — and a valid target for [`spec.scope`](genericref.md#scoperef) on

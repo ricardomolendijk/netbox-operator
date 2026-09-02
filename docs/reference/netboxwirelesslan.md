@@ -7,7 +7,6 @@
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbwlan` |
 | Status subresource | yes |
-| Lands with | NBO-050 (M9) |
 
 A `NetBoxWirelessLAN` is one `wireless.WirelessLAN` in NetBox: an SSID, optionally filed under a
 group, bridged onto a VLAN, and attached to a Region, SiteGroup, Site or Location.

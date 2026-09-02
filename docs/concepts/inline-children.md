@@ -340,8 +340,8 @@ one, which is what keeps the sugar from growing into a mirror of the claim spec.
 
 **One thing an inline claim does not do yet, stated plainly: it does not attach the address it
 allocates to the interface it was written under.** `NetBoxIPAddressClaim` carries no
-`assignedObject` and does not yet materialise a `NetBoxIPAddress` of its own (NBO-036), so the
-claim allocates and records an address and stops there. That is exactly as complete as a
+`assignedObject` and does not materialise a `NetBoxIPAddress` of its own, so the
+claim allocates and records an address in `status.address` and stops there. That is exactly as complete as a
 standalone claim — which is the property that keeps this sugar equivalent to the longhand it
 stands for rather than a better version of it — but it is a real gap and not a subtlety. An
 address that has to be on the interface today is written as a literal `address`, and a

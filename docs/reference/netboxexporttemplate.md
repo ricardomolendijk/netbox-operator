@@ -7,7 +7,6 @@
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbet` |
 | Status subresource | yes |
-| Lands with | NBO-059 (M10) |
 
 A `NetBoxExportTemplate` is one `extras.ExportTemplate` in NetBox: a Jinja2 template NetBox
 offers as an export format on a list view.

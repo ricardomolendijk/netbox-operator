@@ -7,7 +7,6 @@
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbfhrpa` |
 | Status subresource | yes |
-| Lands with | NBO-055 (M10) |
 
 A `NetBoxFHRPGroupAssignment` is one `ipam.FHRPGroupAssignment` in NetBox: the join row that
 says an interface participates in a [first-hop-redundancy group](netboxfhrpgroup.md), at a

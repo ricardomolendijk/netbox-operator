@@ -7,7 +7,6 @@
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbvm` |
 | Status subresource | yes |
-| Lands with | NBO-029 (M4); inline children NBO-033 (M5) |
 
 A `NetBoxVirtualMachine` is one `virtualization.VirtualMachine` in NetBox. It is the kind with
 the most intricate identity in the catalogue — four `UniqueConstraint`s, three of them
@@ -543,10 +542,10 @@ applies here unchanged.
   `virtualization.VMInterface` lists only `mac_addresses GenericRelation` — a reverse
   relation, never a column. `NetBoxMACAddress` is NBO-048.
 - **`virtualMachineTypeRef`** — `virtualization.VirtualMachineType` has no ticket (NBO-060).
-- **`configTemplateRef`** — NBO-059. `localContextData` was listed here with it and is now
+- **`configTemplateRef`** — still absent. `localContextData` was listed here with it and is now
   [`spec.localContextData`](#speclocalcontextdata): unlike the config template it references no
   other Kind, so nothing was blocking it
-  ([#241](https://github.com/ricardomolendijk/netbox-operator/issues/241)).
+  ([#277](https://github.com/ricardomolendijk/netbox-operator/pull/277)).
 - **`oobIPRef`** — `VirtualMachine` has no such column; only `dcim.Device` does.
 - **`services` inline** — `ipam.Service` is NBO-055, so there is no child kind to
   materialise yet.

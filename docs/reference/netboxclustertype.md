@@ -7,7 +7,6 @@
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbctype` |
 | Status subresource | yes |
-| Lands with | NBO-028 (M4) |
 
 A `NetBoxClusterType` is one `virtualization.ClusterType` in NetBox: the technology a cluster
 runs on — vSphere, Proxmox VE, Hyper-V, Nutanix.

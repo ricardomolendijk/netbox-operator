@@ -7,7 +7,6 @@
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbrack` |
 | Status subresource | yes |
-| Lands with | NBO-051 (M9–M10) |
 
 A `NetBoxRack` is one `dcim.Rack` in NetBox: a physical cabinet or frame in a site, with a
 height in rack units and a set of things mounted in it.

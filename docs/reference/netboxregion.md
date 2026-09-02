@@ -7,7 +7,6 @@
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbregion` |
 | Status subresource | yes |
-| Lands with | NBO-011 (M2) |
 
 A `NetBoxRegion` is one `dcim.Region` in NetBox: a named, nestable geographic grouping that
 sites, prefixes, VLAN groups, clusters and wireless LANs can be scoped to.

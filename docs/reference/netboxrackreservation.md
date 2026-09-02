@@ -7,7 +7,6 @@
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbrackres` |
 | Status subresource | yes |
-| Lands with | NBO-051 (M9–M10) |
 
 A `NetBoxRackReservation` is one `dcim.RackReservation`: a claim on a run of rack units, so
 nobody mounts a device in them.

@@ -7,7 +7,6 @@
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbcontactassignment` |
 | Status subresource | yes |
-| Lands with | NBO-056 (M10) |
 
 A `NetBoxContactAssignment` is one `tenancy.ContactAssignment` in NetBox: the row that says
 *this contact, in this role, for this object*. It has no name and no slug — it is a **join

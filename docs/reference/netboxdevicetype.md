@@ -7,7 +7,6 @@
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbdtype` |
 | Status subresource | yes |
-| Lands with | NBO-027 |
 
 A `NetBoxDeviceType` is one `dcim.DeviceType` in NetBox: one make and model of device, with its
 rack height and depth.

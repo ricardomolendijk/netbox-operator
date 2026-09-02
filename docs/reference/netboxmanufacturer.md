@@ -7,7 +7,6 @@
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbmfr` |
 | Status subresource | yes |
-| Lands with | NBO-027 |
 
 A `NetBoxManufacturer` is one `dcim.Manufacturer` in NetBox: who makes a device.
 

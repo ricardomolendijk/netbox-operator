@@ -7,7 +7,6 @@
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbct` |
 | Status subresource | yes |
-| Lands with | NBO-059 (M10) |
 
 A `NetBoxConfigTemplate` is one `extras.ConfigTemplate` in NetBox: a Jinja2 template NetBox
 renders into a device or virtual-machine configuration.

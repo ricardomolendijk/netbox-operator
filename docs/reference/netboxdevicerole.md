@@ -7,7 +7,6 @@
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbdrole` |
 | Status subresource | yes |
-| Lands with | NBO-027 |
 
 A `NetBoxDeviceRole` is one `dcim.DeviceRole` in NetBox: what a device *is for* — router,
 access switch, hypervisor.

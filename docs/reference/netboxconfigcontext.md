@@ -7,7 +7,6 @@
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbcc` |
 | Status subresource | yes |
-| Lands with | NBO-059 (M10) |
 
 A `NetBoxConfigContext` is one `extras.ConfigContext` in NetBox: a JSON document merged into
 the rendered configuration of every object its assignment sets select.

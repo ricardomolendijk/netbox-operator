@@ -7,7 +7,6 @@
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbwlink` |
 | Status subresource | yes |
-| Lands with | NBO-050 (M9) |
 
 A `NetBoxWirelessLink` is one `wireless.WirelessLink` in NetBox: a point-to-point connection
 between two wireless interfaces — a mesh AP with no wired uplink, a building-to-building

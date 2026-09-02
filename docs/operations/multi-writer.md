@@ -5,7 +5,6 @@
 | Requires | [`NetBoxEndpoint.spec.managedBy`](provenance.md) with a `clusterID` |
 | Reports on | `status.conflict`, the `Conflict` condition, the `Conflict` Event, `netbox_operator_conflicts_total` |
 | Prevents | **nothing** — see [Why nothing is serialised](#why-nothing-is-serialised) |
-| Lands with | NBO-047 |
 
 One NetBox can be reconciled from several clusters, and one cluster can hold two manifests
 that describe the same NetBox object. Neither is refused, and neither is coordinated. What

@@ -7,7 +7,6 @@
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbrt` |
 | Status subresource | yes |
-| Lands with | NBO-022 (M3) |
 
 A `NetBoxRouteTarget` is one `ipam.RouteTarget` in NetBox: a BGP extended community, written
 `<asn>:<value>`, that a VRF imports or exports.

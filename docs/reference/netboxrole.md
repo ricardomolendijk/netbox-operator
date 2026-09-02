@@ -7,7 +7,6 @@
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbrole` |
 | Status subresource | yes |
-| Lands with | NBO-055 (M10) |
 
 A `NetBoxRole` is one `ipam.Role` in NetBox: what a prefix, a VLAN, an IP range or an ASN is
 *for* — management, guest, IoT, point-to-point.

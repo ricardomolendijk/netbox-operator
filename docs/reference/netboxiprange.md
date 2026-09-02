@@ -8,7 +8,6 @@
 | Short name | `nbrange` |
 | Status subresource | yes |
 | NetBox model | `ipam.IPRange` (`ipam/ip-ranges`) |
-| Lands with | NBO-064 (M6), pulled forward from NBO-055 |
 
 A `NetBoxIPRange` is a run of consecutive addresses: `10.0.30.128/24` through
 `10.0.30.191/24` is 64 of them. It is what you write down when *something else* hands those

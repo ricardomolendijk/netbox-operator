@@ -7,7 +7,6 @@
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbprefix` |
 | Status subresource | yes |
-| Lands with | NBO-024 (M3) |
 
 A `NetBoxPrefix` is one `ipam.Prefix` in NetBox: a network in CIDR notation, IPv4 or IPv6,
 optionally in a VRF and optionally attached to a Region, SiteGroup, Site or Location.

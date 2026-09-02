@@ -7,7 +7,6 @@
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbvmif` |
 | Status subresource | yes |
-| Lands with | NBO-029 (M4) |
 
 A `NetBoxVMInterface` is one `virtualization.VMInterface` in NetBox: a network interface on a
 [`NetBoxVirtualMachine`](netboxvirtualmachine.md).

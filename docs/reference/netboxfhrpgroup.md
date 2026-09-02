@@ -7,7 +7,6 @@
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbfhrp` |
 | Status subresource | yes |
-| Lands with | NBO-055 (M10) |
 
 A `NetBoxFHRPGroup` is one `ipam.FHRPGroup` in NetBox: a VRRP, HSRP, GLBP or CARP group that
 several interfaces share a virtual address through.

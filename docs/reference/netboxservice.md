@@ -7,7 +7,6 @@
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbsvc` |
 | Status subresource | yes |
-| Lands with | NBO-055 (M10) |
 
 A `NetBoxService` is one `ipam.Service` in NetBox: a layer-four service running on a device, a
 virtual machine or a [first-hop-redundancy group](netboxfhrpgroup.md).

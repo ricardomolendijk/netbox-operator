@@ -7,7 +7,6 @@
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbmac` |
 | Status subresource | yes |
-| Lands with | NBO-048 (M9) |
 
 A `NetBoxMACAddress` is one `dcim.MACAddress` in NetBox: an EUI-48 address, optionally attached
 to a device interface or a virtual-machine interface.

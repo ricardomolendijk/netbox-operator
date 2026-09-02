@@ -109,9 +109,12 @@ lands on that endpoint's `spec.managedBy`.
 
 **`gitops.*` is manager-wide**, because the annotation set is a property of the operator
 rather than of one NetBox. It is rendered as `NETBOX_GENERATED_ANNOTATIONS` on the
-Deployment. Nothing materialises a child CR yet — that is
-[#45](https://github.com/ricardomolendijk/netbox-operator/issues/45) — so the value is
-plumbed and inert until then, which is said here rather than left to be discovered.
+Deployment — **and the manager does not read that variable yet.** Inline children *are*
+materialised, and they *do* carry generated-object annotations, but from the hardcoded
+default (Argo CD on, Flux off) rather than from these values. Setting `gitops.flux.enabled`
+or `gitops.extraAnnotations` today changes nothing on any object. Said here rather than left
+to be discovered; [gitops.md](operations/gitops.md#gitops-is-manager-wide-and-the-chart-values-do-not-reach-it-yet)
+has the workaround.
 
 ### What this chart does not expose
 
@@ -317,11 +320,10 @@ renders from.
 
 ## OLM
 
-Not shipped. An OLM bundle needs a `ClusterServiceVersion` whose owned-CRD list is generated
-from the same registry the CRDs are — 22 entries hand-maintained would be wrong within one
-release — plus a pinned `operator-sdk` and a bundle image. It is tracked as part of
-[#62](https://github.com/ricardomolendijk/netbox-operator/issues/62) and is not blocking a
-Helm install.
+Not shipped, and not currently tracked by a ticket. An OLM bundle needs a
+`ClusterServiceVersion` whose owned-CRD list is generated from the same registry the CRDs are
+— 64 entries hand-maintained would be wrong within one release — plus a pinned `operator-sdk`
+and a bundle image. None of that blocks a Helm install, which is why it has stayed unbuilt.
 
 ## Releasing
 

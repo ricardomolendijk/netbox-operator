@@ -7,7 +7,6 @@
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbcf` |
 | Status subresource | yes |
-| Lands with | NBO-059 (M10) |
 
 A `NetBoxCustomField` is one `extras.CustomField`: a **column added to NetBox's own schema**,
 which every other kind's `spec.customFields` can then write into. It is not data about a

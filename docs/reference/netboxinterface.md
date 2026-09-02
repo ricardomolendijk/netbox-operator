@@ -7,7 +7,6 @@
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbif` |
 | Status subresource | yes |
-| Lands with | NBO-030 (M4) |
 
 A `NetBoxInterface` is one `dcim.Interface` in NetBox: a named port on a
 [device](netboxdevice.md), of a type, optionally in a LAG, optionally carrying VLANs.
@@ -25,15 +24,16 @@ A `NetBoxInterface` is one `dcim.Interface` in NetBox: a named port on a
 >
 > | Member | Object type | Kind | Resolves? |
 > |---|---|---|---|
-> | `interfaceRef` | `dcim.interface` | `NetBoxInterface` | **yes, as of this Kind** |
-> | `vmInterfaceRef` | `virtualization.vminterface` | `NetBoxVMInterface` | not yet — NBO-029 |
-> | `fhrpGroupRef` | `ipam.fhrpgroup` | `NetBoxFHRPGroup` | not yet — no ticket in M4 |
+> | `interfaceRef` | `dcim.interface` | [`NetBoxInterface`](netboxinterface.md) | yes |
+> | `vmInterfaceRef` | `virtualization.vminterface` | [`NetBoxVMInterface`](netboxvminterface.md) | yes |
+> | `fhrpGroupRef` | `ipam.fhrpgroup` | [`NetBoxFHRPGroup`](netboxfhrpgroup.md) | yes |
 >
-> So this closes **one** of the three, not all three. `NetBoxIPAddress` itself is
-> [#199](https://github.com/ricardomolendijk/netbox-operator/pull/199) and NBO-029 is
-> [#211](https://github.com/ricardomolendijk/netbox-operator/pull/211); the union is complete
-> when both have merged and `ipam.FHRPGroup` has a Kind. `registry.ByObjectType` is the
-> authority, and a unit test asserts all three states rather than the hoped-for one.
+> This Kind closed the first of the three. All three resolve today: `NetBoxIPAddress` shipped
+> with [#199](https://github.com/ricardomolendijk/netbox-operator/pull/199),
+> `NetBoxVMInterface` with
+> [#211](https://github.com/ricardomolendijk/netbox-operator/pull/211), and `NetBoxFHRPGroup`
+> with the rest of the `ipam` remainder. `registry.ByObjectType` is the authority, and a unit
+> test asserts all three states rather than the hoped-for one.
 
 ## Minimal example
 

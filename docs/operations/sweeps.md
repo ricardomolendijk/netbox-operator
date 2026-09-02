@@ -45,7 +45,7 @@ The asymmetry that decides the design:
 |---|---|---|
 | Visible? | Yes — it is a row in NetBox, and this report names it | No — it is gone |
 | Costs? | A row, and a prefix or address somebody may re-allocate later | A prefix or address that may **already have been handed to somebody else** |
-| Reversible? | Yes, at any time, by hand or by `nbctl adopt` | No |
+| Reversible? | Yes, at any time, by re-applying the CR with `onConflict: Adopt` or by hand | No |
 
 A tool that gets the second column wrong once earns a reputation it cannot lose. So the sweep
 reports, and a human decides. This is the same answer
@@ -317,10 +317,14 @@ every orphan it can fit.
 | `Orphaned`, and you recognise the `owner` | The CR was removed from Git while the operator was down. | Re-apply the manifest and let the engine adopt the object (`onConflict: Adopt`), or delete it in NetBox by hand. |
 | `Orphaned`, and `deletionPolicy: Retain` was set | Working as intended. The object was left behind on purpose. | Nothing, or delete it by hand when it is genuinely finished with. This is the most likely false positive in any report. |
 | `Orphaned` after a cluster rebuild | Every CR has a new `metadata.uid`, so every stamp names a CR that no longer exists. | Re-apply the manifests: the engine adopts by natural key and re-stamps with the new uid, and the finding clears on the next run. **Expect a full report the first time a sweep runs after a rebuild.** |
-| `Unattributed` | Written before `k8s_owner` existed, or by `netbox-populator`. | `nbctl adopt` (NBO-039) once it lands; until then, stamp it by hand or accept it. |
+| `Unattributed` | Written before `k8s_owner` existed, or by `netbox-populator`. | Write a CR for it with `onConflict: Adopt` and let the engine stamp it, stamp it in NetBox by hand, or accept it. |
 | Everything at once | Almost always a bug in the *operator* or a misconfiguration, not a real mass orphan. | Check `Ready`'s reason and `summary.claimed`. `claimed: 0` with a large `orphans` means claims are not being seen at all — start with the endpoint's mode. |
 
-Adopting is not this kind's job: `nbctl adopt` is, and a sweep's report is its input.
+Adopting is not this kind's job. A sweep's report is the *input* to an adoption: you decide
+which findings deserve a CR, write those CRs with `onConflict: Adopt`, and the engine takes
+over the objects and stamps them. There is no bulk adopt command — `nbctl export` writes
+manifests for objects you want to bring under management, and `nbctl` has no `adopt`
+subcommand today ([exporting.md](exporting.md#not-implemented-yet)).
 
 ## Metrics and alerting
 
@@ -438,8 +442,8 @@ spec:
    Git any more. For each: re-apply the manifest if it should exist, or delete it in NetBox if
    it should not.
 
-5. **Work the `Unattributed` list** with `nbctl adopt`, or by stamping them, or by deciding
-   they are fine as they are. Nothing about them is urgent and nothing about them is a
+5. **Work the `Unattributed` list** by writing CRs for them with `onConflict: Adopt`, by
+   stamping them in NetBox, or by deciding they are fine as they are. Nothing about them is urgent and nothing about them is a
    failure — they are objects the operator has no evidence about.
 
 6. **Leave the sweep running.** `orphans` should sit at zero on a healthy namespace, and an

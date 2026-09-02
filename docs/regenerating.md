@@ -221,7 +221,10 @@ would confirm three things this cannot:
   does not declare explicitly, which the IR leaves as "on the write path, requiredness from the
   ORM".
 
-e2e against a live instance is deferred to #29. Until then:
+None of the three is settled by reading the IR, so settle them against a live instance. The
+[e2e suite](operations/e2e.md) exercises the operator end to end against a real NetBox, but it
+proves convergence rather than schema fidelity — for a schema question, ask the instance
+directly:
 
 ```sh
 curl -sH "Authorization: Token $NETBOX_TOKEN" \
