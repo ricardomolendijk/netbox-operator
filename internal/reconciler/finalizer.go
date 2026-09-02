@@ -8,6 +8,7 @@ import (
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -26,7 +27,18 @@ const (
 	// protectedRetryBase is the wait after the first refused delete. Short, because the
 	// common case is a chain of a few objects being deleted together and the dependent is
 	// about to go.
-	protectedRetryBase = 10 * time.Second
+	//
+	// Two seconds rather than the ten this shipped with, and the change is a consequence of
+	// #289 rather than a tuning preference. The interval was never observed until the storm
+	// it was supposed to govern was fixed, and what it governs is teardown latency: every
+	// object deleted at the same time as its dependent is refused once, so a chain of depth
+	// d converges after (2^(d-1) - 1) intervals. At ten seconds a four-deep chain -- prefix,
+	// VLAN, VLAN group, tenant, which is an ordinary NetBox graph and is the one
+	// test/e2e/fixtures/graph tears down -- needs 150 s, past the gate's two-minute budget
+	// and past what anyone watching a `kubectl delete` would call working. At two it needs
+	// 30 s, and the ceiling below still keeps a permanently blocked object down to twelve
+	// requests an hour.
+	protectedRetryBase = 2 * time.Second
 
 	// protectedRetryCap is the ceiling on that backoff. A delete blocked by an object
 	// nobody is going to remove must not spin, and must not back off past a horizon where
@@ -40,7 +52,12 @@ const (
 	// protectedEventAfter is how many refusals it takes before the block is reported as an
 	// Event. An Event per attempt is noise at cluster scale; no Event at all makes a
 	// permanently stuck deletion silent, which is worse.
-	protectedEventAfter = 3
+	//
+	// Five, which with the base above is thirty seconds of refusals. It moved with the base
+	// so that the *elapsed time* before a human is told stays roughly what it was: an Event
+	// on the third refusal would now fire six seconds into an ordinary cascade, which is a
+	// warning about something that is working.
+	protectedEventAfter = 5
 )
 
 // FinalizerWriter persists an object's metadata.finalizers.
@@ -169,6 +186,18 @@ func (p *pass) deleting(ctx context.Context) (ctrl.Result, error) {
 	}
 	p.endpoint = endpoint
 
+	// Last, because everything above is a decision this pass can make for itself and this is
+	// the one step that costs a request. A pass that arrives before the backoff has run out
+	// re-queues for the remainder and writes nothing at all -- see deletionHold.
+	if remaining, holding := deletionHold(
+		p.obj.NetBoxStatus().DeletionAttempts, p.obj.NetBoxStatus().LastDeletionAttempt, time.Now(),
+	); holding {
+		logf.FromContext(ctx).V(1).Info("holding off the next delete attempt",
+			"action", "delete", "netboxID", p.obj.NetBoxStatus().ID, "in", remaining.String())
+
+		return p.finish(ctx, remaining)
+	}
+
 	if p.obj.NetBoxStatus().ID == 0 {
 		return p.deleteByStamp(ctx)
 	}
@@ -224,6 +253,44 @@ func (p *pass) deleteByStamp(ctx context.Context) (ctrl.Result, error) {
 	p.obj.NetBoxStatus().ID = int64(id)
 
 	return p.deleteObject(ctx)
+}
+
+// deletionHold reports how long is left of the backoff after the last refused delete, and
+// whether this pass must therefore send nothing.
+//
+// **This is what makes the backoff a backoff** (#289). The interval protected() chooses is
+// carried in a ctrl.Result, and a ctrl.Result only says when to come back *at the latest*:
+// the status write that records the refusal is itself an event on the object, so the
+// controller wakes immediately, and a pass that cannot tell an early wake from a due one
+// sends the DELETE again. Measured on the shipped code, that is a refused DELETE and a status
+// write about every three milliseconds, for as long as whatever is referencing the object
+// exists -- against NetBox and against the API server at once, which is how five CRs
+// referenced by other fixtures failed to be deleted inside two minutes while nothing in the
+// log said a delete had even been refused.
+//
+// So the schedule is read off the clock rather than off what happened to wake the pass. Any
+// number of wake-ups between two attempts cost one cached read each and nothing else, and the
+// caller still requeues for the remainder, so the object comes back on its own if nothing
+// else wakes it.
+//
+// A last attempt in the future is treated as due rather than as a very long wait: clocks move
+// backwards, and the one thing this must never do is turn a wait that resolves itself into a
+// finalizer nobody can get off.
+func deletionHold(attempts int32, last *metav1.Time, now time.Time) (time.Duration, bool) {
+	if attempts <= 0 || last == nil {
+		return 0, false
+	}
+
+	elapsed := now.Sub(last.Time)
+	if elapsed < 0 {
+		return 0, false
+	}
+
+	if wait := protectedBackoff(attempts); elapsed < wait {
+		return wait - elapsed, true
+	}
+
+	return 0, false
 }
 
 // pendingDependents names the child CRs this object materialised that are still in the
@@ -474,6 +541,13 @@ func (p *pass) deleted(id int, out netbox.Object) release {
 func (p *pass) protected(ctx context.Context, err error) (ctrl.Result, error) {
 	status := p.obj.NetBoxStatus()
 	status.DeletionAttempts++
+
+	// Stamped in the same write as the count it belongs to, because the two are one fact and
+	// a count nothing can date is what #289 was. Serialisation truncates it to the second,
+	// which can bring the next attempt forward by under a second and changes nothing that
+	// matters at these intervals.
+	now := metav1.Now()
+	status.LastDeletionAttempt = &now
 
 	wait := protectedBackoff(status.DeletionAttempts)
 

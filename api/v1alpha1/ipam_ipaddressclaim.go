@@ -405,6 +405,14 @@ type NetBoxClaimStatus struct {
 	// +optional
 	DeletionAttempts int32 `json:"deletionAttempts,omitempty"`
 
+	// LastDeletionAttempt is when the last of those attempts was made, and it is what makes
+	// the bound above a bound on *time* (#289, reconciler.deletionHold). Without it a blocked
+	// claim spends one of its attempts on every wake-up -- including the ones its own status
+	// write causes -- so all of them go inside a millisecond and the address is reported
+	// retained before whatever blocked it had a chance to clear.
+	// +optional
+	LastDeletionAttempt *metav1.Time `json:"lastDeletionAttempt,omitempty"`
+
 	// Conditions follow the standard Kubernetes vocabulary.
 	// +listType=map
 	// +listMapKey=type

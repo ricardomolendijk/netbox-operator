@@ -463,10 +463,10 @@ Status:
     Message:  netbox refused the delete, object is referenced (409): {"detail":"Unable to
               delete object. Cannot delete some instances of model 'Prefix' because they
               are referenced through protected foreign keys: 'IPAddress.vrf'."};
-              attempt 3, retrying in 40s
+              attempt 5, retrying in 32s
 Events:
   Type     Reason         Message
-  Warning  DeleteBlocked  netbox has refused to delete ipam/prefixes/12 3 times: ...
+  Warning  DeleteBlocked  netbox has refused to delete ipam/prefixes/12 5 times: ...
 ```
 
 Detection covers both shapes NetBox uses: a 409, and a non-409 whose body names the
@@ -483,30 +483,44 @@ the `PROTECT` was for.
 
 ### The backoff, and why it is capped
 
-Each refusal doubles the wait, from 10s, capped at 5 minutes:
+Each refusal doubles the wait, from 2s, capped at 5 minutes:
 
 | Refusals | Next attempt |
 |---|---|
-| 1 | 10s |
-| 2 | 20s |
-| 3 | 40s |
-| 4 | 80s |
-| 5 | 160s |
-| 6+ | 300s (capped) |
+| 1 | 2s |
+| 2 | 4s |
+| 3 | 8s |
+| 4 | 16s |
+| 5 | 32s |
+| 6 | 64s |
+| 7 | 128s |
+| 8 | 256s |
+| 9+ | 300s (capped) |
 
 Starting short is what makes `kubectl delete -f` on a whole dependency chain converge in
-seconds rather than minutes: the dependent usually goes away almost immediately, and the
-first or second retry finds the parent free. Capping is what stops a *permanently* blocked
-delete — a dependent nobody is going to remove — from either spinning at the base interval or
-backing off past a horizon where nobody would notice it recovering.
+seconds rather than minutes. Every object deleted at the same time as its dependent is
+refused at least once, so a chain of depth *d* costs `2^(d-1) - 1` base intervals: four
+deep — prefix, VLAN, VLAN group, tenant — is 30 seconds. Capping is what stops a
+*permanently* blocked delete — a dependent nobody is going to remove — from either spinning
+at the base interval or backing off past a horizon where nobody would notice it recovering.
 
-The count lives in `status.deletionAttempts` rather than in memory. A controller has no
-memory between passes, so a backoff that survives a requeue, a leader election and a restart
-needs the count on the object. It is non-zero only while a CR is terminating.
+The schedule lives on the object, in `status.deletionAttempts` and
+`status.lastDeletionAttempt`, rather than in memory: a controller has no memory between
+passes, so a backoff that survives a requeue, a leader election and a restart needs both on
+the object. They are set only while a CR is terminating.
 
-After three refusals the block is reported as a `Warning`/`DeleteBlocked` Event — **once**.
-Every attempt would be noise at cluster scale; never at all would make a permanently stuck
-deletion silent, which is worse.
+**Both, and the pair is load-bearing** (#289). A `RequeueAfter` says when to come back *at
+the latest*, and the status write that records a refusal is itself an event on the object —
+so the controller wakes again immediately, long before the interval is up. A pass that could
+not tell an early wake-up from a due one sent the `DELETE` again on every one of them: a
+refused delete and a status write roughly every three milliseconds, against NetBox and the
+API server at once, for as long as the object stayed blocked. With the timestamp beside the
+count, the schedule is read off the clock: a pass that arrives early re-queues for the
+remainder and calls nothing.
+
+After five refusals — half a minute of them — the block is reported as a
+`Warning`/`DeleteBlocked` Event, **once**. Every attempt would be noise at cluster scale;
+never at all would make a permanently stuck deletion silent, which is worse.
 
 ### Getting out of a blocked delete
 

@@ -1602,6 +1602,10 @@ func (in *NetBoxClaimStatus) DeepCopyInto(out *NetBoxClaimStatus) {
 		*out = new(ProvenanceStatus)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.LastDeletionAttempt != nil {
+		in, out := &in.LastDeletionAttempt, &out.LastDeletionAttempt
+		*out = (*in).DeepCopy()
+	}
 	if in.Conditions != nil {
 		in, out := &in.Conditions, &out.Conditions
 		*out = make([]v1.Condition, len(*in))
@@ -4334,6 +4338,10 @@ func (in *NetBoxObjectStatus) DeepCopyInto(out *NetBoxObjectStatus) {
 		in, out := &in.Children, &out.Children
 		*out = make([]ChildStatus, len(*in))
 		copy(*out, *in)
+	}
+	if in.LastDeletionAttempt != nil {
+		in, out := &in.LastDeletionAttempt, &out.LastDeletionAttempt
+		*out = (*in).DeepCopy()
 	}
 	if in.Conditions != nil {
 		in, out := &in.Conditions, &out.Conditions

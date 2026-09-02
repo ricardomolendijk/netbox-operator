@@ -372,7 +372,7 @@ free. A `Delete` policy spends it, so it is bought back deliberately:
 | `DELETE` returns 404 | Release, `Normal`/`Deleted`. Already gone is the end state that was asked for, reached by somebody else. |
 | `DELETE` refused (409, a `PROTECT`ed relation such as a NAT pairing) | Keep the finalizer, `Deleting=False, Reason=Protected`, capped backoff. Never an error — that would put the workqueue's millisecond backoff on top of an interval chosen deliberately. |
 | The endpoint is not `Ready`, or NetBox is unreachable | Keep the finalizer, reason and interval from the [error table](errors-and-retries.md). |
-| Any of the above, **8 attempts in** (~20 minutes) | **Release anyway**, `Warning`/`AddressRetained`, and count it. |
+| Any of the above, **11 attempts in** (~18 minutes) | **Release anyway**, `Warning`/`AddressRetained`, and count it. |
 
 That last row is the whole of it. The declarative engine keeps its finalizer forever on a
 delete NetBox will not accept and relies on a human writing
