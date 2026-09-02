@@ -1034,6 +1034,17 @@ type claimClient struct {
 	list    []netbox.Object
 	listErr error
 
+	// holders answers the second query the pin verification can make: who holds this value
+	// now, asked by the allocated object's own result field rather than by a custom field.
+	//
+	// A field of its own rather than a filter over list, because the two queries have to be
+	// able to disagree -- "nothing carries this claim's identity *and* somebody else holds
+	// its address" is the whole of issue #167, and a fake that answers both from one slice
+	// cannot express it. GetOne routes by the shape of the query: a cf_ filter is the
+	// identity search, anything else is the holder search.
+	holders    []netbox.Object
+	holdersErr error
+
 	allocated       netbox.Object
 	allocErr        error
 	allocatePayload netbox.Object
@@ -1059,11 +1070,32 @@ func (c *claimClient) GetByID(_ context.Context, endpoint string, id int) (netbo
 func (c *claimClient) GetOne(_ context.Context, endpoint string, params netbox.Params) (netbox.Object, error) {
 	c.calls = append(c.calls, call{method: "GETONE", endpoint: endpoint, params: params})
 
-	if c.listErr != nil {
-		return nil, c.listErr
+	if byIdentity(params) {
+		if c.listErr != nil {
+			return nil, c.listErr
+		}
+
+		return netbox.One(endpoint, params, c.list)
 	}
 
-	return netbox.One(endpoint, params, c.list)
+	if c.holdersErr != nil {
+		return nil, c.holdersErr
+	}
+
+	return netbox.One(endpoint, params, c.holders)
+}
+
+// byIdentity reports whether a query is the allocation-identity search rather than the
+// holder search. The identity lives in a custom field and nothing else the claim engine
+// filters on does, so the prefix NetBox requires for one is the whole of the test.
+func byIdentity(params netbox.Params) bool {
+	for filter := range params {
+		if strings.HasPrefix(filter, customFieldFilter) {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (c *claimClient) Allocate(
