@@ -482,7 +482,7 @@ difference the next reconcile finds again, and PATCH forever.
 
 ### `deletionPolicy` defaults to `Delete`
 
-Not an IPAM kind, so `Delete` (#176 option B). A rack is configuration a manifest recreates
+`Delete`, like every kind since [#304](https://github.com/ricardomolendijk/netbox-operator/issues/304). A rack is configuration a manifest recreates
 verbatim; nothing about deleting one frees a resource for somebody else, which is what `Retain`
 exists for. See [deletion](../concepts/deletion.md).
 
