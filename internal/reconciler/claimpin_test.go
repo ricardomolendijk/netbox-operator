@@ -16,11 +16,11 @@ import (
 // The pin is `status.address`, and this file is about the one question ADR-0004 leaves open:
 // what happens when NetBox stops agreeing with it.
 //
-// A settled claim short-circuits before any HTTP call -- that is what makes "reconcile fifty
-// times, POST once" structural -- and until #167 that short-circuit was unconditional, so a
-// claim went on reporting Ready=True for an address it no longer held, indefinitely, and
-// nothing ever looked. The tests here are the two halves of not breaking one property while
-// fixing the other: the pin is re-read, and the quiet path stays quiet.
+// A settled claim short-circuits the *allocation* before any HTTP call, which is what makes
+// "reconcile fifty times, POST once" structural. Until #167 it short-circuited the whole pass,
+// so a claim went on reporting Ready=True for an address it no longer held, indefinitely, and
+// nothing ever looked. The tests here are the two halves of fixing that without spending the
+// property it was bought with: the pin is re-read, and the quiet path stays quiet.
 
 // pinAddress is what every claim in this file holds, and what the second allocation takes.
 const pinAddress = "10.0.20.37/24"
@@ -264,7 +264,7 @@ func TestAnUnverifiablePinIsLeftAlone(t *testing.T) {
 	stamp := provenance.Stamp{Config: provenance.FromSpec(&netboxv1alpha1.ManagedBy{
 		ClusterID: testClusterID,
 	}), TagID: 7}
-	stamp.Config.AllocationIdentityField = ""
+	stamp.AllocationIdentityField = ""
 
 	engine.Endpoints = fakeEndpoints{ready: true, endpoint: Endpoint{
 		Client: nb, Allocator: nb, Provenance: stamp,
@@ -352,6 +352,44 @@ func TestAPinCarriedByTwoObjectsIsAConflict(t *testing.T) {
 		t.Errorf("Ready = %s/%s, want False/%s", got.Status, got.Reason,
 			netboxv1alpha1.ReasonAllocationConflict)
 	}
+}
+
+// TestAnAddressHeldBySeveralObjectsIsAConflict is the other ambiguity, one query later.
+//
+// Two objects carrying one *identity* is an over-allocation; two objects holding one *value* is
+// what a duplicate address in another VRF looks like from here, and after a restore it is also
+// what "the row came back and somebody allocated it again" looks like. The claim cannot prove
+// which of them is its own -- nothing carries its identity at all -- so it names them and
+// refuses to guess, exactly as the lookup that found them does.
+func TestAnAddressHeldBySeveralObjectsIsAConflict(t *testing.T) {
+	claim, engine, nb := settledClaim(t)
+
+	restoredWithout(nb)
+	nb.holders = []netbox.Object{
+		allocatedObject(57, pinAddress, "beefbeefbeefbeef", "uid-2"),
+		allocatedObject(58, pinAddress, "", ""),
+	}
+	verificationDue(claim)
+
+	if _, err := engine.Reconcile(context.Background(), claim); err != nil {
+		t.Fatalf("an ambiguous holder is a state, not a controller failure: %v", err)
+	}
+
+	ready := readyOfClaim(claim)
+	if ready.Status != metav1.ConditionFalse ||
+		ready.Reason != netboxv1alpha1.ReasonAllocationConflict {
+		t.Errorf("Ready = %s/%s, want False/%s", ready.Status, ready.Reason,
+			netboxv1alpha1.ReasonAllocationConflict)
+	}
+
+	for _, want := range []string{"57", "58"} {
+		if !strings.Contains(ready.Message, want) {
+			t.Errorf("Ready message %q does not name every object holding the address (%s)",
+				ready.Message, want)
+		}
+	}
+
+	assertPinReportedNotRewritten(t, claim, nb)
 }
 
 // TestAPinIsVerifiedEvenWithDriftOff says which of the two switches on an endpoint this

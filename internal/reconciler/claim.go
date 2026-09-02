@@ -229,9 +229,13 @@ func (e *ClaimEngine) Reconcile(ctx context.Context, claim Claim) (ctrl.Result, 
 	}
 
 	// The immutability of ADR-0004 as a guard clause. This is what makes "reconcile fifty
-	// times, POST once" structural rather than a property of the code below it -- and note
-	// that it needs no endpoint and issues no request, so the steady state of every claim in
-	// the cluster is a reconcile that talks to nobody.
+	// times, POST once" structural rather than a property of the code below it: past this
+	// line no code path in this file can allocate, whatever it finds.
+	//
+	// It short-circuits the *allocation*, not the whole pass. Since #167 the settled path
+	// occasionally re-reads the pin -- see settled -- because "never allocate again" and
+	// "never look again" are not the same promise, and the second one is what let two claims
+	// hold one address after a restore with neither of them able to notice.
 	if address := claim.Allocated(); address != "" {
 		return p.settled(ctx, address)
 	}
@@ -1150,6 +1154,14 @@ func (p *claimPass) commit(
 	status.AllocationIdentity = p.identity
 	status.ClaimUID = string(p.claim.GetUID())
 	status.AllocatedAt = &metav1.Time{Time: time.Now()}
+
+	// The read-after-write this pass already did proves the same three facts the periodic
+	// verification checks -- the object exists, holds this value, and carries this identity --
+	// so dating it here is what stops a freshly allocated claim from re-reading NetBox a
+	// moment later to be told what it has just been told. The reclaim path is the same read
+	// by a different route and gets the same credit.
+	p.datePinVerification()
+
 	status.Pool = &netboxv1alpha1.AllocationPool{
 		Display: p.pool.display, Endpoint: p.pool.endpoint, ID: int64(p.pool.id),
 	}
@@ -1166,21 +1178,359 @@ func (p *claimPass) commit(
 		"pool", p.pool.display, "allocationIdentity", p.identity, "reason", out.reason)
 	p.engine.event(p.claim, out.event, "%s", out.detail)
 
-	return p.ready(ctx, out.detail)
+	// The interval, not zero: a claim that has just allocated is a settled claim, and the
+	// timer is what brings it back to re-read its pin (settled).
+	return p.ready(ctx, out.detail, p.resync())
 }
 
-// settled is a claim that already holds an allocation: nothing to do, nothing to ask NetBox.
+// settled is a claim that already holds an allocation: nothing to do, and -- once per
+// verification interval -- one question to ask NetBox.
+//
+// # Why this path reads at all (issue #167)
+//
+// It used to read nothing, ever, and that was load-bearing: it is what makes "reconcile fifty
+// times, POST once" structural. The cost was that status.address was a pin nothing ever
+// re-checked. Restore NetBox from a snapshot predating an allocation and the restored
+// database has no record of it, so it offers that address to the next claim that asks --
+// while the claim already holding it goes on reporting Ready=True, indefinitely, because it
+// never looks. Two claims, one address, and neither of them can tell. A hazard nobody can
+// detect is not a hazard anyone can avoid, which is why this is a guard in code rather than a
+// row in a runbook.
+//
+// # Why once per interval, and not per pass
+//
+// A read per pass would put a NetBox request behind every wake-up, and a settled claim is
+// woken by more than the clock: its own status writes, its pool changing, every informer
+// resync. So the schedule is on the clock instead -- status.lastVerifiedAt -- and the
+// interval is the endpoint's own resyncPeriod, which is already the rate at which this same
+// endpoint re-reads every NetBoxObject in the cluster. A claim costs one indexed GET per
+// interval on top of that, and fifty passes inside one interval still cost nothing.
+//
+// # Why this does not break quiescence
+//
+// The e2e gate asserts **zero mutating requests** across two resync periods
+// (docs/operations/e2e.md, harness.mutatingMethods = POST, PATCH, DELETE). Nothing below can
+// reach any of the three: the verification reads, compares, and writes its verdict to the
+// CR's status. Quiescence is a promise about what this operator writes to NetBox, not a
+// promise that it stops looking -- the declarative engine has re-read every object it owns
+// every resync since it existed, and passes the same gate.
 func (p *claimPass) settled(ctx context.Context, value string) (ctrl.Result, error) {
-	status := p.claim.ClaimStatus()
+	// Resolved here rather than in Reconcile, and from the informer cache rather than over
+	// the wire: the interval below is this endpoint's, and reading it must not be able to
+	// fail. A miss leaves p.endpoint zero -- no client, so no verification -- which is
+	// exactly what this path did before the verification existed, and is what keeps the
+	// older promise that an already-allocated claim settles while NetBox is unreachable.
+	if endpoint, ok := p.engine.Endpoints.Endpoint(
+		ctx, p.claim.GetNamespace(), p.claim.ClaimSpec().EndpointRef); ok {
+		p.endpoint = endpoint
+	}
 
-	logf.FromContext(ctx).V(1).Info("already allocated; nothing to do",
-		"action", "none", "netboxID", status.NetBoxID, "allocationIdentity", status.AllocationIdentity)
+	if wait, due := p.pinVerification(time.Now()); !due {
+		logf.FromContext(ctx).V(1).Info("already allocated; nothing to do",
+			"action", "none", "netboxID", p.claim.ClaimStatus().NetBoxID,
+			"allocationIdentity", p.claim.ClaimStatus().AllocationIdentity)
+
+		return p.pinned(ctx, value, wait)
+	}
+
+	return p.verifyPin(ctx, value)
+}
+
+// pinVerification is how long until this claim re-reads its pin, and whether that is now.
+func (p *claimPass) pinVerification(now time.Time) (time.Duration, bool) {
+	every := p.resync()
+
+	if !p.canVerifyPin() {
+		return every, false
+	}
+
+	// Never verified: a claim allocated before this operator carried the check, or one whose
+	// allocating pass could not date it. Due immediately, which on an upgrade is one extra
+	// indexed GET per settled claim, once -- the same shape as the declarative engine's first
+	// sweep over every object it owns.
+	last := p.claim.ClaimStatus().LastVerifiedAt
+	if last == nil {
+		return 0, true
+	}
+
+	if elapsed := now.Sub(last.Time); elapsed < every {
+		return every - elapsed, false
+	}
+
+	return 0, true
+}
+
+// canVerifyPin reports whether there is anything to verify against.
+//
+// Three inputs, none of them this pass's to produce: a client, which means the endpoint is
+// Ready; the identity the allocated object was stamped with, which the allocating pass wrote
+// to status; and the custom field it lives in, which is spec.managedBy.allocationIdentityField
+// and is renameable -- searching a hard-coded k8s_allocation_identity on an endpoint that
+// renamed it would find nothing and report every settled claim in that namespace as lost.
+//
+// Missing any of the three, the answer is silence rather than a verdict. An object this
+// endpoint cannot search for is not an object that is gone.
+func (p *claimPass) canVerifyPin() bool {
+	return p.endpoint.Client != nil &&
+		p.claim.ClaimStatus().AllocationIdentity != "" &&
+		p.identityField() != ""
+}
+
+// verifyPin asks the question the settled path never used to ask: is the value in status
+// still held, in NetBox, by an object carrying this claim's allocation identity?
+//
+// By identity and not by id. status.netboxID is a primary key, and a restored database
+// reissues those to other objects -- a read by id can be answered by a stranger. The identity
+// is this engine's ownership proof everywhere else in this file, it is indexed, and it is
+// what a restore cannot fabricate. findByIdentity is that query already, so this reuses a
+// mechanism rather than adding one, down to inheriting its verdict on two objects sharing one
+// identity.
+//
+// # Where this sits next to refuseForeignReclaim (#306)
+//
+// That guard decides whether a claim may *adopt* an object it found, and since #306 it fails
+// closed on a stamp it cannot read, because the endpoint doing the reading can rename the
+// stamp fields out from under its neighbour. This one adopts nothing and grants nothing: its
+// only possible effect is to take Ready away. So it does not consult a stamp, and it cannot
+// contradict that guard -- there is no state in which this reports an allocation sound that
+// refuseForeignReclaim would have refused, because refusing is not an outcome available here.
+// The identity it compares is the one this operator wrote into NetBox itself.
+//
+// Deliberately *not* checked: whether the object carrying the identity still has the id in
+// status.netboxID. That id is the deletion path's input and #304 is in flight there; the
+// identity is the ownership proof, so an object that carries it holds this claim's allocation
+// whatever its id has become.
+func (p *claimPass) verifyPin(ctx context.Context, value string) (ctrl.Result, error) {
+	p.identity = p.claim.ClaimStatus().AllocationIdentity
+
+	held, err := p.findByIdentity(ctx)
+
+	var refused *refusal
+	switch {
+	case errors.As(err, &refused):
+		return p.contested(ctx, netboxv1alpha1.ReasonAllocationConflict,
+			netboxv1alpha1.EventAllocationConflict, "%s", refused.Error())
+	case err != nil:
+		return p.unverifiable(ctx, value, err)
+	}
+
+	if held != nil {
+		if got, _ := held[p.desc.ResultField].(string); got == value {
+			return p.verified(ctx, value)
+		}
+	}
+
+	return p.pinNotHeld(ctx, value, held)
+}
+
+// pinNotHeld reports a pin this claim's own object no longer backs, after finding out who
+// holds the value now.
+//
+// The second read is the difference between a hazard a human is told about and one they can
+// act on: the remedy for one address under two claims is choosing which of them keeps it, and
+// that choice needs the other object's id and identity. It costs nothing in the steady state,
+// because it only runs on a pass that has already established something is wrong.
+//
+// carrier is the object that does carry this claim's identity while holding some *other*
+// value -- rare, and worth naming when it happens, because it says the allocation moved
+// rather than vanished.
+func (p *claimPass) pinNotHeld(
+	ctx context.Context, value string, carrier netbox.Object,
+) (ctrl.Result, error) {
+	holder, err := p.endpoint.Client.GetOne(ctx, p.desc.Endpoint,
+		netbox.Params{}.Match(p.desc.ResultField, netbox.LookupExact, value))
+
+	var ambiguous *netbox.AmbiguousError
+
+	switch {
+	case errors.As(err, &ambiguous):
+		// Matches() rather than Error(), because the sentence already names the endpoint and
+		// the value the query was for and saying either twice reads worse for saying more.
+		return p.contested(ctx, netboxv1alpha1.ReasonAllocationConflict,
+			netboxv1alpha1.EventAllocationConflict,
+			"several netbox %s hold %s=%q -- %s -- and %s carries this claim's allocation identity"+
+				" %s, so this claim cannot prove any of them is its own. %s",
+			p.desc.Endpoint, p.desc.ResultField, value, ambiguous.Matches(),
+			p.pinPreamble(carrier), p.identity, pinRemedy)
+	case err != nil:
+		// The read that found the problem succeeded; this one did not. A verdict is published
+		// only when both halves of it are known, so the pin stands and the next pass -- a
+		// transient tier away, not a whole interval -- asks again.
+		return p.unverifiable(ctx, value, err)
+	}
+
+	if holder == nil {
+		return p.contested(ctx, netboxv1alpha1.ReasonAllocationLost,
+			netboxv1alpha1.EventAllocationLost,
+			"no netbox %s holds %s=%q and none carries this claim's allocation identity %s%s, so"+
+				" the allocation this claim reports is not in netbox. A netbox restored from a"+
+				" snapshot predating the allocation is the usual cause, and the value is free for"+
+				" netbox to hand to the next claim that asks. %s",
+			p.desc.Endpoint, p.desc.ResultField, value, p.identity, p.pinCarrier(carrier), pinRemedy)
+	}
+
+	id, _ := holder.ID()
+
+	return p.contested(ctx, netboxv1alpha1.ReasonAllocationConflict,
+		netboxv1alpha1.EventAllocationConflict,
+		"netbox %s/%d holds %s=%q, which this claim reports as its own, and %s rather than this"+
+			" claim's %s%s. Nothing was allocated, changed or deleted: both claims to that value"+
+			" may be in service, and only a human knows which. %s",
+		p.desc.Endpoint, id, p.desc.ResultField, value, p.holderIdentity(holder), p.identity,
+		p.pinCarrier(carrier), pinRemedy)
+}
+
+// pinRemedy is the sentence every verification verdict ends on.
+//
+// It leads with the trap rather than with the fix, because the instinct -- delete the losing
+// claim and re-apply it -- is the one move that can destroy the allocation the operator
+// decided to keep: a claim frees its address by DELETEing the object at status.netboxID
+// unconditionally, and a restored NetBox has reissued that id to something else
+// (docs/operations/gitops.md, "restoring NetBox from backup").
+const pinRemedy = "Before deleting this claim, set spec.deletionPolicy: Retain on it or remove" +
+	" the netbox object by hand: deleting it as it stands DELETEs the object at its" +
+	" status.netboxID, and a restored netbox may have reissued that id to somebody else's" +
+	" allocation. This claim re-checks on its own and clears the condition if the object comes" +
+	" back."
+
+// pinPreamble names the object carrying this claim's identity, for the ambiguous-holder
+// message where there is no single holder to name instead.
+func (p *claimPass) pinPreamble(carrier netbox.Object) string {
+	if carrier == nil {
+		return "no netbox object"
+	}
+
+	id, _ := carrier.ID()
+
+	return fmt.Sprintf("netbox %s/%d", p.desc.Endpoint, id)
+}
+
+// pinCarrier says where the claim's own allocation went, when it went somewhere rather than
+// nowhere. Empty for the ordinary case, so the common message does not carry a clause about
+// a state it is not in.
+func (p *claimPass) pinCarrier(carrier netbox.Object) string {
+	if carrier == nil {
+		return ""
+	}
+
+	id, _ := carrier.ID()
+	elsewhere, _ := carrier[p.desc.ResultField].(string)
+
+	return fmt.Sprintf(" (the object that does carry it, netbox %s/%d, holds %s=%q instead)",
+		p.desc.Endpoint, id, p.desc.ResultField, elsewhere)
+}
+
+// holderIdentity is how the message names what the current holder is, which is the fact the
+// verdict turns on. An object with no identity this endpoint can read is not this claim's
+// either -- it is equally a row a restore brought back and a hand-made object.
+func (p *claimPass) holderIdentity(holder netbox.Object) string {
+	identity := netbox.CustomFieldOf(holder, p.identityField())
+	if identity == "" {
+		return fmt.Sprintf("carries no %s this endpoint can read", p.identityField())
+	}
+
+	return fmt.Sprintf("carries allocation identity %s", identity)
+}
+
+// errPinNotVerified is what the log carries for a verification verdict. A sentinel rather
+// than the message, so the log's error is a type and the wording is a value, exactly as every
+// other classified failure in this package is.
+var errPinNotVerified = errors.New("the allocation this claim reports is not its own")
+
+// contested reports a pin NetBox no longer backs, and changes nothing else.
+//
+// Deliberately not stop(). stop() also sets Allocated=False, which is right for a claim that
+// has never allocated and wrong for every claim that reaches here: Allocated is a historical
+// fact, once True never False (ADR-0004), and this condition is about who holds the
+// allocation now rather than about whether it happened. Ready is what goes False, because
+// Ready is what `kubectl wait` and every dependent workload read.
+//
+// Nothing is written to NetBox on any path below -- no re-allocation, no adoption, no
+// delete. Both claims over one address are entitled to it and only a human knows which NIC,
+// DNS record or firewall rule is already configured with it; an operator that picked one
+// would be converting a bookkeeping accident into a live network change.
+func (p *claimPass) contested(
+	ctx context.Context, reason, event, format string, args ...any,
+) (ctrl.Result, error) {
+	p.datePinVerification()
+	p.result = metrics.ResultError
+
+	message := fmt.Sprintf(format, args...)
+
+	// Read before the condition below overwrites it: an Event and an error-level line on
+	// every pass of a state that lasts until somebody changes NetBox would be one page of the
+	// same sentence per claim per interval.
+	changed := p.transitioned(netboxv1alpha1.ConditionReady, metav1.ConditionFalse, reason)
+
+	log := logf.FromContext(ctx).WithValues("action", "stop", "reason", reason,
+		"netboxID", p.claim.ClaimStatus().NetBoxID, "allocationIdentity", p.identity)
+
+	if changed {
+		log.Error(errPinNotVerified, "the allocation could not be verified", "detail", message)
+		p.engine.warnClaim(p.claim, event, "%s", message)
+	} else {
+		log.V(1).Info("the allocation still could not be verified", "detail", message)
+	}
+
+	p.condition(netboxv1alpha1.ConditionReady, false, reason, message)
+
+	return p.finish(ctx, refusedRetry)
+}
+
+// verified is NetBox agreeing with the pin. The one outcome that costs a read and says
+// nothing.
+func (p *claimPass) verified(ctx context.Context, value string) (ctrl.Result, error) {
+	p.datePinVerification()
+
+	logf.FromContext(ctx).V(1).Info("the allocation is still this claim's",
+		"action", "none", "netboxID", p.claim.ClaimStatus().NetBoxID,
+		"allocationIdentity", p.identity)
+
+	return p.pinned(ctx, value, p.resync())
+}
+
+// unverifiable is a verification that could not be carried out. The pin stands.
+//
+// "Could not ask" is not "the answer is no". Flipping every claim in a cluster to Ready=False
+// because NetBox is restarting would make this guard the outage it exists to prevent, and the
+// settled path's older promise -- an already-allocated claim settles while NetBox is
+// unreachable -- is not one #167 has any reason to spend.
+//
+// status.lastVerifiedAt is deliberately left where it was, so the next pass tries again
+// rather than waiting out a full interval on the strength of a request that failed. The
+// requeue comes from the shared outcome table, so an unreachable NetBox, a 429 and an expired
+// token are waited out here exactly as long as they are everywhere else.
+func (p *claimPass) unverifiable(ctx context.Context, value string, cause error) (ctrl.Result, error) {
+	logf.FromContext(ctx).V(1).Info("could not verify the allocation; keeping it",
+		"action", "none", "netboxID", p.claim.ClaimStatus().NetBoxID, "err", cause.Error())
+
+	return p.pinned(ctx, value, classify(cause, p.resync()).requeue)
+}
+
+// datePinVerification records that a verification ran, which is what makes the next one an
+// interval away rather than a wake-up away.
+//
+// On the verdict paths as well as the clean one. A contested claim that re-read NetBox on
+// every wake-up would become a poll -- and its own status write is one of the things that
+// wakes it.
+func (p *claimPass) datePinVerification() {
+	now := metav1.Now()
+	p.claim.ClaimStatus().LastVerifiedAt = &now
+}
+
+// pinned is a settled claim reporting what it holds: the whole of what this path did on every
+// pass before the verification existed, and what it still does on every pass the interval has
+// not run out on.
+func (p *claimPass) pinned(
+	ctx context.Context, value string, requeue time.Duration,
+) (ctrl.Result, error) {
+	status := p.claim.ClaimStatus()
 
 	p.result = metrics.ResultUnchanged
 	p.condition(netboxv1alpha1.ConditionAllocated, true, netboxv1alpha1.ReasonAddressAllocated,
 		fmt.Sprintf("netbox %s/%d holds %s", p.desc.Endpoint, status.NetBoxID, value))
 
-	return p.ready(ctx, fmt.Sprintf("%s is allocated", value))
+	return p.ready(ctx, fmt.Sprintf("%s is allocated", value), requeue)
 }
 
 // claimDeleteAttempts bounds the retry on a delete that will not go through, after which the
@@ -1618,17 +1968,21 @@ func (p *claimPass) pending(ctx context.Context, reason, message string) (ctrl.R
 
 // ready records a claim that holds its allocation.
 //
-// No requeue. There is nothing left to re-check: the allocation is immutable and this engine
-// never re-reads it, so a timer here would be a NetBox request per claim per interval that
-// can only ever conclude what status already says. Drift correction of the allocated object
-// is the declarative engine's job, on the NetBoxIPAddress the claim will materialise
-// (NBO-025, NBO-032).
-func (p *claimPass) ready(ctx context.Context, detail string) (ctrl.Result, error) {
+// The requeue is the caller's, and on a settled claim it is when that claim next re-reads its
+// pin. It used to be unconditionally zero, on the grounds that "there is nothing left to
+// re-check: the allocation is immutable and this engine never re-reads it" -- which was true
+// of the engine and not of NetBox. A restore predating an allocation erases it, and a claim
+// with no timer never finds out (#167). Drift correction of the allocated object is still the
+// declarative engine's job, on the NetBoxIPAddress the claim will materialise (NBO-025,
+// NBO-032); this timer buys one indexed GET per claim per interval and nothing else.
+func (p *claimPass) ready(
+	ctx context.Context, detail string, requeue time.Duration,
+) (ctrl.Result, error) {
 	p.condition(netboxv1alpha1.ConditionRefsResolved, true, netboxv1alpha1.ReasonAllResolved,
 		"no unresolved references")
 	p.condition(netboxv1alpha1.ConditionReady, true, netboxv1alpha1.ReasonAddressAllocated, detail)
 
-	return p.finish(ctx, 0)
+	return p.finish(ctx, requeue)
 }
 
 // resync is this endpoint's interval, used for the states that need a backstop timer.
