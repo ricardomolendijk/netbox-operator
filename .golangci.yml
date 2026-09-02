@@ -105,8 +105,10 @@ linters:
         linters: [wrapcheck]
       # SA1019 (use of a deprecated symbol), excluded TEMPORARILY -- see #294.
       #
-      # The v2.13.2 bump in #293 carries a newer staticcheck, which knows about upstream
-      # deprecations the old pin did not: controller-runtime's scheme.Builder,
+      # The deprecations arrived with #282, which took k8s.io/* 0.34.1 -> 0.37.0 and
+      # controller-runtime 0.22.4 -> 0.24.x. CI on main fails on them with the *old* v2.6.1
+      # pin, so they are not something this bump surfaced -- they are library churn:
+      # controller-runtime's scheme.Builder,
       # Manager.GetEventRecorderFor, client.Apply, and apimachinery's FieldsV1.Raw. Twelve
       # sites, none of them a defect in this repository -- every one is an upstream API that
       # still works and has not been removed.
