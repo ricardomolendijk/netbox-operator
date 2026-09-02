@@ -36,7 +36,7 @@ spec:
 one Secret, one `NetBoxEndpoint`, one `NetBoxSite`, and the object visible in NetBox.
 
 > **Status: pre-alpha, under active construction.** The API group is `v1alpha1` and is
-> expected to change. All 64 CRDs ship, and `v0.0.9` is the first release to publish an
+> expected to change. All 69 CRDs ship, and `v0.0.9` is the first release to publish an
 > installable chart, CRD bundle and signed image — every tag before it carries no assets, so
 > pin the version rather than taking the newest tag. See
 > [`docs/install.md`](docs/install.md#what-is-published).
@@ -126,8 +126,8 @@ audited on every run of the test suite and written to
 
 ## Supported kinds
 
-**64 CRDs ship today**, and the catalogue is no longer delivered a milestone at a time:
-61 of them are NetBox objects driven by the same engine, and three are not NetBox objects at
+**69 CRDs ship today**, and the catalogue is no longer delivered a milestone at a time:
+66 of them are NetBox objects driven by the same engine, and three are not NetBox objects at
 all — [`NetBoxEndpoint`](docs/reference/netboxendpoint.md) is the connection,
 [`NetBoxRefGrant`](docs/reference/netboxrefgrant.md) authorises references between
 namespaces, and [`NetBoxSweep`](docs/reference/netboxsweep.md) reports what this cluster has
@@ -145,12 +145,14 @@ left behind in NetBox.
 | `virtualization` | `NetBoxClusterType`, `NetBoxClusterGroup`, `NetBoxCluster`, `NetBoxVirtualMachine`, `NetBoxVMInterface`, `NetBoxVirtualDisk` |
 | `wireless` | `NetBoxWirelessLANGroup`, `NetBoxWirelessLAN`, `NetBoxWirelessLink` |
 | `extras` | `NetBoxTag`, `NetBoxCustomField`, `NetBoxCustomFieldChoiceSet`, `NetBoxCustomLink`, `NetBoxSavedFilter`, `NetBoxExportTemplate`, `NetBoxConfigTemplate`, `NetBoxConfigContextProfile`, `NetBoxConfigContext` |
+| `circuits`, the catalogue | [`NetBoxProvider`](docs/reference/netboxprovider.md), [`NetBoxProviderAccount`](docs/reference/netboxprovideraccount.md), [`NetBoxProviderNetwork`](docs/reference/netboxprovidernetwork.md), [`NetBoxCircuitType`](docs/reference/netboxcircuittype.md), [`NetBoxCircuit`](docs/reference/netboxcircuit.md) |
 
 Every one of them has a reference page — the index is
 [`docs/README.md`](docs/README.md#reference). What of NetBox's 138 REST endpoints that
 leaves implemented, deliberately excluded or still missing is audited on every run of the
-test suite and written to [`docs/coverage.md`](docs/coverage.md); circuits, power, modules
-and VPN are the largest remaining gaps.
+test suite and written to [`docs/coverage.md`](docs/coverage.md); the rest of `circuits`
+-- terminations, groups and the virtual-circuit kinds -- plus power, modules and VPN are the
+largest remaining gaps.
 
 ## Migrating an existing NetBox
 

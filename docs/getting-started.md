@@ -26,10 +26,10 @@ kubectl apply --server-side --force-conflicts \
 ```
 
 From a checkout that is `make install-crds`, which runs the same `kubectl apply` against
-`config/crd/bases/`. Either way it installs 64 CRDs. Check:
+`config/crd/bases/`. Either way it installs 69 CRDs. Check:
 
 ```sh
-kubectl get crd | grep netbox.kubeforge.org | wc -l     # 64
+kubectl get crd | grep netbox.kubeforge.org | wc -l     # 69
 ```
 
 <details>
