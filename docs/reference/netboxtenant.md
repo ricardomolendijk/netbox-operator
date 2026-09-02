@@ -286,7 +286,7 @@ kubectl describe netboxtenant donkerslootstraat
 ...
   Deleting  False  Protected  cannot delete netbox tenancy/tenants/7: Unable to delete
                               object. The following dependent objects were found:
-                              VLAN group Donkerslootstraat (RTM); attempt 4, retrying in 1m20s
+                              VLAN group Donkerslootstraat (RTM); attempt 4, retrying in 16s
 ```
 
 To get out of it: delete the blocker, or set `deletionPolicy: Retain` on the tenant and

@@ -55,7 +55,28 @@ fixture graph in
 | **grant-last** | Every referrer applied first sits at `RefsResolved=False, Reason=RefDenied` and has written nothing; the `NetBoxRefGrant` arriving afterwards moves them all to `Ready` — with `resyncPeriod: 1h` set, so a resync cannot be what did it. |
 | **restart** | The manager Pod is deleted partway through a random-order apply, and the run still converges to the same dump. Reconciliation is level-triggered, so no in-memory state may be load-bearing. |
 | **cycle** | Two regions whose `parentRef`s point at each other both report `Reason=RefCycle`, write nothing to NetBox, and stay under ten reconciles between them in sixty seconds. Fixing one spec converges both. |
-| **teardown** | Deleting the whole graph in random order leaves NetBox empty, with no CR held by a finalizer and NetBox's own `PROTECT` 409s resolving themselves as dependents go away. |
+| **teardown** | Deleting the whole graph in random order leaves NetBox empty, with no CR held by a finalizer and NetBox's own `PROTECT` 409s resolving themselves as dependents go away — [one retry per refusal](#the-teardown-run-is-also-a-rate-assertion), not one per wake-up. |
+
+### The teardown run is also a rate assertion
+
+The sentence above was true of the design and false of the code until
+[#289](https://github.com/ricardomolendijk/netbox-operator/issues/289). A refusal *did*
+resolve itself as the dependents went away — but the retry was not on the backoff the engine
+had chosen. The status write recording each refusal is an event on the object, so the
+controller woke immediately and tried again, at roughly a refused `DELETE` and a status write
+every three milliseconds per blocked object. Five CRs the rest of the graph references doing
+that at once saturated NetBox and the API server, so the deletes that would have unblocked
+them never got through inside the two-minute budget and the run failed with those five still
+holding their finalizers — with nothing in the log that looked like a delete being refused
+in an orderly way, because there was nothing orderly about it.
+
+What makes the claim true is `status.lastDeletionAttempt` beside `status.deletionAttempts`
+(see [Deletion → the backoff](../concepts/deletion.md#the-backoff-and-why-it-is-capped)): the
+schedule is read off the clock, so a wake-up between two attempts costs a cached read and
+nothing else. The regression test for it is
+`TestARefusedDeleteBacksOffInsteadOfStorming` in `internal/controller`, where the assertion is
+a *rate* — a real API server is the only place the self-triggering exists, and a
+single-`Reconcile` unit test cannot see it.
 
 Each of forward, reverse and every random run also asserts the two things an end-state check
 would miss:
