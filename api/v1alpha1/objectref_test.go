@@ -53,6 +53,14 @@ func TestRefAliasTargets(t *testing.T) {
 		// `name` alone (docs/netbox-schema.md), so a slug-mode ref matches nothing there
 		// either.
 		{"vlanTranslationPolicy", VLANTranslationPolicyRef{}, "NetBoxVLANTranslationPolicy"}} {
+		// The second target with no slug column, and the first in dcim:
+		// dcim.ModuleTypeProfile is unique on `name` alone (docs/netbox-schema.md), so a
+		// slug-mode ref matches nothing there either.
+		{"moduleTypeProfile", ModuleTypeProfileRef{}, "NetBoxModuleTypeProfile"},
+		{"moduleType", ModuleTypeRef{}, "NetBoxModuleType"},
+		{"moduleBay", ModuleBayRef{}, "NetBoxModuleBay"},
+		{"module", ModuleRef{}, "NetBoxModule"},
+	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := tc.ref.TargetGVK()
 
