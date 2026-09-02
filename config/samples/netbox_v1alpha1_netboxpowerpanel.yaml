@@ -1,0 +1,27 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxPowerPanel
+metadata:
+  name: panel-a
+  namespace: default
+spec:
+  endpointRef: homelab
+  onConflict: Fail
+  deletionPolicy: Delete
+
+  name: Panel A
+
+  # Required: `dcim.PowerPanel.site` is a REQ foreign key and the natural key reads `site_id`,
+  # so until this resolves nothing is written to NetBox rather than a panel being created in the
+  # wrong site -- or a same-named panel in one being adopted. It is *not* a containment parent:
+  # `site` is on_delete=PROTECT, so NetBox refuses to delete a site that still has panels.
+  siteRef:
+    name: home
+
+  # Optional, and -- unlike the identically spelled field on NetBoxRack -- it carries no weight
+  # in the identity at all. dcim.PowerPanel's one constraint is `(site, name)`, so two panels
+  # called `Panel A` in this site are refused however their locations differ, and moving this
+  # one between rooms does not change what this CR resolves to.
+  locationRef:
+    name: rack-row-1
+
+  description: Main distribution panel, front cage
