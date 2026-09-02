@@ -1165,3 +1165,113 @@ func hasEvent(recorder *fakeRecorder, want string) bool {
 
 	return false
 }
+
+// stampedAs stamps a live object as belonging to another CR, the way an allocating POST from
+// that CR would have.
+func stampedAs(obj netbox.Object, owner, clusterID string) netbox.Object {
+	netbox.SetCustomField(obj, provenance.DefaultOwnerField, owner)
+	netbox.SetCustomField(obj, provenance.DefaultClusterField, clusterID)
+
+	return obj
+}
+
+// TestClaimRefusesAGivenIdentityOwnedByAnotherCR is the cross-namespace takeover this guard
+// exists for.
+//
+// The identity is the claim engine's entire ownership proof: one custom field is matched and
+// the match is adopted. A derived identity contains the claim's own namespace, so nobody can
+// compute another namespace's -- but spec.allocationIdentity is a free string on a CR any
+// namespace may create, and the value it needs is printed in the victim's own
+// status.allocationIdentity. Without this check, a claim in `other-team` naming `homelab`'s
+// identity adopts its address, reports it as its own, and deletes the live NetBox object when
+// it is deleted, because deletionPolicy defaults to Delete.
+//
+// Pointing at the same pool is what the attack does, so the ReclaimedOutsidePool guard cannot
+// catch it. The assertion is therefore the strong one: no POST, no delete, no address.
+func TestClaimRefusesAGivenIdentityOwnedByAnotherCR(t *testing.T) {
+	claim, engine, nb := newClaimFixture(t)
+
+	// The identity `homelab/dns-eth0` derives, typed into a claim that is not it.
+	victim := AllocationIdentity(testURL, "homelab", "NetBoxIPAddressClaim", "dns-eth0")
+	claim.Namespace, claim.Name, claim.UID = "other-team", "borrowed", "uid-9"
+	claim.Spec.AllocationIdentity = victim
+
+	nb.list = []netbox.Object{stampedAs(
+		allocatedObject(412, "10.0.20.37/24", victim, "uid-1"),
+		"netboxipaddressclaim/homelab/dns-eth0", "prod-eu")}
+
+	if _, err := engine.Reconcile(context.Background(), claim); err != nil {
+		t.Fatalf("a refusal must not be returned as an error: %v", err)
+	}
+
+	assertRefused(t, claim, nb, netboxv1alpha1.ReasonForeignAllocation)
+
+	if nb.deletes != 0 {
+		t.Errorf("%d DELETEs, want 0: a refused claim must not touch the object it was refused", nb.deletes)
+	}
+
+	// The message has to name the other writer, or the next step -- unset the field, or go and
+	// talk to whoever owns that object -- is not one a human can take from the condition.
+	if got := readyOfClaim(claim).Message; !strings.Contains(got, "homelab/dns-eth0") {
+		t.Errorf("Ready message %q does not name the owning cr", got)
+	}
+}
+
+// TestClaimReclaimsAGivenIdentityOnAnUnstampedObject is the case the override was added for,
+// and it has to keep working.
+//
+// An object with no owner stamp is unattributable rather than foreign -- every NetBox object
+// that predates the operator is in that set -- so pointing spec.allocationIdentity at one is
+// an adoption, not a takeover.
+func TestClaimReclaimsAGivenIdentityOnAnUnstampedObject(t *testing.T) {
+	claim, engine, nb := newClaimFixture(t)
+
+	claim.Spec.AllocationIdentity = "carriedoveridentity"
+
+	obj := netbox.Object{
+		"id":      float64(412),
+		"address": "10.0.20.99/24",
+		"url":     fmt.Sprintf("%s/api/ipam/ip-addresses/412/", testURL),
+	}
+	netbox.SetCustomField(obj, provenance.DefaultAllocationIdentityField, "carriedoveridentity")
+	nb.list = []netbox.Object{obj}
+
+	if _, err := engine.Reconcile(context.Background(), claim); err != nil {
+		t.Fatal(err)
+	}
+
+	if nb.posts != 0 {
+		t.Errorf("%d POSTs, want 0: an unstamped object carrying the identity is reclaimed", nb.posts)
+	}
+	if claim.Status.Address != "10.0.20.99/24" {
+		t.Errorf("status.address = %q, want the reclaimed 10.0.20.99/24", claim.Status.Address)
+	}
+}
+
+// TestClaimReclaimsADerivedIdentityWhateverTheStampSays keeps the guard off the path it must
+// never touch.
+//
+// A derived identity cannot be forged across namespaces, so a stamp that disagrees with it is
+// not a takeover -- it is a renamed owner field, an endpoint whose managedBy changed, or the
+// handover the reclaim path has always reported and never judged. Judging it here would break
+// a cluster rebuilt from Git, which is the whole reason the identity is deterministic.
+func TestClaimReclaimsADerivedIdentityWhateverTheStampSays(t *testing.T) {
+	claim, engine, nb := newClaimFixture(t)
+	identity := AllocationIdentity(testURL, "homelab", "NetBoxIPAddressClaim", "dns-eth0")
+
+	nb.list = []netbox.Object{stampedAs(
+		allocatedObject(412, "10.0.20.99/24", identity, "uid-0"),
+		"netboxipaddressclaim/homelab/renamed-away", "prod-eu")}
+
+	if _, err := engine.Reconcile(context.Background(), claim); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := conditionOfClaim(claim, netboxv1alpha1.ConditionAllocated); got.Reason !=
+		netboxv1alpha1.ReasonReclaimedByIdentity {
+		t.Errorf("Allocated reason = %q, want ReclaimedByIdentity: a derived identity is not gated", got.Reason)
+	}
+	if claim.Status.Address != "10.0.20.99/24" {
+		t.Errorf("status.address = %q, want the reclaimed 10.0.20.99/24", claim.Status.Address)
+	}
+}

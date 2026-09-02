@@ -403,9 +403,9 @@ The honest table, because "the identity is deterministic" is necessary and not s
 | The NetBox object deleted in NetBox | gone | allocates a new address — there is nothing left to reclaim |
 | NetBox restored from empty | gone | allocates a new address; see [restoring NetBox from backup](../operations/gitops.md#restoring-netbox-from-backup) |
 
-## The three refusals a human has to clear
+## The four refusals a human has to clear
 
-All three wait on the same ten-minute tier, emit an Event, and write nothing.
+All four wait on the same ten-minute tier, emit an Event, and write nothing.
 
 ### `AllocationConflict` — two objects carry one identity
 
@@ -428,6 +428,26 @@ accepting the out-of-pool object would make `prefixRef` a lie.
 
 **Fix:** either delete the stale NetBox object, or set `spec.allocationIdentity` to the
 identity of the object this claim should keep.
+
+### `ForeignAllocation` — the identity names somebody else's object
+
+Only reachable with `spec.allocationIdentity` set. The object carrying the identity this claim
+was *given* is stamped as belonging to a different CR, or to a different cluster.
+
+The identity is the whole of a claim's ownership proof: one custom field is matched and the
+match is adopted. That is safe for a derived identity, which is
+`sha256(url, namespace, kind, name)` and therefore already contains the claim's own namespace —
+no namespace can compute another's. It is not safe for a value somebody types, and the value
+they would need is printed in the other claim's `status.allocationIdentity`. Without this
+refusal a claim in one namespace could adopt another namespace's address, report it as its own,
+and delete the live NetBox object with itself under the default `deletionPolicy: Delete`.
+
+Note what stays allowed: an object with **no** owner stamp is unattributable rather than
+foreign, so pointing a given identity at a pre-existing NetBox object — the case the field
+exists for — still reclaims it.
+
+**Fix:** unset `spec.allocationIdentity` and let the claim derive its own, or have the owner
+release the object first.
 
 ### `IdempotencyKeyUnavailable` — nowhere to store an identity
 

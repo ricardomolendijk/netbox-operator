@@ -379,6 +379,11 @@ type claimPass struct {
 	// identity is this claim's allocation identity, resolved once per pass.
 	identity string
 
+	// identityExplicit records that the identity came from spec.allocationIdentity rather
+	// than from the derivation, which is the one case a reclaim has to check provenance for.
+	// See refuseForeignReclaim.
+	identityExplicit bool
+
 	// pool is the resolved allocation pool. Zero until resolvePool succeeds.
 	pool pool
 
@@ -411,11 +416,11 @@ type pool struct {
 
 // allocateOnce is the allocating half of a pass, after the guards that need no NetBox.
 func (p *claimPass) allocateOnce(ctx context.Context) (ctrl.Result, error) {
-	identity, err := p.allocationIdentity()
+	identity, explicit, err := p.allocationIdentity()
 	if err != nil {
 		return p.stop(ctx, err)
 	}
-	p.identity = identity
+	p.identity, p.identityExplicit = identity, explicit
 
 	live, err := p.resolvePool(ctx)
 	if err != nil {
@@ -440,20 +445,20 @@ func (p *claimPass) allocateOnce(ctx context.Context) (ctrl.Result, error) {
 	return p.allocate(ctx)
 }
 
-// allocationIdentity is this claim's identity, and the check that there is somewhere to keep
-// it.
+// allocationIdentity is this claim's identity, whether it was given rather than derived, and
+// the check that there is somewhere to keep it.
 //
 // The check is not optional and has no override. The provenance stamp is optional for an
 // ordinary object -- an unstamped object is merely unattributed -- but for a claim the
 // identity store is what makes a lost HTTP response recoverable, and without it every retry
 // of a POST that actually committed allocates another address. So an endpoint that cannot
 // store one allocates nothing at all: zero POSTs, a condition, an Event.
-func (p *claimPass) allocationIdentity() (string, error) {
+func (p *claimPass) allocationIdentity() (string, bool, error) {
 	stamp := p.endpoint.Provenance
 
 	if !stamp.Applicable() || stamp.AllocationIdentityField == "" ||
 		!slices.Contains(stamp.Fields, stamp.AllocationIdentityField) {
-		return "", refuse(netboxv1alpha1.ReasonIdempotencyKeyUnavailable,
+		return "", false, refuse(netboxv1alpha1.ReasonIdempotencyKeyUnavailable,
 			netboxv1alpha1.EventAllocationConflict,
 			"this endpoint has nowhere to store an allocation identity, so nothing was allocated:"+
 				" set spec.managedBy.clusterID on the netboxendpoint and let the bootstrap create the"+
@@ -463,13 +468,29 @@ func (p *claimPass) allocationIdentity() (string, error) {
 	}
 
 	// The explicit override wins, for the case the derived value cannot survive by
-	// construction: a claim that has been renamed and should keep its address.
+	// construction: a claim that has been renamed and should keep its address. It is
+	// returned as explicit so the reclaim path knows it is holding a value somebody typed
+	// rather than one this operator computed -- see refuseForeignReclaim.
 	if explicit := p.claim.ClaimSpec().AllocationIdentity; explicit != "" {
-		return explicit, nil
+		return explicit, true, nil
 	}
 
 	return AllocationIdentity(p.endpoint.Allocator.URL(),
-		p.claim.GetNamespace(), p.desc.GVK.Kind, p.claim.GetName()), nil
+		p.claim.GetNamespace(), p.desc.GVK.Kind, p.claim.GetName()), false, nil
+}
+
+// owner is the CR behind this pass, as the stamp names it.
+//
+// The same shape as the declarative engine's pass.owner, and read by both of the two things
+// that need it: the allocating POST's stamp, and the reclaim path's check that the object it
+// matched is not somebody else's.
+func (p *claimPass) owner() provenance.Owner {
+	return provenance.Owner{
+		Kind:      p.desc.GVK.Kind,
+		Namespace: p.claim.GetNamespace(),
+		Name:      p.claim.GetName(),
+		UID:       string(p.claim.GetUID()),
+	}
 }
 
 // identityField is the NetBox custom field the identity is stored in.
@@ -716,6 +737,10 @@ func (p *claimPass) reclaim(ctx context.Context, live netbox.Object) (ctrl.Resul
 			p.desc.Endpoint, id, p.identity, p.desc.ResultField, value, p.pool.display))
 	}
 
+	if err := p.refuseForeignReclaim(live, id, value); err != nil {
+		return p.stop(ctx, err)
+	}
+
 	metrics.AllocationsTotal.WithLabelValues(p.desc.GVK.Kind, metrics.AllocationReclaimed).Inc()
 
 	return p.commit(ctx, live, id, value, allocation{
@@ -724,6 +749,53 @@ func (p *claimPass) reclaim(ctx context.Context, live netbox.Object) (ctrl.Resul
 		detail: fmt.Sprintf("reclaimed netbox %s/%d (%s) by allocation identity %s%s",
 			p.desc.Endpoint, id, value, p.identity, p.handover(live)),
 	})
+}
+
+// refuseForeignReclaim stops a *given* identity from reclaiming an object another CR is
+// stamped as owning.
+//
+// The gap this closes. An allocation identity is the whole of the claim engine's ownership
+// proof: findByIdentity matches one custom field, and reclaim then adopts whatever came back.
+// A derived identity is safe on its own, because sha256(url, namespace, kind, name) already
+// contains the namespace -- no namespace can compute another's. spec.allocationIdentity is
+// not: it is a free string on a CR any namespace may create, and the value it would need is
+// printed in the other claim's own status.allocationIdentity and Events. So a claim in one
+// namespace could name another namespace's identity, adopt its address, report it as its own,
+// and -- under the default deletionPolicy: Delete -- delete the live NetBox object on the way
+// out. The pool check above does not catch it: pointing at the same pool is exactly what the
+// attack does.
+//
+// So the given case is checked and the derived case is not, and that split is the point:
+// every legitimate use of the derived identity keeps working untouched, including the two this
+// engine exists to support -- a cluster rebuilt from Git, and a claim deleted and re-applied
+// from the same manifest. Both re-derive the same identity and both carry the same owner
+// stamp, so neither reaches a verdict here.
+//
+// provenance.Stamp.Conflict is the judge rather than a comparison written here, because it
+// already encodes which differences mean somebody else owns this: a foreign cluster stamp, or
+// a foreign owner. It deliberately does *not* count a foreign uid whose owner still matches --
+// that is the re-applied manifest, and treating it as a conflict is how this check would have
+// been switched off in a week. Note also what stays permitted: an object with no owner stamp
+// at all is unattributable rather than foreign, so a given identity may still be pointed at a
+// pre-existing NetBox object, which is the migration case the field was added for.
+func (p *claimPass) refuseForeignReclaim(live netbox.Object, id int, value string) error {
+	if !p.identityExplicit {
+		return nil
+	}
+
+	conflict, found := p.endpoint.Provenance.Conflict(live, p.owner())
+	if !found {
+		return nil
+	}
+
+	return refuse(netboxv1alpha1.ReasonForeignAllocation,
+		netboxv1alpha1.EventForeignAllocation,
+		"netbox %s/%d (%s) carries the allocation identity %s this claim's"+
+			" spec.allocationIdentity names, but it is stamped as belonging to %s, so nothing was"+
+			" allocated and nothing was changed. An identity that names somebody else's object is"+
+			" a claim pointed at somebody else's allocation: unset spec.allocationIdentity to let"+
+			" this claim derive its own, or have the owner release that object first",
+		p.desc.Endpoint, id, value, p.identity, conflict.Writer())
 }
 
 // handover names the UID the reclaimed object was stamped with when it is not this claim's.
@@ -810,13 +882,9 @@ func (p *claimPass) allocate(ctx context.Context) (ctrl.Result, error) {
 func (p *claimPass) payload() (netbox.Object, error) {
 	payload := netbox.Object{}
 
-	owner := provenance.Owner{
-		Kind: p.desc.GVK.Kind, Namespace: p.claim.GetNamespace(),
-		Name: p.claim.GetName(), UID: string(p.claim.GetUID()),
-	}
 	target := provenance.Target{Taggable: p.desc.Taggable, CustomFields: p.desc.CustomFieldable}
 
-	if applied, ok := p.endpoint.Provenance.Apply(payload, nil, owner, target); ok {
+	if applied, ok := p.endpoint.Provenance.Apply(payload, nil, p.owner(), target); ok {
 		p.stamped = &applied
 	}
 

@@ -52,8 +52,21 @@ func parseFlags() (options, zap.Options) {
 		"Address the health probe endpoint binds to.")
 	flag.BoolVar(&opts.enableLeaderElection, "leader-elect", false,
 		"Enable leader election, so only one manager instance is active.")
+	// "with authn/authz" is what this said, and it was not true: controller-runtime only
+	// runs a TokenReview/SubjectAccessReview on the metrics endpoint when the server is
+	// given a FilterProvider, and this one is not (see NewManager below). The flag has only
+	// ever chosen HTTPS-with-a-self-signed-certificate over plain HTTP, so that is what it
+	// now says -- a scraper needs no credential either way, and anybody reading the old
+	// string had reason to believe the port was protected when it is not.
+	//
+	// Wiring the filter is the stronger answer and is deliberately not done here: it needs
+	// `create` on tokenreviews and subjectaccessreviews in the ClusterRole and a bearer
+	// token on every existing scraper, so it is a breaking change for a deployment rather
+	// than a bug fix. Until then the port must not be reachable from outside the cluster --
+	// docs/operations/observability.md and the chart's own comment say so.
 	flag.BoolVar(&opts.secureMetrics, "metrics-secure", true,
-		"Serve metrics over HTTPS with authn/authz.")
+		"Serve metrics over HTTPS with a self-signed certificate. There is no authn/authz "+
+			"filter on the endpoint either way: do not expose it outside the cluster.")
 	flag.BoolVar(&opts.enableHTTP2, "enable-http2", false,
 		"Enable HTTP/2 on the metrics and webhook servers.")
 	flag.IntVar(&opts.webhookPort, "webhook-port", 9443,

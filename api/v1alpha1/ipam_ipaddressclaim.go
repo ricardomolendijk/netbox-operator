@@ -98,6 +98,22 @@ const (
 	// the next step is a human choosing.
 	ReasonAllocationConflict = "AllocationConflict"
 
+	// ReasonForeignAllocation is on Allocated and on Ready: the object this claim's
+	// spec.allocationIdentity names is stamped as belonging to a different CR or cluster.
+	//
+	// Only a *given* identity reaches it. A derived identity contains the claim's own
+	// namespace, so no namespace can compute another's and the derived path cannot produce
+	// this state -- which is what keeps a rebuilt cluster and a re-applied manifest, both of
+	// which re-derive the same identity, entirely unaffected.
+	//
+	// The refusal exists because the identity is the claim engine's whole ownership proof: it
+	// is matched on one custom field and the match is then adopted, so a free-text override
+	// pointed at somebody else's identity would adopt their address and, under
+	// deletionPolicy: Delete, delete their NetBox object on the way out. An unstamped object
+	// is not foreign and is still reclaimable, which is the migration the field was added
+	// for.
+	ReasonForeignAllocation = "ForeignAllocation"
+
 	// ReasonIdempotencyKeyUnavailable is on Allocated and on Ready: this endpoint has no
 	// place to store an allocation identity, so the claim will not allocate at all.
 	//
@@ -134,6 +150,11 @@ const (
 
 	// EventAllocationConflict is two or more objects carrying one identity.
 	EventAllocationConflict = "AllocationConflict"
+
+	// EventForeignAllocation is a spec.allocationIdentity naming an object that is stamped as
+	// belonging to another CR or another cluster. It names the other writer, because the next
+	// step is either unsetting the field or talking to whoever owns that object.
+	EventForeignAllocation = "ForeignAllocation"
 
 	// EventAddressRetained is a claim being deleted while its NetBox object stays.
 	//
@@ -220,6 +241,14 @@ type NetBoxClaimSpec struct {
 	// Immutable once set, and settable on a claim that has one already only in the sense
 	// that adding it is allowed and changing it is not: an identity that moves is a claim
 	// pointed at somebody else's address.
+	//
+	// It may not point at an object another CR is stamped as owning. Unlike the derived
+	// value -- which contains this claim's own namespace, so no namespace can compute
+	// another's -- this is a string anybody may type, and the identity is the only thing a
+	// reclaim matches on. So a given identity whose object carries a foreign owner or
+	// cluster stamp is refused with Reason=ForeignAllocation rather than adopted. An
+	// object carrying no stamp is unattributable rather than foreign and is still
+	// reclaimable, which is the pre-existing-NetBox-object case this field exists for.
 	//
 	// Absent and empty mean the same thing here -- derive it -- so this field has two states
 	// rather than the three of docs/concepts/field-ownership.md. Nothing is written to NetBox

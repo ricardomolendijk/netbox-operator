@@ -670,3 +670,122 @@ func TestEncodeParamsIsStable(t *testing.T) {
 		t.Errorf("encodeParams = %q, want %q", first, want)
 	}
 }
+
+// TestListNeverFollowsPaginationToAnotherOrigin is the regression test for the token this
+// client would otherwise hand to whoever answers a list.
+//
+// Every request carries `Authorization: Token ...`, and `next` is a value out of a response
+// body. Following it verbatim means one crafted page exfiltrates the endpoint's credential --
+// and Go's own cross-origin credential stripping does not apply, because this is a request the
+// client builds rather than a redirect it follows.
+func TestListNeverFollowsPaginationToAnotherOrigin(t *testing.T) {
+	var attackerHits atomic.Int64
+	var sawToken atomic.Bool
+	attacker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attackerHits.Add(1)
+		if r.Header.Get("Authorization") != "" {
+			sawToken.Store(true)
+		}
+		_, _ = fmt.Fprint(w, `{"results":[],"next":null}`)
+	}))
+	defer attacker.Close()
+
+	var pages atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if pages.Add(1) == 1 {
+			_, _ = fmt.Fprintf(w, `{"results":[{"id":1}],"next":"%s/api/dcim/sites/?page=2"}`, attacker.URL)
+			return
+		}
+		_, _ = fmt.Fprint(w, `{"results":[{"id":2}],"next":null}`)
+	}))
+	defer srv.Close()
+
+	objs, err := newTestClient(t, srv, nil).List(context.Background(), "dcim/sites", nil)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+
+	if attackerHits.Load() != 0 {
+		t.Errorf("the client made %d request(s) to the other origin, want 0", attackerHits.Load())
+	}
+	if sawToken.Load() {
+		t.Error("the api token was sent to an origin netbox named in a response body")
+	}
+	// The query the server chose is still honoured, on the origin we asked: the second page
+	// was fetched from srv, so pagination is followed rather than abandoned.
+	if len(objs) != 2 {
+		t.Errorf("got %d objects, want 2 -- pagination must still follow, just not off-origin", len(objs))
+	}
+}
+
+// TestNextPageKeepsTheServersQuery holds the half of the fix that is not about security: the
+// rewrite must preserve whatever paging scheme NetBox chose, since limit/offset and a cursor
+// both live entirely in the query.
+func TestNextPageKeepsTheServersQuery(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		current string
+		next    string
+		want    string
+	}{
+		{
+			name:    "same origin passes through",
+			current: "https://netbox.example/api/dcim/sites/?limit=250",
+			next:    "https://netbox.example/api/dcim/sites/?limit=250&offset=250",
+			want:    "https://netbox.example/api/dcim/sites/?limit=250&offset=250",
+		},
+		{
+			name:    "a proxy-rewritten host keeps the query and loses the host",
+			current: "https://netbox.internal/api/dcim/sites/?limit=250",
+			next:    "https://netbox.public/api/dcim/sites/?limit=250&offset=250",
+			want:    "https://netbox.internal/api/dcim/sites/?limit=250&offset=250",
+		},
+		{
+			name:    "a cursor survives the rewrite",
+			current: "https://netbox.example/api/dcim/sites/?limit=250",
+			next:    "https://elsewhere.example/whatever/?cursor=cD0yMDI0",
+			want:    "https://netbox.example/api/dcim/sites/?cursor=cD0yMDI0",
+		},
+		{
+			name:    "a relative next is resolved against the current page",
+			current: "https://netbox.example/api/dcim/sites/?limit=250",
+			next:    "?limit=250&offset=500",
+			want:    "https://netbox.example/api/dcim/sites/?limit=250&offset=500",
+		},
+		{
+			name:    "no next page ends the loop",
+			current: "https://netbox.example/api/dcim/sites/?limit=250",
+			next:    "",
+			want:    "",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := nextPage(context.Background(), tc.current, tc.next)
+			if err != nil {
+				t.Fatalf("nextPage: %v", err)
+			}
+			if got != tc.want {
+				t.Errorf("nextPage = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestRedactURLMasksCredentials covers the strings that reach a log line, an Event and a
+// condition. The unparseable case is the one that matters most: it is the error message about
+// a url, so it is the message most likely to be carrying one nobody sanitised.
+func TestRedactURLMasksCredentials(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"https://netbox.example/api", "https://netbox.example/api"},
+		{"https://user:s3cr3t@netbox.example/api", "https://user:xxxxx@netbox.example/api"},
+		{"https://user:s3cr3t@netbox.example:8443/api?x=1", "https://user:xxxxx@netbox.example:8443/api?x=1"},
+		{"https://user:s3cr3t@netbox.example/api\x7f", "https://xxxxx:xxxxx@netbox.example/api\x7f"},
+	} {
+		if got := RedactURL(tc.in); got != tc.want {
+			t.Errorf("RedactURL(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+		if strings.Contains(RedactURL(tc.in), "s3cr3t") {
+			t.Errorf("RedactURL(%q) leaked the password", tc.in)
+		}
+	}
+}

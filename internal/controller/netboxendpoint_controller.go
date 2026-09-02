@@ -161,9 +161,17 @@ func (r *NetBoxEndpointReconciler) ready(ctx context.Context, e *netboxv1alpha1.
 	became := transitioned(e, netboxv1alpha1.ConditionReady, metav1.ConditionTrue,
 		netboxv1alpha1.ReasonReady)
 
+	// Redacted, both times. spec.url only has to match `^https?://`, so it may carry
+	// userinfo -- `https://user:password@netbox` is a shape a proxy in front of NetBox asks
+	// for -- and this line goes to the manager's stdout while the Event below becomes a
+	// namespaced object that the built-in `view` role can read. netbox.Config.Token carries
+	// "never logged, at any level"; the credential in a url deserves the same, and had it
+	// only because nothing was looking (see redactURL).
+	shown := netbox.RedactURL(e.Spec.URL)
+
 	logf.FromContext(ctx).V(debugUnless(became)).Info("endpoint ready",
 		"action", "probe",
-		"url", e.Spec.URL, "netboxVersion", status.Version,
+		"url", shown, "netboxVersion", status.Version,
 		// cfg.Mode rather than spec.mode, because driftMode: Report overrides it: the line
 		// has to report the mode the client is actually in, or a suppressed write looks
 		// like a bug.
@@ -173,7 +181,7 @@ func (r *NetBoxEndpointReconciler) ready(ctx context.Context, e *netboxv1alpha1.
 	if became {
 		r.event(e, corev1.EventTypeNormal, netboxv1alpha1.ReasonReady,
 			fmt.Sprintf("netbox %s at %s accepted the token; client available",
-				status.Version, e.Spec.URL))
+				status.Version, shown))
 	}
 
 	setCondition(e, netboxv1alpha1.ConditionAuthenticated, metav1.ConditionTrue,

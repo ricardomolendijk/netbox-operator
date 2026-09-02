@@ -111,10 +111,12 @@ func New(cfg Config) (*Client, error) {
 	}
 	parsed, err := url.Parse(strings.TrimRight(cfg.URL, "/"))
 	if err != nil {
-		return nil, fmt.Errorf("parsing netbox url %q: %w", cfg.URL, err)
+		// Redacted, because a url that does not parse is still a url somebody may have put a
+		// password in, and this error is rendered into a condition on the NetBoxEndpoint.
+		return nil, fmt.Errorf("parsing netbox url %q: %w", RedactURL(cfg.URL), err)
 	}
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return nil, fmt.Errorf("netbox url %q must be http or https", cfg.URL)
+		return nil, fmt.Errorf("netbox url %q must be http or https", RedactURL(cfg.URL))
 	}
 
 	transport, err := buildTransport(cfg)
@@ -233,9 +235,94 @@ func (c *Client) List(ctx context.Context, endpoint string, params Params) ([]Ob
 			return nil, err
 		}
 		all = append(all, asList(body["results"])...)
-		target = asString(body["next"])
+
+		next, err := nextPage(ctx, target, asString(body["next"]))
+		if err != nil {
+			return nil, err
+		}
+		target = next
 	}
 	return all, nil
+}
+
+// nextPage is the URL of the next page, rebuilt onto the one we asked for.
+//
+// Only the query survives the round trip. `next` is a value out of the response body, and
+// every request this client makes carries the endpoint's API token in an Authorization
+// header -- so following it verbatim means a NetBox that answers
+// `{"next": "https://elsewhere/"}` is handed the token, and a client with
+// insecureSkipVerify set hands it to whoever is in the middle instead. Go's own redirect
+// handling strips credentials across origins; this is not a redirect but a request the
+// client builds itself, so that protection never applies and the check has to be here.
+//
+// Rebuilt rather than refused, because the two ways a legitimate `next` differs from the
+// request are both benign: NetBox renders it from the request's absolute URI, so a reverse
+// proxy that rewrites Host or forwards a different scheme produces a URL that is correct
+// for a browser and wrong for this client. Pagination lives entirely in the query
+// (`limit`/`offset`, or a cursor), so keeping the query and discarding the origin follows
+// the server's paging exactly while making the destination unforgeable. The mismatch is
+// still worth saying out loud once per list, because the other thing that produces one is
+// the attack.
+//
+// An empty `next` is the last page and returns "", which is what ends the loop.
+func nextPage(ctx context.Context, current, next string) (string, error) {
+	if next == "" {
+		return "", nil
+	}
+
+	parsed, err := url.Parse(next)
+	if err != nil {
+		// Not transient: the same list will produce the same unparseable value.
+		return "", &ValidationError{
+			Body: fmt.Sprintf("netbox returned an unparseable next-page url: %s", RedactURL(next)),
+		}
+	}
+
+	base, err := url.Parse(current)
+	if err != nil {
+		return "", fmt.Errorf("parsing the current page url: %w", err)
+	}
+
+	if parsed.IsAbs() && (parsed.Scheme != base.Scheme || parsed.Host != base.Host) {
+		logf.FromContext(ctx).Info("netbox paginated to a different origin; keeping the query and "+
+			"discarding the host, because following it would send this endpoint's token there",
+			"action", "list", "expected", base.Scheme+"://"+base.Host,
+			"got", parsed.Scheme+"://"+parsed.Host)
+	}
+
+	// The query the server chose, on the URL we know is the endpoint's.
+	paged := *base
+	paged.RawQuery = parsed.RawQuery
+
+	return paged.String(), nil
+}
+
+// RedactURL renders a URL with any embedded credentials masked, for a log line, an Event or
+// a condition message.
+//
+// url.URL.Redacted does this for a URL that parses; the string form is here because the one
+// place a URL most needs redacting is the error saying it could not be parsed. Everything
+// between `//` and the last `@` of the authority is the userinfo, and that is what goes.
+func RedactURL(raw string) string {
+	if parsed, err := url.Parse(raw); err == nil {
+		return parsed.Redacted()
+	}
+
+	start := strings.Index(raw, "//")
+	if start < 0 {
+		return raw
+	}
+	authority := raw[start+2:]
+	end := strings.IndexAny(authority, "/?#")
+	if end < 0 {
+		end = len(authority)
+	}
+	at := strings.LastIndex(authority[:end], "@")
+	if at < 0 {
+		return raw
+	}
+
+	return raw[:start+2] + "xxxxx:xxxxx" + authority[at:]
 }
 
 // GetByID fetches one object by its NetBox id. A missing object is a *NotFoundError
