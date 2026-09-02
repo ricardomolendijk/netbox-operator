@@ -156,7 +156,8 @@ an object undeletable.
 
 ## Why there is no defaulting webhook
 
-[NBO-044](../../specs/NBO-044-admission-webhooks.md) proposed one, defaulting `spec.endpointRef`
+NBO-044 ([#68](https://github.com/ricardomolendijk/netbox-operator/issues/68)) proposed one,
+defaulting `spec.endpointRef`
 from a per-endpoint `defaultForNamespaces`, and `spec.slug` from `slugify(spec.name)`. It is not
 implemented, deliberately, for three reasons in increasing order of weight.
 
