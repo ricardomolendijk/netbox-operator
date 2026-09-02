@@ -59,3 +59,8 @@ resources:
 - netbox_v1alpha1_netboxrackgroup.yaml
 - netbox_v1alpha1_netboxrack.yaml
 - netbox_v1alpha1_netboxrackreservation.yaml
+- netbox_v1alpha1_netboxprovider.yaml
+- netbox_v1alpha1_netboxprovideraccount.yaml
+- netbox_v1alpha1_netboxprovidernetwork.yaml
+- netbox_v1alpha1_netboxcircuittype.yaml
+- netbox_v1alpha1_netboxcircuit.yaml

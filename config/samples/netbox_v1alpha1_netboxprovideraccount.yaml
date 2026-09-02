@@ -1,0 +1,23 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxProviderAccount
+metadata:
+  name: ntt-eu-billing
+  namespace: default
+spec:
+  endpointRef: homelab
+  onConflict: Fail
+  deletionPolicy: Delete
+
+  # Required, and the leading half of the only natural key, so until it resolves the object
+  # writes nothing at all.
+  providerRef:
+    name: ntt
+
+  # The trailing half: `(provider, account)` is the one unconditional UniqueConstraint.
+  account: "EU-4417"
+
+  # Set, but NOT part of the identity: `(provider, name)` carries `condition=~Q(name='')`, which
+  # is not a null pin and has no NetBox filter, so it is not a candidate.
+  name: EU billing account
+
+  description: Invoiced monthly

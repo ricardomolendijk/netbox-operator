@@ -1,0 +1,20 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxCircuitType
+metadata:
+  name: transit
+  namespace: default
+spec:
+  endpointRef: homelab
+  onConflict: Fail
+  deletionPolicy: Delete
+
+  name: Transit
+
+  # The natural key, from OrganizationalModel's column-level UNIQUE two base classes up.
+  slug: transit
+
+  # Undefaulted, unlike NetBoxRackRole's: BaseCircuitType.color is `blank=True` with no Django
+  # default, so a default here would invent a value NetBox does not have.
+  color: "2196f3"
+
+  description: IP transit purchased from a carrier

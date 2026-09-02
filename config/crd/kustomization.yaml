@@ -65,3 +65,8 @@ resources:
 - bases/netbox.kubeforge.org_netboxrackgroups.yaml
 - bases/netbox.kubeforge.org_netboxracks.yaml
 - bases/netbox.kubeforge.org_netboxrackreservations.yaml
+- bases/netbox.kubeforge.org_netboxproviders.yaml
+- bases/netbox.kubeforge.org_netboxprovideraccounts.yaml
+- bases/netbox.kubeforge.org_netboxprovidernetworks.yaml
+- bases/netbox.kubeforge.org_netboxcircuittypes.yaml
+- bases/netbox.kubeforge.org_netboxcircuits.yaml

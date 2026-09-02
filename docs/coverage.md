@@ -16,22 +16,22 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 | | count |
 |---|--:|
 | NetBox REST endpoints | 138 |
-| — implemented as a Kind | 58 |
+| — implemented as a Kind | 63 |
 | — excluded, with a reason | 27 |
-| — **not implemented** | 53 |
+| — **not implemented** | 48 |
 | in scope (endpoints − excluded) | 111 |
 | | |
-| writable columns on the implemented Kinds | 657 |
-| — written by a spec field, or engine-owned | 494 |
+| writable columns on the implemented Kinds | 700 |
+| — written by a spec field, or engine-owned | 527 |
 | — deliberately omitted, with a reason | 10 |
-| — blocked: a reference whose target model has no Kind | 69 |
-| — **MISSING**: nothing declares it and nothing blocks it | 84 |
+| — blocked: a reference whose target model has no Kind | 74 |
+| — **MISSING**: nothing declares it and nothing blocks it | 89 |
 | — of those, required on create (fails the audit) | 0 |
 | | |
 | natural-key candidates the IR calls unusable | 21 |
 | — expressible since #216 (`?<fk>_id=null`) | 17 |
 | — still unusable | 4 |
-| — still unusable on an implemented Kind | 0 |
+| — still unusable on an implemented Kind | 1 |
 | | |
 | IR `unresolved` rows naming an implemented Kind | 0 |
 
@@ -39,8 +39,8 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 
 | column | status | Kinds | detail |
 |---|---|--:|---|
-| `owner` | blocked | 55 | `users.Owner` is an excluded endpoint, so nothing will ever write this |
-| `tags` | MISSING | 50 | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
+| `owner` | blocked | 60 | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `tags` | MISSING | 55 | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `comments` | excluded | 6 | organisational kinds map name/slug/description only (api/v1alpha1/virtualization_clustertype.go) |
 | `tenant` | MISSING | 6 | deferred to NetBoxTenant (NBO-021), which now ships -- nothing blocks it any more |
 | `config_template` | MISSING | 4 | — |
@@ -115,6 +115,11 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 | `dcim.Site` | `group` | Ref | — | MISSING | deferred to NetBoxSiteGroup (NBO-066), which now ships -- nothing blocks it any more |
 | `dcim.Device` | `location` | Ref | — | MISSING | — |
 | `dcim.Interface` | `module` | Ref | — | blocked | waits on a Kind for `dcim.Module` |
+| `circuits.Circuit` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `circuits.CircuitType` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `circuits.Provider` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `circuits.ProviderAccount` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `circuits.ProviderNetwork` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `dcim.Cable` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `dcim.CableBundle` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `dcim.Device` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
@@ -176,6 +181,11 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 | `dcim.Device` | `rack` | Ref | — | MISSING | NBO-051 ships NetBoxRack, so nothing blocks this any more -- but the column does not arrive alone: `(rack, position, face)` is one of dcim.Device's UniqueConstraints (docs/netbox-schema.md), so mounting a device in a rack means adding all three at once and re-deriving that kind's natural keys. NBO-051's ticket calls it out of scope on the belief the three were already on NetBoxDevice from NBO-030; they are not (internal/registry/dcim_device.go, dcimDeviceFields) |
 | `dcim.DeviceType` | `rear_image` | Scalar | — | MISSING | — |
 | `dcim.Site` | `region` | Ref | — | MISSING | deferred with dcim.Site's other optional foreign keys; NetBoxRegion now ships, so nothing blocks it any more (api/v1alpha1/dcim_site.go) |
+| `circuits.Circuit` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
+| `circuits.CircuitType` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
+| `circuits.Provider` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
+| `circuits.ProviderAccount` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
+| `circuits.ProviderNetwork` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `dcim.Cable` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `dcim.CableBundle` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `dcim.Device` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
@@ -254,7 +264,7 @@ each pinned column's class rather than from the IR's reason string.
 
 | model | shipped | constraint | verdict | detail |
 |---|---|---|---|---|
-| `circuits.ProviderAccount` | — | `%(app_label)s_%(class)s_unique_provider_name` | unusable | constraint condition is more than a null pin: ['name'] |
+| `circuits.ProviderAccount` | yes | `%(app_label)s_%(class)s_unique_provider_name` | unusable | constraint condition is more than a null pin: ['name'] |
 | `dcim.CableTermination` | — | `%(app_label)s_%(class)s_unique_connector` | unusable | no registered filter parameter for column 'connector' (tried: connector, connector_id) |
 | `dcim.Device` | yes | `%(app_label)s_%(class)s_unique_name_site` | usable via #216 | null pins are all foreign keys: `?<column>_id=null` (registry.NullColumnRef) |
 | `dcim.DeviceRole` | yes | `%(app_label)s_%(class)s_name` | usable via #216 | null pins are all foreign keys: `?<column>_id=null` (registry.NullColumnRef) |
@@ -283,11 +293,11 @@ each pinned column's class rather than from the IR's reason string.
 | `circuits/circuit-group-assignments` | `circuits.CircuitGroupAssignment` | — | MISSING | — |
 | `circuits/circuit-groups` | `circuits.CircuitGroup` | — | MISSING | — |
 | `circuits/circuit-terminations` | `circuits.CircuitTermination` | — | MISSING | — |
-| `circuits/circuit-types` | `circuits.CircuitType` | — | MISSING | — |
-| `circuits/circuits` | `circuits.Circuit` | — | MISSING | — |
-| `circuits/provider-accounts` | `circuits.ProviderAccount` | — | MISSING | — |
-| `circuits/provider-networks` | `circuits.ProviderNetwork` | — | MISSING | — |
-| `circuits/providers` | `circuits.Provider` | — | MISSING | — |
+| `circuits/circuit-types` | `circuits.CircuitType` | `NetBoxCircuitType` | implemented | — |
+| `circuits/circuits` | `circuits.Circuit` | `NetBoxCircuit` | implemented | — |
+| `circuits/provider-accounts` | `circuits.ProviderAccount` | `NetBoxProviderAccount` | implemented | — |
+| `circuits/provider-networks` | `circuits.ProviderNetwork` | `NetBoxProviderNetwork` | implemented | — |
+| `circuits/providers` | `circuits.Provider` | `NetBoxProvider` | implemented | — |
 | `circuits/virtual-circuit-terminations` | `circuits.VirtualCircuitTermination` | — | MISSING | — |
 | `circuits/virtual-circuit-types` | `circuits.VirtualCircuitType` | — | MISSING | — |
 | `circuits/virtual-circuits` | `circuits.VirtualCircuit` | — | MISSING | — |

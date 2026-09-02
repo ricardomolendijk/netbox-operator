@@ -1,0 +1,22 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxProviderNetwork
+metadata:
+  name: ntt-backbone
+  namespace: default
+spec:
+  endpointRef: homelab
+  onConflict: Fail
+  deletionPolicy: Delete
+
+  # The leading half of `(provider, name)`, the one unconditional constraint on this model.
+  providerRef:
+    name: ntt
+
+  # Unique per provider rather than globally: there is no column-level UNIQUE here, so two
+  # providers may both have a "Backbone".
+  name: Backbone
+
+  # Carries no UNIQUE of any kind, so deliberately not part of the identity.
+  serviceId: NTT-BB-0001
+
+  description: The provider cloud a circuit terminates into

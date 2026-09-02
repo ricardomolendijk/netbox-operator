@@ -1,0 +1,23 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxProvider
+metadata:
+  name: ntt
+  namespace: default
+spec:
+  endpointRef: homelab
+  onConflict: Fail
+  deletionPolicy: Delete
+
+  name: NTT Communications
+
+  # The natural key. `circuits.Provider` declares no meta.constraints at all, so the identity
+  # comes from the column-level UNIQUE on `slug`; `name` is UNIQUE too and deliberately not a
+  # second candidate.
+  slug: ntt
+
+  # A to-many reference: omitted leaves NetBox's list alone, `[]` clears it, a list replaces it.
+  # All or nothing -- one unresolvable element leaves the whole field out of the payload.
+  asns:
+    - name: as2914
+
+  description: Transit provider

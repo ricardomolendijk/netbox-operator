@@ -1,0 +1,39 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxCircuit
+metadata:
+  name: ntt-transit-ams
+  namespace: default
+spec:
+  endpointRef: homelab
+  onConflict: Fail
+  deletionPolicy: Delete
+
+  # `(provider, cid)` is the natural key, and the only candidate this kind declares. The second
+  # constraint, `(provider_account, cid)`, is deliberately not one -- see
+  # docs/reference/netboxcircuit.md.
+  cid: "100000123"
+  providerRef:
+    name: ntt
+
+  # Required by the column but not in the key.
+  typeRef:
+    name: transit
+
+  providerAccountRef:
+    name: ntt-eu-billing
+
+  # NetBox's own default, written out so the operator manages the field from the first reconcile.
+  status: active
+
+  installDate: "2026-01-15"
+  commitRate: 1000000
+
+  # A string, not a number: NetBox returns "12.50" and the engine compares the two numerically,
+  # so this produces no PATCH on the second reconcile.
+  distance: "12.5"
+  distanceUnit: km
+
+  description: Primary transit into AMS
+
+  # There is no `terminationA` or `terminationZ` here, and there never will be. Both columns are
+  # read-only on circuits.Circuit and written by NetBox from the termination's side.
