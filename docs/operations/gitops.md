@@ -341,9 +341,10 @@ reason:
   would have found.
 - **`onConflict: Adopt`**, which this page recommends keeping in Git for the objects this
   operator owns, will remove the one place a `Conflict` would have surfaced — once claims
-  materialise their child `NetBoxIPAddress` at all. They do not yet (NBO-032, [#45]
-  (https://github.com/ricardomolendijk/netbox-operator/issues/45)); `status.address` is the
-  only record today. When that child does land, re-creating it under `Adopt` would take over
+  materialise their child `NetBoxIPAddress` at all. They still do not: a claim records what it
+  allocated in `status.address` and writes no address CR, which is verified in
+  [claims](../concepts/claims.md). (Inline children *are* built, for the parent kinds that
+  declare them — this gap is the claim kinds specifically.) When that child does land, re-creating it under `Adopt` would take over
   whatever sits at the address by then, which may be the second claim's object — so this row
   gets worse, not better, unless the guard lands first.
 - **Reading `status.address` afterwards**, [step 3 of a both-lost restore](#both-were-lost),
@@ -545,16 +546,27 @@ neither — set `driftMode` in the manifest.
 something the operator can be configured to require. The value documents the convention and
 renders nothing.
 
-### `gitops.*` is manager-wide, and inert for now
+### `gitops.*` is manager-wide, and the chart values do not reach it yet
 
 The annotation set is a property of the operator rather than of one NetBox, so it is one
-value for the install and it is rendered as `NETBOX_GENERATED_ANNOTATIONS` on the Deployment.
-Nothing materialises a child CR yet — that is
-[#45](https://github.com/ricardomolendijk/netbox-operator/issues/45) — so today the value is
-plumbed and unread. Said plainly, because a value that looks like it works and does not is
-worse than one that is missing.
+value for the install, and the chart renders it as `NETBOX_GENERATED_ANNOTATIONS` on the
+Deployment.
 
-`gitops.flux.enabled` is off by default and it is the one to turn on if you run Flux:
+**The manager does not read that variable.** Materialisation itself works — an inline
+`interfaces` entry becomes a real child CR, and that child does get the annotations — but the
+set it gets is the hardcoded default in `gitOpsDefaults()`
+(`internal/controller/objectcontroller.go`), which is §5's documented default and nothing
+else: **Argo CD on, Flux off, no extras**. Setting `gitops.flux.enabled=true` or
+`gitops.extraAnnotations` today changes the Deployment's environment and changes no
+annotation on any object. Said plainly, because a value that looks like it works and does not
+is worse than one that is missing.
+
+Until the wiring lands, a Flux install that needs
+`kustomize.toolkit.fluxcd.io/reconcile: disabled` on generated children has to add it another
+way — a Kustomize patch on the child kinds, or Flux-side exclusion.
+
+`gitops.flux.enabled` is off by default and it is the one to turn on once it is wired, if you
+run Flux:
 `kustomize.toolkit.fluxcd.io/reconcile: disabled` on a CR the operator generated is what
 stops Flux from pruning an object that was never in its inventory, in exactly the way
 `IgnoreExtraneous` stops Argo CD reporting one as extraneous. Turning on the annotations for

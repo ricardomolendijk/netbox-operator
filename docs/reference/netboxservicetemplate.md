@@ -7,7 +7,6 @@
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbsvctpl` |
 | Status subresource | yes |
-| Lands with | NBO-055 (M10) |
 
 A `NetBoxServiceTemplate` is one `ipam.ServiceTemplate` in NetBox: a reusable
 protocol-and-ports definition a [service](netboxservice.md) can be stamped from.

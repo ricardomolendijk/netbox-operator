@@ -8,7 +8,6 @@
 | Short names | `nbiprangeclaim`, `nbrngc` |
 | Status subresource | yes |
 | Allocates | `ipam.IPRange` via `POST ipam/ip-ranges/` — **no advisory lock** |
-| Lands with | NBO-064 (M6) |
 
 A `NetBoxIPRangeClaim` reserves one run of consecutive addresses inside a prefix, **once**:
 "reserve me 64 consecutive addresses in `10.0.30.0/24`", and the answer is

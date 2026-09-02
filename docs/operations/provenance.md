@@ -4,7 +4,6 @@
 |---|---|
 | Configured by | [`NetBoxEndpoint.spec.managedBy`](../reference/netboxendpoint.md#specmanagedby) |
 | Default | **off** — an unset `spec.managedBy` stamps nothing |
-| Lands with | NBO-075 (M1) |
 
 Every NetBox object the operator manages can be attributed to a cluster, a namespace and a
 CR. That attribution is a **stamp**: one NetBox tag, and a small set of custom fields. This

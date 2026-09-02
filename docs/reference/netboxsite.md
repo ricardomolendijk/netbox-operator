@@ -7,7 +7,6 @@
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbsite` |
 | Status subresource | yes |
-| Lands with | NBO-009 (M1) |
 
 A `NetBoxSite` is one `dcim.Site` in NetBox: a physical location that devices, racks,
 prefixes and VLANs are scoped to.

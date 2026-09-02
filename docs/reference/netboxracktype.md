@@ -7,7 +7,6 @@
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbracktype` |
 | Status subresource | yes |
-| Lands with | NBO-051 (M9–M10) |
 
 A `NetBoxRackType` is one `dcim.RackType` in NetBox: one make and model of rack, with its
 height, width and weight.

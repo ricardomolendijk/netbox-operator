@@ -7,7 +7,6 @@
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbwlangroup` |
 | Status subresource | yes |
-| Lands with | NBO-050 (M9) |
 
 A `NetBoxWirelessLANGroup` is one `wireless.WirelessLANGroup` in NetBox: a named, nestable
 folder that SSIDs are filed under.

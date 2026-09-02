@@ -7,7 +7,6 @@
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbvlangroup` |
 | Status subresource | yes |
-| Lands with | NBO-023 (M3) |
 
 A `NetBoxVLANGroup` is one `ipam.VLANGroup` in NetBox: a named span of VLAN IDs, optionally
 attached to a Region, SiteGroup, Site or Location, that VLANs can be grouped under so the same

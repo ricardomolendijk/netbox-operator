@@ -5,10 +5,11 @@ Two phases, both run by `make docs-check`:
 
   source  Every relative link and heading anchor under docs/ resolves the way GitHub
           resolves it. This is the check that was being done by hand on every docs PR.
-          Plus: every page under docs/ is reachable from docs/README.md, the index the
-          site's navigation follows. The site has no nav file to drift from that index
-          -- MkDocs derives navigation from the docs/ tree -- so the drift that is still
-          possible is a page nobody indexed and nobody linked, and this catches it.
+          Plus: every page under docs/ is reachable from docs/README.md, the hand-
+          maintained index. mkdocs.yml's `nav:` is the site's sidebar and `mkdocs build
+          --strict` already fails on a page the nav omits, so that half is covered there;
+          what this catches is the other half, a page nobody indexed and nobody linked,
+          which the nav alone would happily publish as an orphan.
 
   site    Run against site/ after `mkdocs build`. Asserts:
           * every published file traces back to a path under docs/ -- the allowlist

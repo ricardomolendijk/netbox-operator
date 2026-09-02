@@ -1,16 +1,35 @@
 # Workflows
 
-Every job here is a thin wrapper over a `make` target, so a CI failure is reproducible
-locally with one command. If CI can do something the `Makefile` cannot, that is a
-`Makefile` gap — fix it there rather than in YAML.
+Every job in `ci.yaml`, `docs.yaml` and `e2e.yaml` is a thin wrapper over a `make` target, so
+a CI failure is reproducible locally with one command. If CI can do something the `Makefile`
+cannot, that is a `Makefile` gap — fix it there rather than in YAML. `release.yaml` is the one
+exception and says why [below](#why-releaseyaml-is-not-a-thin-wrapper).
 
 Actions are pinned to a commit SHA rather than a tag, because a tag can be moved.
 
-| Workflow | Gates |
-|---|---|
-| `ci.yaml` | `make build vet lint test verify`, `kustomize build`, `ruff check hack/`, `make test-schema` |
-| `docs.yaml` | `make docs-check`, `make docs-build`; deploys to GitHub Pages on push to `main` only |
-| `e2e.yaml` | `make test-e2e`; nightly, on a pull request labelled `area/refs`, and on demand — **not** on every PR |
+| Workflow | Jobs | Gates |
+|---|---|---|
+| `ci.yaml` | `build`, `manifests`, `chart`, `python` | `make build vet lint test verify`; `kustomize build config/default` and `config/crd`; `make helm-verify helm-package crd-bundle` against the pinned Helm; `ruff check hack/` and `make test-schema` |
+| `docs.yaml` | `build`, `deploy` | `make docs-tools docs-check docs-build`, then the Pages artifact; deploys to GitHub Pages on push to `main` only |
+| `e2e.yaml` | `convergence` | `make test-e2e`; nightly, on a pull request labelled `area/refs`, and on demand — **not** on every PR |
+| `release.yaml` | `release` | The tag must equal `Chart.yaml`'s `version` *and* `appVersion`; `make helm-lint helm-template helm-package crd-bundle`, then the multi-arch image, the SBOM, the cosign signature, the OCI chart push and the GitHub release |
+
+The `chart` job is the one most easily missed, and it is the one that gates what a user
+installs: `make helm-verify` (lint, four renders, and the golden RBAC diff), `make helm-package`
+(which fails if the packaged chart crosses 256 KB) and `make crd-bundle` (the
+`netbox-operator-crds-<version>.yaml` that replaces the `crds/` directory the chart no longer
+has — see [`docs/install.md`](../../docs/install.md)). It pins Helm itself rather than taking
+the runner's, for the same reason every other tool here is pinned.
+
+## Why `release.yaml` is not a thin wrapper
+
+Four of its steps are `make` calls; the rest is version resolution, the fork/publish gate,
+buildx, SBOM generation, cosign, the OCI chart push and `gh release`. None of those is
+reproducible locally on purpose — a `make` target that could push to `ghcr.io` and cut a
+GitHub release is a target somebody runs by accident. The gate is explicit: it publishes only
+when the repository is `ricardomolendijk/netbox-operator` **and** the ref is a `v*` tag, so a
+`workflow_dispatch` run, or a tag on a fork, builds the same artefacts into the run and
+publishes nothing.
 
 ## Why `e2e.yaml` is separate
 

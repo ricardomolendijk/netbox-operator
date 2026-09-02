@@ -7,7 +7,6 @@
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbcablebundle` |
 | Status subresource | yes |
-| Lands with | NBO-049 (M10) |
 
 A `NetBoxCableBundle` is one `dcim.CableBundle` in NetBox: a named grouping of cables that are
 pulled together — a trunk, a riser, a patch bundle.

@@ -7,7 +7,6 @@
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbcgroup` |
 | Status subresource | yes |
-| Lands with | NBO-028 (M4) |
 
 A `NetBoxClusterGroup` is one `virtualization.ClusterGroup` in NetBox: an administrative
 grouping of clusters — `Production`, `Lab`, `Amsterdam DC`.

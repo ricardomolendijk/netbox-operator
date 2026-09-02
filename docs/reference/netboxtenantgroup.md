@@ -7,7 +7,6 @@
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbtenantgroup` |
 | Status subresource | yes |
-| Lands with | NBO-021 (M3) |
 
 A `NetBoxTenantGroup` is one `tenancy.TenantGroup` in NetBox: a nestable grouping of
 tenants, and `tenancy.Tenant`'s only foreign key.

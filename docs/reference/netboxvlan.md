@@ -7,7 +7,6 @@
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbvlan` |
 | Status subresource | yes |
-| Lands with | NBO-023 (M3) |
 
 A `NetBoxVLAN` is one `ipam.VLAN` in NetBox: an 802.1Q VLAN ID and name, optionally on a site,
 optionally in a [VLAN group](netboxvlangroup.md), and optionally one half of a Q-in-Q pair.

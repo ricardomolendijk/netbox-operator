@@ -7,7 +7,6 @@
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbccp` |
 | Status subresource | yes |
-| Lands with | NBO-059 (M10) |
 
 A `NetBoxConfigContextProfile` is one `extras.ConfigContextProfile` in NetBox: a JSON Schema
 that [`NetBoxConfigContext`](netboxconfigcontext.md) documents are validated against.

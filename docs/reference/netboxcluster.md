@@ -7,7 +7,6 @@
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbcluster` |
 | Status subresource | yes |
-| Lands with | NBO-028 (M4) |
 
 A `NetBoxCluster` is one `virtualization.Cluster` in NetBox: a set of hosts that virtual
 machines run on.

@@ -3,10 +3,12 @@
 How the operator gets from "here is an object" to "NetBox agrees with it", and what it
 does when it cannot.
 
-One reconcile loop exists today: `NetBoxEndpointReconciler` in
-`internal/controller/netboxendpoint_controller.go`. It is the worked example for
-everything below, because it is real. The generic per-object loop is designed but not
-built — see [object lifecycle](object-lifecycle.md).
+`NetBoxEndpointReconciler` in `internal/controller/netboxendpoint_controller.go` is the
+worked example for everything below: it is the smallest loop in the repository and every rule
+on this page is visible in it. The per-object loop that drives the other 61 kinds follows the
+same model through the shared engine — [the reconcile engine](engine.md) is the page for that
+one, and [object lifecycle](object-lifecycle.md) is the register of what is still designed
+rather than built.
 
 ## The level-triggered model
 
@@ -575,4 +577,4 @@ is precisely where a per-resync Event does the most damage while looking least l
 - How a live object is compared against the desired payload — [drift detection](drift.md).
 - The per-object create/adopt/update loop, and the two-pass write a deferred field takes —
   [object lifecycle](object-lifecycle.md).
-- Symptom-first diagnosis — [troubleshooting](../operations/troubleshooting.md).
+- Symptom-first diagnosis — [troubleshooting](../troubleshooting.md).

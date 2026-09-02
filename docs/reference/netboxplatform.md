@@ -7,7 +7,6 @@
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbplatform` |
 | Status subresource | yes |
-| Lands with | NBO-027 |
 
 A `NetBoxPlatform` is one `dcim.Platform` in NetBox: the operating system or firmware a device
 runs. `dcim.Device.platform` and `dcim.DeviceType.default_platform` both point here.

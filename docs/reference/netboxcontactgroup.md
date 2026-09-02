@@ -7,7 +7,6 @@
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbcontactgroup` |
 | Status subresource | yes |
-| Lands with | NBO-056 (M10) |
 
 A `NetBoxContactGroup` is one `tenancy.ContactGroup` in NetBox: a tree of buckets to file
 contacts in — `Operations` → `Network`, `Vendors` → `Transit`.

@@ -7,7 +7,6 @@
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbregion` |
 | Status subresource | yes |
-| Lands with | NBO-011 (M2) |
 
 A `NetBoxRegion` is one `dcim.Region` in NetBox: a named, nestable geographic grouping that
 sites, prefixes, VLAN groups, clusters and wireless LANs can be scoped to.
@@ -234,7 +233,7 @@ diagnosing a `WaitingForRef`.
 | `Ready=False`, `Reason=WaitingForKey`, no `parentRef` | Not expected — check `spec.name` is non-empty and the descriptor validated at boot. |
 | `Ready=False`, `Reason=Conflict` | More than one NetBox region matched. Two CRs claiming one region, or a name duplicated under the same parent. `status.naturalKey` shows what was searched. |
 | A second region appeared after an edit | `spec.name` was changed. See [Renaming changes identity](#renaming-changes-identity). |
-| `Ready=False`, `Reason=WaitingForEndpoint` | The `NetBoxEndpoint` is not `Ready`. See [troubleshooting](../operations/troubleshooting.md). |
+| `Ready=False`, `Reason=WaitingForEndpoint` | The `NetBoxEndpoint` is not `Ready`. See [troubleshooting](../troubleshooting.md). |
 
 ## Related
 

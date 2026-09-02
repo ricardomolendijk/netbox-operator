@@ -7,7 +7,6 @@
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbcl` |
 | Status subresource | yes |
-| Lands with | NBO-059 (M10) |
 
 A `NetBoxCustomLink` is one `extras.CustomLink` in NetBox: a button NetBox renders on an
 object's page, whose text and URL are Jinja2 templates rendered with that object as context.

@@ -7,7 +7,6 @@
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbsf` |
 | Status subresource | yes |
-| Lands with | NBO-059 (M10) |
 
 A `NetBoxSavedFilter` is one `extras.SavedFilter` in NetBox: a named set of query parameters
 NetBox offers as a one-click filter in its UI.

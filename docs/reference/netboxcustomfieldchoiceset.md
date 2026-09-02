@@ -7,7 +7,6 @@
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbcfcs` |
 | Status subresource | yes |
-| Lands with | NBO-059 (M10) |
 
 A `NetBoxCustomFieldChoiceSet` is one `extras.CustomFieldChoiceSet` in NetBox: the list of values
 a `select` or `multiselect` custom field may hold. Like

@@ -8,7 +8,6 @@
 | Short names | `nbprefixclaim`, `nbpfxc` |
 | Status subresource | yes |
 | Allocates | `ipam.Prefix` out of `POST ipam/prefixes/{id}/available-prefixes/` |
-| Lands with | NBO-064 (M6) |
 
 A `NetBoxPrefixClaim` asks NetBox to carve one child prefix out of a container, **once**:
 "give me a /26 out of `10.0.0.0/16`", and the answer is whichever /26 NetBox hands out.

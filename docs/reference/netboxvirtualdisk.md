@@ -7,7 +7,6 @@
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbvdisk` |
 | Status subresource | yes |
-| Lands with | NBO-029 (M4) |
 
 A `NetBoxVirtualDisk` is one `virtualization.VirtualDisk` in NetBox: a disk attached to a
 [`NetBoxVirtualMachine`](netboxvirtualmachine.md).

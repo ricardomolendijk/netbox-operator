@@ -7,7 +7,6 @@
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbcontact` |
 | Status subresource | yes |
-| Lands with | NBO-056 (M10) |
 
 A `NetBoxContact` is one `tenancy.Contact` in NetBox: a person or a rota, with a phone number
 and an email address, that can be attached to anything NetBox lets you attach a contact to.

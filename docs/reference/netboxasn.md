@@ -7,7 +7,6 @@
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbasn` |
 | Status subresource | yes |
-| Lands with | NBO-055 (M10) |
 
 A `NetBoxASN` is one `ipam.ASN` in NetBox: an autonomous system number allocated by a registry.
 

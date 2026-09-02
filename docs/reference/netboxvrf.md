@@ -7,7 +7,6 @@
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbvrf` |
 | Status subresource | yes |
-| Lands with | NBO-022 (M3) |
 
 A `NetBoxVRF` is one `ipam.VRF` in NetBox: a routing table that gives prefixes and addresses
 somewhere to be unique. Without it, every house using `10.0.0.0/24` collides in NetBox's

@@ -7,7 +7,6 @@
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbipclaim`, `nbipc` |
 | Status subresource | yes |
-| Lands with | NBO-036 (M6) |
 
 A `NetBoxIPAddressClaim` asks NetBox for one free address out of a prefix, **once**. It is not
 a mode of [`NetBoxIPAddress`](netboxprefix.md) and it is not a field on one: allocating is a

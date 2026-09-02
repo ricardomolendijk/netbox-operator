@@ -7,7 +7,6 @@
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbrir` |
 | Status subresource | yes |
-| Lands with | NBO-055 (M10) |
 
 A `NetBoxRIR` is one `ipam.RIR` in NetBox: a regional internet registry — ARIN, RIPE NCC — or
 a private allocation authority standing in for one, such as RFC 1918.

@@ -7,7 +7,6 @@
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbip` |
 | Status subresource | yes |
-| Lands with | NBO-025 (M3) |
 
 A `NetBoxIPAddress` is one `ipam.IPAddress` in NetBox: an address, its mask, and what it is
 attached to.

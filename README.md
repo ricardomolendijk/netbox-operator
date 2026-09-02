@@ -32,10 +32,14 @@ spec:
   dnsName: dns.home.arpa
 ```
 
-> **Status: pre-alpha, under active construction.** The API group is `v1alpha1` and
-> is expected to change. Nothing here is released yet — see
-> [the issue tracker](https://github.com/ricardomolendijk/netbox-operator/milestones)
-> for what is landing and in what order.
+**New here? [Start with the ten-minute walkthrough](docs/getting-started.md)** — CRDs, chart,
+one Secret, one `NetBoxEndpoint`, one `NetBoxSite`, and the object visible in NetBox.
+
+> **Status: pre-alpha, under active construction.** The API group is `v1alpha1` and is
+> expected to change. All 64 CRDs ship, and `v0.0.9` is the first release to publish an
+> installable chart, CRD bundle and signed image — every tag before it carries no assets, so
+> pin the version rather than taking the newest tag. See
+> [`docs/install.md`](docs/install.md#what-is-published).
 
 ## Why this exists
 
@@ -65,8 +69,8 @@ loop rather than a tree walk. Consequences:
 
 Longer form, one page each:
 
-- [The Descriptor](docs/concepts/descriptor.md) — how one engine drives ~120 kinds with
-  no per-kind code, and how an object's identity is established before it has an ID.
+- [The Descriptor](docs/concepts/descriptor.md) — how one engine drives the whole catalogue
+  with no per-kind code, and how an object's identity is established before it has an ID.
 - [Drift detection](docs/concepts/drift.md) — why what NetBox returns is not what you
   wrote, and the comparison rules that keep a reconcile from PATCHing forever.
 - [Lookups](docs/concepts/lookups.md) — how a natural key becomes a query string, and the
@@ -83,25 +87,31 @@ Longer form, one page each:
   answer is a report and never a deletion, and why a sweep only ever considers objects
   stamped with its own cluster id.
 
-Full index: [`docs/README.md`](docs/README.md). Decisions and their rationale:
-[`docs/decisions/README.md`](docs/decisions/README.md). Running it, including what the
-operator can read and the label every credential Secret needs:
-[`docs/operations/rbac.md`](docs/operations/rbac.md).
+Full index: [`docs/README.md`](docs/README.md). When something goes wrong:
+[`docs/troubleshooting.md`](docs/troubleshooting.md), which lists every condition reason the
+operator emits. Decisions and their rationale:
+[`docs/decisions/README.md`](docs/decisions/README.md). What the operator can read and the
+label every credential Secret needs: [`docs/operations/rbac.md`](docs/operations/rbac.md).
 
 ## Installing
 
 ```sh
-make install-crds        # the CRDs are their own artefact, not part of the Helm release
+# The CRDs are their own artefact, not part of the Helm release.
+kubectl apply --server-side --force-conflicts \
+  -f https://github.com/ricardomolendijk/netbox-operator/releases/download/v0.0.9/netbox-operator-crds-0.0.9.yaml
 
-helm install netbox-operator ./charts/netbox-operator \
+kubectl create namespace homelab
+
+helm install netbox-operator oci://ghcr.io/ricardomolendijk/charts/netbox-operator \
+  --version 0.0.9 \
   --namespace netbox-operator-system --create-namespace \
   --set credentialNamespaces={homelab}
 ```
 
-Nothing is published yet, so the chart installs from a checkout. Full instructions,
-every value, and the one thing to know before you upgrade — the CRDs are applied by you,
-before the chart, every time — are in [`docs/install.md`](docs/install.md). The chart values that
-change GitOps and drift behaviour are documented alongside the behaviour, in
+[Getting started](docs/getting-started.md) walks the whole path including the first object;
+[`docs/install.md`](docs/install.md) has every value, both upgrade commands, and the one thing
+to know before you upgrade — the CRDs are applied by you, before the chart, every time. The
+chart values that change GitOps and drift behaviour are documented alongside the behaviour, in
 [`docs/operations/gitops.md`](docs/operations/gitops.md#chart-values).
 
 ## Target NetBox version
@@ -116,29 +126,31 @@ audited on every run of the test suite and written to
 
 ## Supported kinds
 
-`NetBoxEndpoint` is the connection; `NetBoxTag` is the first NetBox object to land, and
-the one that proves the engine. `NetBoxRefGrant` is neither — it is the one kind that
-describes no NetBox object at all, and authorises references between namespaces. The
-delivery order for the rest is deliberate: **the
-logical model first** — tenancy, IPAM and virtualization — with physical plant (racks,
-power, modules, cabling), circuits and VPN deliberately last.
+**64 CRDs ship today**, and the catalogue is no longer delivered a milestone at a time:
+61 of them are NetBox objects driven by the same engine, and three are not NetBox objects at
+all — [`NetBoxEndpoint`](docs/reference/netboxendpoint.md) is the connection,
+[`NetBoxRefGrant`](docs/reference/netboxrefgrant.md) authorises references between
+namespaces, and [`NetBoxSweep`](docs/reference/netboxsweep.md) reports what this cluster has
+left behind in NetBox.
 
-| Group | Kinds | Status |
-|---|---|---|
-| Connection | [`NetBoxEndpoint`](docs/reference/netboxendpoint.md) | **Available** (M1) |
-| `extras` | [`NetBoxTag`](docs/reference/netboxtag.md) | **Available** (M1) |
-| `dcim` | [`NetBoxSite`](docs/reference/netboxsite.md) | **Available** (M1) |
-| Authorisation | [`NetBoxRefGrant`](docs/reference/netboxrefgrant.md) | **Available** (M2) |
-| `tenancy` | `NetBoxTenantGroup`, `NetBoxTenant` | M3 |
-| `tenancy` | [`NetBoxContactGroup`](docs/reference/netboxcontactgroup.md), [`NetBoxContactRole`](docs/reference/netboxcontactrole.md), [`NetBoxContact`](docs/reference/netboxcontact.md), [`NetBoxContactAssignment`](docs/reference/netboxcontactassignment.md) | **Available** (M10) |
-| `ipam` | `NetBoxVRF`, `NetBoxRouteTarget`, `NetBoxVLAN`, `NetBoxVLANGroup`, `NetBoxPrefix`, `NetBoxIPAddress` | M3 |
-| `virtualization` | `NetBoxClusterType`, `NetBoxClusterGroup`, `NetBoxCluster`, `NetBoxVirtualMachine`, `NetBoxVMInterface`, `NetBoxVirtualDisk` | M4 |
-| `dcim` | `NetBoxManufacturer`, `NetBoxDeviceRole`, `NetBoxDeviceType`, `NetBoxPlatform`, `NetBoxDevice`, `NetBoxInterface` | M4 |
-| `dcim`, physical plant | [`NetBoxRackRole`](docs/reference/netboxrackrole.md), [`NetBoxRackType`](docs/reference/netboxracktype.md), [`NetBoxRackGroup`](docs/reference/netboxrackgroup.md), [`NetBoxRack`](docs/reference/netboxrack.md), [`NetBoxRackReservation`](docs/reference/netboxrackreservation.md) | **Available** (M9–M10) |
-| Claims | [`NetBoxIPAddressClaim`](docs/reference/netboxipaddressclaim.md), [`NetBoxPrefixClaim`](docs/reference/netboxprefixclaim.md), [`NetBoxIPRangeClaim`](docs/reference/netboxiprangeclaim.md) | M6 |
-| `ipam`, with a claim kind that needs it | [`NetBoxIPRange`](docs/reference/netboxiprange.md) | M6, pulled forward from M10 |
-| `ipam` remainder | [`NetBoxRIR`](docs/reference/netboxrir.md), [`NetBoxAggregate`](docs/reference/netboxaggregate.md), [`NetBoxASN`](docs/reference/netboxasn.md), [`NetBoxASNRange`](docs/reference/netboxasnrange.md), [`NetBoxRole`](docs/reference/netboxrole.md), [`NetBoxFHRPGroup`](docs/reference/netboxfhrpgroup.md), [`NetBoxFHRPGroupAssignment`](docs/reference/netboxfhrpgroupassignment.md), [`NetBoxService`](docs/reference/netboxservice.md), [`NetBoxServiceTemplate`](docs/reference/netboxservicetemplate.md) | **Available** (M10) |
-| Physical plant, wireless, circuits, VPN | ~70 further kinds | M9–M10 |
+| Group | Kinds |
+|---|---|
+| Connection and authorisation | `NetBoxEndpoint`, `NetBoxRefGrant`, `NetBoxSweep` |
+| `dcim`, sites and locations | `NetBoxRegion`, `NetBoxSiteGroup`, `NetBoxSite`, `NetBoxLocation` |
+| `dcim`, physical plant | `NetBoxRackRole`, `NetBoxRackType`, `NetBoxRackGroup`, `NetBoxRack`, `NetBoxRackReservation`, `NetBoxCable`, `NetBoxCableBundle` |
+| `dcim`, devices | `NetBoxManufacturer`, `NetBoxDeviceRole`, `NetBoxDeviceType`, `NetBoxPlatform`, `NetBoxDevice`, `NetBoxInterface`, `NetBoxMACAddress` |
+| `tenancy` | `NetBoxTenantGroup`, `NetBoxTenant`, `NetBoxContactGroup`, `NetBoxContactRole`, `NetBoxContact`, `NetBoxContactAssignment` |
+| `ipam` | `NetBoxVRF`, `NetBoxRouteTarget`, `NetBoxVLANGroup`, `NetBoxVLAN`, `NetBoxPrefix`, `NetBoxIPRange`, `NetBoxIPAddress`, `NetBoxRIR`, `NetBoxAggregate`, `NetBoxASN`, `NetBoxASNRange`, `NetBoxRole`, `NetBoxFHRPGroup`, `NetBoxFHRPGroupAssignment`, `NetBoxService`, `NetBoxServiceTemplate` |
+| Claims | `NetBoxIPAddressClaim`, `NetBoxPrefixClaim`, `NetBoxIPRangeClaim` |
+| `virtualization` | `NetBoxClusterType`, `NetBoxClusterGroup`, `NetBoxCluster`, `NetBoxVirtualMachine`, `NetBoxVMInterface`, `NetBoxVirtualDisk` |
+| `wireless` | `NetBoxWirelessLANGroup`, `NetBoxWirelessLAN`, `NetBoxWirelessLink` |
+| `extras` | `NetBoxTag`, `NetBoxCustomField`, `NetBoxCustomFieldChoiceSet`, `NetBoxCustomLink`, `NetBoxSavedFilter`, `NetBoxExportTemplate`, `NetBoxConfigTemplate`, `NetBoxConfigContextProfile`, `NetBoxConfigContext` |
+
+Every one of them has a reference page — the index is
+[`docs/README.md`](docs/README.md#reference). What of NetBox's 138 REST endpoints that
+leaves implemented, deliberately excluded or still missing is audited on every run of the
+test suite and written to [`docs/coverage.md`](docs/coverage.md); circuits, power, modules
+and VPN are the largest remaining gaps.
 
 ## Migrating an existing NetBox
 
@@ -168,8 +180,9 @@ the address I want" — and deliberately uses a different API group
 
 ## Contributing
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md). Work is tracked as `NBO-nnn` issues;
-branches are `nbo-<nnn>-<slug>`, one feature per pull request.
+See [`CONTRIBUTING.md`](CONTRIBUTING.md). Work is tracked as
+[GitHub issues](https://github.com/ricardomolendijk/netbox-operator/issues), one feature per
+pull request.
 
 ## Trademarks and affiliation
 

@@ -7,7 +7,6 @@
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbtenant` |
 | Status subresource | yes |
-| Lands with | NBO-021 (M3) |
 
 A `NetBoxTenant` is one `tenancy.Tenant` in NetBox: the owner an IPAM or DCIM object is
 filed under. `tenant ForeignKey -> tenancy.Tenant on_delete=PROTECT` appears on `ipam.VRF`,

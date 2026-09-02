@@ -7,7 +7,6 @@
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbrackgroup` |
 | Status subresource | yes |
-| Lands with | NBO-051 (M9–M10) |
 
 A `NetBoxRackGroup` is one `dcim.RackGroup` in NetBox: a named grouping of racks — `Cage 1`,
 `DMZ`, `Overflow`.

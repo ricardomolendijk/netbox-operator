@@ -7,7 +7,6 @@
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbagg` |
 | Status subresource | yes |
-| Lands with | NBO-055 (M10) |
 
 A `NetBoxAggregate` is one `ipam.Aggregate` in NetBox: a top-level block of address space, as
 allocated to you by a registry, that the [prefixes](netboxprefix.md) underneath it are carved

@@ -7,7 +7,6 @@
 | Scope | Namespaced ([ADR-0002](../decisions/0002-crd-scoping.md)) |
 | Short names | `nbcontactrole` |
 | Status subresource | yes |
-| Lands with | NBO-056 (M10) |
 
 A `NetBoxContactRole` is one `tenancy.ContactRole` in NetBox: the capacity a contact is
 attached to something in — `Technical`, `Billing`, `Escalation`, `Site Access`.
