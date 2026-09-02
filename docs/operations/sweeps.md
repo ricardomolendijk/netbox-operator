@@ -378,10 +378,10 @@ sum by (result) (rate(netbox_operator_sweep_runs_total{result!="Complete"}[1h]))
 
 ### Events
 
-| Reason | Type | When |
-|---|---|---|
-| `OrphansFound` | Normal | A completed run confirmed at least one orphan. Normal, not Warning: an orphan is a fact about NetBox, not a malfunction of the operator. |
-| `SweepRefused` | Warning | A run did not happen, and the findings in `status` are now older than they look. Emitted on the transition only, so a NetBox that is down does not fill the namespace. |
+| Reason | Type | Action | When |
+|---|---|---|---|
+| `OrphansFound` | Normal | `Sweep` | A completed run confirmed at least one orphan. Normal, not Warning: an orphan is a fact about NetBox, not a malfunction of the operator. |
+| `SweepRefused` | Warning | `Sweep` | A run did not happen, and the findings in `status` are now older than they look. Emitted on the transition only, so a NetBox that is down does not fill the namespace. |
 
 Events are the notification; `status` is the record. Never read a missing Event as a missing
 orphan — the recorder aggregates, and Events age out.

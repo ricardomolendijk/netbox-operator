@@ -551,23 +551,61 @@ Events are what a user sees in `kubectl describe` without knowing conditions exi
 mark **transitions**. They are not a log: an Event per resync fills the namespace with the
 same line and buries whatever actually happened.
 
+They are written to `events.k8s.io/v1`, which is what the tables below mean by an **action**
+next to the reason.
+
+### Reason, action, and note
+
+Three fields, and they answer different questions.
+
+- **Reason** is *how it turned out*: `Created`, `AuthError`, `PoolExhausted`. It is the same
+  vocabulary as the condition reasons, deliberately, so the two cannot drift apart.
+- **Action** is *what the operator was doing*: `Create`, `Probe`, `Allocate`. It is the same
+  vocabulary as the `action` key on the log line beside the Event, so a reader has one set
+  of verbs rather than two. Success and failure of one operation share an action — `Probe`
+  covers both `Ready` and `AuthError`, and `Delete` covers every way a deletion can end.
+- **Note** is the human-readable sentence, and the only one of the three that is not a
+  contract. It is capped at 1024 characters by the API server; a longer one is cut and
+  marked `[truncated]`, and the full detail is in the object's conditions.
+
+`kubectl describe` shows the reason and the note. The action needs a wider read:
+
+```console
+$ kubectl get events.events.k8s.io -n homelab \
+    -o custom-columns='REASON:.reason,ACTION:.action,OBJECT:.regarding.name'
+REASON              ACTION        OBJECT
+Ready               Probe         homelab
+Created             Create        rack-a1
+ChildMaterialised   Materialise   vm-web
+```
+
+**Events for the same reason, action and object are aggregated into a series** for about
+six minutes, and the note is *not* part of what makes two Events the same. Two writes to one
+object inside that window therefore show as one Event with a count and the **first** note.
+Where the distinction matters the Event names a second object: a materialised or pruned
+child goes in the Event's `related` field, so one parent materialising six children produces
+six Events rather than one saying `(x6)`. For everything else the standing detail is in
+`status.conditions`, which is why the Event never had to carry it.
+
 ### On a `NetBoxEndpoint`
 
 Emitted only when the `Ready` condition's status or reason changes, so a NetBox that has
 been unreachable for a week produces one Event, not one every thirty seconds. The Event
 reason is the condition reason, so the two vocabularies cannot drift apart.
 
-| Reason | Type | Fires when |
-|---|---|---|
-| `Ready` | Normal | The endpoint becomes usable: token accepted, version in range, client cached. |
-| `AuthError` | Warning | NetBox returned 401 or 403 for the status probe. |
-| `TokenMissing` | Warning | The Secret exists but has no value under the referenced key. |
-| `SecretMissing` | Warning | The token or CA-bundle Secret is not readable — often because it is not labelled `netbox.kubeforge.org/endpoint-credential=true`. |
-| `CABundleMissing` | Warning | `spec.tlsConfig.caBundleSecretRef` points at a Secret that is not there. |
-| `ProbeFailed` | Warning | NetBox was unreachable, timed out, or answered something unusable. |
-| `VersionUnsupported` | Warning | NetBox is outside `>=4.2, <5.0`. |
-| `VersionUnparseable` | Warning | `/api/status/` returned something that is not a version. |
-| `InvalidConfig` | Warning | The spec cannot produce a client: bad URL, unusable CA bundle. |
+| Reason | Type | Action | Fires when |
+|---|---|---|---|
+| `Ready` | Normal | `Probe` | The endpoint becomes usable: token accepted, version in range, client cached. |
+| `AuthError` | Warning | `Probe` | NetBox returned 401 or 403 for the status probe. |
+| `TokenMissing` | Warning | `Probe` | The Secret exists but has no value under the referenced key. |
+| `SecretMissing` | Warning | `Probe` | The token or CA-bundle Secret is not readable — often because it is not labelled `netbox.kubeforge.org/endpoint-credential=true`. |
+| `CABundleMissing` | Warning | `Probe` | `spec.tlsConfig.caBundleSecretRef` points at a Secret that is not there. |
+| `ProbeFailed` | Warning | `Probe` | NetBox was unreachable, timed out, or answered something unusable. |
+| `VersionUnsupported` | Warning | `Probe` | NetBox is outside `>=4.2, <5.0`. |
+| `VersionUnparseable` | Warning | `Probe` | `/api/status/` returned something that is not a version. |
+| `InvalidConfig` | Warning | `Probe` | The spec cannot produce a client: bad URL, unusable CA bundle. |
+| `Provisioned` | Normal | `Bootstrap` | The provenance tag and custom fields were created or widened in NetBox. |
+| `BootstrapFailed`, `BootstrapDisabled` | Warning | `Bootstrap` | The bootstrap could not finish, so no object controller is handed this endpoint. |
 
 An Event or a condition never quotes an upstream response body. It reports the status code,
 the media type, the length, and NetBox's own `detail` string when the body carries one — the
@@ -589,17 +627,20 @@ Events:
 
 Emitted by the engine when it writes, or when it refuses to.
 
-| Reason | Type | Fires when |
-|---|---|---|
-| `Created` | Normal | A new NetBox object was POSTed. |
-| `Adopted` | Normal | An existing NetBox object matched the natural key and `spec.onConflict` permitted taking it over. Names the id and the key that matched. |
-| `Updated` | Normal | Fields were PATCHed. The message is the aligned `field: old → new` diff. |
-| `Recreated` | Normal | The object was deleted and POSTed again because its identity is not PATCHable. |
-| `Conflict` | Warning | NetBox holds an object this CR cannot safely claim: more than one natural-key match, an unadoptable match, or a protected relation. |
-| `Invalid` | Warning | NetBox rejected the payload, or the spec cannot be rendered into one. |
-| `DriftDetected` | Normal | Drift was found on a `driftMode: Report` endpoint and deliberately left alone. The message is the same `field: old → new` diff, prefixed `report only: would have written …`. |
-| `Conflict` | Warning | *(also)* The live NetBox object carries another cluster's or another CR's provenance stamp. Names the claimant and the manifest to edit. Fires once per claimant; the write goes ahead regardless ([multi-writer](multi-writer.md)). |
-| `ConflictSustained` | Warning | The same claimant has been on the object for five consecutive reconciles — a two-writer fight rather than a flap. Fires exactly once, at the threshold. |
+| Reason | Type | Action | Fires when |
+|---|---|---|---|
+| `Created` | Normal | `Create` | A new NetBox object was POSTed. |
+| `Adopted` | Normal | `Adopt` | An existing NetBox object matched the natural key and `spec.onConflict` permitted taking it over. Names the id and the key that matched. |
+| `Updated` | Normal | `Update` | Fields were PATCHed. The message is the aligned `field: old → new` diff. |
+| `Recreated` | Normal | `Recreate` | The object was deleted and POSTed again because its identity is not PATCHable. |
+| `Conflict` | Warning | `Claim` | NetBox holds an object this CR cannot safely claim: more than one natural-key match, an unadoptable match, or a protected relation. |
+| `Invalid` | Warning | `Write` | NetBox rejected the payload, or the spec cannot be rendered into one. |
+| `DriftDetected` | Normal | `ReportDrift` | Drift was found on a `driftMode: Report` endpoint and deliberately left alone. The message is the same `field: old → new` diff, prefixed `report only: would have written …`. |
+| `Conflict` | Warning | `Claim` | *(also)* The live NetBox object carries another cluster's or another CR's provenance stamp. Names the claimant and the manifest to edit. Fires once per claimant; the write goes ahead regardless ([multi-writer](multi-writer.md)). |
+| `ConflictSustained` | Warning | `Claim` | The same claimant has been on the object for five consecutive reconciles — a two-writer fight rather than a flap. Fires exactly once, at the threshold. |
+| `Deleted`, `Retained`, `NothingToDelete`, `DeleteBlocked`, `FinalizerSkipped` | Normal, `DeleteBlocked` Warning | `Delete` | The CR is going away. Every outcome gets an Event, because once the finalizer is off there is no status left to read ([deletion](../concepts/deletion.md)). |
+| `ChildMaterialised`, `ChildPruned` | Normal | `Materialise`, `Prune` | An inline entry became a child CR, or a child CR went away because its entry did. The Event names the child in `related` ([inline children](../concepts/inline-children.md)). |
+| `ChildFieldReverted` | Warning | `Materialise` | A field on a materialised child that somebody else had taken ownership of, taken back. |
 
 On a `DryRun` endpoint the write's own reason is kept with a `dry run: would have written …`
 message, because the endpoint is rehearsing that write. `driftMode: Report` replaces it with
@@ -622,12 +663,30 @@ There is deliberately **no** Event for a transient failure. A 500 or a timeout r
 its own, and an Event for each one is noise at cluster scale — those show up in
 `api_requests_total` and in the `Ready=False/APIError` condition.
 
+### On a claim
+
+Every one of these is the `Allocate` action: they are the outcomes of one operation, which
+is the allocation engine trying to give a claim an address, prefix or range out of a pool
+([claims](../concepts/claims.md)). A claim's deletion Events are the object CR's, above.
+
+| Reason | Type | Fires when |
+|---|---|---|
+| `Allocated` | Normal | A new address, prefix or range was taken out of the pool. |
+| `AllocationReclaimed` | Normal | The claim's previous allocation was still there and still its own, so nothing was written. |
+| `PoolExhausted` | Warning | The pool has nothing left of the requested size. |
+| `PoolNotAllocatable` | Warning | The pool CR is not in a state anything can be allocated from. |
+| `PoolUnexpectedStatus` | Warning | The pool is in service and is being subdivided anyway. |
+| `AllocationConflict` | Warning | Two claims are asking for the same thing. |
+| `AllocationContended` | Warning | NetBox refused the allocating write because somebody else got there first. |
+| `ForeignAllocation` | Warning | The address this claim holds carries another claim's identity. |
+| `ReclaimedOutsidePool` | Warning | The claim's stored allocation is no longer inside the pool it was taken from. |
+
 ### On a `NetBoxSweep`
 
-| Reason | Type | When |
-|---|---|---|
-| `OrphansFound` | Normal | A completed run confirmed at least one orphan. Normal rather than Warning: an orphan is a fact about NetBox, not a malfunction of the operator, and it is reported so somebody can decide what to do about it |
-| `SweepRefused` | Warning | A run did not happen, so the findings in `status` are older than they look. The message names the refusal reason and when the findings were last true. Emitted on the transition only, so a NetBox that is down does not fill the namespace |
+| Reason | Type | Action | When |
+|---|---|---|---|
+| `OrphansFound` | Normal | `Sweep` | A completed run confirmed at least one orphan. Normal rather than Warning: an orphan is a fact about NetBox, not a malfunction of the operator, and it is reported so somebody can decide what to do about it |
+| `SweepRefused` | Warning | `Sweep` | A run did not happen, so the findings in `status` are older than they look. The message names the refusal reason and when the findings were last true. Emitted on the transition only, so a NetBox that is down does not fill the namespace |
 
 Neither is a substitute for `status`. Events age out — an hour by default — and a
 [sweep's](sweeps.md) whole value is that "what has this cluster left behind in NetBox" is
