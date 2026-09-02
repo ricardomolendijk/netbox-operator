@@ -643,7 +643,7 @@ func TestMaterialiseReadyGating(t *testing.T) {
 // what a real apply's response does.
 type readyChildren struct{ *fakeChildren }
 
-func (r *readyChildren) Apply(ctx context.Context, obj client.Object, opts ...client.PatchOption) error {
+func (r *readyChildren) Apply(ctx context.Context, obj client.Object, opts ...client.ApplyOption) error {
 	if err := r.fakeChildren.Apply(ctx, obj, opts...); err != nil {
 		return err
 	}

@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
@@ -68,6 +69,46 @@ func (g specGuard) Patch(ctx context.Context, obj client.Object, patch client.Pa
 
 	if err := g.Client.Patch(ctx, obj, patch, opts...); err != nil {
 		return fmt.Errorf("patching %s/%s: %w", obj.GetNamespace(), obj.GetName(), err)
+	}
+
+	return nil
+}
+
+// Apply refuses a server-side apply of a guarded object.
+//
+// Unconditionally, where Patch has metadataOnly to let the finalizer through: an apply
+// configuration carries the whole object, so there is no metadata-only apply to allow. The
+// one the operator makes is the materialiser's, and it passes the check rather than skips
+// it -- a child carries the controller owner reference that says the operator created it,
+// and a hand-written CR does not (objectcontroller.go, childWriter).
+//
+// Client.Apply takes a runtime.ApplyConfiguration, which is not necessarily an object and
+// so cannot always be inspected. The one this operator sends is an unstructured object and
+// is; anything else is refused rather than guessed at, which is the rule metadataOnly
+// already follows for a patch body of an unfamiliar shape.
+func (g specGuard) Apply(ctx context.Context, obj runtime.ApplyConfiguration, opts ...client.ApplyOption) error {
+	target, ok := obj.(client.Object)
+	if !ok {
+		return fmt.Errorf("%w: an apply of %T, whose contents this guard cannot read",
+			ErrSpecWriteForbidden, obj)
+	}
+
+	// The kind comes from the body here, where Update and Patch get it from the Go type, so
+	// a body without one would leave check() with nothing to look up and let the write
+	// through. Refused instead: every apply the operator makes carries its apiVersion and
+	// kind (reconciler/children.go sets them, precisely because an apply needs them), and
+	// one that does not is refused by the API server anyway.
+	if target.GetObjectKind().GroupVersionKind().Empty() {
+		return fmt.Errorf("%w: an apply of %s/%s carrying no apiVersion or kind",
+			ErrSpecWriteForbidden, target.GetNamespace(), target.GetName())
+	}
+
+	if err := g.check(target, "apply"); err != nil {
+		return err
+	}
+
+	if err := g.Client.Apply(ctx, obj, opts...); err != nil {
+		return fmt.Errorf("applying %s/%s: %w", target.GetNamespace(), target.GetName(), err)
 	}
 
 	return nil

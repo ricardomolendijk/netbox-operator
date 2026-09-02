@@ -262,14 +262,14 @@ func (f *fakeChildren) Get(_ context.Context, key client.ObjectKey, obj client.O
 	return nil
 }
 
-func (f *fakeChildren) Apply(_ context.Context, obj client.Object, opts ...client.PatchOption) error {
+func (f *fakeChildren) Apply(_ context.Context, obj client.Object, opts ...client.ApplyOption) error {
 	gvk := obj.GetObjectKind().GroupVersionKind()
 	if gvk.Empty() {
 		return errors.New("fakeChildren.Apply was handed an object with no apiVersion or kind, " +
 			"which a real apply patch is refused for")
 	}
 
-	forced := slices.ContainsFunc(opts, func(o client.PatchOption) bool {
+	forced := slices.ContainsFunc(opts, func(o client.ApplyOption) bool {
 		return o == client.ForceOwnership
 	})
 
