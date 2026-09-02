@@ -771,31 +771,91 @@ func (p *claimPass) reclaim(ctx context.Context, live netbox.Object) (ctrl.Resul
 // from the same manifest. Both re-derive the same identity and both carry the same owner
 // stamp, so neither reaches a verdict here.
 //
-// provenance.Stamp.Conflict is the judge rather than a comparison written here, because it
-// already encodes which differences mean somebody else owns this: a foreign cluster stamp, or
-// a foreign owner. It deliberately does *not* count a foreign uid whose owner still matches --
-// that is the re-applied manifest, and treating it as a conflict is how this check would have
-// been switched off in a week. Note also what stays permitted: an object with no owner stamp
-// at all is unattributable rather than foreign, so a given identity may still be pointed at a
-// pre-existing NetBox object, which is the migration case the field was added for.
+// provenance.Stamp.Conflict is the judge of a stamp that *is* readable, rather than a
+// comparison written here, because it already encodes which differences mean somebody else owns
+// this: a foreign cluster stamp, or a foreign owner. It deliberately does *not* count a foreign
+// uid whose owner still matches -- that is the re-applied manifest, and treating it as a
+// conflict is how this check would have been switched off in a week.
+//
+// # Why an unreadable stamp is refused rather than allowed (issue #299)
+//
+// Conflict answers "no conflict" for an object it cannot read a stamp off, and that answer is
+// only safe when "unstamped" is a fact about the object. It is not: Claim.Stamped() reads the
+// live object by the field names of the endpoint *doing the reading*, and for a claim in
+// another namespace that endpoint is one that namespace wrote. An endpoint whose spec.managedBy
+// renames uidField, clusterField and ownerField -- while keeping allocationIdentityField, which
+// has to match or findByIdentity would never locate the object -- sees every object its
+// neighbour stamped as unstamped, and #271's guard evaporates. There is no ownership signal
+// here that the referring endpoint cannot reconfigure, so this fails closed instead: an object
+// carrying somebody's allocation identity that this endpoint cannot attribute to this CR is
+// suspicious, not free.
+//
+// The cost is the migration case, and it is charged deliberately. A given identity pointed at a
+// genuinely unstamped pre-existing NetBox object is now refused too, because from in here it is
+// the same read: three empty custom fields. The refusal writes nothing, deletes nothing and
+// names the one step that clears it -- stamp the object for this claim in NetBox -- so the
+// migration is one manual field away rather than impossible. Do not "simplify" this back to
+// returning nil on an unstamped object: that is the whole of the bypass.
+//
+// Only the given case pays any of this. A derived identity returns above and is untouched,
+// which is every reclaim after a cluster rebuild, a re-applied manifest, or a lost status write.
 func (p *claimPass) refuseForeignReclaim(live netbox.Object, id int, value string) error {
 	if !p.identityExplicit {
 		return nil
 	}
 
-	conflict, found := p.endpoint.Provenance.Conflict(live, p.owner())
-	if !found {
+	if conflict, found := p.endpoint.Provenance.Conflict(live, p.owner()); found {
+		return refuse(netboxv1alpha1.ReasonForeignAllocation,
+			netboxv1alpha1.EventForeignAllocation,
+			"netbox %s/%d (%s) carries the allocation identity %s this claim's"+
+				" spec.allocationIdentity names, but it is stamped as belonging to %s, so nothing was"+
+				" allocated and nothing was changed. An identity that names somebody else's object is"+
+				" a claim pointed at somebody else's allocation: unset spec.allocationIdentity to let"+
+				" this claim derive its own, or have the owner release that object first. If that"+
+				" stamp names a cr of your own that no longer exists -- this claim under an earlier"+
+				" name -- hand the object over deliberately instead: %s",
+			p.desc.Endpoint, id, value, p.identity, conflict.Writer(), p.stampRemedy())
+	}
+
+	if p.endpoint.Provenance.Read(live).Stamped() {
 		return nil
 	}
 
 	return refuse(netboxv1alpha1.ReasonForeignAllocation,
 		netboxv1alpha1.EventForeignAllocation,
 		"netbox %s/%d (%s) carries the allocation identity %s this claim's"+
-			" spec.allocationIdentity names, but it is stamped as belonging to %s, so nothing was"+
-			" allocated and nothing was changed. An identity that names somebody else's object is"+
-			" a claim pointed at somebody else's allocation: unset spec.allocationIdentity to let"+
-			" this claim derive its own, or have the owner release that object first",
-		p.desc.Endpoint, id, value, p.identity, conflict.Writer())
+			" spec.allocationIdentity names, but it carries no provenance this endpoint can read,"+
+			" so nothing was allocated and nothing was changed. An object this endpoint cannot"+
+			" attribute is not proof of anything -- it is equally an object another namespace's"+
+			" endpoint stamped under custom field names of its own choosing -- and the identity is"+
+			" the only thing a reclaim matches on. To hand this object to this claim, %s; to let"+
+			" this claim allocate a new object instead, unset spec.allocationIdentity",
+		p.desc.Endpoint, id, value, p.identity, p.stampRemedy())
+}
+
+// stampRemedy is the manual step that makes an unattributable object attributable to this
+// claim: the custom field to set in NetBox, and what to set it to.
+//
+// Rendered from the endpoint's own configuration rather than from the default names, because
+// the endpoint that refuses is the endpoint that will read it back, and naming k8s_owner to
+// somebody who renamed it sends them to a field the guard does not look at. The fields are
+// switchable one by one, so the first one that is switched on is the one named -- and an
+// endpoint with all three off can attribute nothing at all, which is a spec.managedBy to fix
+// rather than a NetBox object.
+func (p *claimPass) stampRemedy() string {
+	stamp := p.endpoint.Provenance
+
+	switch {
+	case stamp.OwnerField != "":
+		return fmt.Sprintf("set its custom field %s to %q in netbox", stamp.OwnerField, p.owner().Ref())
+	case stamp.ClusterField != "":
+		return fmt.Sprintf("set its custom field %s to %q in netbox", stamp.ClusterField, stamp.ClusterID)
+	case stamp.UIDField != "":
+		return fmt.Sprintf("set its custom field %s to %q in netbox", stamp.UIDField, p.claim.GetUID())
+	default:
+		return "give this endpoint's spec.managedBy an ownerField -- with uidField, clusterField" +
+			" and ownerField all switched off it cannot attribute any object to any cr"
+	}
 }
 
 // handover names the UID the reclaimed object was stamped with when it is not this claim's.

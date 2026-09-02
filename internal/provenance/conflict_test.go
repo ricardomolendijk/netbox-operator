@@ -33,6 +33,34 @@ func stamped(uid, cluster, owner string) netbox.Object {
 	return netbox.Object{"id": float64(9), "custom_fields": fields}
 }
 
+// renamed is a second endpoint against the same NetBox with every stamp field under a name of
+// its own: the shape issue #299 is about.
+func renamed() Stamp {
+	cfg := FromSpec(&netboxv1alpha1.ManagedBy{
+		ClusterID:    "prod-eu",
+		UIDField:     "ot_uid",
+		ClusterField: "ot_cluster",
+		OwnerField:   "ot_owner",
+	})
+
+	return Stamp{Config: cfg, TagID: 7, Fields: cfg.CustomFieldNames()}
+}
+
+// stampedUnder renders a live object stamped by whichever endpoint wrote it, rather than by
+// the default names, so a test can put two endpoints' stamps on one NetBox.
+func stampedUnder(s Stamp, uid, cluster, owner string) netbox.Object {
+	fields := map[string]any{}
+	for name, value := range map[string]string{
+		s.UIDField: uid, s.ClusterField: cluster, s.OwnerField: owner,
+	} {
+		if name != "" && value != "" {
+			fields[name] = value
+		}
+	}
+
+	return netbox.Object{"id": float64(9), "custom_fields": fields}
+}
+
 // TestConflict is the classification table: every combination of stamp values that can reach
 // a write, and what each one is.
 //
@@ -163,6 +191,36 @@ func TestConflict(t *testing.T) {
 			name:  "whitespace around a value is not a different writer",
 			stamp: ours(),
 			live:  stamped(" 6f1a-uid ", "  prod-eu\n", "netboxfake/team-a/managed "),
+		},
+		{
+			// Issue #299's three rows. Renaming the stamp fields is a supported configuration
+			// (docs/operations/provenance.md), so the verdicts under renamed names have to be
+			// the same verdicts -- an honest conflict still conflicts, and our own object
+			// still does not.
+			name:       "a foreign owner under renamed stamp fields is still a conflict",
+			stamp:      renamed(),
+			live:       stampedUnder(renamed(), "other-uid", "prod-eu", "netboxfake/team-b/managed"),
+			wantReason: netboxv1alpha1.ReasonForeignOwner,
+			wantWriter: "netboxfake/team-b/managed in cluster prod-eu",
+		},
+		{
+			name:  "our own object under renamed stamp fields is still not a conflict",
+			stamp: renamed(),
+			live:  stampedUnder(renamed(), "6f1a-uid", "prod-eu", "netboxfake/team-a/managed"),
+		},
+		{
+			// The limitation this function has and keeps: a stamp is read by the reading
+			// endpoint's names, so an object another endpoint stamped under names of its own
+			// is not readable here and is therefore not a conflict. Nothing can be judged
+			// from a value that was never read, and guessing at names would report a conflict
+			// against an endpoint that merely renamed a field.
+			//
+			// It is also why the claim engine's reclaim guard does not treat "no conflict" as
+			// permission: an unreadable stamp is refused there rather than adopted
+			// (internal/reconciler/claim.go, refuseForeignReclaim).
+			name:  "a stamp written under another endpoint's names is unreadable, not a conflict",
+			stamp: renamed(),
+			live:  stamped("other-uid", "prod-us", "netboxfake/team-b/managed"),
 		},
 	}
 

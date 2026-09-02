@@ -33,6 +33,10 @@ const (
 	poolEndpoint  = "ipam/prefixes"
 	claimEndpoint = "ipam/ip-addresses"
 	testURL       = "https://netbox.example"
+
+	// testClusterID is the fixture endpoint's spec.managedBy.clusterID, and the cluster every
+	// stamp in this file is written by.
+	testClusterID = "prod-eu"
 )
 
 // TestAllocationIdentityIsPinned is the golden test the whole reclaim story rests on.
@@ -1166,11 +1170,16 @@ func hasEvent(recorder *fakeRecorder, want string) bool {
 	return false
 }
 
-// stampedAs stamps a live object as belonging to another CR, the way an allocating POST from
-// that CR would have.
-func stampedAs(obj netbox.Object, owner, clusterID string) netbox.Object {
+// stampedAs stamps a live object as belonging to the named CR in this fixture's cluster, the
+// way an allocating POST from that CR would have.
+//
+// The cluster is the fixture's own rather than a parameter: every caller stamps
+// testClusterID, because a *different* cluster is already the ForeignCluster arm that
+// internal/provenance's table owns. What the claim engine has to be shown is the arm the
+// stamp cannot settle on its own -- one cluster, two CRs.
+func stampedAs(obj netbox.Object, owner string) netbox.Object {
 	netbox.SetCustomField(obj, provenance.DefaultOwnerField, owner)
-	netbox.SetCustomField(obj, provenance.DefaultClusterField, clusterID)
+	netbox.SetCustomField(obj, provenance.DefaultClusterField, testClusterID)
 
 	return obj
 }
@@ -1198,7 +1207,7 @@ func TestClaimRefusesAGivenIdentityOwnedByAnotherCR(t *testing.T) {
 
 	nb.list = []netbox.Object{stampedAs(
 		allocatedObject(412, "10.0.20.37/24", victim, "uid-1"),
-		"netboxipaddressclaim/homelab/dns-eth0", "prod-eu")}
+		"netboxipaddressclaim/homelab/dns-eth0")}
 
 	if _, err := engine.Reconcile(context.Background(), claim); err != nil {
 		t.Fatalf("a refusal must not be returned as an error: %v", err)
@@ -1217,13 +1226,20 @@ func TestClaimRefusesAGivenIdentityOwnedByAnotherCR(t *testing.T) {
 	}
 }
 
-// TestClaimReclaimsAGivenIdentityOnAnUnstampedObject is the case the override was added for,
-// and it has to keep working.
+// TestClaimRefusesAGivenIdentityOnAnUnstampedObject pins the fail-closed half of the guard,
+// and the behaviour change issue #299 charges for it.
 //
-// An object with no owner stamp is unattributable rather than foreign -- every NetBox object
-// that predates the operator is in that set -- so pointing spec.allocationIdentity at one is
-// an adoption, not a takeover.
-func TestClaimReclaimsAGivenIdentityOnAnUnstampedObject(t *testing.T) {
+// #271 let this through: an object with no readable stamp was unattributable rather than
+// foreign, so a given identity could adopt a pre-existing NetBox object. That reading is only
+// sound if "unstamped" is a fact about the object, and it is not -- it is a fact about the
+// field names the *reading* endpoint chose, which for a claim in another namespace is that
+// namespace's own configuration. So the same read now refuses.
+//
+// What it costs is exactly this test's old subject: a migration onto a NetBox object nobody
+// stamped. It is refused rather than lost -- no POST, no PATCH, no DELETE -- and the message
+// names the custom field to set to hand the object over, which is the same proof of ownership
+// the guard would have wanted in the first place.
+func TestClaimRefusesAGivenIdentityOnAnUnstampedObject(t *testing.T) {
 	claim, engine, nb := newClaimFixture(t)
 
 	claim.Spec.AllocationIdentity = "carriedoveridentity"
@@ -1237,11 +1253,45 @@ func TestClaimReclaimsAGivenIdentityOnAnUnstampedObject(t *testing.T) {
 	nb.list = []netbox.Object{obj}
 
 	if _, err := engine.Reconcile(context.Background(), claim); err != nil {
+		t.Fatalf("a refusal must not be returned as an error: %v", err)
+	}
+
+	assertRefused(t, claim, nb, netboxv1alpha1.ReasonForeignAllocation)
+
+	if nb.deletes != 0 {
+		t.Errorf("%d DELETEs, want 0: a refusal touches nothing", nb.deletes)
+	}
+
+	// The remedy has to be in the message, or a migration that this refusal blocks has nowhere
+	// to go: the field to set, and the value that makes the object this claim's.
+	got := readyOfClaim(claim).Message
+	if !strings.Contains(got, provenance.DefaultOwnerField) ||
+		!strings.Contains(got, "netboxipaddressclaim/homelab/dns-eth0") {
+		t.Errorf("Ready message %q does not say which custom field to set to what", got)
+	}
+}
+
+// TestClaimReclaimsAGivenIdentityOnAnObjectStampedAsItsOwn is the given identity's remaining
+// happy path, and the one the refusal above hands people to.
+//
+// The identity is derived from the endpoint's URL among other things, so moving NetBox behind
+// a new hostname re-rolls every claim's identity; spec.allocationIdentity carries the old value
+// across, and the owner stamp on the object still names this very claim. Attributable, ours,
+// reclaimed -- no POST.
+func TestClaimReclaimsAGivenIdentityOnAnObjectStampedAsItsOwn(t *testing.T) {
+	claim, engine, nb := newClaimFixture(t)
+
+	claim.Spec.AllocationIdentity = "carriedoveridentity"
+
+	obj := allocatedObject(412, "10.0.20.99/24", "carriedoveridentity", "uid-1")
+	nb.list = []netbox.Object{stampedAs(obj, "netboxipaddressclaim/homelab/dns-eth0")}
+
+	if _, err := engine.Reconcile(context.Background(), claim); err != nil {
 		t.Fatal(err)
 	}
 
 	if nb.posts != 0 {
-		t.Errorf("%d POSTs, want 0: an unstamped object carrying the identity is reclaimed", nb.posts)
+		t.Errorf("%d POSTs, want 0: an object stamped as this claim's own is reclaimed", nb.posts)
 	}
 	if claim.Status.Address != "10.0.20.99/24" {
 		t.Errorf("status.address = %q, want the reclaimed 10.0.20.99/24", claim.Status.Address)
@@ -1261,7 +1311,7 @@ func TestClaimReclaimsADerivedIdentityWhateverTheStampSays(t *testing.T) {
 
 	nb.list = []netbox.Object{stampedAs(
 		allocatedObject(412, "10.0.20.99/24", identity, "uid-0"),
-		"netboxipaddressclaim/homelab/renamed-away", "prod-eu")}
+		"netboxipaddressclaim/homelab/renamed-away")}
 
 	if _, err := engine.Reconcile(context.Background(), claim); err != nil {
 		t.Fatal(err)
@@ -1273,5 +1323,141 @@ func TestClaimReclaimsADerivedIdentityWhateverTheStampSays(t *testing.T) {
 	}
 	if claim.Status.Address != "10.0.20.99/24" {
 		t.Errorf("status.address = %q, want the reclaimed 10.0.20.99/24", claim.Status.Address)
+	}
+}
+
+// TestClaimRefusesAnAllocationItCannotReadTheStampOf is issue #299: the guard above, aimed
+// around rather than through.
+//
+// refuseForeignReclaim asks provenance.Stamp.Conflict for the verdict, and Conflict reads the
+// live object by the field names the *reading* endpoint is configured with. Those names come
+// off spec.managedBy of the endpoint the claim refers to -- which, for a claim in another
+// namespace, is an endpoint that namespace wrote. Renaming uidField, clusterField and
+// ownerField therefore makes every object the endpoint next door stamped read back as
+// unstamped, and an unstamped object used to be reclaimable: the guard was switched off by the
+// party it guards against.
+//
+// allocationIdentityField is the one name that may not be renamed, because findByIdentity has
+// to keep matching the victim's identity -- and it is the only one that has to agree.
+//
+// Two endpoints against one NetBox stub, differing in nothing else.
+func TestClaimRefusesAnAllocationItCannotReadTheStampOf(t *testing.T) {
+	claim, engine, nb := newClaimFixture(t)
+
+	// homelab's endpoint, on the defaults, and the address it allocated. Stamped by the
+	// provenance code itself rather than by hand, so the fixture cannot drift from what this
+	// operator actually writes.
+	victim := provenance.FromSpec(&netboxv1alpha1.ManagedBy{ClusterID: testClusterID})
+	victimStamp := provenance.Stamp{Config: victim, TagID: 7, Fields: victim.CustomFieldNames()}
+	identity := AllocationIdentity(testURL, "homelab", "NetBoxIPAddressClaim", "dns-eth0")
+
+	live := netbox.Object{
+		"id":      float64(412),
+		"address": "10.0.20.37/24",
+		"url":     fmt.Sprintf("%s/api/ipam/ip-addresses/412/", testURL),
+	}
+	netbox.SetCustomField(live, provenance.DefaultAllocationIdentityField, identity)
+	victimStamp.Apply(live, nil, provenance.Owner{
+		Kind: "NetBoxIPAddressClaim", Namespace: "homelab", Name: "dns-eth0", UID: "uid-1",
+	}, provenance.Target{Taggable: true, CustomFields: true})
+	nb.list = []netbox.Object{live}
+
+	// other-team's endpoint against that same NetBox: the same allocationIdentityField, and
+	// provenance field names of its own choosing.
+	attacker := provenance.FromSpec(&netboxv1alpha1.ManagedBy{
+		ClusterID:    "other-team",
+		UIDField:     "ot_uid",
+		ClusterField: "ot_cluster",
+		OwnerField:   "ot_owner",
+	})
+	engine.Endpoints = fakeEndpoints{ready: true, endpoint: Endpoint{
+		Client:     nb,
+		Allocator:  nb,
+		Provenance: provenance.Stamp{Config: attacker, TagID: 8, Fields: attacker.CustomFieldNames()},
+	}}
+
+	claim.Namespace, claim.Name, claim.UID = "other-team", "borrowed", "uid-9"
+	claim.Spec.AllocationIdentity = identity
+
+	if _, err := engine.Reconcile(context.Background(), claim); err != nil {
+		t.Fatalf("a refusal must not be returned as an error: %v", err)
+	}
+
+	assertRefused(t, claim, nb, netboxv1alpha1.ReasonForeignAllocation)
+
+	if nb.deletes != 0 {
+		t.Errorf("%d DELETEs, want 0: a refused claim must not touch the object it was refused", nb.deletes)
+	}
+}
+
+// TestClaimRefusalNamesTheSpecWhenTheEndpointAttributesNothing is the other end of the same
+// change, and the second thing it costs.
+//
+// An endpoint may have all three stamp fields switched off and still allocate: the identity
+// field is the only one a claim needs (docs/operations/provenance.md, "Stamp less"). Such an
+// endpoint can attribute no object to any CR, so under the fail-closed guard no given identity
+// reclaims anything through it -- and the refusal has to say that the fix is in spec.managedBy
+// rather than send somebody looking for a custom field that does not exist.
+func TestClaimRefusalNamesTheSpecWhenTheEndpointAttributesNothing(t *testing.T) {
+	claim, engine, nb := newClaimFixture(t)
+
+	// Built as a Config rather than from a spec, because FromSpec defaults an empty name back
+	// to the canonical one: this is the resolved state, not a manifest.
+	stampless := provenance.Config{
+		ClusterID:               testClusterID,
+		Tag:                     provenance.DefaultTag,
+		AllocationIdentityField: provenance.DefaultAllocationIdentityField,
+		Bootstrap:               true,
+	}
+	engine.Endpoints = fakeEndpoints{ready: true, endpoint: Endpoint{
+		Client:     nb,
+		Allocator:  nb,
+		Provenance: provenance.Stamp{Config: stampless, TagID: 7, Fields: stampless.CustomFieldNames()},
+	}}
+
+	claim.Spec.AllocationIdentity = "carriedoveridentity"
+	nb.list = []netbox.Object{allocatedObject(412, "10.0.20.99/24", "carriedoveridentity", "uid-1")}
+
+	if _, err := engine.Reconcile(context.Background(), claim); err != nil {
+		t.Fatalf("a refusal must not be returned as an error: %v", err)
+	}
+
+	assertRefused(t, claim, nb, netboxv1alpha1.ReasonForeignAllocation)
+
+	if got := readyOfClaim(claim).Message; !strings.Contains(got, "spec.managedBy") {
+		t.Errorf("Ready message %q does not name spec.managedBy as the thing to fix", got)
+	}
+}
+
+// TestClaimRenamedOntoItsOldIdentityIsToldHowToTakeIt pins the guard's answer to the one case
+// spec.allocationIdentity was added for, and the remedy it now has to carry.
+//
+// A rename is a new CR: new name, new uid, and a derived identity that no longer matches the
+// object. Setting the old identity finds it -- and finds it stamped with the *old* name, which
+// #271 already classifies as a foreign owner and refuses. That is not this change (an
+// unattributable object was the only kind a given identity could ever adopt, and it is what
+// #299 closes), but it is the case a human is most likely to hit, so the refusal has to say
+// what to do rather than only "unset the field", which here would allocate a second address.
+func TestClaimRenamedOntoItsOldIdentityIsToldHowToTakeIt(t *testing.T) {
+	claim, engine, nb := newClaimFixture(t)
+
+	old := AllocationIdentity(testURL, "homelab", "NetBoxIPAddressClaim", "dns-eth0")
+	claim.Name, claim.UID = "dns-eth1", "uid-2"
+	claim.Spec.AllocationIdentity = old
+
+	nb.list = []netbox.Object{stampedAs(
+		allocatedObject(412, "10.0.20.37/24", old, "uid-1"),
+		"netboxipaddressclaim/homelab/dns-eth0")}
+
+	if _, err := engine.Reconcile(context.Background(), claim); err != nil {
+		t.Fatalf("a refusal must not be returned as an error: %v", err)
+	}
+
+	assertRefused(t, claim, nb, netboxv1alpha1.ReasonForeignAllocation)
+
+	got := readyOfClaim(claim).Message
+	if !strings.Contains(got, provenance.DefaultOwnerField) ||
+		!strings.Contains(got, "netboxipaddressclaim/homelab/dns-eth1") {
+		t.Errorf("Ready message %q does not say how to hand the object to the renamed claim", got)
 	}
 }
