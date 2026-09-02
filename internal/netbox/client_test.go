@@ -76,6 +76,13 @@ func TestNewRejectsUnusableConfig(t *testing.T) {
 		"bad scheme":    {URL: "ftp://netbox.example"},
 		"unparseable":   {URL: "http://[::1"},
 		"bad ca bundle": {URL: "https://netbox.example", CABundle: []byte("not a certificate")},
+		// The four shapes a NetBox base url never has. Refused here as well as by the CEL
+		// on spec.url, because a Config does not have to come from a CR (#298).
+		"no host":      {URL: "https:///api"},
+		"query string": {URL: "https://netbox.example/api?x=1"},
+		"empty query":  {URL: "https://netbox.example/api?"},
+		"fragment":     {URL: "https://netbox.example/api#frag"},
+		"userinfo":     {URL: "https://user:s3cr3t@netbox.example/api"},
 	}
 	for name, cfg := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -787,6 +794,34 @@ func TestRedactURLMasksCredentials(t *testing.T) {
 		if strings.Contains(RedactURL(tc.in), "s3cr3t") {
 			t.Errorf("RedactURL(%q) leaked the password", tc.in)
 		}
+	}
+}
+
+// TestNewRejectsAQueryStringThatWouldChooseTheRequestPath is #298's Path B, in the two
+// lines it takes to show it.
+//
+// The client's base url is `TrimSuffix(url, "/api") + "/api"` and Status() appends
+// "/status/", so a query on the end of spec.url absorbs the forced suffix into a parameter
+// value and the path actually requested is the one whoever wrote the CR chose. The
+// assertion is that New refuses. The body of the if is what the operator would do
+// otherwise, printed rather than described, so that relaxing the rule reports the
+// consequence instead of a bare "expected an error".
+func TestNewRejectsAQueryStringThatWouldChooseTheRequestPath(t *testing.T) {
+	var path, query string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path, query = r.URL.Path, r.URL.RawQuery
+		_, _ = w.Write([]byte(`{"netbox-version":"4.6.8"}`))
+	}))
+	defer srv.Close()
+
+	client, err := New(Config{URL: srv.URL + "/somewhere/the-author-chose?absorb="})
+	if err == nil {
+		_, _ = client.Status(context.Background())
+		t.Fatalf("New accepted a url carrying a query string: the probe then requested path %q"+
+			" with query %q, rather than /api/status/", path, query)
+	}
+	if !strings.Contains(err.Error(), "query string") {
+		t.Errorf("error = %v, want it to name the query string", err)
 	}
 }
 

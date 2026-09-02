@@ -196,6 +196,10 @@ endpoint:
   # Empty means the release namespace. It must be one of credentialNamespaces, or the
   # operator cannot read the token -- the template refuses to render otherwise.
   namespace: ""
+  # The base URL and nothing else: no query string, no fragment, no userinfo. The operator
+  # appends the API path to this value, so anything after the path changes what it requests
+  # -- the CRD rejects all three, and this schema does too, so the failure is at `helm
+  # install` rather than at reconcile. See #298.
   url: ""
   # Inline token: convenient for a demo, and it puts a NetBox API token in your values
   # file and in the release's stored manifest. Use existingSecret for anything else.

@@ -752,3 +752,47 @@ func TestUpstreamBodyDoesNotReachTheConditions(t *testing.T) {
 		t.Errorf("Ready message = %q, want the status code and the body's shape", msg)
 	}
 }
+
+// TestEndpointURLShapeIsRejectedAtAdmission is #298's Path B closed one layer earlier, by
+// CEL on the CRD -- so it holds whether or not anything is serving the webhook, whose
+// failurePolicy is Ignore.
+func TestEndpointURLShapeIsRejectedAtAdmission(t *testing.T) {
+	ns := newNamespace(t)
+
+	for name, tc := range map[string]struct{ url, want string }{
+		// The one with teeth: `/api/status/` is appended to this, so the request path
+		// becomes /latest/meta-data/... and the suffix lands in `z`.
+		"query string":  {"http://192.0.2.1/latest/meta-data?z=", "query string"},
+		"empty query":   {"https://netbox.example/api?", "query string"},
+		"fragment":      {"https://netbox.example/api#frag", "fragment"},
+		"userinfo":      {"https://user:s3cr3t@netbox.example/api", "userinfo"},
+		"no host":       {"https:///api", "host"},
+		"still a url":   {"notaurl", "url"},
+		"still a shape": {"https://netbox.example/api", ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			endpoint := &netboxv1alpha1.NetBoxEndpoint{
+				ObjectMeta: metav1.ObjectMeta{Name: "shape-" + strings.ReplaceAll(name, " ", "-"), Namespace: ns},
+				Spec: netboxv1alpha1.NetBoxEndpointSpec{
+					URL:            tc.url,
+					TokenSecretRef: netboxv1alpha1.SecretKeyRef{Name: "nb-token", Key: "token"},
+				},
+			}
+			err := k8sClient.Create(context.Background(), endpoint)
+			if tc.want == "" {
+				if err != nil {
+					t.Fatalf("a plain netbox url was rejected: %v", err)
+				}
+				t.Cleanup(func() { _ = k8sClient.Delete(context.Background(), endpoint) })
+				return
+			}
+			if err == nil {
+				t.Cleanup(func() { _ = k8sClient.Delete(context.Background(), endpoint) })
+				t.Fatalf("the api server admitted spec.url = %q", tc.url)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("rejection = %v, want it to name %q so the author knows what to fix", err, tc.want)
+			}
+		})
+	}
+}

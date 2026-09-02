@@ -113,18 +113,30 @@ what the operator's Secret permissions currently are.
 | Type | `string` |
 | Required | yes |
 | Default | none |
-| Validation | ``+kubebuilder:validation:Pattern=`^https?://` `` |
+| Validation | ``Pattern=`^https?://` ``, `MaxLength=2048`, and CEL: names a host, no `?`, no `#`, no `@` |
 
 Base URL of the NetBox instance. A trailing `/api` is accepted: the client strips one and
 appends exactly one, so `https://netbox.home.arpa` and `https://netbox.home.arpa/api` are
 equivalent. A path prefix is preserved — `https://host/netbox` becomes
 `https://host/netbox/api`.
 
-**If it is wrong.** The pattern is enforced at admission, so `netbox.home.arpa` (no scheme)
-and `ftp://…` are rejected by `kubectl apply` before the object is stored. A URL that
-matches the pattern but cannot be parsed fails at reconcile with
-`Ready=False, Reason=InvalidConfig`. A URL that parses but does not answer gives
-`Ready=False, Reason=ProbeFailed` with the transport error in the message.
+A **base** URL and nothing more. A query string, a fragment and userinfo are each rejected,
+and the query string is the one that matters: the client builds every request as
+`<url minus a trailing /api> + /api + <path>`, so a URL ending in `?x=` absorbs that whole
+suffix into a parameter value and the path actually requested is the one written before the
+`?`. That turns a field meant to name a NetBox into a way to make the operator fetch an
+arbitrary path, with its token, from wherever its pod can reach
+([#298](https://github.com/ricardomolendijk/netbox-operator/issues/298)). Userinfo is
+rejected for a plainer reason: the credential goes in the Secret named by
+`spec.tokenSecretRef`, not in a spec field that everyone who can read the CR can read.
+
+**If it is wrong.** All of the above is enforced at admission by the CRD schema, so
+`netbox.home.arpa` (no scheme), `ftp://…`, `https://netbox/api?x=1` and
+`https://user:pw@netbox` are rejected by `kubectl apply` before the object is stored — and
+by the API server itself, so no webhook has to be running. `netbox.New` refuses the same
+shapes at reconcile, which is what an object stored before this rule existed reports:
+`Ready=False, Reason=InvalidConfig`, with no request made. A URL that parses but does not
+answer gives `Ready=False, Reason=ProbeFailed` with the transport error in the message.
 
 ### `spec.tokenSecretRef`
 
@@ -774,6 +786,7 @@ works too.
 | Symptom | Condition you would see | Cause | Fix |
 |---|---|---|---|
 | `kubectl apply` rejected, "should match `^https?://`" | none; admission refused the object | `spec.url` has no scheme | Write `https://host`, not `host` |
+| `kubectl apply` rejected, "url must not carry a query string / a fragment / userinfo" | none; admission refused the object | `spec.url` is not a bare base URL. The REST path is appended to it, so anything after the path changes what gets requested | Write the base URL only. A credential goes in the Secret, not in the URL |
 | `kubectl apply` rejected, "Unsupported value" on `mode` | none; admission refused the object | `spec.mode` is not `Apply` or `DryRun` | Use one of the two, exactly as spelled |
 | `READY=False` immediately after apply | `Ready=False, Authenticated=False, Reason=SecretMissing` | a referenced Secret is absent, or in another namespace. Read the message — it names which one | Create the Secret **in the endpoint's namespace**; there is no cross-namespace ref |
 | `READY=False`, Secret exists | `Ready=False, Authenticated=False, Reason=TokenMissing` | wrong key name, or the key holds an empty string | Match `spec.tokenSecretRef.key` to the Secret's key, or drop it to use `token` |
