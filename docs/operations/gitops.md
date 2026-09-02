@@ -496,6 +496,8 @@ a tool you do not run is noise, which is why neither is unconditional.
 The documented adoption path, and the reason `Report` exists at all:
 
 ```sh
+make install-crds        # the CRDs are not in the chart -- docs/install.md
+
 helm install netbox-operator ./charts/netbox-operator \
   --namespace netbox-operator-system --create-namespace \
   --set credentialNamespaces={homelab} \
@@ -513,25 +515,25 @@ Nothing converges while `Report` is on, and no object reaches `Ready=True`. `NOT
 says so after every install that sets it, because a mode that quietly does nothing is the
 one people forget they left on.
 
-### CRDs, `--include-crds`, and Argo CD
+### CRDs and Argo CD
 
-The chart ships its CRDs in `crds/`, which Helm installs once and never upgrades
-([installing](../install.md#crds-and-why-an-upgrade-does-not-touch-them)). For a GitOps
-install that is the wrong shape: the tool that owns the release should own the CRDs too, or
-a CRD change lands whenever somebody remembers to run `kubectl apply`.
+The chart does not contain the CRDs, and `--include-crds` therefore does nothing here. That
+is not a GitOps concession: Helm 3 stores the whole chart in the release `Secret` and 2.7 MB
+of CRDs put it over the API server's 1 MiB cap, which failed every install of any kind
+([installing](../install.md#crds-and-why-they-are-not-in-the-chart)).
 
-Template them in instead, and let Argo CD or Flux apply the whole render:
+For GitOps the shape is arguably better than it was. The CRDs are a plain multi-document
+YAML — `make crd-bundle`, or `netbox-operator-crds-<version>.yaml` off the release — so the
+tool that owns the release can own them too, as a source of its own that syncs first:
 
-```sh
-helm template netbox-operator ./charts/netbox-operator \
-  --namespace netbox-operator-system --include-crds \
-  -f values.yaml >netbox-operator.yaml
+```yaml
+  # the CRDs, first
+  metadata:
+    annotations:
+      argocd.argoproj.io/sync-wave: "-1"
 ```
 
-For an Argo CD `Application` with a Helm source, the equivalent is
-`spec.source.helm.skipCrds: false` (the default) plus `ServerSideApply=true` in
-`syncOptions` — the CRDs are large enough that client-side apply's
-`last-applied-configuration` annotation exceeds what the API server accepts:
+Two things an Argo CD `Application` needs either way:
 
 ```yaml
   syncPolicy:
@@ -539,9 +541,22 @@ For an Argo CD `Application` with a Helm source, the equivalent is
       - ServerSideApply=true
 ```
 
-And note the ordering the [installing](../install.md#crds-and-why-an-upgrade-does-not-touch-them)
-page states: CRDs before the manager, because a manager reconciling a field the old CRD
-prunes fails in a way that looks like an operator bug.
+`ServerSideApply=true` because the CRDs are large enough that client-side apply's
+`last-applied-configuration` annotation exceeds what the API server accepts. And the ordering
+the [installing](../install.md#crds-and-why-they-are-not-in-the-chart) page states — CRDs
+before the manager, because a manager reconciling a field the old CRD prunes fails in a way
+that looks like an operator bug.
+
+A renderer that templates the chart away from the cluster cannot see the CRDs in discovery
+and will trip the chart's precondition. Pass `--api-versions netbox.kubeforge.org/v1alpha1`,
+or set `crds.check=false` in the `Application`'s Helm values:
+
+```sh
+helm template netbox-operator ./charts/netbox-operator \
+  --namespace netbox-operator-system \
+  --api-versions netbox.kubeforge.org/v1alpha1 \
+  -f values.yaml >netbox-operator.yaml
+```
 
 ## NetBox permissions
 

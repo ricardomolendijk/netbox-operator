@@ -148,8 +148,19 @@ jobs:
             $output .
           echo "ref=$image:$version" >>"$GITHUB_OUTPUT"
 
+      # helm-package also asserts the packaged chart's size. A chart that grew past the
+      # ceiling is one whose release Secret the API server would reject, and a release is
+      # the worst place to find that out (#265).
       - name: Package the chart
         run: make helm-package
+
+      # The CRDs are not in the chart and cannot be: Helm stores the whole chart in the
+      # release Secret, which the API server caps at 1 MiB (#265). So they ship as their own
+      # release asset -- the one thing somebody installing the OCI chart has no other way to
+      # get, since an OCI chart has no crds/ directory to extract and no checkout to run
+      # `make install-crds` from.
+      - name: Bundle the CRDs
+        run: make crd-bundle
 
       - name: SBOM
         run: |
@@ -198,12 +209,19 @@ jobs:
             echo
             echo "## Install"
             echo
+            echo "The CRDs are **not** in the chart and Helm does not manage them: Helm stores"
+            echo "the whole chart in the release Secret, which the API server caps at 1 MiB."
+            echo "Apply them first, and again before every upgrade."
+            echo
             echo '```sh'
+            echo "kubectl apply --server-side --force-conflicts \\"
+            echo "  -f https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.tag }}/netbox-operator-crds-${{ steps.version.outputs.version }}.yaml"
+            echo
             echo "helm install netbox-operator oci://$REGISTRY/${{ github.repository_owner }}/charts/netbox-operator \\"
             echo "  --version ${{ steps.version.outputs.version }} --namespace netbox-operator-system --create-namespace"
             echo '```'
             echo
-            echo "A chart upgrade does **not** upgrade the CRDs. See \`docs/install.md\`."
+            echo "See \`docs/install.md\`."
           } >dist/release-notes.md
           cat dist/release-notes.md
 
@@ -229,14 +247,18 @@ jobs:
         run: |
           set -euo pipefail
           tag='${{ steps.version.outputs.tag }}'
+          # netbox-operator-crds-*.yaml is an asset and not an afterthought: the install
+          # instructions above link straight at it, and a release published without it is a
+          # chart nobody can install (#265).
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release edit "$tag" --title "$tag" --notes-file dist/release-notes.md
-            gh release upload "$tag" dist/*.tgz dist/*.spdx.json --clobber
+            gh release upload "$tag" dist/*.tgz dist/*.spdx.json \
+              dist/netbox-operator-crds-*.yaml --clobber
           else
             gh release create "$tag" \
               --title "$tag" \
               --notes-file dist/release-notes.md \
-              dist/*.tgz dist/*.spdx.json
+              dist/*.tgz dist/*.spdx.json dist/netbox-operator-crds-*.yaml
           fi
 
       - name: Summary
