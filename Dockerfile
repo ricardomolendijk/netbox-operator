@@ -4,7 +4,7 @@
 # cross-compile below produce the target one. Without it, `buildx --platform linux/arm64`
 # runs the whole Go toolchain under QEMU on an amd64 runner, which is minutes of emulation
 # to produce a statically linked binary GOARCH could have produced natively.
-FROM --platform=$BUILDPLATFORM golang:1.26 AS builder
+FROM --platform=$BUILDPLATFORM golang:1.27 AS builder
 ARG TARGETOS
 ARG TARGETARCH
 
