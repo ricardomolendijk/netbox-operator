@@ -12,6 +12,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	eventsv1 "k8s.io/api/events/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -127,6 +128,61 @@ func TestEndpointBecomesReady(t *testing.T) {
 	}
 	if _, _, ok := cache.Lookup(ns, "homelab"); !ok {
 		t.Error("no client in the cache for a Ready endpoint")
+	}
+}
+
+// TestEndpointEventReachesTheAPIServer is the only assertion in this package that a real
+// API server *accepted* an Event.
+//
+// events.k8s.io/v1 validates what the core/v1 Events the operator used to write did not: a
+// non-empty action, a reportingController that is a qualified name, a reportingInstance,
+// and a note of at most 1024 bytes. A recorder whose Event fails any of those logs a line
+// and carries on -- so every fake-recorder test in this package would pass with an Event
+// no cluster would ever store. This one reads it back out of the API server (#294).
+//
+// What it still does not cover is RBAC: envtest's client is unauthenticated and every
+// request is admitted, so the `events.k8s.io` grant in config/rbac/role.yaml is reviewed
+// rather than tested here.
+func TestEndpointEventReachesTheAPIServer(t *testing.T) {
+	ctx, k8s, ns := context.Background(), k8sClient, newNamespace(t)
+	srv := netboxStub(t, "4.6.8", http.StatusOK)
+	makeSecret(t, k8s, ns, "nb-token", "valid-token")
+	makeEndpoint(t, k8s, ns, "homelab", srv.URL, "nb-token", netboxv1alpha1.EndpointModeApply)
+
+	var stored eventsv1.Event
+
+	eventually(t, "a Ready Event stored in events.k8s.io/v1", func() bool {
+		list := &eventsv1.EventList{}
+		if err := apiClient.List(ctx, list, client.InNamespace(ns)); err != nil {
+			return false
+		}
+
+		for _, event := range list.Items {
+			if event.Reason == netboxv1alpha1.ReasonReady {
+				stored = event
+				return true
+			}
+		}
+
+		return false
+	})
+
+	if stored.Action != netboxv1alpha1.ActionProbe {
+		t.Errorf("action = %q, want %q; an empty one is refused with a 422 the operator only logs",
+			stored.Action, netboxv1alpha1.ActionProbe)
+	}
+	if stored.ReportingController != "netboxendpoint-controller" {
+		t.Errorf("reportingController = %q, want netboxendpoint-controller", stored.ReportingController)
+	}
+	if stored.ReportingInstance == "" {
+		t.Error("reportingInstance is empty, which the API server refuses")
+	}
+	if stored.Regarding.Name != "homelab" || stored.Regarding.Kind != "NetBoxEndpoint" {
+		t.Errorf("regarding = %s/%s, want NetBoxEndpoint/homelab",
+			stored.Regarding.Kind, stored.Regarding.Name)
+	}
+	if stored.Note == "" {
+		t.Error("note is empty; the Event says nothing a user can act on")
 	}
 }
 

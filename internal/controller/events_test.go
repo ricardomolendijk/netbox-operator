@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"slices"
 	"strings"
@@ -11,7 +12,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -145,6 +147,79 @@ func TestEndpointWithNoRecorder(t *testing.T) {
 	reconcileOnce(t, reconciler)
 }
 
+// capturedEvent is one Eventf call. events.FakeRecorder flattens an Event into a string
+// and drops the action unless it is Verbose, which is exactly the field that has to be
+// right here -- events.k8s.io/v1 refuses an Event without one, and the refusal is a line
+// in the manager's log rather than a test failure.
+type capturedEvent struct {
+	eventtype string
+	reason    string
+	action    string
+	note      string
+}
+
+// captureRecorder keeps whole Events instead of strings.
+type captureRecorder struct {
+	captured []capturedEvent
+}
+
+func (c *captureRecorder) Eventf(_, _ runtime.Object,
+	eventtype, reason, action, note string, args ...any,
+) {
+	c.captured = append(c.captured, capturedEvent{
+		eventtype: eventtype, reason: reason, action: action,
+		note: fmt.Sprintf(note, args...),
+	})
+}
+
+// TestEndpointEventCarriesItsAction pins the endpoint controller's half of the (reason ->
+// action) table. Both outcomes of the probe are the `Probe` action -- success and failure
+// of one operation, which is what the field is for -- and the bootstrap that follows it is
+// its own.
+func TestEndpointEventCarriesItsAction(t *testing.T) {
+	srv := netboxStub(t, "4.6.8", http.StatusUnauthorized)
+	reconciler, _ := fakeReconciler(t, endpointFor(srv.URL), credentialSecret())
+
+	recorder := &captureRecorder{}
+	reconciler.Recorder = recorder
+
+	reconcileOnce(t, reconciler)
+
+	if len(recorder.captured) != 1 {
+		t.Fatalf("captured %d Events, want 1: %+v", len(recorder.captured), recorder.captured)
+	}
+
+	got := recorder.captured[0]
+	if got.eventtype != corev1.EventTypeWarning || got.reason != netboxv1alpha1.ReasonAuthError {
+		t.Errorf("Event = %s/%s, want Warning/%s", got.eventtype, got.reason,
+			netboxv1alpha1.ReasonAuthError)
+	}
+	if got.action != netboxv1alpha1.ActionProbe {
+		t.Errorf("action = %q, want %q", got.action, netboxv1alpha1.ActionProbe)
+	}
+	if got.note == "" {
+		t.Error("note is empty; the Event says nothing a user can act on")
+	}
+}
+
+// TestSweepEventCarriesItsAction is the sweep's half of the same table.
+func TestSweepEventCarriesItsAction(t *testing.T) {
+	recorder := &captureRecorder{}
+	sweeps := &NetBoxSweepReconciler{Recorder: recorder}
+
+	sweeps.event(&netboxv1alpha1.NetBoxSweep{
+		ObjectMeta: metav1.ObjectMeta{Name: "nightly", Namespace: "default"},
+	}, corev1.EventTypeNormal, netboxv1alpha1.EventOrphansFound, "3 orphans")
+
+	if len(recorder.captured) != 1 {
+		t.Fatalf("captured %d Events, want 1", len(recorder.captured))
+	}
+
+	if got := recorder.captured[0].action; got != netboxv1alpha1.ActionSweep {
+		t.Errorf("action = %q, want %q", got, netboxv1alpha1.ActionSweep)
+	}
+}
+
 // TestClientCacheSizeGauge covers the one gauge the operator exports. It is the earliest
 // operator-side signal that writes have stopped: an object reconcile whose endpoint is
 // not in the cache can only wait.
@@ -177,10 +252,10 @@ func TestClientCacheSizeGauge(t *testing.T) {
 // fakeReconciler builds a reconciler over an in-memory API server. The status subresource
 // is declared, or every condition write would be silently dropped and every case would
 // look like a first reconcile.
-func fakeReconciler(t *testing.T, objects ...client.Object) (*NetBoxEndpointReconciler, *record.FakeRecorder) {
+func fakeReconciler(t *testing.T, objects ...client.Object) (*NetBoxEndpointReconciler, *events.FakeRecorder) {
 	t.Helper()
 
-	recorder := record.NewFakeRecorder(16)
+	recorder := events.NewFakeRecorder(16)
 	fakeClient := fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(objects...).
@@ -230,7 +305,7 @@ func credentialSecret() *corev1.Secret {
 // drain collects the Events the recorder holds as "Type Reason", without blocking on an
 // empty channel. The message is deliberately dropped: its wording is not the contract,
 // and asserting on it would make every reworded error a failing test.
-func drain(recorder *record.FakeRecorder) []string {
+func drain(recorder *events.FakeRecorder) []string {
 	var out []string
 	for {
 		select {

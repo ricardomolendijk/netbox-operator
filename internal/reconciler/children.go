@@ -377,7 +377,7 @@ func (m *materialisation) applyChild(ctx context.Context, child desiredChild) {
 	if !exists {
 		logf.FromContext(ctx).Info("materialised a child",
 			"action", "materialise", "child", child.gvk.Kind+"/"+child.name, "path", child.path)
-		m.p.engine.event(m.p.obj, netboxv1alpha1.EventChildMaterialised,
+		m.p.engine.eventAbout(m.p.obj, child.obj, netboxv1alpha1.EventChildMaterialised,
 			"created %s %s from %s", child.gvk.Kind, child.name, child.path)
 	}
 
@@ -561,7 +561,7 @@ func (m *materialisation) write(ctx context.Context, child desiredChild) error {
 		return fmt.Errorf("applying %s %s: %w", child.gvk.Kind, child.name, err)
 	}
 
-	m.p.engine.warn(m.p.obj, netboxv1alpha1.EventChildFieldReverted,
+	m.p.engine.warnAbout(m.p.obj, child.obj, netboxv1alpha1.EventChildFieldReverted,
 		"%s %s: taking back fields another writer claimed: %v", child.gvk.Kind, child.name, err)
 
 	if err := m.p.engine.Children.Apply(ctx, child.obj, client.ForceOwnership); err != nil {
@@ -695,7 +695,7 @@ func (m *materialisation) delete(ctx context.Context, candidate *unstructured.Un
 
 	logf.FromContext(ctx).Info("pruned a child whose inline entry is gone",
 		"action", "prune", "child", kind+"/"+name, "path", path)
-	m.p.engine.event(m.p.obj, netboxv1alpha1.EventChildPruned,
+	m.p.engine.eventAbout(m.p.obj, candidate, netboxv1alpha1.EventChildPruned,
 		"deleted %s %s: %s is no longer declared", kind, name, path)
 
 	m.pending = append(m.pending, fmt.Sprintf("%s %s is being deleted", kind, name))

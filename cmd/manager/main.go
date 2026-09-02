@@ -181,7 +181,7 @@ func run() error {
 	if err := (&controller.NetBoxEndpointReconciler{
 		Client:   client.WithFieldOwner(mgr.GetClient(), reconciler.FieldManager),
 		Cache:    clients,
-		Recorder: mgr.GetEventRecorderFor("netboxendpoint-controller"), //nolint:staticcheck // SA1019: the events-API migration is #294 group 1
+		Recorder: mgr.GetEventRecorder("netboxendpoint-controller"),
 		Secrets:  secrets,
 	}).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("setting up the NetBoxEndpoint controller: %w", err)
@@ -208,7 +208,7 @@ func run() error {
 		Client:   mgr.GetClient(),
 		Clients:  clients,
 		Scheme:   mgr.GetScheme(),
-		Recorder: mgr.GetEventRecorderFor("netboxsweep-controller"), //nolint:staticcheck // SA1019: the events-API migration is #294 group 1
+		Recorder: mgr.GetEventRecorder("netboxsweep-controller"),
 	}).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("setting up the NetBoxSweep controller: %w", err)
 	}

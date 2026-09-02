@@ -148,7 +148,7 @@ func newClaimController(
 			Refs:       &resolver.Resolver{Objects: writer, Grants: writer},
 			Status:     statusWriter{writer},
 			Finalizers: finalizerWriter{writer},
-			Events:     mgr.GetEventRecorderFor(kind.name), //nolint:staticcheck // SA1019: the events-API migration is #294 group 1
+			Events:     mgr.GetEventRecorder(kind.name),
 			Scheme:     mgr.GetScheme(),
 			// Claims and Pools are left nil deliberately: the engine then reads the
 			// package-level registries, which the per-kind init()s filled.
