@@ -405,6 +405,14 @@ type (
 	// RackRef points at a NetBoxRack (dcim.Rack, dcim/racks).
 	RackRef ObjectRef
 
+	// PowerPanelRef points at a NetBoxPowerPanel (dcim.PowerPanel, dcim/power-panels).
+	//
+	// `dcim.PowerFeed.power_panel` is the one column that points at it, and it is required
+	// (docs/netbox-schema.md -> dcim.PowerFeed), so this alias exists to be one feed's
+	// upstream. Unlike the eight cable-termination aliases above it is not a union member:
+	// dcim.PowerPanel mixes in no CabledObjectModel and a cable never terminates on a panel.
+	PowerPanelRef ObjectRef
+
 	// CircuitTerminationRef points at a NetBoxCircuitTermination
 	// (circuits.CircuitTermination, circuits/circuit-terminations).
 	//
@@ -716,6 +724,7 @@ var (
 	_ RefTarget = RackTypeRef{}
 	_ RefTarget = RackGroupRef{}
 	_ RefTarget = RackRef{}
+	_ RefTarget = PowerPanelRef{}
 )
 
 // TargetGVK reports the Kind this reference resolves against.
@@ -829,6 +838,14 @@ func (r PowerFeedRef) TargetGVK() schema.GroupVersionKind {
 
 // AsObjectRef returns the underlying reference.
 func (r PowerFeedRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r PowerPanelRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxPowerPanel")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r PowerPanelRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
 
 // TargetGVK reports the Kind this reference resolves against.
 func (r CircuitTerminationRef) TargetGVK() schema.GroupVersionKind {

@@ -46,7 +46,9 @@ func TestRefAliasTargets(t *testing.T) {
 		{"asn", ASNRef{}, "NetBoxASN"}, {"rackRole", RackRoleRef{}, "NetBoxRackRole"},
 		{"rackType", RackTypeRef{}, "NetBoxRackType"},
 		{"rackGroup", RackGroupRef{}, "NetBoxRackGroup"},
-		{"rack", RackRef{}, "NetBoxRack"}} {
+		{"rack", RackRef{}, "NetBoxRack"},
+		{"powerPanel", PowerPanelRef{}, "NetBoxPowerPanel"},
+		{"powerFeed", PowerFeedRef{}, "NetBoxPowerFeed"}} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := tc.ref.TargetGVK()
 
