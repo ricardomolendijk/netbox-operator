@@ -715,15 +715,6 @@ func TestClaimWithoutAFinalizerWriterFailsLoudly(t *testing.T) {
 	}
 }
 
-// stampedLiveTag is a NetBox object carrying stampedObject()'s own metadata.uid: what a
-// create that reached NetBox left behind when the status write recording its id did not.
-func stampedLiveTag(id int) netbox.Object {
-	live := liveTag(id)
-	live["custom_fields"] = map[string]any{"k8s_uid": "6f1a-uid"}
-
-	return live
-}
-
 // deletingStampedObject is stampedObject() as the API server hands it back after
 // `kubectl delete`, with the status.id the lost write never recorded.
 func deletingStampedObject() *fakeKind {
@@ -739,7 +730,7 @@ func deletingStampedObject() *fakeKind {
 // landed, and the object in NetBox carries this CR's own uid stamp -- which is proof of
 // authorship a natural key could never be, so the delete goes out.
 func TestDeleteFindsTheObjectALostStatusWriteLeftBehind(t *testing.T) {
-	client := &fakeClient{list: []netbox.Object{stampedLiveTag(9)}}
+	client := &fakeClient{list: []netbox.Object{stampedLiveTag(9, "6f1a-uid")}}
 	events := &fakeRecorder{}
 
 	engine := stampedEngine(t, stampableDescriptor(), client)
