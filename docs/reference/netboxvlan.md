@@ -449,8 +449,8 @@ meta.constraints: (models.UniqueConstraint(fields=('group', 'vid'),
 ```
 
 — `(group, vid)`, `(group, name)`, `(qinq_svlan, vid)` and `(qinq_svlan, name)`. **There is no
-`(site, vid)` constraint.** `plan.md` §8 lists this kind's natural key as "`(group, vid)` or
-`(site, vid)`" as if both came from `Meta.constraints`; only the first does. Candidates 2 and 3
+`(site, vid)` constraint.** This kind's natural key is usually given as "`(group, vid)` or
+`(site, vid)`", as if both came from `Meta.constraints`; only the first does. Candidates 2 and 3
 are conventions.
 
 That matters concretely rather than pedantically. **Every VLAN in `../inventory.yaml` has a site

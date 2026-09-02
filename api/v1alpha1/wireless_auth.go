@@ -8,7 +8,7 @@ package v1alpha1
 // invisible.
 //
 // **`auth_psk` is deliberately not a field on either kind.** It is a pre-shared key, so it may
-// never be inline in a spec (NBO-050, plan.md §15): the required shape is
+// never be inline in a spec (NBO-050): the required shape is
 // `authPSKSecretRef` -> a key of a Secret. That needs the engine to source one payload value
 // from a Secret rather than from the spec, which is a new `registry.FieldClass` plus a Secret
 // read in the payload path -- shared machinery, not descriptor data, and so out of scope for a

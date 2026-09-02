@@ -25,8 +25,8 @@ import (
 //
 // So there is no `parent IS NULL` variant to model, and `(parent, name)` is subsumed by the
 // column-level `UNIQUE` on `name` that already makes a name globally unique. `slug` alone
-// identifies at most one group whatever its parent is. Adding the `?parent_id=null` pin that
-// plan.md §8.1 asserts every MPTT kind needs would be wrong the same two ways it would be
+// identifies at most one group whatever its parent is. Adding the `?parent_id=null` pin an
+// MPTT kind is usually assumed to need would be wrong the same two ways it would be
 // wrong on a NetBoxTenantGroup: it would make a nested group's slug unfindable, and it would
 // express a constraint the database does not have.
 type NetBoxWirelessLANGroupSpec struct {

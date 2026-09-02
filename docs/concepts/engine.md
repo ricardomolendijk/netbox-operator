@@ -101,8 +101,8 @@ where [ADR-0005](../decisions/0005-gitops-coexistence.md) says desired state bel
 An object located by an id the CR already recorded in `status.id` raises no adoption
 question -- it is already ours.
 
-> This deviates from `plan.md` §6.1, which defaulted `onConflict` to `Adopt`. Defaulting to
-> adoption makes the destructive outcome the one you get by not reading the docs.
+> This deviates from the original design, which defaulted `onConflict` to `Adopt`. Defaulting
+> to adoption makes the destructive outcome the one you get by not reading the docs.
 
 ## Spec field names and NetBox field names
 

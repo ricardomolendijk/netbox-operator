@@ -234,7 +234,7 @@ since it becomes the mechanism that finds unexposed fields rather than the gener
 
 ## A naming note that outlived its ticket
 
-`plan.md` §6.1 calls the field `spec.reclaimPolicy`. The built field is
+The original design called the field `spec.reclaimPolicy`. The built field is
 `spec.deletionPolicy`, matching
 [ADR-0003](../decisions/0003-ownership-and-references.md#deletion-policy), because
 `reclaimPolicy` is PersistentVolume vocabulary where it means something materially

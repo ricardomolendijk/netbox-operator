@@ -23,25 +23,25 @@
 endpoints:
   # core/* -- read-only records NetBox writes itself, or deferred pending demand.
   - endpoint: core/jobs
-    reason: read-only; NetBox writes job records and nothing about one is declarative (plan.md 8)
+    reason: read-only; NetBox writes job records and nothing about one is declarative (#61)
   - endpoint: core/object-changes
-    reason: read-only append-only changelog (plan.md 8)
+    reason: read-only append-only changelog (#61)
   - endpoint: core/object-types
-    reason: read-only enumeration of NetBox's own content types (plan.md 8)
+    reason: read-only enumeration of NetBox's own content types (#61)
   - endpoint: core/background-queues
-    reason: not a model; an RQ introspection view with no rows to declare (plan.md 8)
+    reason: not a model; an RQ introspection view with no rows to declare (#61)
   - endpoint: core/background-workers
-    reason: not a model; an RQ introspection view with no rows to declare (plan.md 8)
+    reason: not a model; an RQ introspection view with no rows to declare (#61)
   - endpoint: core/background-tasks
-    reason: not a model; an RQ introspection view with no rows to declare (plan.md 8)
+    reason: not a model; an RQ introspection view with no rows to declare (#61)
   - endpoint: core/data-files
-    reason: read-only; a data file is written by a data-source sync (plan.md 8)
+    reason: read-only; a data file is written by a data-source sync (#61)
   - endpoint: core/data-sources
-    reason: deferred pending demand; a remote plus its credentials is deployment configuration (plan.md 8)
+    reason: deferred pending demand; a remote plus its credentials is deployment configuration (#61)
 
   # dcim/* -- one read-only view, and one read-only serializer over a real model.
   - endpoint: dcim/connected-device
-    reason: not a model; a read-only lookup view over cable paths (plan.md 8)
+    reason: not a model; a read-only lookup view over cable paths (#61)
   - endpoint: dcim/cable-terminations
     reason: >-
       read-only: CableTerminationSerializer.Meta sets `read_only_fields = fields`
@@ -56,41 +56,41 @@ endpoints:
 
   # extras/* -- non-declarative, binary, per-user or append-only.
   - endpoint: extras/scripts
-    reason: non-declarative; a script is code uploaded and run (plan.md 8)
+    reason: non-declarative; a script is code uploaded and run (#61)
   - endpoint: extras/scripts/upload
-    reason: binary upload, not expressible as a manifest (plan.md 8)
+    reason: binary upload, not expressible as a manifest (#61)
   - endpoint: extras/notifications
-    reason: per-user runtime state (plan.md 8)
+    reason: per-user runtime state (#61)
   - endpoint: extras/notification-groups
-    reason: addresses users and groups, which users/* excludes (plan.md 8)
+    reason: addresses users and groups, which users/* excludes (#61)
   - endpoint: extras/subscriptions
-    reason: per-user runtime state (plan.md 8)
+    reason: per-user runtime state (#61)
   - endpoint: extras/bookmarks
-    reason: per-user UI state (plan.md 8)
+    reason: per-user UI state (#61)
   - endpoint: extras/table-configs
-    reason: per-user UI state (plan.md 8)
+    reason: per-user UI state (#61)
   - endpoint: extras/tagged-objects
-    reason: read-only view over the tag through-table; the writable side is each object's own tags (plan.md 8)
+    reason: read-only view over the tag through-table; the writable side is each object's own tags (#61)
   - endpoint: extras/image-attachments
-    reason: binary upload, not expressible as a manifest (plan.md 8)
+    reason: binary upload, not expressible as a manifest (#61)
   - endpoint: extras/journal-entries
-    reason: append-only; a journal entry is an event, and re-applying a manifest must not rewrite history (plan.md 8)
+    reason: append-only; a journal entry is an event, and re-applying a manifest must not rewrite history (#61)
 
   # users/* -- identity and authorisation are the cluster's job.
   - endpoint: users/users
-    reason: out of scope; identity belongs to the cluster, not to a NetBox manifest (plan.md 8)
+    reason: out of scope; identity belongs to the cluster, not to a NetBox manifest (#61)
   - endpoint: users/groups
-    reason: out of scope; identity belongs to the cluster, not to a NetBox manifest (plan.md 8)
+    reason: out of scope; identity belongs to the cluster, not to a NetBox manifest (#61)
   - endpoint: users/tokens
-    reason: out of scope; a token in a manifest is a credential in Git (plan.md 8)
+    reason: out of scope; a token in a manifest is a credential in Git (#61)
   - endpoint: users/permissions
-    reason: out of scope; authorisation belongs to the cluster's RBAC (plan.md 8)
+    reason: out of scope; authorisation belongs to the cluster's RBAC (#61)
   - endpoint: users/owner-groups
-    reason: out of scope; the ownership model addresses users, which users/* excludes (plan.md 8)
+    reason: out of scope; the ownership model addresses users, which users/* excludes (#61)
   - endpoint: users/owners
-    reason: out of scope; the ownership model addresses users, which users/* excludes (plan.md 8)
+    reason: out of scope; the ownership model addresses users, which users/* excludes (#61)
   - endpoint: users/config
-    reason: out of scope; per-user UI preferences (plan.md 8)
+    reason: out of scope; per-user UI preferences (#61)
 
 # columns: writable columns an implemented Kind deliberately does not map.
 #
@@ -175,9 +175,9 @@ notes:
   - kind: ipam.FHRPGroup
     column: auth_key
     reason: >-
-      a pre-shared key, permitted only as spec.authKeySecretRef (plan.md 15) and the engine
+      a pre-shared key, permitted only as spec.authKeySecretRef and never inline; the engine
       has no FieldClass that reads a Secret into a payload, so the column is unmapped rather
-      than inline; it is in internal/netbox/do.go's redaction set because NetBox returns it
+      than written, and it is in internal/netbox/do.go's redaction set because NetBox returns it
       (api/v1alpha1/ipam_fhrpgroup.go, docs/reference/netboxfhrpgroup.md)
   - kind: dcim.Site
     column: time_zone

@@ -200,11 +200,11 @@ Inherited from `PrimaryModel`; `description` is capped at 200 characters and `co
 ### What is deliberately absent
 
 - **`siteRef`** — see above. This is the whole ticket.
-- **Inline children.** `plan.md` §7 lists `Cluster` among the kinds that get inline expansion
-  but names no lists. A cluster's plausible children are Devices and VirtualMachines, which
-  have independent lifecycles and are not components of it; materialising them would make this
-  the composite topology kind `plan.md` §2 principle 1 forbids. Decision: no inline children,
-  now or later.
+- **Inline children.** `Cluster` was an early candidate for [inline
+  expansion](../concepts/inline-children.md), with no lists ever named. A cluster's plausible
+  children are Devices and VirtualMachines, which have independent lifecycles and are not
+  components of it; materialising them would make this a composite topology kind, which this
+  API deliberately does not have. Decision: no inline children, now or later.
 - **`vlan_groups`, `contacts`** — `GenericRelation`s, so reverse relations rather than columns.
 - **`device_count`, `virtualmachine_count`, `allocated_vcpus`, `allocated_memory`,
   `allocated_disk`** — read-only serializer annotations. NetBox returns them and refuses them.

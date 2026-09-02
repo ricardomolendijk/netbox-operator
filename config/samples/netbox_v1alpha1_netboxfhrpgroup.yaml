@@ -14,9 +14,9 @@ spec:
 
   name: Gateway VRRP
 
-  # There is deliberately no authKey field: plan.md 15 permits the key only as a Secret
-  # reference, and reading a Secret into a NetBox payload is not a capability the engine
-  # has yet. Set the key in NetBox by hand; the operator never writes or clears it.
+  # There is deliberately no authKey field: a pre-shared key may never be inline in a spec,
+  # so the only permitted shape is a Secret reference -- and reading a Secret into a NetBox
+  # payload is not a capability the engine has yet. Set the key in NetBox by hand; the operator never writes or clears it.
   authType: md5
 
   description: Redundant default gateway for the lab VLAN

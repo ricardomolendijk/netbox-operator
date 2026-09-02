@@ -51,7 +51,7 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 | `primary_mac_address` | MISSING | 2 | NBO-053 owns it. NBO-048 ships the forward half -- a NetBoxMACAddress names the interface it is assigned to -- and the reverse half is a deferred field on the two BaseInterface component specs, because modelling both directions as required references is the unresolvable cycle NBO-016 rejects (api/v1alpha1/dcim_macaddress.go) |
 | `vlan_translation_policy` | blocked | 2 | waits on a Kind for `ipam.VLANTranslationPolicy` |
 | `asns` | MISSING | 1 | deferred with dcim.Site's other optional foreign keys; NetBoxASN ships with NBO-055, so nothing blocks it any more (api/v1alpha1/dcim_site.go) |
-| `auth_key` | MISSING | 1 | a pre-shared key, permitted only as spec.authKeySecretRef (plan.md 15) and the engine has no FieldClass that reads a Secret into a payload, so the column is unmapped rather than inline; it is in internal/netbox/do.go's redaction set because NetBox returns it (api/v1alpha1/ipam_fhrpgroup.go, docs/reference/netboxfhrpgroup.md) |
+| `auth_key` | MISSING | 1 | a pre-shared key, permitted only as spec.authKeySecretRef and never inline; the engine has no FieldClass that reads a Secret into a payload, so the column is unmapped rather than written, and it is in internal/netbox/do.go's redaction set because NetBox returns it (api/v1alpha1/ipam_fhrpgroup.go, docs/reference/netboxfhrpgroup.md) |
 | `auto_sync_enabled` | MISSING | 1 | — |
 | `data_path` | excluded | 1 | NetBox owns the git-sync trio and overwrites `data` from it (api/v1alpha1/extras_configcontext.go) |
 | `data_path` | excluded | 1 | NetBox owns the git-sync trio and overwrites `schema` from it (api/v1alpha1/extras_configcontextprofile.go) |
@@ -82,7 +82,7 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 | model | column | class | required | status | detail |
 |---|---|---|---|---|---|
 | `dcim.Site` | `asns` | M2M | — | MISSING | deferred with dcim.Site's other optional foreign keys; NetBoxASN ships with NBO-055, so nothing blocks it any more (api/v1alpha1/dcim_site.go) |
-| `ipam.FHRPGroup` | `auth_key` | Scalar | — | MISSING | a pre-shared key, permitted only as spec.authKeySecretRef (plan.md 15) and the engine has no FieldClass that reads a Secret into a payload, so the column is unmapped rather than inline; it is in internal/netbox/do.go's redaction set because NetBox returns it (api/v1alpha1/ipam_fhrpgroup.go, docs/reference/netboxfhrpgroup.md) |
+| `ipam.FHRPGroup` | `auth_key` | Scalar | — | MISSING | a pre-shared key, permitted only as spec.authKeySecretRef and never inline; the engine has no FieldClass that reads a Secret into a payload, so the column is unmapped rather than written, and it is in internal/netbox/do.go's redaction set because NetBox returns it (api/v1alpha1/ipam_fhrpgroup.go, docs/reference/netboxfhrpgroup.md) |
 | `wireless.WirelessLAN` | `auth_psk` | Scalar | — | MISSING | deliberately unmapped on both wireless kinds and NOT excused: a pre-shared key may never be inline in a spec, so the field has to be `authPSKSecretRef` -> a Secret key, which needs a Secret read in the payload path and a Secret informer scoped to the object's own namespace. That is shared machinery and an RBAC decision (NBO-072), so it owes its own ticket rather than riding along with the kinds (api/v1alpha1/wireless_auth.go) |
 | `wireless.WirelessLink` | `auth_psk` | Scalar | — | MISSING | deliberately unmapped on both wireless kinds and NOT excused: a pre-shared key may never be inline in a spec, so the field has to be `authPSKSecretRef` -> a Secret key, which needs a Secret read in the payload path and a Secret informer scoped to the object's own namespace. That is shared machinery and an RBAC decision (NBO-072), so it owes its own ticket rather than riding along with the kinds (api/v1alpha1/wireless_auth.go) |
 | `extras.ConfigTemplate` | `auto_sync_enabled` | Scalar | — | MISSING | — |
@@ -291,18 +291,18 @@ each pinned column's class rather than from the IR's reason string.
 | `circuits/virtual-circuit-terminations` | `circuits.VirtualCircuitTermination` | — | MISSING | — |
 | `circuits/virtual-circuit-types` | `circuits.VirtualCircuitType` | — | MISSING | — |
 | `circuits/virtual-circuits` | `circuits.VirtualCircuit` | — | MISSING | — |
-| `core/background-queues` | `-` | — | excluded | not a model; an RQ introspection view with no rows to declare (plan.md 8) |
-| `core/background-tasks` | `-` | — | excluded | not a model; an RQ introspection view with no rows to declare (plan.md 8) |
-| `core/background-workers` | `-` | — | excluded | not a model; an RQ introspection view with no rows to declare (plan.md 8) |
-| `core/data-files` | `core.DataFile` | — | excluded | read-only; a data file is written by a data-source sync (plan.md 8) |
-| `core/data-sources` | `core.DataSource` | — | excluded | deferred pending demand; a remote plus its credentials is deployment configuration (plan.md 8) |
-| `core/jobs` | `core.Job` | — | excluded | read-only; NetBox writes job records and nothing about one is declarative (plan.md 8) |
-| `core/object-changes` | `core.ObjectChange` | — | excluded | read-only append-only changelog (plan.md 8) |
-| `core/object-types` | `core.ObjectType` | — | excluded | read-only enumeration of NetBox's own content types (plan.md 8) |
+| `core/background-queues` | `-` | — | excluded | not a model; an RQ introspection view with no rows to declare (#61) |
+| `core/background-tasks` | `-` | — | excluded | not a model; an RQ introspection view with no rows to declare (#61) |
+| `core/background-workers` | `-` | — | excluded | not a model; an RQ introspection view with no rows to declare (#61) |
+| `core/data-files` | `core.DataFile` | — | excluded | read-only; a data file is written by a data-source sync (#61) |
+| `core/data-sources` | `core.DataSource` | — | excluded | deferred pending demand; a remote plus its credentials is deployment configuration (#61) |
+| `core/jobs` | `core.Job` | — | excluded | read-only; NetBox writes job records and nothing about one is declarative (#61) |
+| `core/object-changes` | `core.ObjectChange` | — | excluded | read-only append-only changelog (#61) |
+| `core/object-types` | `core.ObjectType` | — | excluded | read-only enumeration of NetBox's own content types (#61) |
 | `dcim/cable-bundles` | `dcim.CableBundle` | `NetBoxCableBundle` | implemented | — |
 | `dcim/cable-terminations` | `dcim.CableTermination` | — | excluded | read-only: CableTerminationSerializer.Meta sets `read_only_fields = fields` (netbox/dcim/api/serializers_/cables.py:71), so every one of its twelve fields -- `cable`, `cable_end`, `termination_type`, `termination_id`, `connector`, `positions` included -- is refused on write. NBO-049 asked for a NetBoxCableTermination Kind; there is nothing for one to write. A termination is created and destroyed by writing dcim.Cable's own `a_terminations` / `b_terminations`, which NetBoxCable does, and `connector` / `positions` are unreachable from the REST API in 4.6.8 at all -- GenericObjectSerializer carries only `{object_type, object_id}` (netbox/netbox/api/serializers/generic.py:15) |
 | `dcim/cables` | `dcim.Cable` | `NetBoxCable` | implemented | — |
-| `dcim/connected-device` | `-` | — | excluded | not a model; a read-only lookup view over cable paths (plan.md 8) |
+| `dcim/connected-device` | `-` | — | excluded | not a model; a read-only lookup view over cable paths (#61) |
 | `dcim/console-port-templates` | `dcim.ConsolePortTemplate` | — | MISSING | — |
 | `dcim/console-ports` | `dcim.ConsolePort` | — | MISSING | — |
 | `dcim/console-server-port-templates` | `dcim.ConsoleServerPortTemplate` | — | MISSING | — |
@@ -346,7 +346,7 @@ each pinned column's class rather than from the IR's reason string.
 | `dcim/sites` | `dcim.Site` | `NetBoxSite` | implemented | — |
 | `dcim/virtual-chassis` | `dcim.VirtualChassis` | — | MISSING | — |
 | `dcim/virtual-device-contexts` | `dcim.VirtualDeviceContext` | — | MISSING | — |
-| `extras/bookmarks` | `extras.Bookmark` | — | excluded | per-user UI state (plan.md 8) |
+| `extras/bookmarks` | `extras.Bookmark` | — | excluded | per-user UI state (#61) |
 | `extras/config-context-profiles` | `extras.ConfigContextProfile` | `NetBoxConfigContextProfile` | implemented | — |
 | `extras/config-contexts` | `extras.ConfigContext` | `NetBoxConfigContext` | implemented | — |
 | `extras/config-templates` | `extras.ConfigTemplate` | `NetBoxConfigTemplate` | implemented | — |
@@ -355,16 +355,16 @@ each pinned column's class rather than from the IR's reason string.
 | `extras/custom-links` | `extras.CustomLink` | `NetBoxCustomLink` | implemented | — |
 | `extras/event-rules` | `extras.EventRule` | — | MISSING | — |
 | `extras/export-templates` | `extras.ExportTemplate` | `NetBoxExportTemplate` | implemented | — |
-| `extras/image-attachments` | `extras.ImageAttachment` | — | excluded | binary upload, not expressible as a manifest (plan.md 8) |
-| `extras/journal-entries` | `extras.JournalEntry` | — | excluded | append-only; a journal entry is an event, and re-applying a manifest must not rewrite history (plan.md 8) |
-| `extras/notification-groups` | `extras.NotificationGroup` | — | excluded | addresses users and groups, which users/* excludes (plan.md 8) |
-| `extras/notifications` | `extras.Notification` | — | excluded | per-user runtime state (plan.md 8) |
+| `extras/image-attachments` | `extras.ImageAttachment` | — | excluded | binary upload, not expressible as a manifest (#61) |
+| `extras/journal-entries` | `extras.JournalEntry` | — | excluded | append-only; a journal entry is an event, and re-applying a manifest must not rewrite history (#61) |
+| `extras/notification-groups` | `extras.NotificationGroup` | — | excluded | addresses users and groups, which users/* excludes (#61) |
+| `extras/notifications` | `extras.Notification` | — | excluded | per-user runtime state (#61) |
 | `extras/saved-filters` | `extras.SavedFilter` | `NetBoxSavedFilter` | implemented | — |
-| `extras/scripts` | `extras.Script` | — | excluded | non-declarative; a script is code uploaded and run (plan.md 8) |
-| `extras/scripts/upload` | `extras.ScriptModule` | — | excluded | binary upload, not expressible as a manifest (plan.md 8) |
-| `extras/subscriptions` | `extras.Subscription` | — | excluded | per-user runtime state (plan.md 8) |
-| `extras/table-configs` | `extras.TableConfig` | — | excluded | per-user UI state (plan.md 8) |
-| `extras/tagged-objects` | `extras.TaggedItem` | — | excluded | read-only view over the tag through-table; the writable side is each object's own tags (plan.md 8) |
+| `extras/scripts` | `extras.Script` | — | excluded | non-declarative; a script is code uploaded and run (#61) |
+| `extras/scripts/upload` | `extras.ScriptModule` | — | excluded | binary upload, not expressible as a manifest (#61) |
+| `extras/subscriptions` | `extras.Subscription` | — | excluded | per-user runtime state (#61) |
+| `extras/table-configs` | `extras.TableConfig` | — | excluded | per-user UI state (#61) |
+| `extras/tagged-objects` | `extras.TaggedItem` | — | excluded | read-only view over the tag through-table; the writable side is each object's own tags (#61) |
 | `extras/tags` | `extras.Tag` | `NetBoxTag` | implemented | — |
 | `extras/webhooks` | `extras.Webhook` | — | MISSING | — |
 | `ipam/aggregates` | `ipam.Aggregate` | `NetBoxAggregate` | implemented | — |
@@ -391,13 +391,13 @@ each pinned column's class rather than from the IR's reason string.
 | `tenancy/contacts` | `tenancy.Contact` | `NetBoxContact` | implemented | — |
 | `tenancy/tenant-groups` | `tenancy.TenantGroup` | `NetBoxTenantGroup` | implemented | — |
 | `tenancy/tenants` | `tenancy.Tenant` | `NetBoxTenant` | implemented | — |
-| `users/config` | `users.UserConfig` | — | excluded | out of scope; per-user UI preferences (plan.md 8) |
-| `users/groups` | `users.Group` | — | excluded | out of scope; identity belongs to the cluster, not to a NetBox manifest (plan.md 8) |
-| `users/owner-groups` | `users.OwnerGroup` | — | excluded | out of scope; the ownership model addresses users, which users/* excludes (plan.md 8) |
-| `users/owners` | `users.Owner` | — | excluded | out of scope; the ownership model addresses users, which users/* excludes (plan.md 8) |
-| `users/permissions` | `users.ObjectPermission` | — | excluded | out of scope; authorisation belongs to the cluster's RBAC (plan.md 8) |
-| `users/tokens` | `users.Token` | — | excluded | out of scope; a token in a manifest is a credential in Git (plan.md 8) |
-| `users/users` | `users.User` | — | excluded | out of scope; identity belongs to the cluster, not to a NetBox manifest (plan.md 8) |
+| `users/config` | `users.UserConfig` | — | excluded | out of scope; per-user UI preferences (#61) |
+| `users/groups` | `users.Group` | — | excluded | out of scope; identity belongs to the cluster, not to a NetBox manifest (#61) |
+| `users/owner-groups` | `users.OwnerGroup` | — | excluded | out of scope; the ownership model addresses users, which users/* excludes (#61) |
+| `users/owners` | `users.Owner` | — | excluded | out of scope; the ownership model addresses users, which users/* excludes (#61) |
+| `users/permissions` | `users.ObjectPermission` | — | excluded | out of scope; authorisation belongs to the cluster's RBAC (#61) |
+| `users/tokens` | `users.Token` | — | excluded | out of scope; a token in a manifest is a credential in Git (#61) |
+| `users/users` | `users.User` | — | excluded | out of scope; identity belongs to the cluster, not to a NetBox manifest (#61) |
 | `virtualization/cluster-groups` | `virtualization.ClusterGroup` | `NetBoxClusterGroup` | implemented | — |
 | `virtualization/cluster-types` | `virtualization.ClusterType` | `NetBoxClusterType` | implemented | — |
 | `virtualization/clusters` | `virtualization.Cluster` | `NetBoxCluster` | implemented | — |
