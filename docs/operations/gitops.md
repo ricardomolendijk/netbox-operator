@@ -340,31 +340,58 @@ reason:
   works by finding the object that already holds the address. The restore erased the row it
   would have found.
 - **`onConflict: Adopt`**, which this page recommends keeping in Git for the objects this
-  operator owns, removes the one place a `Conflict` would have surfaced: when the first
-  claim's child `NetBoxIPAddress` is re-created it adopts whatever now sits at that address,
-  which by then may be the second claim's object.
+  operator owns, will remove the one place a `Conflict` would have surfaced — once claims
+  materialise their child `NetBoxIPAddress` at all. They do not yet (NBO-032, [#45]
+  (https://github.com/ricardomolendijk/netbox-operator/issues/45)); `status.address` is the
+  only record today. When that child does land, re-creating it under `Adopt` would take over
+  whatever sits at the address by then, which may be the second claim's object — so this row
+  gets worse, not better, unless the guard lands first.
 - **Reading `status.address` afterwards**, [step 3 of a both-lost restore](#both-were-lost),
   reads the pin — and the pin is the thing that is wrong.
 
 The check that does find it compares the pin against NetBox rather than trusting it: for each
 claim, `GET /api/ipam/ip-addresses/?address=<status.address>` and compare the object's
-`cf_k8s_allocation_identity` with the claim's `status.allocationIdentity`. No object where a
-settled claim says there is one, or an object carrying somebody else's identity, is this
-hazard — and the remedy is a human's, because both claims are entitled to the address and only
-you know which NIC, DNS record or firewall rule is already using it. Decide which claim keeps
-it and move the other one aside: a claim never re-allocates under its own name, so freeing it
-means deleting the CR and re-creating it under a different name, which derives a new
-[allocation identity](#claims-which-have-no-onconflict-to-set) and allocates afresh. The rule
-the whole row reduces to: **do not restore a snapshot older than your live allocations without
-reconciling them against `status.address` first.**
+allocation-identity custom field with the claim's `status.allocationIdentity`. The field is
+`cf_k8s_allocation_identity` unless the endpoint renamed it — `spec.managedBy.allocationIdentityField`
+is configurable, and reading the default on an endpoint that set something else returns
+nothing and reads as "no hazard here". No object where a settled claim says there is one, or
+an object carrying somebody else's identity, is this hazard.
+
+The remedy is a human's, because both claims are entitled to the address and only you know
+which NIC, DNS record or firewall rule is already using it.
+
+!!! danger "Do not simply delete the losing claim"
+
+    A claim never re-allocates under its own name, so the instinct is to delete the CR and
+    re-create it under a different name — which does derive a new
+    [allocation identity](#claims-which-have-no-onconflict-to-set) and allocate afresh. **In
+    this scenario that can delete the address you decided to keep.** Deleting a claim frees
+    its address by `DELETE`ing the NetBox object at the id in `status.netboxID`
+    (`internal/reconciler/claim.go:1286`), unconditionally — nothing re-checks that the object
+    still carries this claim's allocation identity. After a restore, that id came from the
+    pre-restore database and the restored one has reissued it, quite possibly to the surviving
+    claim's address.
+
+    Free the losing claim by a route that cannot delete anything, in order of preference:
+
+    1. Set `spec.deletionPolicy: Retain` on it **before** deleting the CR
+       (`internal/reconciler/claim.go:1229`), which leaves the NetBox object alone.
+    2. Or delete the NetBox object by hand first, then delete the CR, so the id is stale in
+       the harmless direction.
+    3. Break-glass only: the `netbox.kubeforge.org/skip-finalizer: "true"` annotation
+       (`internal/reconciler/claim.go:1218`) drops the finalizer without touching NetBox.
+
+The rule the whole row reduces to: **do not restore a snapshot older than your live
+allocations without reconciling them against `status.address` first.**
 
 Whether the engine should catch this itself — a settled claim re-reading its address on the
 quiet path and reporting `Conflict` when another allocation identity holds it — is tracked on
 [#167](https://github.com/ricardomolendijk/netbox-operator/issues/167). Until that lands, the
 check above is the only thing standing in front of it.
 
-The bottom row is the only genuine loss, and it is a NetBox backup problem rather than a Git
-one. If a specific address must survive even that, then it is not really a claim: put it in
+The bottom row is the only *unrecoverable* loss, and it is a NetBox backup problem rather than
+a Git one — the second row is recoverable, but only by the human check above, which is why it
+is the one to plan against. If a specific address must survive even that, then it is not really a claim: put it in
 Git as a `NetBoxIPAddress` with an explicit `spec.address`, which is the kind that exists for
 exactly that requirement. A claim means "I don't want to know", and its address lives
 wherever NetBox lives.
