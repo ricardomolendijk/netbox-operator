@@ -1,0 +1,30 @@
+{{- /*
+Renders nothing. It exists to turn "you forgot the CRDs" into a sentence, at install time.
+
+The chart stopped shipping crds/ in #265: Helm 3 stores the entire chart in the release
+Secret and 2.7 MB of CRDs put that Secret past the API server's 1 MiB cap, so every single
+`helm install` failed before a Pod was scheduled. The CRDs are now applied out of band
+(`make install-crds`, or the crds bundle attached to the release), which buys a working
+install and costs one ordering constraint: the manager needs its CRDs to exist.
+
+Without this check that ordering fails late and unrecognisably. The install succeeds, the
+Deployment rolls out, and the manager exits building its caches -- "no matches for kind
+NetBoxEndpoint" in a container log, several minutes and one `kubectl logs` away from the
+command that caused it. A missing prerequisite should fail where the prerequisite was
+missed.
+
+`.Capabilities.APIVersions` is discovery from the live cluster during install and upgrade,
+so this is the same mechanism the cert-manager and Prometheus Operator gates already use.
+The group/version rather than a named Kind: any one Kind is a list this would have to be
+kept in step with, and a partial apply is not a case worth distinguishing from a missing one.
+
+Off the cluster -- `helm template`, `helm lint`, a GitOps renderer that does not pass
+`--api-versions` -- discovery has nothing in it and this would fail a render that was never
+going to install anything. crds.check=false is that escape hatch, and `make helm-template`
+renders the chart both ways *and* asserts that leaving it on with no CRDs does fail.
+*/ -}}
+{{- if .Values.crds.check }}
+{{- if not (.Capabilities.APIVersions.Has "netbox.kubeforge.org/v1alpha1") }}
+{{- fail (printf "netbox-operator: the netbox.kubeforge.org/v1alpha1 CustomResourceDefinitions are not installed on this cluster, and this chart no longer carries them (#265 -- they made the Helm release Secret exceed the API server's 1 MiB limit, which failed every install).\n\nApply them first, then install this chart:\n\n  # from a checkout\n  make install-crds\n\n  # from a release\n  kubectl apply --server-side --force-conflicts -f \\\n    https://github.com/ricardomolendijk/netbox-operator/releases/download/v%s/netbox-operator-crds-%s.yaml\n\nSee docs/install.md. Rendering off a cluster (helm template, helm lint, some GitOps\nrenderers) cannot see the CRDs even when they are there: pass --api-versions\nnetbox.kubeforge.org/v1alpha1, or set crds.check=false." .Chart.Version .Chart.Version) }}
+{{- end }}
+{{- end }}

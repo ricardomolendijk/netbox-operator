@@ -7,6 +7,28 @@
 nameOverride: ""
 fullnameOverride: ""
 
+# ---------------------------------------------------------------------------------------
+# The CRDs, which this chart does not contain.
+#
+# There is no crds.install here and there never will be, but not for the reason there used
+# to be. The chart shipped a crds/ directory until #265, and Helm 3 stores the whole chart
+# in the release Secret: 2.7 MB of CRDs, gzipped and base64-encoded, exceeded the API
+# server's 1 MiB cap on a Secret and failed *every* install of this chart. The catalogue
+# only grows, so the CRDs left the release rather than being squeezed under the limit.
+#
+# They are applied out of band now -- `make install-crds` from a checkout, or the
+# netbox-operator-crds-<version>.yaml attached to the release -- and that has to happen
+# before this chart is installed. docs/install.md#crds has the sequence.
+#
+# `check` is what makes forgetting it a legible failure instead of a manager that
+# CrashLoops on "no matches for kind". Turn it off only where the render happens away from
+# the cluster and cannot see discovery: `helm template` without --api-versions, or a GitOps
+# renderer that does the same. It is a render-time assertion, not a runtime one, so
+# switching it off changes nothing about what gets installed.
+# ---------------------------------------------------------------------------------------
+crds:
+  check: true
+
 image:
   repository: ghcr.io/ricardomolendijk/netbox-operator
   # Empty means .Chart.AppVersion, which is the only place the version is written.

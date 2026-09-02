@@ -12,6 +12,11 @@
 # helm.sh/chart and app.kubernetes.io/version are stripped from every rendered object: both
 # are Chart.yaml's version string, not a privilege, and capturing them made every version
 # bump fail helm-verify with a diff that was 100% noise (#260).
+#
+# --api-versions names the operator's own group as well as the Prometheus Operator's,
+# because templates/crds-precondition.yaml refuses to render an install whose CRDs are
+# absent (#265) and `helm template` off a cluster sees no discovery. It renders nothing, so
+# the golden file is unchanged by it.
 set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -32,6 +37,7 @@ for values in "$chart/values.yaml" "$chart/ci/all-features-values.yaml"; do
     -n netbox-operator-system \
     -f "$values" \
     --api-versions monitoring.coreos.com/v1 \
+    --api-versions netbox.kubeforge.org/v1alpha1 \
     -s templates/clusterrole.yaml \
     -s templates/clusterrolebinding.yaml \
     -s templates/credential-rbac.yaml \
