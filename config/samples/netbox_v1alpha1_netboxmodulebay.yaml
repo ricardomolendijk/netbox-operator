@@ -24,9 +24,9 @@ spec:
   # of the lookup. It is never the module installed *in* this bay: that is
   # NetBoxModule.moduleBayRef, pointing the other way.
 
-  # The `{module}` token NetBox substitutes into the names of components a module installed
-  # here provides. A string, because NetBox's column is a CharField and slot identifiers are
-  # routinely "A1" or "0/1".
+  # The slot identifier. NetBox substitutes it for the `{module}` token when it instantiates
+  # an installed module's component templates, so it is data rather than decoration. A string,
+  # because the column is a CharField and slot identifiers are routinely "A1" or "0/1".
   position: "1"
 
   enabled: true

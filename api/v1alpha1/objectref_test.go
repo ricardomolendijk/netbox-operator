@@ -47,9 +47,10 @@ func TestRefAliasTargets(t *testing.T) {
 		{"rackType", RackTypeRef{}, "NetBoxRackType"},
 		{"rackGroup", RackGroupRef{}, "NetBoxRackGroup"},
 		{"rack", RackRef{}, "NetBoxRack"},
-		// The second target with no slug column, and the first in dcim:
-		// dcim.ModuleTypeProfile is unique on `name` alone (docs/netbox-schema.md), so a
-		// slug-mode ref matches nothing there either.
+		// The other reference target with no slug column, and the reason the module block
+		// has two: neither dcim.ModuleTypeProfile nor dcim.ModuleType has one, where
+		// dcim.Manufacturer, dcim.DeviceType, dcim.RackType and dcim.Platform all do
+		// (docs/netbox-schema.md). A slug-mode ref matches nothing against either.
 		{"moduleTypeProfile", ModuleTypeProfileRef{}, "NetBoxModuleTypeProfile"},
 		{"moduleType", ModuleTypeRef{}, "NetBoxModuleType"},
 		{"moduleBay", ModuleBayRef{}, "NetBoxModuleBay"},

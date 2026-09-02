@@ -67,9 +67,12 @@ type NetBoxModuleBaySpec struct {
 	// +optional
 	Label string `json:"label,omitempty"`
 
-	// Position is the identifier NetBox substitutes into the names of the components a
-	// module installed here provides -- the `{module}` token in a module type's templates
-	// (docs/netbox-schema.md -> dcim.ModuleBay, `position CharField len=30`).
+	// Position is the slot identifier, and NetBox uses it for more than display: it is what
+	// the `{module}` token in a module type's component templates is substituted with when a
+	// module installed here has its components instantiated
+	// (`ModuleBay.position`'s help text, NetBox 4.6.8
+	// `netbox/dcim/models/device_components.py`; the column itself is
+	// `position CharField len=30`, docs/netbox-schema.md -> dcim.ModuleBay).
 	//
 	// A string and not a number: NetBox's column is a CharField, and slot identifiers are
 	// routinely `A1` or `0/1`.
