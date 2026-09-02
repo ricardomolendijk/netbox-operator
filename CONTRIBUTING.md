@@ -201,6 +201,15 @@ Tools install themselves into `./bin` at pinned versions on first use — there 
 to install by hand, and your global toolchain cannot change generated output. `make test-e2e`
 installs `kind` and `helm` the same way, and only when it is actually going to use them.
 
+One pin is not independent of your toolchain: `golangci-lint` links its own copy of the Go
+type-checker, so a Go release newer than the pinned linter makes `make lint` fail every
+standard-library import with `export data version N is greater than maximum supported
+version M` and lint nothing. `make lint` detects that and names both versions. The fix is to
+raise `GOLANGCI_LINT_VERSION` in the Makefile and send it as its own PR — never a local
+workaround or a `nolint`. Getting the linter running again is worth the interruption: when it
+only runs in CI, a lint failure surfaces after you have pushed, which is how PR #275 merged red
+and needed PR #279 to repair `main` (issue #283).
+
 `make test-e2e` is the one target that needs a Docker daemon: it creates a kind cluster,
 brings up NetBox 4.6.8 with its Postgres and Redis, deploys the chart and applies the
 ordering gate's graph in dependency, reverse and seeded random order. Without Docker it
