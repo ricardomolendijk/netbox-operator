@@ -541,8 +541,14 @@ Two things an Argo CD `Application` needs either way:
       - ServerSideApply=true
 ```
 
-`ServerSideApply=true` because the CRDs are large enough that client-side apply's
-`last-applied-configuration` annotation exceeds what the API server accepts. And the ordering
+`ServerSideApply=true` for **ownership**, not for size. Argo CD's client-side apply takes
+sole ownership of every field it sends, so a CRD also touched by `make upgrade-crds` or by a
+Helm-managed install becomes a fight between two managers; server-side apply makes that a
+recorded co-ownership instead. It also drops the `last-applied-configuration` annotation,
+which for these CRDs is worth about 55% of the stored object — but that is a saving rather
+than a requirement. Earlier wording here said the annotation exceeded what the API server
+accepts: it does not. The largest is 98,381 bytes against a 262,144 byte cap, measured. And
+the ordering
 the [installing](../install.md#crds-and-why-they-are-not-in-the-chart) page states — CRDs
 before the manager, because a manager reconciling a field the old CRD prunes fails in a way
 that looks like an operator bug.

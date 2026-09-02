@@ -301,7 +301,12 @@ undeploy: kustomize ## Remove the manager from the current cluster.
 ##@ Chart
 
 CHART ?= charts/netbox-operator
-HELM  ?= helm
+# The pinned Helm, not whatever is on PATH. `make helm-verify` compares against a golden RBAC
+# render, and Helm 4 emits trailing blank lines Helm 3 does not -- so with an ambient
+# v4.2.4 the target fails on formatting for anyone who happens to have Helm 4 installed,
+# while CI (which installs the pinned v3.16.3) passes. A target that depends on a pinned tool
+# has to name it. Override HELM= to render with something else deliberately.
+HELM  ?= $(HELM_BIN)
 
 # Chart.yaml is the one place the version is written (see .github/workflows/release.yaml),
 # so the packaged filename and the CRD bundle's read it from there rather than repeat it.
@@ -373,7 +378,13 @@ HELM_GOLDEN ?= $(CHART)/ci/golden-rbac.yaml
 
 .PHONY: helm-golden
 helm-golden: ## Regenerate the golden RBAC render.
-	@./hack/helm-golden.sh >$(HELM_GOLDEN)
+	@# HELM= is passed explicitly: hack/helm-golden.sh reads it from the *environment*
+	@# (helm=${HELM:-helm}), and make does not export a variable it was not told to. Without
+	@# this the script silently used whatever helm was on PATH while every other chart target
+	@# used the pinned one -- and Helm 4 emits two trailing blank lines per document that
+	@# Helm 3 does not, so helm-verify failed on formatting for anyone with Helm 4 installed
+	@# and passed in CI, which installs the pin.
+	@HELM=$(HELM) ./hack/helm-golden.sh >$(HELM_GOLDEN)
 
 .PHONY: helm-verify
 helm-verify: helm-lint helm-template helm-golden ## Fail if the chart's rendered RBAC changed.
