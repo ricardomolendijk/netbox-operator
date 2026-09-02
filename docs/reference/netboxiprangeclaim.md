@@ -277,6 +277,7 @@ guest-pool                                            False   4m
 |---|---|---|---|
 | `START` empty, `READY` False forever | `Reason=IdempotencyKeyUnavailable` | the endpoint has no identity store | set `spec.managedBy.clusterID` |
 | `START` empty, message names another cr | `Reason=ForeignAllocation` | `spec.allocationIdentity` names a range somebody else owns | unset it, or have the owner release it |
+| `START` empty, message names a custom field to set | `Reason=ForeignAllocation` | `spec.allocationIdentity` names a range this endpoint cannot attribute to this claim | stamp it for this claim in NetBox as the message says, or unset the field |
 | `START` empty, retrying every 10m, message names five attempts | `Reason=AllocationContended` | the parent is busy | wait; if it persists, split the claims across parents |
 | `START` empty, retrying every 10m, message names the parent | `Reason=PoolExhausted` | no run of `size` addresses is free | widen the parent, or delete a range in NetBox |
 | `START` empty, refused immediately | `Reason=PoolNotAllocatable` | the parent has `mark_utilized` | clear the flag |
