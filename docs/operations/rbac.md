@@ -72,6 +72,40 @@ Two things follow, and both are worth acting on:
 `kubectl auth can-i --list -n <namespace> --as=$SA` prints what the grant really is. Note
 that it says nothing about labels, because the grant does not.
 
+## The other direction: what a CR *author* can make the operator do
+
+Everything above narrows what a **compromised manager** can read. It says nothing about what
+somebody who can only `create netboxendpoints` can make the manager read *for* them, and the
+two are not the same boundary.
+
+Creating a `NetBoxEndpoint` in a listed namespace is a request that the operator fetch a URL
+you chose, with a Secret you named, using the operator's ServiceAccount and the operator's
+network position. It needs `create netboxendpoints` in that namespace and **not** `get
+secrets` there. State it plainly:
+
+> **Create access to `NetBoxEndpoint` in a credential namespace is equivalent to use of
+> every labelled Secret in that namespace.**
+
+So a credential namespace is a trust boundary, and it should hold one team's credentials or
+one team's endpoints — not "the namespace with loose write access". The shipped default of
+`credentialNamespaces: [default]` is a starting point for a single-tenant install, not a
+recommendation for a shared cluster.
+
+What [#298](https://github.com/ricardomolendijk/netbox-operator/issues/298) has closed, and
+what it has not:
+
+| | Status |
+|---|---|
+| The response body is reflected back into the `Ready` condition and a Warning Event | **Closed.** Conditions and Events carry the status code, media type, length and NetBox's own `detail` string; the body itself goes to the manager's log at `-v=1`. |
+| `spec.url` carries a query string, so the appended `/api/status/` lands in a parameter and the request path is the author's | **Closed.** A query, a fragment and userinfo are rejected by CEL on the CRD, and again by `netbox.New` at reconcile. |
+| `spec.url` names any host the operator's pod can reach | **Open.** There is no host allowlist. The probe still happens, and its success or failure is still observable through the `Ready` condition. |
+| `tokenSecretRef` names a labelled Secret its author cannot read | **Open.** Nothing requires the Secret to consent to the endpoint using it. |
+
+The two open rows are a product decision — a deploy-time allowlist, an opt-in annotation on
+the Secret, or both — and are tracked on #298. Until one lands, the boundary is the one
+stated above: treat create access to `NetBoxEndpoint` in a credential namespace as use of
+that namespace's credentials.
+
 ## Adding a namespace
 
 **A Helm install adds it to the value**, whole list at a time, because Helm replaces a list

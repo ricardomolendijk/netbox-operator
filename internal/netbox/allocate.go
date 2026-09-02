@@ -439,7 +439,9 @@ func overlapping(err error) bool {
 		return false
 	}
 
-	return strings.Contains(strings.ToLower(invalid.Body), "overlap")
+	// On raw rather than Body: Body is a summary now (#298), and a summary that dropped
+	// the sentence would silently stop recognising contention and report Invalid instead.
+	return strings.Contains(strings.ToLower(invalid.raw), "overlap")
 }
 
 // hostOf reads the host part of a NetBox address column, which carries a mask

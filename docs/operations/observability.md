@@ -569,13 +569,19 @@ reason is the condition reason, so the two vocabularies cannot drift apart.
 | `VersionUnparseable` | Warning | `/api/status/` returned something that is not a version. |
 | `InvalidConfig` | Warning | The spec cannot produce a client: bad URL, unusable CA bundle. |
 
+An Event or a condition never quotes an upstream response body. It reports the status code,
+the media type, the length, and NetBox's own `detail` string when the body carries one — the
+body itself is on the manager's log at `-v=1`, because these two surfaces are readable by
+whoever chose the host that produced it
+([#298](https://github.com/ricardomolendijk/netbox-operator/issues/298)).
+
 ```console
 $ kubectl describe netboxendpoint homelab
 ...
 Events:
   Type     Reason      Age   From                       Message
   ----     ------      ----  ----                       -------
-  Warning  AuthError   12m   netboxendpoint-controller  netbox authentication or permission failure (401): {"detail":"Invalid token."}
+  Warning  AuthError   12m   netboxendpoint-controller  netbox authentication or permission failure (401): "Invalid token." (application/json, 27 bytes)
   Normal   Ready       2m    netboxendpoint-controller  netbox 4.6.8 at https://netbox.example.com accepted the token; client available
 ```
 

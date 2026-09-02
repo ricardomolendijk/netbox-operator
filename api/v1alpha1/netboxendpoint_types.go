@@ -258,8 +258,23 @@ type RateLimit struct {
 
 // NetBoxEndpointSpec describes one NetBox instance.
 type NetBoxEndpointSpec struct {
-	// URL of the NetBox instance, with or without a trailing /api.
+	// URL of the NetBox instance, with or without a trailing /api. A base URL and nothing
+	// else: scheme, host, optional port, optional path prefix. A query string, a fragment
+	// and userinfo are each rejected -- the operator appends the REST path to this value,
+	// so anything after it is not part of a NetBox base URL and changes what gets
+	// requested.
+	//
+	// These are layer 1 -- CEL on the CRD, enforced by the API server unconditionally --
+	// because each is a property of `self` alone, which is the line
+	// docs/operations/admission-webhooks.md draws. netbox.New's checkBaseURL is the
+	// reconcile-time backstop and carries the full reasoning.
+	//
+	// +kubebuilder:validation:MaxLength=2048
 	// +kubebuilder:validation:Pattern=`^https?://`
+	// +kubebuilder:validation:XValidation:rule="self.matches('^https?://[^/]')",message="url must name a host"
+	// +kubebuilder:validation:XValidation:rule="!self.contains('?')",message="url must not carry a query string: the operator appends /api and the rest of the REST path to it, so a query would absorb that suffix and choose the request path itself"
+	// +kubebuilder:validation:XValidation:rule="!self.contains('#')",message="url must not carry a fragment: a fragment is never sent to a server, so it can only mislead whoever reads it"
+	// +kubebuilder:validation:XValidation:rule="!self.contains('@')",message="url must not carry userinfo: the credential belongs in the Secret named by tokenSecretRef, not in a spec field that everyone who can read the CR can read"
 	URL string `json:"url"`
 
 	// TokenSecretRef names the Secret holding the API token. That Secret must be

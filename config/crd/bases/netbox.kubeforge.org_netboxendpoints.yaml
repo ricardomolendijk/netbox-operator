@@ -263,10 +263,34 @@ spec:
                 - name
                 type: object
               url:
-                description: URL of the NetBox instance, with or without a trailing
-                  /api.
+                description: |-
+                  URL of the NetBox instance, with or without a trailing /api. A base URL and nothing
+                  else: scheme, host, optional port, optional path prefix. A query string, a fragment
+                  and userinfo are each rejected -- the operator appends the REST path to this value,
+                  so anything after it is not part of a NetBox base URL and changes what gets
+                  requested.
+
+                  These are layer 1 -- CEL on the CRD, enforced by the API server unconditionally --
+                  because each is a property of `self` alone, which is the line
+                  docs/operations/admission-webhooks.md draws. netbox.New's checkBaseURL is the
+                  reconcile-time backstop and carries the full reasoning.
+                maxLength: 2048
                 pattern: ^https?://
                 type: string
+                x-kubernetes-validations:
+                - message: url must name a host
+                  rule: self.matches('^https?://[^/]')
+                - message: 'url must not carry a query string: the operator appends
+                    /api and the rest of the REST path to it, so a query would absorb
+                    that suffix and choose the request path itself'
+                  rule: '!self.contains(''?'')'
+                - message: 'url must not carry a fragment: a fragment is never sent
+                    to a server, so it can only mislead whoever reads it'
+                  rule: '!self.contains(''#'')'
+                - message: 'url must not carry userinfo: the credential belongs in
+                    the Secret named by tokenSecretRef, not in a spec field that everyone
+                    who can read the CR can read'
+                  rule: '!self.contains(''@'')'
             required:
             - tokenSecretRef
             - url

@@ -704,3 +704,95 @@ func (w *countingStatusWriter) Update(ctx context.Context, obj client.Object,
 
 	return w.SubResourceWriter.Update(ctx, obj, opts...)
 }
+
+// TestUpstreamBodyDoesNotReachTheConditions is #298's Path B at the surface it is read
+// from. The endpoint probe fires on the first reconcile, before anything else, and fail()
+// writes cause.Error() into the Ready condition and a Warning Event -- both readable by
+// whoever wrote spec.url, and therefore by whoever chose the host that produced the body.
+func TestUpstreamBodyDoesNotReachTheConditions(t *testing.T) {
+	const marker = "eyJzZWNyZXQiOiJub3QteW91cnMifQ"
+
+	k8s, ns := k8sClient, newNamespace(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = fmt.Fprintf(w, `{"AccessKeyId":"AKIA","Token":%q}`, marker)
+	}))
+	t.Cleanup(srv.Close)
+	makeSecret(t, k8s, ns, "nb-token", "some-token")
+	makeEndpoint(t, k8s, ns, "reflect", srv.URL, "nb-token", netboxv1alpha1.EndpointModeApply)
+
+	eventually(t, "Ready=False", func() bool {
+		e := fetch(t, k8s, ns, "reflect")
+		if e == nil {
+			return false
+		}
+		c := conditionOf(e, netboxv1alpha1.ConditionReady)
+		return c != nil && c.Status == metav1.ConditionFalse
+	})
+
+	e := mustFetch(t, k8s, ns, "reflect")
+	for _, name := range []string{
+		netboxv1alpha1.ConditionReady,
+		netboxv1alpha1.ConditionAuthenticated,
+		netboxv1alpha1.ConditionVersionSupported,
+	} {
+		c := conditionOf(e, name)
+		if c == nil {
+			continue
+		}
+		if strings.Contains(c.Message, marker) {
+			t.Errorf("%s carries the upstream response body: %q", name, c.Message)
+		}
+	}
+	// Still diagnosable: the reader has to be able to tell a 403 from a 500 and NetBox
+	// from an HTML error page without reading the manager's log.
+	if msg := conditionOf(e, netboxv1alpha1.ConditionReady).Message; !strings.Contains(msg, "403") ||
+		!strings.Contains(msg, "bytes") {
+		t.Errorf("Ready message = %q, want the status code and the body's shape", msg)
+	}
+}
+
+// TestEndpointURLShapeIsRejectedAtAdmission is #298's Path B closed one layer earlier, by
+// CEL on the CRD -- so it holds whether or not anything is serving the webhook, whose
+// failurePolicy is Ignore.
+func TestEndpointURLShapeIsRejectedAtAdmission(t *testing.T) {
+	ns := newNamespace(t)
+
+	for name, tc := range map[string]struct{ url, want string }{
+		// The one with teeth: `/api/status/` is appended to this, so the request path
+		// becomes /latest/meta-data/... and the suffix lands in `z`.
+		"query string":  {"http://192.0.2.1/latest/meta-data?z=", "query string"},
+		"empty query":   {"https://netbox.example/api?", "query string"},
+		"fragment":      {"https://netbox.example/api#frag", "fragment"},
+		"userinfo":      {"https://user:s3cr3t@netbox.example/api", "userinfo"},
+		"no host":       {"https:///api", "host"},
+		"still a url":   {"notaurl", "url"},
+		"still a shape": {"https://netbox.example/api", ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			endpoint := &netboxv1alpha1.NetBoxEndpoint{
+				ObjectMeta: metav1.ObjectMeta{Name: "shape-" + strings.ReplaceAll(name, " ", "-"), Namespace: ns},
+				Spec: netboxv1alpha1.NetBoxEndpointSpec{
+					URL:            tc.url,
+					TokenSecretRef: netboxv1alpha1.SecretKeyRef{Name: "nb-token", Key: "token"},
+				},
+			}
+			err := k8sClient.Create(context.Background(), endpoint)
+			if tc.want == "" {
+				if err != nil {
+					t.Fatalf("a plain netbox url was rejected: %v", err)
+				}
+				t.Cleanup(func() { _ = k8sClient.Delete(context.Background(), endpoint) })
+				return
+			}
+			if err == nil {
+				t.Cleanup(func() { _ = k8sClient.Delete(context.Background(), endpoint) })
+				t.Fatalf("the api server admitted spec.url = %q", tc.url)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("rejection = %v, want it to name %q so the author knows what to fix", err, tc.want)
+			}
+		})
+	}
+}

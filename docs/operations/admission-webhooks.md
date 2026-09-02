@@ -39,6 +39,14 @@ enforced, it is a marker in `api/v1alpha1`:
 - `NetBoxIPAddressClaim`'s immutable `prefixRef` and `allocationIdentity`.
 - A grant's `namespaces: Selector` requiring a non-empty selector, and `namespaces: All`
   refusing one.
+- `NetBoxEndpoint.spec.url` being a *base* URL: no query string, no fragment, no userinfo,
+  and a host (`netboxendpoint_types.go`). Layer 1 because each is a property of `self`
+  alone, and worth stating because it is a security rule rather than a tidiness one — the
+  client appends the REST path to this value, so a query string on the end absorbs it and
+  chooses the request path instead
+  ([#298](https://github.com/ricardomolendijk/netbox-operator/issues/298)). `netbox.New`
+  refuses the same four shapes at reconcile, which is what the row in the table below
+  refers to.
 
 ### What this webhook checks
 
@@ -107,6 +115,7 @@ writes.
 | endpoint absent or not `Ready` | warning | `Reason=WaitingForEndpoint` — unchanged |
 | grant naming an unknown Kind | warning | the grant silently permits nothing for that Kind |
 | cross-namespace collision | not checked | `Conflict` — unchanged |
+| `spec.url` carrying a query, fragment or userinfo | rejected by **CEL** | rejected by CEL — and by `netbox.New`, as `Ready=False, Reason=InvalidConfig`, before any request is made |
 | everything in layer 1 | rejected by **CEL** | rejected by CEL — unchanged |
 
 The last row is the important one. `spec.endpointRef` immutability, `spec.prefix`'s CIDR check,

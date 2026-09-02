@@ -118,12 +118,18 @@ func New(cfg Config) (*Client, error) {
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
 		return nil, fmt.Errorf("netbox url %q must be http or https", RedactURL(cfg.URL))
 	}
+	if err := checkBaseURL(parsed, cfg.URL); err != nil {
+		return nil, err
+	}
 
 	transport, err := buildTransport(cfg)
 	if err != nil {
 		return nil, err
 	}
 
+	// Safe as string surgery only because checkBaseURL has just established that
+	// parsed.String() is scheme, authority and path and nothing else. With a query on the
+	// end, "/api" and every path after it lands inside a parameter value instead.
 	base := strings.TrimSuffix(parsed.String(), "/api") + "/api"
 	client := &Client{
 		base:       base,
@@ -140,6 +146,46 @@ func New(cfg Config) (*Client, error) {
 		client.limiter = rate.NewLimiter(rate.Limit(cfg.QPS), orDefaultInt(cfg.Burst, int(cfg.QPS)))
 	}
 	return client, nil
+}
+
+// checkBaseURL refuses the url shapes that are not a NetBox base url.
+//
+// This is the reconcile-time half of the rule; the other half is the CEL on
+// NetBoxEndpointSpec.URL, which rejects the same three shapes at apply time. Both exist
+// because the validating webhook's failurePolicy is Ignore and CEL is skipped for any
+// client that builds a Config without going through the API server at all -- the manager's
+// own flags, and every test. docs/operations/admission-webhooks.md: every denial has a
+// reconcile-time backstop, and the backstop is the authority.
+//
+// Refusing rather than stripping. Stripping would make the endpoint work while quietly
+// meaning something other than what was written, and the whole complaint in #298 is a url
+// that means something other than it looks like it means.
+//
+// raw is passed separately so the message quotes what the operator wrote, not the
+// normalised form -- and redacted, because a url with a password in it is exactly one of
+// the shapes being rejected here, and this error is rendered into a condition.
+func checkBaseURL(parsed *url.URL, raw string) error {
+	switch {
+	case parsed.Host == "":
+		return fmt.Errorf("netbox url %q must name a host", RedactURL(raw))
+	case parsed.User != nil:
+		// Not "the password leaks": that is true but secondary. A NetBox token goes in the
+		// Authorization header from a Secret, so userinfo here is either a credential in a
+		// world-readable spec field or a mistake.
+		return fmt.Errorf("netbox url %q must not carry userinfo; put the credential in the"+
+			" secret named by tokenSecretRef", RedactURL(raw))
+	case parsed.RawQuery != "" || parsed.ForceQuery:
+		// The one with teeth. Every request path is appended to this url, so a query on the
+		// end swallows "/api/status/" as a parameter value and the path that is actually
+		// requested is whatever was written before the "?" (#298).
+		return fmt.Errorf("netbox url %q must not carry a query string: the rest of the api"+
+			" path is appended to it, so a query would absorb that suffix and choose the"+
+			" request path itself", RedactURL(raw))
+	case parsed.Fragment != "":
+		return fmt.Errorf("netbox url %q must not carry a fragment: a fragment is never sent"+
+			" to a server", RedactURL(raw))
+	}
+	return nil
 }
 
 func buildTransport(cfg Config) (http.RoundTripper, error) {

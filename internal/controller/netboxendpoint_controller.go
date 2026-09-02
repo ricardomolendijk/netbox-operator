@@ -161,12 +161,12 @@ func (r *NetBoxEndpointReconciler) ready(ctx context.Context, e *netboxv1alpha1.
 	became := transitioned(e, netboxv1alpha1.ConditionReady, metav1.ConditionTrue,
 		netboxv1alpha1.ReasonReady)
 
-	// Redacted, both times. spec.url only has to match `^https?://`, so it may carry
-	// userinfo -- `https://user:password@netbox` is a shape a proxy in front of NetBox asks
-	// for -- and this line goes to the manager's stdout while the Event below becomes a
-	// namespaced object that the built-in `view` role can read. netbox.Config.Token carries
-	// "never logged, at any level"; the credential in a url deserves the same, and had it
-	// only because nothing was looking (see redactURL).
+	// Redacted, both times, and still redacted now that `spec.url` refuses userinfo
+	// outright (#298): admission is not the only way a Config reaches netbox.New, the CEL
+	// rule is only as old as this release, and this line goes to the manager's stdout while
+	// the Event below becomes a namespaced object that the built-in `view` role can read.
+	// netbox.Config.Token carries "never logged, at any level"; a credential someone put in
+	// a url before the rule existed deserves the same (see RedactURL).
 	shown := netbox.RedactURL(e.Spec.URL)
 
 	logf.FromContext(ctx).V(debugUnless(became)).Info("endpoint ready",
