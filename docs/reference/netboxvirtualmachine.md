@@ -508,6 +508,34 @@ Free text, `MaxLength=50` / `200` / none. Omit any of them to leave NetBox's own
 set one to `""` to clear it. Those are different instructions
 ([field ownership](../concepts/field-ownership.md)).
 
+### `spec.localContextData`
+
+| | |
+|---|---|
+| Type | JSON object (`x-kubernetes-preserve-unknown-fields`) |
+| Required | no |
+| Default | none |
+| Validation | `type: object`; the contents are NetBox's business |
+
+This VM's own slice of config context: the document NetBox merges **last** when it renders the
+VM's configuration, after every [`NetBoxConfigContext`](netboxconfigcontext.md) whose selectors
+matched (`docs/netbox-schema.md` → `virtualization.VirtualMachine`,
+`local_context_data (ConfigContextModel) JSONField`).
+
+```yaml
+spec:
+  localContextData:
+    ansible_user: svc-deploy
+    ntp:
+      servers: ["10.0.0.1"]
+```
+
+The same column `dcim.Device` carries, from the same `ConfigContextModel` mixin, behaving the
+same way — a per-object override that wins every merge collision, rather than a reference to
+something shared. [`NetBoxDevice`](netboxdevice.md#speclocalcontextdata) states the reasoning,
+the whole-document comparison and the `{}`-not-`null` clearing rule at length; all of it
+applies here unchanged.
+
 ### What is deliberately absent
 
 - **`macAddress` / `primaryMACAddressRef`.** NetBox 4.2 moved the MAC to `dcim.MACAddress`
@@ -515,7 +543,10 @@ set one to `""` to clear it. Those are different instructions
   `virtualization.VMInterface` lists only `mac_addresses GenericRelation` — a reverse
   relation, never a column. `NetBoxMACAddress` is NBO-048.
 - **`virtualMachineTypeRef`** — `virtualization.VirtualMachineType` has no ticket (NBO-060).
-- **`configTemplateRef` and `localContextData`** — NBO-059.
+- **`configTemplateRef`** — NBO-059. `localContextData` was listed here with it and is now
+  [`spec.localContextData`](#speclocalcontextdata): unlike the config template it references no
+  other Kind, so nothing was blocking it
+  ([#241](https://github.com/ricardomolendijk/netbox-operator/issues/241)).
 - **`oobIPRef`** — `VirtualMachine` has no such column; only `dcim.Device` does.
 - **`services` inline** — `ipam.Service` is NBO-055, so there is no child kind to
   materialise yet.

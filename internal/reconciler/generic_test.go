@@ -549,7 +549,12 @@ func TestEngineReconcileUnregisteredKind(t *testing.T) {
 // TestEngineReconcileStatusWriteFails checks the one error worth returning from the write
 // path: a failed status update has to be retried, or the object's status silently lags its
 // NetBox object forever.
+//
+// The id of the object it just created is kept regardless, and that is asserted here rather
+// than only on the lost-race path: a status write refused for any reason at all leaves NetBox
+// holding an object whose id nothing in Kubernetes knows (issues #289 and #291, recordID).
 func TestEngineReconcileStatusWriteFails(t *testing.T) {
+	ids := &apiServer{}
 	engine := &Engine{
 		Descriptors: fakeDescriptors{descriptor: fakeDescriptor(), registered: true},
 		Endpoints: fakeEndpoints{
@@ -557,6 +562,7 @@ func TestEngineReconcileStatusWriteFails(t *testing.T) {
 			ready:    true,
 		},
 		Status:     &fakeStatus{err: errStatusWrite},
+		IDs:        ids,
 		LiveStatus: &fakeLiveStatus{},
 		Finalizers: &fakeFinalizers{},
 		Scheme:     fakeScheme(t),
@@ -564,6 +570,10 @@ func TestEngineReconcileStatusWriteFails(t *testing.T) {
 
 	if _, err := engine.Reconcile(context.Background(), fakeObject()); err == nil {
 		t.Fatal("Reconcile() = nil, want the status write error")
+	}
+
+	if ids.status.ID != 7 {
+		t.Errorf("recorded status.id = %d, want 7", ids.status.ID)
 	}
 }
 

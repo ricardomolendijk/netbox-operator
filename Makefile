@@ -12,7 +12,18 @@ IMG ?= netbox-operator:latest
 # Tool versions -- pinned, never @latest.
 CONTROLLER_TOOLS_VERSION ?= v0.19.0
 KUSTOMIZE_VERSION        ?= v5.5.0
-GOLANGCI_LINT_VERSION    ?= v2.6.1
+# Unlike every other pin here, this one is tied to the Go toolchain and not only to the tool's
+# own behaviour: golangci-lint links its own copy of the type-checker (through x/tools) and can
+# only read the export data written by the Go releases it was built for. v2.6.1 links x/tools
+# v0.38.0, which stops at export data version 2; Go 1.27 writes version 4, so on a 1.27 machine
+# the linter failed every import of the standard library with "export data version 4 is greater
+# than maximum supported version 2" and linted nothing at all. The pin therefore stopped meaning
+# "local and CI agree" and started meaning "only CI can run this" -- which is how #275 merged
+# with a one-line prealloc finding its author had no way to see (#283, and #279 to repair it).
+# v2.13.0 added Go 1.27 support; v2.13.2 is that line's current patch. It still declares Go
+# 1.26.0 as its minimum, so it runs on the toolchain go.mod pins for CI as well as on a
+# contributor's 1.27.
+GOLANGCI_LINT_VERSION    ?= v2.13.2
 ENVTEST_VERSION          ?= release-0.22
 ENVTEST_K8S_VERSION      ?= 1.34.0
 KIND_VERSION             ?= v0.30.0
@@ -30,6 +41,12 @@ GOLANGCI_LINT  ?= $(LOCALBIN)/golangci-lint
 ENVTEST        ?= $(LOCALBIN)/setup-envtest
 KIND           ?= $(LOCALBIN)/kind
 HELM_BIN       ?= $(LOCALBIN)/helm
+
+# Where controller-gen writes the CRDs before hack/crd-nullable.sh publishes them into
+# config/crd/bases. Under $(LOCALBIN) because it is generator scratch rather than output:
+# bin/ is already gitignored and already what `make clean` takes away, and a staging
+# directory under config/ would be picked up by `make verify`'s tree.
+CRD_STAGE      ?= $(LOCALBIN)/crd-stage
 
 $(LOCALBIN):
 	mkdir -p $(LOCALBIN)
@@ -55,9 +72,18 @@ manifests: controller-gen ## Generate CRDs and RBAC into config/.
 	@# controller-gen fails hard on a path pattern that matches no package, and git does
 	@# not track empty directories, so a fresh checkout has no ./internal/... until the
 	@# first controller lands. Found by CI on exactly that clean checkout.
+	@# The CRDs go to a staging directory and hack/crd-nullable.sh publishes them from
+	@# there, so that a CRD only ever appears in config/crd/bases with the nullable flag
+	@# already on it. Writing them straight into config/crd/bases published every CRD
+	@# incorrect for the couple of seconds the post-passes take, which is long enough for a
+	@# concurrent envtest suite to install one and fail on a feature that works (#276); the
+	@# script's own header carries the full reasoning. Emptied first, because controller-gen
+	@# only ever writes: a leftover CRD for a deleted Kind would otherwise be republished
+	@# for ever.
+	rm -rf $(CRD_STAGE)
 	$(CONTROLLER_GEN) rbac:roleName=manager-role crd webhook \
 		paths="./..." \
-		output:crd:artifacts:config=config/crd/bases \
+		output:crd:artifacts:config=$(CRD_STAGE) \
 		output:rbac:artifacts:config=config/rbac \
 		output:webhook:artifacts:config=config/webhook
 	@# The Secret grant controller-gen cannot express: a marker only ever produces a
@@ -68,7 +94,7 @@ manifests: controller-gen ## Generate CRDs and RBAC into config/.
 	@# The nullable flag controller-gen cannot express: `nullable` is a field marker and the
 	@# nullable thing is spec.customFields' map *values*, whose null means "remove this
 	@# custom field" (#196). Without it the API server prunes the null before validation.
-	./hack/crd-nullable.sh
+	./hack/crd-nullable.sh $(CRD_STAGE)
 	@# The chart's copies of the two things config/ generates: the CRDs and the manager
 	@# ClusterRole's rules. Hand-maintaining 22 CRDs and a rule list that grows with every
 	@# kind is wrong within one release, so it is a copy and `make verify` checks it.
@@ -84,7 +110,35 @@ vet: ## Run go vet.
 
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint.
-	$(GOLANGCI_LINT) run
+	@# The run goes through a log so the failure the pin above describes can be translated
+	@# the next time it happens -- and it will happen again, because roughly once a year a Go
+	@# release changes the export data format and every linter built before it stops being
+	@# able to typecheck anything. The diagnostic golangci-lint emits for that names neither
+	@# Go nor golangci-lint: it reports the standard-library imports of some package nobody
+	@# touched as typecheck errors and gives up, which reads as a broken repository rather
+	@# than a stale tool. It read that way for long enough to merge #275 with lint red, so
+	@# say which two versions disagree and which line moves, rather than leaving the next
+	@# contributor to decode it (#283).
+	@# --color is passed explicitly because tee makes stdout a pipe, and the linter would
+	@# otherwise drop the colour it prints when run from a terminal.
+	@set -o pipefail; \
+	if [ -t 1 ]; then color=always; else color=never; fi; \
+	log=$$(mktemp); \
+	trap 'rm -f "$$log"' EXIT; \
+	if $(GOLANGCI_LINT) run --color=$$color 2>&1 | tee "$$log"; then exit 0; fi; \
+	if grep -q 'export data version' "$$log"; then \
+		echo; \
+		echo "The linter typechecked nothing above: it cannot read this Go toolchain."; \
+		echo "  local toolchain:  $$(go version)"; \
+		echo "  pinned linter:    golangci-lint $(GOLANGCI_LINT_VERSION), built against an older Go"; \
+		echo "golangci-lint carries its own copy of the Go type-checker, so a Go release that"; \
+		echo "changes the export data format makes an older linter unusable. The errors above"; \
+		echo "are the standard library failing to import; they are not your change."; \
+		echo "Fix: raise GOLANGCI_LINT_VERSION in the Makefile to a release that supports this"; \
+		echo "Go (https://github.com/golangci/golangci-lint/releases), send that bump as its own"; \
+		echo "PR, and keep go.mod's toolchain and CI on the same Go. Do not reach for nolint."; \
+	fi; \
+	exit 1
 
 .PHONY: lint-fix
 lint-fix: golangci-lint ## Run golangci-lint and apply fixes.
@@ -262,7 +316,17 @@ undeploy: kustomize ## Remove the manager from the current cluster.
 ##@ Chart
 
 CHART ?= charts/netbox-operator
-HELM  ?= helm
+# The pinned Helm when there is one, otherwise whatever is on PATH.
+#
+# `make helm-verify` compares against a golden RBAC render, and Helm 4 emits trailing blank
+# lines Helm 3 does not -- so an ambient v4.2.4 fails the target on pure formatting while CI,
+# which installs the pinned v3.16.3 onto PATH, passes. Preferring ./bin/helm fixes that for
+# anyone who has run `make helm-bin` once.
+#
+# Conditional rather than a hard $(HELM_BIN): CI installs Helm to /usr/local/bin and never
+# populates ./bin, so pointing at it unconditionally breaks the chart job with "No such file
+# or directory" -- which is exactly what happened on the first attempt at this change.
+HELM  ?= $(shell test -x "$(HELM_BIN)" && echo "$(HELM_BIN)" || echo helm)
 
 # Chart.yaml is the one place the version is written (see .github/workflows/release.yaml),
 # so the packaged filename and the CRD bundle's read it from there rather than repeat it.
@@ -334,7 +398,13 @@ HELM_GOLDEN ?= $(CHART)/ci/golden-rbac.yaml
 
 .PHONY: helm-golden
 helm-golden: ## Regenerate the golden RBAC render.
-	@./hack/helm-golden.sh >$(HELM_GOLDEN)
+	@# HELM= is passed explicitly: hack/helm-golden.sh reads it from the *environment*
+	@# (helm=${HELM:-helm}), and make does not export a variable it was not told to. Without
+	@# this the script silently used whatever helm was on PATH while every other chart target
+	@# used the pinned one -- and Helm 4 emits two trailing blank lines per document that
+	@# Helm 3 does not, so helm-verify failed on formatting for anyone with Helm 4 installed
+	@# and passed in CI, which installs the pin.
+	@HELM=$(HELM) ./hack/helm-golden.sh >$(HELM_GOLDEN)
 
 .PHONY: helm-verify
 helm-verify: helm-lint helm-template helm-golden ## Fail if the chart's rendered RBAC changed.

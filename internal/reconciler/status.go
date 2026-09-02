@@ -206,7 +206,21 @@ func (p *pass) finish(ctx context.Context, requeue time.Duration) (ctrl.Result, 
 	}
 
 	if err := p.engine.Status.UpdateStatus(ctx, p.obj); err != nil {
+		// Before either branch below decides what the failure means, because it is true of
+		// both: everything this pass computed can be computed again except the id of an object
+		// it has just created, and that one is lost unless it is written now.
+		recorded := p.recordID(ctx)
+
 		if staleStatusWrite(ctx, err) {
+			if recorded != nil {
+				// The refused status write is the ordinary outcome of a cached read and would
+				// have been a requeue; failing to keep the id is not, so this is the error the
+				// pass reports and the one controller-runtime backs off on.
+				p.result = metrics.ResultError
+
+				return ctrl.Result{}, recorded
+			}
+
 			p.result = metrics.ResultWaiting
 
 			return ctrl.Result{RequeueAfter: Jitter(staleRetry)}, nil
@@ -222,6 +236,57 @@ func (p *pass) finish(ctx context.Context, requeue time.Duration) (ctrl.Result, 
 	}
 
 	return ctrl.Result{RequeueAfter: Jitter(requeue)}, nil
+}
+
+// recordID persists the id of a NetBox object this pass created, when the status write that
+// was carrying it did not land.
+//
+// This is the exception staleStatusWrite's reasoning does not cover, and the one it costs the
+// most to be wrong about. Dropping a refused pass's conclusions is safe because "the next pass
+// reads the caught-up copy and reaches the same conclusions again if they still hold" -- true
+// of every conclusion but one. *I created NetBox object 4001* cannot be reached again: the API
+// server's copy has status.id == 0, so the next pass falls through to the natural key, finds
+// the object the operator itself made, has no evidence it is its own, and refuses to adopt on a
+// guess. The CR is then Ready=False/Conflict for ever, advising spec.onConflict: Adopt on an
+// object nothing else has ever touched -- which is exactly the advice issue #252 established is
+// harmful -- and NetBox holds an orphan (issues #289 and #291).
+//
+// So the id goes back on its own, through a writer that carries no resourceVersion and
+// therefore cannot lose the same race twice (IDWriter). Nothing else from the refused pass goes
+// with it: an id is a fact NetBox minted for a POST that has already happened, while a
+// condition or a hash is a conclusion drawn from a read that turned out to be stale, and the
+// whole of #252's second half is that those two must not be written by the same call.
+//
+// Only for an id this pass proved by writing to NetBox (applyWrite sets newID). An adoption is
+// deliberately not included: the next pass matches the same natural key, and its policy is
+// Adopt by construction, so it takes the same object over again.
+func (p *pass) recordID(ctx context.Context) error {
+	if p.newID == 0 {
+		return nil
+	}
+
+	if p.engine.IDs == nil {
+		return fmt.Errorf("%w: no id writer, so the netbox object this pass created cannot be "+
+			"recorded", errNotConfigured)
+	}
+
+	if err := p.engine.IDs.RecordID(ctx, p.obj, p.newID); err != nil {
+		err = fmt.Errorf("recording netbox %s/%d on %s/%s: %w", p.desc.Endpoint, p.newID,
+			p.obj.GetNamespace(), p.obj.GetName(), err)
+
+		// At error level, and one of the few places that earns it: the object exists in NetBox
+		// and nothing in Kubernetes knows its id, which is the one state this engine cannot
+		// reconcile its way out of on an endpoint with no provenance stamp to recognise it by.
+		logf.FromContext(ctx).Error(err, "the netbox object this pass created may be orphaned",
+			"netboxID", p.newID, "action", "record")
+
+		return err
+	}
+
+	logf.FromContext(ctx).Info("kept the id of the netbox object this pass created, past a "+
+		"status write that lost", "netboxID", p.newID, "action", "record")
+
+	return nil
 }
 
 // staleStatusWrite reports whether err is a status write the API server refused because

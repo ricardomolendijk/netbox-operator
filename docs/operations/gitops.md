@@ -290,6 +290,9 @@ Most of this recovers itself, and the addresses come back unchanged:
    the address is literal in the child `NetBoxIPAddress`'s spec — the claim itself never
    re-allocates
    ([ADR-0004](../decisions/0004-claims-first-allocation.md#statusaddress-is-immutable-the-operator-never-re-allocates)).
+   That is the right outcome only while the backup is *newer* than the allocation. A snapshot
+   taken before it can hand the same address to two claims: see
+   [what survives what](#what-survives-what).
 5. **Check what did not come back.** Every CR reaching `Ready=True` means the operator has
    rebuilt everything it manages. Anything else in NetBox — hand-made objects, another
    tool's, another cluster's — is outside this operator's reach and outside its ability to
@@ -316,13 +319,79 @@ If the cluster is being rebuilt from Git *and* NetBox from backup, the order mat
 
 | What was lost | Does an allocated address survive? | Because |
 |---|---|---|
-| NetBox, restored from backup; cluster intact | **Yes** | The child `NetBoxIPAddress` holds the address literally in its spec, and the claim never re-allocates |
+| NetBox, restored from a backup **taken after** the allocation; cluster intact | **Yes** | The child `NetBoxIPAddress` holds the address literally in its spec, and the claim never re-allocates |
+| NetBox, restored from a snapshot **predating** the allocation; cluster intact | **Yes — and a second claim may be handed it too** | The restored database has no record of the address, so NetBox offers it as free to the next claim that asks, and the claim already holding it never re-reads its pin to notice ([#167](https://github.com/ricardomolendijk/netbox-operator/issues/167)) |
 | Cluster, rebuilt from Git; NetBox intact | **Yes** | The deterministic allocation identity finds the existing object and adopts it (ADR-0005 §3) |
 | Both; NetBox restored first | **Yes, for everything the backup contains** | Reclaim by identity finds the restored object |
 | Both; NetBox empty or restored afterwards | **No** | Nothing holds the value any more, so every claim allocates afresh |
 
-The bottom row is the only genuine loss, and it is a NetBox backup problem rather than a Git
-one. If a specific address must survive even that, then it is not really a claim: put it in
+**The second row is the one to plan against, because nothing in the system reports it.**
+`status.address` is a pin, not a lease: a claim that has allocated short-circuits before it
+reaches the endpoint at all — the steady state of a settled claim is a reconcile that talks to
+nobody, which is what makes "reconcile fifty times, POST once" structural
+([ADR-0004](../decisions/0004-claims-first-allocation.md#statusaddress-is-immutable-the-operator-never-re-allocates)).
+So a claim that allocated its address after the snapshot goes on reporting `Allocated=True`
+for it, while the restored NetBox — which has never heard of that address — offers it to the
+next claim that asks. Two claims, one address, both `Ready=True`, and neither of them did
+anything wrong. Each of the three mechanisms this page recommends misses it for its own
+reason:
+
+- **Reclaim by identity** ([ADR-0005 §3](../decisions/0005-gitops-coexistence.md#3-allocations-survive-a-cluster-rebuild-without-writing-to-git))
+  works by finding the object that already holds the address. The restore erased the row it
+  would have found.
+- **`onConflict: Adopt`**, which this page recommends keeping in Git for the objects this
+  operator owns, will remove the one place a `Conflict` would have surfaced — once claims
+  materialise their child `NetBoxIPAddress` at all. They do not yet (NBO-032, [#45]
+  (https://github.com/ricardomolendijk/netbox-operator/issues/45)); `status.address` is the
+  only record today. When that child does land, re-creating it under `Adopt` would take over
+  whatever sits at the address by then, which may be the second claim's object — so this row
+  gets worse, not better, unless the guard lands first.
+- **Reading `status.address` afterwards**, [step 3 of a both-lost restore](#both-were-lost),
+  reads the pin — and the pin is the thing that is wrong.
+
+The check that does find it compares the pin against NetBox rather than trusting it: for each
+claim, `GET /api/ipam/ip-addresses/?address=<status.address>` and compare the object's
+allocation-identity custom field with the claim's `status.allocationIdentity`. The field is
+`cf_k8s_allocation_identity` unless the endpoint renamed it — `spec.managedBy.allocationIdentityField`
+is configurable, and reading the default on an endpoint that set something else returns
+nothing and reads as "no hazard here". No object where a settled claim says there is one, or
+an object carrying somebody else's identity, is this hazard.
+
+The remedy is a human's, because both claims are entitled to the address and only you know
+which NIC, DNS record or firewall rule is already using it.
+
+!!! danger "Do not simply delete the losing claim"
+
+    A claim never re-allocates under its own name, so the instinct is to delete the CR and
+    re-create it under a different name — which does derive a new
+    [allocation identity](#claims-which-have-no-onconflict-to-set) and allocate afresh. **In
+    this scenario that can delete the address you decided to keep.** Deleting a claim frees
+    its address by `DELETE`ing the NetBox object at the id in `status.netboxID`
+    (`internal/reconciler/claim.go:1286`), unconditionally — nothing re-checks that the object
+    still carries this claim's allocation identity. After a restore, that id came from the
+    pre-restore database and the restored one has reissued it, quite possibly to the surviving
+    claim's address.
+
+    Free the losing claim by a route that cannot delete anything, in order of preference:
+
+    1. Set `spec.deletionPolicy: Retain` on it **before** deleting the CR
+       (`internal/reconciler/claim.go:1229`), which leaves the NetBox object alone.
+    2. Or delete the NetBox object by hand first, then delete the CR, so the id is stale in
+       the harmless direction.
+    3. Break-glass only: the `netbox.kubeforge.org/skip-finalizer: "true"` annotation
+       (`internal/reconciler/claim.go:1218`) drops the finalizer without touching NetBox.
+
+The rule the whole row reduces to: **do not restore a snapshot older than your live
+allocations without reconciling them against `status.address` first.**
+
+Whether the engine should catch this itself — a settled claim re-reading its address on the
+quiet path and reporting `Conflict` when another allocation identity holds it — is tracked on
+[#167](https://github.com/ricardomolendijk/netbox-operator/issues/167). Until that lands, the
+check above is the only thing standing in front of it.
+
+The bottom row is the only *unrecoverable* loss, and it is a NetBox backup problem rather than
+a Git one — the second row is recoverable, but only by the human check above, which is why it
+is the one to plan against. If a specific address must survive even that, then it is not really a claim: put it in
 Git as a `NetBoxIPAddress` with an explicit `spec.address`, which is the kind that exists for
 exactly that requirement. A claim means "I don't want to know", and its address lives
 wherever NetBox lives.
@@ -541,8 +610,14 @@ Two things an Argo CD `Application` needs either way:
       - ServerSideApply=true
 ```
 
-`ServerSideApply=true` because the CRDs are large enough that client-side apply's
-`last-applied-configuration` annotation exceeds what the API server accepts. And the ordering
+`ServerSideApply=true` for **ownership**, not for size. Argo CD's client-side apply takes
+sole ownership of every field it sends, so a CRD also touched by `make upgrade-crds` or by a
+Helm-managed install becomes a fight between two managers; server-side apply makes that a
+recorded co-ownership instead. It also drops the `last-applied-configuration` annotation,
+which for these CRDs is worth about 55% of the stored object — but that is a saving rather
+than a requirement. Earlier wording here said the annotation exceeded what the API server
+accepts: it does not. The largest is 98,381 bytes against a 262,144 byte cap, measured. And
+the ordering
 the [installing](../install.md#crds-and-why-they-are-not-in-the-chart) page states — CRDs
 before the manager, because a manager reconciling a field the old CRD prunes fails in a way
 that looks like an operator bug.

@@ -72,17 +72,27 @@ A final spec then asserts, over **every** run at once, that
 `error`-level line. Every waiting state in this graph is a legitimate intermediate state, so
 any of them arriving through an error path is a bug.
 
-Once, at the end, rather than inside each run — because it is currently **red**.
-[#252](https://github.com/ricardomolendijk/netbox-operator/issues/252) makes the second
+Once, at the end, rather than inside each run. It was written that way while
+[#252](https://github.com/ricardomolendijk/netbox-operator/issues/252) made it red: the second
 reconcile of almost every object read a stale `status.id` from the informer cache, briefly
-accuse the operator of a foreign NetBox object, and lose its own status write to a 409.
-Asserting that inside each pass would stop the suite at the forward run and leave the twenty
-permutations, the dump equality, the quiescence and the write economy unexecuted — which is
-most of the gate. One spec at the end names the defect once and lets the rest run.
+accused the operator of a foreign NetBox object, and lost its own status write to a 409.
+Asserting that inside each pass would have stopped the suite at the forward run and left the
+twenty permutations, the dump equality, the quiescence and the write economy unexecuted — which
+is most of the gate. One spec at the end names a defect once and lets the rest run, which is
+worth keeping now that #252 is fixed and the spec passes.
 
-!!! warning "One spec is expected to fail until #252 is fixed"
+!!! note "The stale-read family, and what is left of it"
 
-    **#252**, above: the error-path spec fails. Everything about ordering passes.
+    **#252** is fixed and this spec passes. Its fix made a pass that *reads* a stale status
+    recover; a pass whose own status write was refused had nothing to recover from, so a create
+    whose id was lost that way left the CR `Ready=False/Conflict` on the object the operator
+    itself had made, for ever. That was
+    [#289](https://github.com/ricardomolendijk/netbox-operator/issues/289) root cause B and
+    [#291](https://github.com/ricardomolendijk/netbox-operator/issues/291), and it is fixed by
+    persisting `status.id` through a writer that carries no `resourceVersion`. Note that no
+    endpoint in this graph sets `spec.managedBy`
+    (`test/e2e/fixtures/graph/README.md`), so nothing here is stamped and the provenance route
+    back is deliberately not the one under test.
 
     [#249](https://github.com/ricardomolendijk/netbox-operator/issues/249) — a default
     `helm install` CrashLooping because the manager served the admission webhook with no

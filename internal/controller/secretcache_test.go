@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -238,7 +239,16 @@ func TestUngrantedNamespaceIsAConditionNotAForbidden(t *testing.T) {
 	if condition.Reason != netboxv1alpha1.ReasonSecretMissing {
 		t.Errorf("Ready reason = %q, want %q", condition.Reason, netboxv1alpha1.ReasonSecretMissing)
 	}
-	for _, want := range []string{"default", "namespaces.txt", "docs/operations/rbac.md"} {
+	// The namespace, and the fix in both install paths' own terms. `--set
+	// credentialNamespaces={default,somewhere-else}` is the whole list rather than the
+	// missing entry, because Helm replaces a list value: the message a reader pastes must
+	// not silently revoke the namespaces already granted (#300).
+	for _, want := range []string{
+		"default",
+		"--set credentialNamespaces={default,somewhere-else}",
+		"namespaces.txt",
+		"docs/operations/rbac.md",
+	} {
 		if !strings.Contains(condition.Message, want) {
 			t.Errorf("Ready message = %q, want it to name %q", condition.Message, want)
 		}
@@ -247,6 +257,37 @@ func TestUngrantedNamespaceIsAConditionNotAForbidden(t *testing.T) {
 	// this reconcile never read.
 	if _, _, ok := reconciler.Cache.Lookup("default", "homelab"); ok {
 		t.Error("an endpoint in an ungranted namespace still handed out a client")
+	}
+}
+
+// TestCheckNamesBothInstallPaths is the rest of #300: the operator cannot tell whether it
+// was installed by Helm or by kustomize, and the fix is a different artefact in each, so
+// the one message it can emit has to name both. The Helm half carries the *whole* list,
+// because `--set credentialNamespaces={team-a}` replaces the value rather than adding to
+// it and would revoke every namespace already granted.
+func TestCheckNamesBothInstallPaths(t *testing.T) {
+	if err := NewSecretScope([]string{"default", "prod"}).Check("prod"); err != nil {
+		t.Fatalf("Check on a granted namespace = %v, want nil", err)
+	}
+	// Cluster-wide is every namespace, so it never rejects and never suggests anything.
+	if err := (SecretScope{}).Check("anywhere"); err != nil {
+		t.Fatalf("Check under a cluster-wide scope = %v, want nil", err)
+	}
+
+	err := NewSecretScope([]string{"prod", "default"}).Check("team-a")
+	if !errors.Is(err, errNamespaceNotGranted) {
+		t.Fatalf("Check on an ungranted namespace = %v, want errNamespaceNotGranted", err)
+	}
+	for _, want := range []string{
+		`namespace "team-a"`,
+		"granted default, prod",
+		"--set credentialNamespaces={default,prod,team-a}",
+		"config/rbac/credential-namespaces/namespaces.txt",
+		"docs/operations/rbac.md",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("Check() = %q, want it to name %q", err, want)
+		}
 	}
 }
 
@@ -302,7 +343,7 @@ func TestSecretScopeCacheOptions(t *testing.T) {
 	}) {
 		t.Errorf("Label = %v, want it to select the credential label", scoped.Label)
 	}
-	namespaces := []string{}
+	namespaces := make([]string, 0, len(scoped.Namespaces))
 	for namespace := range scoped.Namespaces {
 		namespaces = append(namespaces, namespace)
 	}

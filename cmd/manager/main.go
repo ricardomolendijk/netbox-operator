@@ -119,11 +119,15 @@ func secretScope() (controller.SecretScope, error) {
 	value := os.Getenv(credentialNamespacesEnv)
 	scope, err := controller.ParseSecretScope(value)
 	if err != nil {
+		// Both install paths are named for the reason SecretScope.Check names both: this
+		// message is the first thing a failed rollout shows, and a Helm install has no
+		// config/rbac to edit (#300).
 		return controller.SecretScope{}, fmt.Errorf("reading %s=%q: %w; list the namespaces "+
-			"holding endpoint credential Secrets in "+
-			"config/rbac/credential-namespaces/namespaces.txt and run `make manifests`, or "+
-			"set it to %q to read Secrets cluster-wide -- which needs a cluster-wide Secret "+
-			"grant config/rbac no longer ships (see docs/operations/rbac.md)",
+			"holding endpoint credential Secrets -- Helm: `--set credentialNamespaces={ns}`; "+
+			"kustomize: config/rbac/credential-namespaces/namespaces.txt, then "+
+			"`make manifests` -- or set it to %q to read Secrets cluster-wide, which needs a "+
+			"cluster-wide Secret grant neither the chart nor config/rbac ships "+
+			"(see docs/operations/rbac.md)",
 			credentialNamespacesEnv, value, err, controller.AllNamespaces)
 	}
 	return scope, nil

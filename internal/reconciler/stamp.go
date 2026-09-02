@@ -43,6 +43,26 @@ func (p *pass) stamp(ctx context.Context, live netbox.Object) {
 	status.Provenance = applied.DeepCopy()
 }
 
+// stampedMine reports whether the NetBox object in hand carries this CR's own metadata.uid in
+// the endpoint's provenance stamp.
+//
+// The read half of what stamp() writes, and the only identity claim in the engine that survives
+// the CR's status being lost: `k8s_uid` is written by this operator, for this CR, and by
+// nothing else, so an object carrying it was made by this CR -- whatever Kubernetes managed to
+// record afterwards (issues #289 and #291, ownsMatch).
+//
+// False on every endpoint whose stamp could not identify one object anyway: no spec.managedBy,
+// a kind with no custom fields, the uid field switched off, or a CR with no uid. Those are
+// supported configurations rather than mistakes (docs/operations/provenance.md), and there the
+// question is answered from the CR's own status instead.
+func (p *pass) stampedMine(live netbox.Object) bool {
+	if live == nil || !p.stampIdentifies() {
+		return false
+	}
+
+	return p.endpoint.Provenance.Read(live).UID == string(p.obj.GetUID())
+}
+
 // owner is the CR behind this pass, as the stamp names it.
 func (p *pass) owner() provenance.Owner {
 	return provenance.Owner{

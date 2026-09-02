@@ -164,6 +164,7 @@ func newObjectController(mgr ctrl.Manager, endpoints reconciler.Endpoints, kind 
 			// referring namespace's labels -- and both go through the one guarded route.
 			Refs:       &resolver.Resolver{Objects: writer, Grants: writer},
 			Status:     statusWriter{writer},
+			IDs:        idWriter{writer},
 			Finalizers: finalizerWriter{writer},
 			Owners:     ownerWriter{writer},
 
@@ -292,6 +293,42 @@ type statusWriter struct{ client.Client }
 func (w statusWriter) UpdateStatus(ctx context.Context, obj client.Object) error {
 	if err := w.Status().Update(ctx, obj); err != nil {
 		return fmt.Errorf("updating the status of %s/%s: %w", obj.GetNamespace(), obj.GetName(), err)
+	}
+
+	return nil
+}
+
+// idWriter persists status.id on its own, for the pass that has just created the NetBox object
+// it names.
+//
+// A merge patch on the status subresource with no resourceVersion in it, which is the whole
+// point: statusWriter's Update is optimistically concurrent by design and a create whose status
+// write lost that race left NetBox holding an object no CR could ever claim again (issues #289
+// and #291, reconciler.recordID). An id is not a conclusion drawn from a possibly-stale read --
+// it is a fact NetBox minted for a POST that has already happened -- so there is no fresher
+// value for a concurrent write to hold, and nothing this could clobber.
+//
+// It patches a copy and reads nothing back, for the reason patchMetadata does: a PATCH is
+// answered with the whole object, and decoding that answer into the caller's object would
+// replace the status the pass is still building (issue #243).
+type idWriter struct{ client.Client }
+
+// RecordID writes obj's status.id, and nothing else.
+func (w idWriter) RecordID(ctx context.Context, obj client.Object, id int64) error {
+	patch, err := json.Marshal(map[string]any{"status": map[string]any{"id": id}})
+	if err != nil {
+		return fmt.Errorf("encoding the id patch for %s/%s: %w",
+			obj.GetNamespace(), obj.GetName(), err)
+	}
+
+	patched, ok := obj.DeepCopyObject().(client.Object)
+	if !ok {
+		return fmt.Errorf("%T does not deep-copy into a client.Object", obj)
+	}
+
+	if err := w.Status().Patch(ctx, patched, client.RawPatch(types.MergePatchType, patch)); err != nil {
+		return fmt.Errorf("patching the netbox id of %s/%s: %w",
+			obj.GetNamespace(), obj.GetName(), err)
 	}
 
 	return nil

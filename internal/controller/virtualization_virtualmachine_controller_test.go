@@ -425,3 +425,70 @@ func assertUnstructuredAdmission(t *testing.T, ns string, body map[string]any, w
 
 	assertTypedAdmission(t, obj, wantReject)
 }
+
+// TestVirtualMachineWritesItsLocalContextAsAWholeDocument is #241's end-to-end half, and it is
+// where the two failures a unit test cannot see would actually appear.
+//
+// The document travels from a YAML mapping, through the API server, into the payload. The API
+// server prunes every key a structural schema does not declare, so without
+// `x-kubernetes-preserve-unknown-fields` on the field the operator would faithfully write an
+// empty object and report success -- and nothing about that is visible from the descriptor or
+// from a `Drift` unit test, both of which start from a document that already exists.
+//
+// The top-level `id` key is the point rather than decoration: it is what the scalar comparison
+// would unwrap the whole document down to. So the second assertion -- that no request after
+// the create sends the column again -- is the PATCH loop ClassJSON prevents, observed rather
+// than reasoned about. It is an assertion about an absence and cannot fail spuriously: the
+// create settles the object, and a further write of a column nobody changed could only come
+// from a comparison that disagrees with itself.
+func TestVirtualMachineWritesItsLocalContextAsAWholeDocument(t *testing.T) {
+	ns := newNamespace(t)
+	stub, target := newVMNetBoxStub(t)
+	readyEndpoint(t, ns, target)
+
+	makeVirtualMachine(t, ns, "dns", func(vm *netboxv1alpha1.NetBoxVirtualMachine) {
+		vm.Spec.LocalContextData = &netboxv1alpha1.JSONDocument{
+			Raw: []byte(`{"id":"spine-01","ntp":{"servers":["10.0.0.1"]}}`),
+		}
+	})
+
+	eventually(t, "the virtual machine to be Ready", func() bool { return virtualMachineIsReady(ns, "dns") })
+
+	writes := stub.recorded()
+	if len(writes) == 0 {
+		t.Fatal("no request was recorded, so this assertion proves nothing")
+	}
+
+	post := writes[0]
+	if post.Method != http.MethodPost {
+		t.Fatalf("the first request was %s, want POST", post.Method)
+	}
+
+	document, ok := post.Payload["local_context_data"].(map[string]any)
+	if !ok {
+		t.Fatalf("local_context_data = %#v, want the JSON document itself",
+			post.Payload["local_context_data"])
+	}
+
+	if document["id"] != "spine-01" {
+		t.Errorf("local_context_data.id = %#v, want \"spine-01\": the key survived neither "+
+			"admission nor the payload build", document["id"])
+	}
+
+	ntp, ok := document["ntp"].(map[string]any)
+	if !ok {
+		t.Fatalf("local_context_data.ntp = %#v, want the nested object", document["ntp"])
+	}
+
+	if servers, _ := ntp["servers"].([]any); len(servers) != 1 || servers[0] != "10.0.0.1" {
+		t.Errorf("local_context_data.ntp.servers = %#v, want [10.0.0.1]", ntp["servers"])
+	}
+
+	for i, write := range writes[1:] {
+		if _, resent := write.Payload["local_context_data"]; resent {
+			t.Errorf("request %d (%s) sends local_context_data again although nothing changed: "+
+				"%v -- the document is being compared with the scalar rule, which unwraps it "+
+				"to its `id` key", i+1, write.Method, write.Payload)
+		}
+	}
+}

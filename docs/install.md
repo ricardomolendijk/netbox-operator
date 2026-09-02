@@ -26,7 +26,7 @@ kubectl apply --server-side --force-conflicts \
 
 kubectl create namespace homelab
 
-helm install netbox-operator oci://ghcr.io/ricardomolendijk/netbox-operator/charts/netbox-operator \
+helm install netbox-operator oci://ghcr.io/ricardomolendijk/charts/netbox-operator \
   --namespace netbox-operator-system --create-namespace \
   --set credentialNamespaces={homelab}
 ```
@@ -36,8 +36,12 @@ replaces the `crds/` directory an OCI chart no longer has. Use the file from the
 whose version you are installing — the chart and its CRDs are one artefact split in two, not
 two independently versioned things.
 
-Nothing is published yet — the chart lives in `charts/netbox-operator/` and installs from a
-checkout in the meantime, where the CRD step is a make target:
+**Neither half is published yet, so the two commands above do not work today.** No GitHub
+release has ever carried an asset — every release run so far failed before uploading them —
+so the CRD bundle URL 404s. The only chart in the registry is `0.0.6`, pushed before the CRDs
+came out of it, which is the 348 KB package whose release `Secret` the API server rejects.
+Until a release publishes both halves together, install from a checkout, where the CRD step
+is a make target:
 
 ```sh
 make install-crds        # kubectl apply --server-side -f config/crd/bases/
@@ -177,10 +181,19 @@ They have to agree or the operator is broken in one of two ways, which is why on
 produces both. `*` is rejected by the schema *and* by the template, because the schema is
 skipped by an older Helm and this is not a check to lose.
 
+**`[default]` is a placeholder, not a recommendation.** The `Role` grants `get`, `list` and
+`watch` on *every* Secret in each listed namespace — `resourceNames` cannot narrow a `list`
+or a `watch`, which have no resource name in them — so listing a namespace that also holds
+other applications' credentials hands those to the operator's ServiceAccount as well. List
+a namespace that holds endpoint credentials and little else, and on most clusters `default`
+is not it:
+[the grant is every Secret in the namespace](operations/rbac.md#the-grant-is-every-secret-in-the-namespace-labelled-or-not).
+
 Every Secret an endpoint references must also carry
 `netbox.kubeforge.org/endpoint-credential: "true"`, or it is invisible to the operator even
-when the namespace is granted. Both failure modes, and their exact condition messages, are
-in [rbac.md](operations/rbac.md).
+when the namespace is granted. That label is a cache filter and not a second permission
+boundary: it decides what the operator reads, not what it is allowed to read. Both failure
+modes, and their exact condition messages, are in [rbac.md](operations/rbac.md).
 
 Note that `helm upgrade` with a **shorter** list does not delete the `Role`s it no longer
 renders — Helm removes resources it previously owned, so it does in fact clean up on upgrade,
@@ -214,8 +227,14 @@ What that changes, in three lines:
 
 - **You install the CRDs.** `make install-crds` from a checkout, or the
   `netbox-operator-crds-<version>.yaml` attached to the release. Both are one `kubectl apply
-  --server-side`; server-side because a CRD this size exceeds the
-  `last-applied-configuration` annotation a client-side apply stores inside it.
+  --server-side`. Server-side because it avoids the `last-applied-configuration` annotation
+  a client-side apply stores inside every object, which for these CRDs is 55% of the stored
+  size again — `netboxcables` is 191,094 bytes applied server-side and 295,197 bytes applied
+  client-side. Note this is etcd bloat and *not* a limit: measured against a real 1.34 API
+  server, the largest annotation is 98,381 bytes against a 262,144 byte cap, so all 64 CRDs
+  fit client-side with 2.66x headroom. Earlier wording here claimed they exceeded it; they
+  do not. The 1 MiB limit this project actually hit was the Helm release Secret, an
+  aggregate over the whole chart, which is a different limit on a different object.
 - **You upgrade them too, before the chart.** Helm never touched them and still does not,
   so this is the same trap it always was, now with the step in front of you rather than
   hidden behind an install that quietly did it once.
@@ -237,7 +256,7 @@ or, against a release:
 ```sh
 kubectl apply --server-side --force-conflicts \
   -f https://github.com/ricardomolendijk/netbox-operator/releases/download/v0.0.6/netbox-operator-crds-0.0.6.yaml
-helm upgrade netbox-operator oci://ghcr.io/ricardomolendijk/netbox-operator/charts/netbox-operator --version 0.0.6
+helm upgrade netbox-operator oci://ghcr.io/ricardomolendijk/charts/netbox-operator --version 0.0.6
 ```
 
 CRDs first, because a new chart whose manager reconciles a field the old CRD prunes is the

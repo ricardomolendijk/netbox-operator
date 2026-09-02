@@ -434,6 +434,53 @@ NetBox.
 `description` is `maxLength: 200`; `comments` is a `TextField` with no cap. Both inherited from
 `PrimaryModel`. Omit either to leave NetBox's own value alone; set it to `""` to clear it.
 
+### `spec.localContextData`
+
+| | |
+|---|---|
+| Type | JSON object (`x-kubernetes-preserve-unknown-fields`) |
+| Required | no |
+| Default | none |
+| Validation | `type: object`; the contents are NetBox's business |
+
+This device's own slice of config context: the document NetBox merges **last** when it renders
+the device's configuration, after every [`NetBoxConfigContext`](netboxconfigcontext.md) whose
+selectors matched (`docs/netbox-schema.md` → `dcim.Device`,
+`local_context_data (ConfigContextModel) JSONField`; `netbox/extras/models/configs.py`,
+`ConfigContextModel.get_config_context()`).
+
+```yaml
+spec:
+  localContextData:
+    ntp:
+      servers: ["10.0.0.1", "10.0.0.2"]
+    bgp:
+      asn: 64512
+```
+
+**A column on the device, not a reference to a context.** It is created, updated and deleted
+with the row, so overrides that live here cannot be orphaned by somebody deleting a config
+context — and being last in the merge, it wins every collision. That makes it the place for a
+*single device's exception*. Shared policy belongs in a `NetBoxConfigContext`, which is
+reviewed once and applies to everything it selects.
+
+**Compared as a whole document** (`registry.ClassJSON`), not as a scalar. The scalar rule
+unwraps any JSON object carrying an `id` or a `value` key, because that is how NetBox renders a
+foreign key and a choice on read — so a local context that happens to carry an `id` key, which
+is ordinary in inventory data, would differ from itself on every read and be PATCHed forever
+([drift](../concepts/drift.md)).
+
+**An object and not an arbitrary JSON value.** That is NetBox's rule rather than this
+operator's: `ConfigContextModel.clean()` refuses a `local_context_data` that is not a mapping,
+because rendering merges it into a dict. Declaring `type: object` turns that 400 into a
+rejection at admission, where the message names the field.
+
+Omit it to leave NetBox's own value alone; set it to `{}` to clear it. `{}` and not `null`,
+although the column itself is nullable: the API server prunes a null under a schema that is not
+marked nullable, before validation and before the operator reads the object back, so `null`
+could not be told from an omitted field. An empty document merges to nothing, which is what
+clearing it asks for.
+
 ### `spec.interfaces`
 
 | | |
@@ -576,7 +623,7 @@ a field that is accepted and silently discarded reports success while writing no
 | `location` | the reference exists ([`NetBoxLocation`](netboxlocation.md)) and the rest of the physical plant does not; adding it alone would be half a rack model | NBO-048 |
 | `rack`, `position`, `face` | `dcim.Rack` has no Kind, and `position`/`face` are meaningless without one — which also makes the `('rack', 'position', 'face')` constraint unreachable | NBO-051 |
 | `virtual_chassis`, `vc_position`, `vc_priority` | `dcim.VirtualChassis` has no Kind, so the `('virtual_chassis', 'vc_position')` constraint is unreachable too | NBO-053 |
-| `config_template`, `local_context_data` | rendering and config contexts are their own feature | NBO-059 |
+| `config_template` | rendering is its own feature, and it references a Kind this one cannot yet name. `local_context_data` was in this row until [#241](https://github.com/ricardomolendijk/netbox-operator/issues/241) and is now [`spec.localContextData`](#speclocalcontextdata): it references nothing, so nothing was blocking it | NBO-059 |
 | `tags` | written by the engine as the provenance stamp; a user-facing tag list needs `NetBoxTag` references on every kind at once | NBO-055 |
 | inline `consolePorts`, `consoleServerPorts`, `powerPorts`, `powerOutlets` | the same sugar as [`spec.interfaces`](#specinterfaces), for components whose Kind does not exist yet. Declaring the field first would accept input the operator cannot honour | NBO-052 |
 | inline `frontPorts`, `rearPorts`, `deviceBays`, `moduleBays`, `inventoryItems` | as above | NBO-053 |
