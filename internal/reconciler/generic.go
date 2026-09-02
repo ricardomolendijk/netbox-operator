@@ -184,6 +184,15 @@ type StatusReader interface {
 
 // Recorder emits Kubernetes Events, narrowed from record.EventRecorder so the engine is
 // testable without an event broadcaster.
+//
+// Manager.GetEventRecorderFor, which is what fills this field, is deprecated in favour of
+// GetEventRecorder and client-go's events package. That migration is deliberately not part
+// of #294's first pass, because it is not a change of type but a change of shape: the new
+// Eventf takes a second object, an *action* and a note, so this interface, its four
+// emitters and every fake change with it; the Events move to events.k8s.io/v1, which the
+// manager's RBAC does not grant today; and every emission has to be given an action it
+// does not currently have, which is a decision about what users see rather than a
+// refactor. #294 group 1 carries it, and the call sites are marked.
 type Recorder interface {
 	Eventf(object runtime.Object, eventtype, reason, messageFmt string, args ...any)
 }

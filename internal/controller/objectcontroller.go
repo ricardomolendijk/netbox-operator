@@ -188,7 +188,7 @@ func newObjectController(mgr ctrl.Manager, endpoints reconciler.Endpoints, kind 
 			Children: childWriter{writer},
 			GitOps:   gitOpsDefaults(),
 
-			Events: mgr.GetEventRecorderFor(kind.name),
+			Events: mgr.GetEventRecorderFor(kind.name), //nolint:staticcheck // SA1019: the events-API migration is #294 group 1
 			Scheme: mgr.GetScheme(),
 			// Descriptors is left nil deliberately: the engine then reads the
 			// package-level registry, which is the one every kind's init() filled.
