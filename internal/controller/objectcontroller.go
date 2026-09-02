@@ -188,6 +188,13 @@ func newObjectController(mgr ctrl.Manager, endpoints reconciler.Endpoints, kind 
 			Children: childWriter{writer},
 			GitOps:   gitOpsDefaults(),
 
+			// The cached client, and deliberately: this is an indexed List over
+			// resolver.RefIndex, which is registered on the informer cache and exists
+			// nowhere else. An APIReader would have to walk every object of every
+			// referring kind and decode each spec, per attempt, on a path that already
+			// runs on a backed-off retry loop.
+			Referrers: referrers{client: mgr.GetClient(), scheme: mgr.GetScheme()},
+
 			Events: mgr.GetEventRecorderFor(kind.name), //nolint:staticcheck // SA1019: the events-API migration is #294 group 1
 			Scheme: mgr.GetScheme(),
 			// Descriptors is left nil deliberately: the engine then reads the

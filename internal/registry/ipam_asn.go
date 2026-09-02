@@ -28,11 +28,6 @@ func ipamASNDescriptor() Descriptor {
 		Taggable:        true,
 		CustomFieldable: true,
 
-		// Decision #176: IPAM defaults to Retain. An ASN is an allocation from a registry --
-		// deleting the row destroys the record of who holds it, and a fresh row with the same
-		// number is a different object with a different id.
-		RetainOnDelete: true,
-
 		Fields: []Field{
 			{Spec: "asn", API: "asn"},
 			{Spec: "description", API: "description"},

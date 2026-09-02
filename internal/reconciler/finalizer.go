@@ -370,7 +370,7 @@ func (p *pass) releaseWithoutDeleting() (release, bool) {
 		}, true
 	}
 
-	if deletionPolicyOf(p.obj.NetBoxSpec().DeletionPolicy, p.desc.RetainOnDelete) == netboxv1alpha1.DeletionRetain {
+	if deletionPolicyOf(p.obj.NetBoxSpec().DeletionPolicy) == netboxv1alpha1.DeletionRetain {
 		return release{
 			event: netboxv1alpha1.EventRetained,
 			message: fmt.Sprintf("spec.deletionPolicy is Retain: netbox %s/%d is left in place",
@@ -432,8 +432,9 @@ func (p *pass) nothingToDelete(searched bool) release {
 
 // dataLossBlocked reports whether this delete is one the operator refuses to make, and why.
 //
-// The case is narrow and it is not "deleting this is inconvenient": that is RetainOnDelete,
-// which changes the default rather than refusing. This is a delete NetBox performs happily
+// The case is narrow and it is not "deleting this is inconvenient": that is
+// spec.deletionPolicy: Retain, which is the user stating an intent rather than the operator
+// refusing one. This is a delete NetBox performs happily
 // and which destroys data on *other* objects, so the engine's usual safety net -- send the
 // DELETE, let NetBox refuse it with a `PROTECT`, report Protected and retry -- cannot fire.
 // extras.CustomField is the case: its values live in each object's own `custom_field_data`
@@ -551,6 +552,36 @@ func (p *pass) protected(ctx context.Context, err error) (ctrl.Result, error) {
 
 	wait := protectedBackoff(status.DeletionAttempts)
 
+	// Before the threshold Event, because a cascade that clears the block makes
+	// DeleteBlocked the wrong thing to have said: the deletion is proceeding, and it is
+	// proceeding because the user asked for exactly this.
+	//
+	// A nil Referrers is a supported wiring rather than an error. The engine then reports
+	// the refusal the way it did before the annotation existed, which is the behaviour a
+	// test that never wired one is entitled to.
+	if p.cascades() && p.engine.Referrers != nil {
+		out, cascadeErr := p.cascade(ctx)
+		if cascadeErr != nil {
+			return ctrl.Result{}, cascadeErr
+		}
+
+		if out.any() {
+			// A Warning, and only when this pass deleted something. Deleting Kubernetes
+			// objects the user did not name is not a thing to record at debug -- and
+			// repeating it on every retry while the same referrers finish going is how the
+			// Events somebody needed get evicted from the namespace.
+			if len(out.deleted) > 0 {
+				p.engine.warn(p.obj, netboxv1alpha1.EventCascadeDeleted,
+					"netbox refused to delete %s/%d, so %s=true deleted the CRs referencing it: %s",
+					p.desc.Endpoint, status.ID, netboxv1alpha1.CascadeDeleteAnnotation,
+					strings.Join(out.deleted, ", "))
+			}
+
+			return p.blocked(ctx, netboxv1alpha1.ReasonCascading, wait,
+				out.message(p.desc.Endpoint, status.ID, err))
+		}
+	}
+
 	// Once, at the threshold. NetBox's body names the protected relation, and it is
 	// carried through verbatim: "cannot delete" without a reason is the worst possible
 	// operator experience.
@@ -626,28 +657,28 @@ func (p *pass) release(ctx context.Context, out release) (ctrl.Result, error) {
 }
 
 // deletionPolicyOf returns the effective deletion policy: the spec's when it states one, and
-// otherwise retainByDefault's answer.
+// Delete otherwise.
 //
-// It takes the two values it reads rather than an Object and a Descriptor, because the
-// allocation engine needs exactly this rule over a Claim and a registry.ClaimDescriptor,
-// which are different types holding the same two facts (claim.go). One function that both
-// callers pass their own pair into is the only shape in which "unset means the kind's
-// default" cannot come to mean two different things -- and this rule is the last word on
-// whether the operator deletes somebody's data, so it existing twice is not acceptable.
+// One default for every kind, which is the whole of the rule since #304. It was not always:
+// decision #176 made the IPAM kinds default to Retain, on the argument that deleting an
+// ipam.IPAddress frees the address for reallocation while deleting a tag costs nothing. The
+// argument was right about the risk and wrong about where to put it. A default of Retain
+// means `kubectl delete` leaves the NetBox object behind and the CR disappears with an Event
+// nobody reads -- and the object it leaves is the one NetBox then cites, with a PROTECT, to
+// refuse the delete of the *site* it belongs to. One namespace deleted that way leaves a
+// NetBox nobody can clean up through the operator at all, which is what #304 was reported as.
 //
-// For an object CR the default is not a CRD marker, and cannot be: spec.deletionPolicy is
-// declared once on the shared NetBoxObjectSpec, so a `+kubebuilder:default` there is the same
-// value for every one of ~120 kinds (#186). Decision #176 made IPAM the exception -- deleting
-// an ipam.IPAddress frees the address for reallocation, which is destructive in a way deleting
-// a tag is not -- so the per-kind answer is data on the Descriptor, where every other per-kind
-// fact lives. docs/concepts/deletion.md carries the table.
-func deletionPolicyOf(policy netboxv1alpha1.DeletionPolicy, retainByDefault bool) netboxv1alpha1.DeletionPolicy {
+// So the destructive-by-default risk is answered where it is visible instead: the delete goes
+// out, NetBox refuses what is still referenced, and the CR stays with `Deleting=False` naming
+// the blocker. A user who wants an object to outlive its CR writes `deletionPolicy: Retain`,
+// which is one line in the manifest that says so, in Git, where the next reader can see it.
+//
+// It still takes the value it reads rather than an Object, because the allocation engine needs
+// this rule over a Claim (claim.go), and this is the last word on whether the operator deletes
+// somebody's data -- so it existing twice is not acceptable.
+func deletionPolicyOf(policy netboxv1alpha1.DeletionPolicy) netboxv1alpha1.DeletionPolicy {
 	if policy != "" {
 		return policy
-	}
-
-	if retainByDefault {
-		return netboxv1alpha1.DeletionRetain
 	}
 
 	return netboxv1alpha1.DeletionDelete

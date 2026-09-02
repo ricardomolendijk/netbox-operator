@@ -55,12 +55,6 @@ func TestIPAddressDescriptorIsRegisteredAndValid(t *testing.T) {
 		t.Errorf("UpdateStrategy = %q, want Patch", d.UpdateStrategy)
 	}
 
-	// Decision #176: IPAM retains. Deleting an address frees it for reallocation, which is
-	// destructive in a way deleting a tag is not.
-	if !d.RetainOnDelete {
-		t.Error("RetainOnDelete = false; decision #176 defaults IPAM kinds to Retain")
-	}
-
 	// PrimaryModel, so both stamp columns exist -- and CustomFieldable is what makes
 	// spec.allowDuplicate's identity possible at all.
 	if !d.Taggable || !d.CustomFieldable {

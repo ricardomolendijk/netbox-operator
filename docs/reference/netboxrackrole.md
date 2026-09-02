@@ -210,7 +210,7 @@ Delete the racks, or move them to another role, first.
 
 ### `deletionPolicy` defaults to `Delete`
 
-Not an IPAM kind, so `Delete` (#176 option B). A rack role is configuration a manifest
+`Delete`, like every kind since [#304](https://github.com/ricardomolendijk/netbox-operator/issues/304). A rack role is configuration a manifest
 recreates verbatim; nothing about deleting one frees a resource somebody else can take, which
 is what `Retain` was reserved for. See [deletion](../concepts/deletion.md).
 

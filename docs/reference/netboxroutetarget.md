@@ -173,14 +173,15 @@ references are declared and unresolved.
 
 ## `deletionPolicy` defaults to `Delete`
 
-Unlike [`NetBoxVRF`](netboxvrf.md#deletionpolicy-defaults-to-retain), and that is deliberate.
+Like every kind, [`NetBoxVRF`](netboxvrf.md#deletionpolicy-defaults-to-delete) included, since
+[#304](https://github.com/ricardomolendijk/netbox-operator/issues/304).
 
-Issue #176 decided (option B) that **IPAM kinds holding allocated state** default to `Retain`,
-and enumerated them: `NetBoxPrefix`, `NetBoxIPAddress`, `NetBoxIPRange`, `NetBoxVLAN`,
-`NetBoxVRF`. A route target is not on that list and should not be: nothing is allocated from
-it, deleting one destroys no record of who owned a range, and re-creating it is free. It is
-configuration, like a tag — so `Delete` is both the expected Kubernetes behaviour and the
-correct one.
+This kind never had a reason to be anything else. Issue #176 defaulted the IPAM kinds holding
+allocated state to `Retain` — `NetBoxPrefix`, `NetBoxIPAddress`, `NetBoxIPRange`, `NetBoxVLAN`,
+`NetBoxVRF` — and a route target was not on that list and should not have been: nothing is
+allocated from it, deleting one destroys no record of who owned a range, and re-creating it is
+free. It is configuration, like a tag. #304 brought the rest of the catalogue here rather than
+the other way round ([deletion](../concepts/deletion.md#why-this-reversed)).
 
 Set `deletionPolicy: Retain` on route targets that other tooling also depends on.
 

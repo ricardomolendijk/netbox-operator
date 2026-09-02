@@ -65,14 +65,6 @@ func TestRemainderDescriptorsAreRegisteredAndValid(t *testing.T) {
 				t.Errorf("UpdateStrategy = %q, want Patch", d.UpdateStrategy)
 			}
 
-			// Decision #176, answered B: IPAM defaults to Retain, and #186 answered A made it
-			// Descriptor data rather than a CRD marker -- `deletionPolicy` is declared once on
-			// the shared NetBoxObjectSpec, so a `+kubebuilder:default` there would be the same
-			// default for every kind in the API.
-			if !d.RetainOnDelete {
-				t.Error("RetainOnDelete = false; every IPAM kind defaults to Retain (#176, #186)")
-			}
-
 			if d.Taggable != tc.stamped || d.CustomFieldable != tc.stamped {
 				t.Errorf("Taggable/CustomFieldable = %v/%v, want %v/%v: read off the model's bases",
 					d.Taggable, d.CustomFieldable, tc.stamped, tc.stamped)

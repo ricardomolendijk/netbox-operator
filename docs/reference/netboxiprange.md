@@ -36,7 +36,7 @@ spec:
   endAddress: 10.0.30.191/24
 ```
 
-Deleting this CR leaves the NetBox range in place: `deletionPolicy` defaults to `Retain` on this
+Deleting this CR deletes the NetBox range: `deletionPolicy` defaults to `Delete` on every
 kind — see [`spec.deletionPolicy`](#specdeletionpolicy).
 
 ## Full example
@@ -174,12 +174,9 @@ to, and that record is not recoverable by re-creating the object: the change log
 entries and the id go with it, and a fresh range over the same addresses is a different object.
 Set `deletionPolicy: Delete` explicitly where `kubectl delete` really should remove the range.
 
-The default is not a CRD marker and cannot be — `deletionPolicy` is declared once on the shared
-envelope, so a marker there is one answer for every kind, and redeclaring it here makes
-controller-gen emit `allOf: [{default: Retain}, {default: Delete}]`, a schema the API server
-rejects. It is data on this kind's Descriptor (`registry.Descriptor.RetainOnDelete`), so
-`kubectl explain` prints no default. Same story as
-[`NetBoxPrefix`](netboxprefix.md#specdeletionpolicy).
+There is no CRD default to read: `deletionPolicy` is declared once on the shared envelope, so
+a marker there would be one answer for every kind, and `kubectl explain` prints no default.
+Same story as [`NetBoxPrefix`](netboxprefix.md#specdeletionpolicy).
 
 ## Natural key
 

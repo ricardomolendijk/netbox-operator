@@ -318,6 +318,14 @@ func TestStatusWriterIsTheOnlyObjectWriter(t *testing.T) {
 		// this list.
 		"Children": true,
 
+		// Referrers reads. Its one method takes an object and returns the CRs that point at
+		// it, so nothing is written through it and no spec can travel back out (#304,
+		// cascade.go). The *deletes* a cascade makes go through Children, which is on this
+		// list already -- and a delete is not a spec write: the invariant is about the
+		// operator and Git fighting over a live object's fields, and a CR the user asked to
+		// be cascaded is one nobody is going to write again.
+		"Referrers": true,
+
 		// GitOps is configuration, not a collaborator: a struct of booleans and a map of
 		// annotation strings, with no route to the API server at all.
 		"GitOps": true,

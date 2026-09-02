@@ -122,9 +122,8 @@ set. See [provenance](../operations/provenance.md).
 
 ## `deletionPolicy` defaults to `Delete`
 
-A cluster type is configuration, not allocated state. Issue #176 (option B) gives `Retain` to
-the IPAM kinds that hold allocations — `NetBoxPrefix`, `NetBoxIPAddress`, `NetBoxIPRange`,
-`NetBoxVLAN`, `NetBoxVRF` — and this is not one of them.
+A cluster type is configuration, not allocated state, and since [#304](https://github.com/ricardomolendijk/netbox-operator/issues/304) every kind defaults to
+`Delete` regardless ([deletion](../concepts/deletion.md#the-two-policies)).
 
 The delete is safe by construction rather than by policy: `virtualization.Cluster.type` is
 `on_delete=PROTECT`, so NetBox refuses to delete a type any cluster still uses. The CR reports

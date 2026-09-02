@@ -106,18 +106,17 @@ kind — see [`NetBoxTag`](netboxtag.md#specendpointref) for the full treatment 
 |---|---|
 | Type | `string` (`DeletionPolicy`) |
 | Required | no |
-| Default | `Delete` — **and that is deliberate on this kind** |
+| Default | `Delete` |
 | Validation | `Enum=Delete;Retain` |
 
-**This is the one kind in `ipam` that does not default to `Retain`, and the exception is the
-point rather than an oversight**
-([#186](https://github.com/ricardomolendijk/netbox-operator/issues/186)). The rule
-[deletion](../concepts/deletion.md#the-default-depends-on-the-kind) turns on is whether deleting
-the NetBox object destroys *state*: `Retain` protects an allocation, `Delete` is fine for
-configuration. A VLAN group allocates nothing — it is an organisational container over
-`vid_ranges` — so deleting one frees no VLAN, no address and no range, and it belongs with the
-catalogue kinds it behaves like. The VLANs *inside* it default to `Retain`
-([`NetBoxVLAN`](netboxvlan.md#specdeletionpolicy)): the container goes, the contents stay.
+**`Delete`, like every kind** ([deletion](../concepts/deletion.md#the-two-policies)). This kind
+used to be the exception worth explaining — the one `ipam` kind that did *not* default to
+`Retain`, because a VLAN group allocates nothing: it is an organisational container over
+`vid_ranges`, so deleting one frees no VLAN, no address and no range
+([#186](https://github.com/ricardomolendijk/netbox-operator/issues/186)).
+[#304](https://github.com/ricardomolendijk/netbox-operator/issues/304) made every kind default
+to `Delete`, so there is no exception left to explain and the VLANs *inside* a group now go the
+same way their container does.
 
 `ipam.VLAN.group` is `on_delete=PROTECT` (`docs/netbox-schema.md` → `ipam.VLAN`), so NetBox
 refuses to delete a group that still holds VLANs and the operator can only
@@ -569,7 +568,7 @@ resolved, which is exactly the state where no lookup ran at all.
 - [Field ownership](../concepts/field-ownership.md) — absent, empty and set, and how `[]`
   survives `omitempty`
 - [Drift detection](../concepts/drift.md) — the ordered-array compare `vidRanges` goes through
-- [Deletion](../concepts/deletion.md#the-default-depends-on-the-kind) — why most IPAM kinds
+- [Deletion](../concepts/deletion.md#the-two-policies) — why most IPAM kinds
   default to `Retain` and why this one does not, and what `PROTECT` looks like
 - [ADR-0003: ownership and references](../decisions/0003-ownership-and-references.md) — the
   containment reference and the cascade

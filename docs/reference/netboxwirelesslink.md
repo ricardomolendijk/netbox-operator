@@ -387,7 +387,7 @@ forever. All three are in the descriptor's `ReadOnly` list, and a test asserts n
 ### `deletionPolicy` defaults to `Delete`
 
 Not an IPAM kind, so `Delete`
-([deletion](../concepts/deletion.md#the-default-depends-on-the-kind)). Nothing points *at* a
+([deletion](../concepts/deletion.md#the-two-policies)). Nothing points *at* a
 wireless link, so the delete is never refused for that reason.
 
 ## Printer columns

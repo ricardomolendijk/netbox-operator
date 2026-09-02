@@ -269,7 +269,7 @@ it — a recorded decision, not an inconsistency, and the reasoning is on
 
 ### `deletionPolicy` defaults to `Delete`
 
-Not an IPAM kind, so `Delete` ([deletion](../concepts/deletion.md#the-default-depends-on-the-kind)).
+Not an IPAM kind, so `Delete` ([deletion](../concepts/deletion.md#the-two-policies)).
 Deleting the CR deletes the group, and NetBox's `SET_NULL` on `WirelessLAN.group` means the
 SSIDs filed under it survive with no group rather than blocking the delete — so a delete here is
 rarely refused, and rarely as harmless as it looks.
@@ -320,5 +320,5 @@ donkerslootstraat-wifi  donkerslootstraat-wifi    homelab-wifi    42   True    5
 - [The admission webhook](../operations/admission-webhooks.md) — the cycle check, and why it
   needs no per-kind entry
 - [Field ownership](../concepts/field-ownership.md) — absent, empty and set
-- [Deletion](../concepts/deletion.md#the-default-depends-on-the-kind) — why this kind defaults to
+- [Deletion](../concepts/deletion.md#the-two-policies) — why this kind defaults to
   `Delete`

@@ -45,7 +45,7 @@ spec:
 A global, unscoped prefix. That is a legitimate and common shape rather than a half-filled
 one — both scope columns are nullable.
 
-Deleting this CR leaves the NetBox prefix in place: `deletionPolicy` defaults to `Retain` on
+Deleting this CR deletes the NetBox prefix: `deletionPolicy` defaults to `Delete` on every
 this kind, and that is a fact about the kind rather than about the example — see
 [`spec.deletionPolicy`](#specdeletionpolicy).
 
@@ -109,27 +109,29 @@ identically on every kind — see [`NetBoxTag`](netboxtag.md#specendpointref) fo
 |---|---|
 | Type | `string` (`DeletionPolicy`) |
 | Required | no |
-| Default | **`Retain`** on this kind |
+| Default | `Delete` |
 | Validation | `Enum=Delete;Retain` |
 
-**`Retain`, unlike most kinds** (decision
-[#176](https://github.com/ricardomolendijk/netbox-operator/issues/176)). Deleting a prefix
-destroys the record of who a range of addresses belonged to, and that record is not recoverable
-by re-creating the object: NetBox's change log, journal entries and contacts go with the row,
-its parents' `_depth` and `_children` are recomputed, and a fresh prefix at the same CIDR is a
-different object with a different id. Deleting a site or a tag is reversible in the way that
-matters; deleting an allocation is not. Set `deletionPolicy: Delete` explicitly where
-`kubectl delete` really should remove the prefix.
+Whether deleting the CR deletes the NetBox prefix.
 
-The default is not a CRD marker. `deletionPolicy` is declared once on the shared envelope every
-object kind embeds, so a marker there could only give every kind the same answer — and
-redeclaring the field on `NetBoxPrefixSpec` makes `controller-gen` emit
-`allOf: [{default: Retain}, {default: Delete}]`, which the API server rejects outright. The
-per-kind value is data on this kind's Descriptor (`registry.Descriptor.RetainOnDelete`), which
-means `kubectl explain netboxprefix.spec.deletionPolicy` describes the field and points here
-rather than printing `Retain`.
-[Deletion](../concepts/deletion.md#the-default-depends-on-the-kind) carries the table of
-per-kind defaults.
+**`Delete`, like every kind** since
+[#304](https://github.com/ricardomolendijk/netbox-operator/issues/304), which reverses
+[#176](https://github.com/ricardomolendijk/netbox-operator/issues/176). This kind used to
+default to `Retain` on the argument that it holds state rather than configuration — deleting
+a prefix destroys the record of who a range of addresses belonged to, recomputes its parents' `_depth` and `_children`, and takes its change log, journal entries and contacts with the row.
+
+That cost is real and the default was still the wrong place to answer it: `Retain` deleted the
+CR, kept the prefix, and left an unmanaged object that NetBox then cites with a `PROTECT` to
+refuse the delete of the thing above it — with no CR left to fix. The risk is answered by
+NetBox instead: the `DELETE` goes out, anything still referenced is refused, and the CR stays
+saying what is in the way ([deletion](../concepts/deletion.md#why-this-reversed)).
+
+Write `deletionPolicy: Retain` where this prefix should outlive its CR. It is one line, in
+Git, where the next reader can see it.
+
+There is no CRD default to read: `deletionPolicy` is declared once on the shared envelope
+every object kind embeds, so `kubectl explain netboxprefix.spec.deletionPolicy` describes the
+field and prints no default.
 
 ### `spec.prefix`
 
@@ -523,7 +525,7 @@ observability half of the populator bug: it is now visible in one command.
 | The prefix exists in NetBox but `scope_type` is `null` | `Ready=False`, `RefsResolved=False` | it was created before the `scope` was added to the spec, and the new scope does not resolve | The operator no longer creates a prefix whose declared scope is unresolved, so this is a prefix that pre-dates the scope. Resolve the reference; do not add a `site` key anywhere. |
 | A second prefix appeared after an edit | — | `spec.prefix` or `spec.vrfRef` was changed | See [renaming changes identity](#renaming-changes-identity). |
 | Terminating forever, `Deleting` `Reason=Protected` | finalizer | addresses or child objects still reference the prefix | Delete them, or switch to `deletionPolicy: Retain` to drop the finalizer without asking NetBox. |
-| Deleting the CR left the prefix in NetBox | `Retained` Event | this kind defaults to `deletionPolicy: Retain` | Set `deletionPolicy: Delete` if removing the prefix is what you want. See [`spec.deletionPolicy`](#specdeletionpolicy). |
+| Deleting the CR left the prefix in NetBox | `Retained` Event | `deletionPolicy: Retain` is set on this CR | Remove it if removing the prefix is what you want. `Delete` is the default. See [`spec.deletionPolicy`](#specdeletionpolicy). |
 
 ## Related
 

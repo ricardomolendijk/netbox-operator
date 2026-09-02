@@ -103,7 +103,7 @@ The reference pointing *at* it is
 
 ## `deletionPolicy` defaults to `Delete`
 
-Not an IPAM kind, so `Delete` (#176 option B). A role is cheap to recreate; what it protects
+`Delete`, like every kind since [#304](https://github.com/ricardomolendijk/netbox-operator/issues/304). A role is cheap to recreate; what it protects
 is the assignments, and `PROTECT` is what does that.
 
 ## Printer columns

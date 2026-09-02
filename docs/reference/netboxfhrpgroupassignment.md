@@ -164,7 +164,7 @@ There is no null variant and none is possible: all three columns are `REQ`.
 
 ## Deletion
 
-**`deletionPolicy` defaults to `Retain`** (decision #176). The row is one end of a redundancy
+**`deletionPolicy` defaults to `Delete`**, like every kind, since [#304](https://github.com/ricardomolendijk/netbox-operator/issues/304) reversed decision #176. The reasoning that used to put `Retain` here still describes a real cost. The row is one end of a redundancy
 pair — deleting it silently demotes an interface out of its group, which is a traffic change
 rather than a bookkeeping one.
 
