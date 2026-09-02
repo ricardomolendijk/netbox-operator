@@ -197,6 +197,15 @@ func dcimInterfaceFields() []Field {
 			Spec: "vrfRef", API: "vrf", Class: ClassRefOne,
 			Target: netboxv1alpha1.VRFRef{}.TargetGVK(),
 		},
+		{
+			Spec: "vlanTranslationPolicyRef", API: "vlan_translation_policy", Class: ClassRefOne,
+			Target: netboxv1alpha1.VLANTranslationPolicyRef{}.TargetGVK(),
+			// `vlan_translation_policy (BaseInterface) ForeignKey ->
+			// ipam.VLANTranslationPolicy on_delete=PROTECT` (docs/netbox-schema.md).
+			// PROTECT, so not eligible to be the containment parent, and no Deferred entry:
+			// a policy has no dependency on the interface pointing at it, so there is no
+			// ordering to solve and none of the reasons `qinq_svlan` is deferred applies.
+		},
 	}
 }
 

@@ -38,9 +38,11 @@ func virtualizationVMInterfaceDescriptor() Descriptor {
 		// declaration of both its cardinality and its comparison rule: M2MFields() derives
 		// the order-independent id-set comparison from it (NBO-088).
 		//
-		// `vlan_translation_policy` and `primary_mac_address` are absent: NBO-055 and NBO-048
-		// own the Kinds they point at, and `mac_addresses` is a GenericRelation rather than a
-		// column at all.
+		// `primary_mac_address` is absent: NBO-048 owns the Kind it points at, and
+		// `mac_addresses` is a GenericRelation rather than a column at all.
+		//
+		// `vlan_translation_policy` used to be listed here as absent for the same reason.
+		// NBO-068 landed NetBoxVLANTranslationPolicy, so it is an ordinary reference now.
 		Fields: []Field{
 			{Spec: "name", API: "name"},
 			{Spec: "enabled", API: "enabled"},
@@ -80,6 +82,15 @@ func virtualizationVMInterfaceDescriptor() Descriptor {
 			{
 				Spec: "vrfRef", API: "vrf", Class: ClassRefOne,
 				Target: netboxv1alpha1.VRFRef{}.TargetGVK(),
+			},
+			{
+				Spec: "vlanTranslationPolicyRef", API: "vlan_translation_policy", Class: ClassRefOne,
+				Target: netboxv1alpha1.VLANTranslationPolicyRef{}.TargetGVK(),
+				// `vlan_translation_policy (BaseInterface) ForeignKey ->
+				// ipam.VLANTranslationPolicy on_delete=PROTECT` (docs/netbox-schema.md).
+				// PROTECT, so not eligible to be the containment parent, and no Deferred
+				// entry: a policy has no dependency on the interface pointing at it, so
+				// there is no ordering to solve.
 			},
 		},
 

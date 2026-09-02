@@ -69,3 +69,5 @@ resources:
 - netbox_v1alpha1_netboxtunnelgroup.yaml
 - netbox_v1alpha1_netboxtunnel.yaml
 - netbox_v1alpha1_netboxl2vpn.yaml
+- netbox_v1alpha1_netboxvlantranslationpolicy.yaml
+- netbox_v1alpha1_netboxvlantranslationrule.yaml

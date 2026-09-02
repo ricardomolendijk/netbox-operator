@@ -426,6 +426,31 @@ The VRF the interface's addresses live in. `vrf ForeignKey -> ipam.VRF on_delete
 Declared on `dcim.Interface` itself, which is the one column here that is — `NetBoxVMInterface`
 gets its `vrf` from the same place and `dcim.BaseInterface` has none.
 
+### `spec.vlanTranslationPolicyRef`
+
+| | |
+|---|---|
+| Type | `*VLANTranslationPolicyRef` → [`NetBoxVLANTranslationPolicy`](netboxvlantranslationpolicy.md) |
+| Required | no |
+
+The table of VLAN ID rewrites applied to this interface.
+`vlan_translation_policy (BaseInterface) ForeignKey -> ipam.VLANTranslationPolicy
+on_delete=PROTECT` (`docs/netbox-schema.md` → `dcim.Interface`).
+
+Inherited from `dcim.BaseInterface`, so it is the same column
+[`NetBoxVMInterface`](netboxvminterface.md#specvlantranslationpolicyref) carries: one policy can
+be shared by a physical interface and a VM interface at once.
+
+**Not deferred**, unlike `qinqSVLANRef`. A policy is a standalone object with no dependency on
+the interface pointing at it, so there is no ordering problem to solve and NetBox
+cross-validates nothing about it — a create can carry the reference.
+
+`PROTECT`, so this is not a containment parent and never could be
+([ADR-0003](../decisions/0003-ownership-and-references.md) rule 4). Pointing at a policy is what
+stops it being deleted, reported on the *policy* as `Deleting=False, Reason=Protected`.
+
+The target has no `slug` column, so `slug` mode matches nothing and reports `NotFound`.
+
 ### `spec.rfRole` / `spec.rfChannel` / `spec.rfChannelFrequency` / `spec.rfChannelWidth` / `spec.txPower`
 
 The wireless group. All optional, all unset on a wired interface.
@@ -475,7 +500,6 @@ alone; set it to `""` to clear it.
 | `module` | `dcim.Module` has no Kind | NBO-053 |
 | `vdcs` | `dcim.VirtualDeviceContext` has no Kind. The digest marks the M2M `REQ`, which is an artefact of how a `ManyToManyField` renders — an empty set satisfies it | NBO-060 audits it |
 | `wireless_link`, `wireless_lans` | `wireless.WirelessLink` and `wireless.WirelessLAN` have no Kinds | NBO-050 |
-| `vlan_translation_policy` | `ipam.VLANTranslationPolicy` has no Kind | NBO-055 |
 | a MAC address of any kind | NetBox 4.2 moved the MAC to `dcim.MACAddress` behind a generic FK. This model's own entry lists `mac_addresses GenericRelation` — a reverse relation, never a column — and `dcim.BaseInterface` carries only `primary_mac_address -> dcim.MACAddress` | NBO-048 |
 | `cable`, `cable_end`, `cable_connector`, `cable_positions` | writable columns that belong to another Kind: a cable is created from its own endpoints, not by an interface claiming one. **Read-only here**, so an interface that adopts a cabled peer does not `PATCH` the cable away | NBO-049 |
 | `tags` | written by the engine as the provenance stamp | NBO-055 |
