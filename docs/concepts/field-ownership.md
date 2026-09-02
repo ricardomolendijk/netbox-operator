@@ -70,6 +70,30 @@ different mechanism: **per key, inside the map**, rather than per field through
 | **key emptied** | `audit_ticket: ""` | writes the empty string |
 | **key removed** | `audit_ticket: null` | removes that custom field's value |
 
+### The value's type is yours to state
+
+A value is written as the JSON type you give it. NetBox custom fields carry a `type` and the
+serializer validates against it, so this is not cosmetic: a `boolean` field handed the string
+`"true"` is refused outright with *"Invalid value for custom field 'chef_managed': Value must
+be true or false"*, and retrying never makes a string into a boolean.
+
+```yaml
+customFields:
+  chef_managed: true        # boolean
+  extra_disk_1: 500         # integer
+  rack_position: "12"       # text that happens to look like a number
+  tiers: [gold, silver]     # multiselect
+```
+
+**Quoting is load-bearing.** `"12"` is right on a text field and wrong on an integer one, and
+`12` is the reverse. Match the `type` of the `extras.CustomField` — a `NetBoxCustomField`
+CR's `spec.type` if the operator manages it.
+
+Until [#303](https://github.com/ricardomolendijk/netbox-operator/issues/303) the map's values
+were strings, so `text` was the only NetBox custom-field type that could be written at all;
+`integer`, `decimal`, `boolean`, `json`, `multiselect` and `multiobject` were unreachable. A
+manifest that already quotes a text value is unaffected.
+
 `null` and `""` are different requests and both are expressible, which is the whole point of
 the map's values being nullable in the CRD schema:
 

@@ -120,6 +120,27 @@ func TestSpecFieldsDesired(t *testing.T) {
 			}},
 		},
 		{
+			// #303. A NetBox custom field carries a type and its serializer validates
+			// against it, so a `boolean` sent the string "true" is refused outright --
+			// which was every non-text custom field's fate while the spec could only hold
+			// strings. The value's JSON type is the user's statement and goes out as it
+			// arrived, quoting included: `"12"` is text and `12` is an integer.
+			name: "a custom-field value keeps the json type it was written as",
+			spec: specFields{"customFields": map[string]any{
+				"chef_managed":  true,
+				"extra_disk_1":  float64(500),
+				"rack_position": "12",
+				"tiers":         []any{"gold", "silver"},
+			}},
+			descriptor: customFieldableDescriptor(),
+			wantPayload: netbox.Object{"custom_fields": map[string]any{
+				"chef_managed":  true,
+				"extra_disk_1":  float64(500),
+				"rack_position": "12",
+				"tiers":         []any{"gold", "silver"},
+			}},
+		},
+		{
 			// `customFields: {}` is what field ownership restores for a map somebody
 			// claimed and emptied (ownership.go, restoreEmpty). It has to keep meaning
 			// "manage nothing": read as "clear everything" it would null out every custom

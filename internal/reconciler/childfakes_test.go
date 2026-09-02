@@ -177,7 +177,7 @@ func inlineParent(interfaces ...inlineChild) *inlineKind {
 			NetBoxObjectSpec: netboxv1alpha1.NetBoxObjectSpec{
 				EndpointRef:    "homelab",
 				DeletionPolicy: netboxv1alpha1.DeletionRetain,
-				CustomFields:   map[string]*string{"owner": nil},
+				CustomFields:   map[string]netboxv1alpha1.JSONDocument{"owner": {}},
 			},
 			Name:       "dns",
 			Interfaces: interfaces,

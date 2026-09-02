@@ -167,6 +167,11 @@ way you would treat a `DROP COLUMN`.
 rejects an unknown key with a 400. So a custom field has to exist before any object that
 populates it reconciles.
 
+It also rejects a value of the wrong shape, so the value's JSON type has to match the
+field's `type`: `chef_managed: true` on a `boolean`, `extra_disk_1: 500` on an `integer`,
+`rack_position: "12"` on a `text`. See [the value's type is
+yours to state](concepts/field-ownership.md#the-values-type-is-yours-to-state).
+
 Nothing in this release models that dependency. `spec.customFields` is a map whose keys are
 opaque strings rather than references, so there is no edge from the consumer to the
 `NetBoxCustomField` that defines the key and nothing to re-enqueue on. What happens today:

@@ -765,6 +765,26 @@ type NetBoxObjectSpec struct {
 	// that NetBox owns, on every reconcile. Omitting the map, or setting it to `{}`,
 	// therefore means "manage nothing" rather than "clear everything".
 	//
+	// A value is written as the JSON type it is given, because that is the only thing
+	// NetBox accepts. A custom field carries a `type` (extras/choices.py,
+	// CustomFieldTypeChoices) and its serializer validates against it, so `chef_managed:
+	// "true"` on a `boolean` field is rejected outright -- *"Invalid value for custom field
+	// 'chef_managed': Value must be true or false"* -- and no amount of retrying makes a
+	// string into a boolean. Every non-text type is in the same position: `integer`,
+	// `decimal`, `boolean`, `json`, `multiselect` and `multiobject` each need their own JSON
+	// shape.
+	//
+	//   customFields:
+	//     chef_managed: true             # boolean
+	//     extra_disk_1: 500              # integer
+	//     rack_position: "12"            # text that happens to look like a number
+	//     tiers: [gold, silver]          # multiselect
+	//
+	// So the type is the user's to state and the operator's to carry through unchanged
+	// (#303). Quoting is therefore load-bearing rather than noise: `"12"` on a text field
+	// and `12` on an integer field are both right, and each is wrong on the other -- which
+	// is a distinction a `map[string]string` could not make at all, and why this is not one.
+	//
 	// `null` and `""` are different intents and both are expressible:
 	//
 	//   customFields:
@@ -783,7 +803,7 @@ type NetBoxObjectSpec struct {
 	// Reason=Invalid. Refused rather than dropped: a discarded value would leave the
 	// object claiming to be synced while NetBox never received it.
 	// +optional
-	CustomFields map[string]*string `json:"customFields,omitempty"`
+	CustomFields map[string]JSONDocument `json:"customFields,omitempty"`
 }
 
 // NetBoxObjectStatus is the part of every object CR's status that the engine owns. It is
