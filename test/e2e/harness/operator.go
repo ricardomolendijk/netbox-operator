@@ -141,7 +141,10 @@ func installCRDs(ctx context.Context, cfg Config, cluster *Cluster) error {
 	}
 
 	logf(cfg.Out, "applying %d CRDs from %s", len(entries), dir)
-	var names []string
+	// Capacity from the directory listing rather than a bare nil slice: every entry but a
+	// stray non-YAML is a CRD, so this is the right size on the first guess and prealloc
+	// (which CI enforces) has nothing to say about it.
+	names := make([]string, 0, len(entries))
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".yaml") {
 			continue
