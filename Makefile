@@ -42,6 +42,12 @@ ENVTEST        ?= $(LOCALBIN)/setup-envtest
 KIND           ?= $(LOCALBIN)/kind
 HELM_BIN       ?= $(LOCALBIN)/helm
 
+# Where controller-gen writes the CRDs before hack/crd-nullable.sh publishes them into
+# config/crd/bases. Under $(LOCALBIN) because it is generator scratch rather than output:
+# bin/ is already gitignored and already what `make clean` takes away, and a staging
+# directory under config/ would be picked up by `make verify`'s tree.
+CRD_STAGE      ?= $(LOCALBIN)/crd-stage
+
 $(LOCALBIN):
 	mkdir -p $(LOCALBIN)
 
@@ -66,9 +72,18 @@ manifests: controller-gen ## Generate CRDs and RBAC into config/.
 	@# controller-gen fails hard on a path pattern that matches no package, and git does
 	@# not track empty directories, so a fresh checkout has no ./internal/... until the
 	@# first controller lands. Found by CI on exactly that clean checkout.
+	@# The CRDs go to a staging directory and hack/crd-nullable.sh publishes them from
+	@# there, so that a CRD only ever appears in config/crd/bases with the nullable flag
+	@# already on it. Writing them straight into config/crd/bases published every CRD
+	@# incorrect for the couple of seconds the post-passes take, which is long enough for a
+	@# concurrent envtest suite to install one and fail on a feature that works (#276); the
+	@# script's own header carries the full reasoning. Emptied first, because controller-gen
+	@# only ever writes: a leftover CRD for a deleted Kind would otherwise be republished
+	@# for ever.
+	rm -rf $(CRD_STAGE)
 	$(CONTROLLER_GEN) rbac:roleName=manager-role crd webhook \
 		paths="./..." \
-		output:crd:artifacts:config=config/crd/bases \
+		output:crd:artifacts:config=$(CRD_STAGE) \
 		output:rbac:artifacts:config=config/rbac \
 		output:webhook:artifacts:config=config/webhook
 	@# The Secret grant controller-gen cannot express: a marker only ever produces a
@@ -79,7 +94,7 @@ manifests: controller-gen ## Generate CRDs and RBAC into config/.
 	@# The nullable flag controller-gen cannot express: `nullable` is a field marker and the
 	@# nullable thing is spec.customFields' map *values*, whose null means "remove this
 	@# custom field" (#196). Without it the API server prunes the null before validation.
-	./hack/crd-nullable.sh
+	./hack/crd-nullable.sh $(CRD_STAGE)
 	@# The chart's copies of the two things config/ generates: the CRDs and the manager
 	@# ClusterRole's rules. Hand-maintaining 22 CRDs and a rule list that grows with every
 	@# kind is wrong within one release, so it is a copy and `make verify` checks it.
