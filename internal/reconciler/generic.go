@@ -646,7 +646,7 @@ func (p *pass) claim(ctx context.Context, found match) (ctrl.Result, error) {
 	// own object is not an adoption under any policy: onConflict: Fail would refuse the
 	// operator's own write, and Adopt would emit an Adopted Event and set status.adopted for
 	// an object nobody adopted.
-	own, err := p.ownsMatch(ctx, id)
+	own, err := p.ownsMatch(ctx, found.live, id)
 	if err != nil {
 		// Returned rather than routed through stop(): the API server did not answer, so
 		// there is no writing a condition about it either, and controller-runtime's backoff
@@ -685,12 +685,20 @@ func (p *pass) claim(ctx context.Context, found match) (ctrl.Result, error) {
 // ever touched, and on a shared catalogue kind that advice is actively harmful
 // (issue #252, docs/reference/netboxtenantgroup.md).
 //
-// The evidence is exact rather than a heuristic: status.id is written by this operator, for
-// this CR, and by nothing else, so an id the API server records there and the natural key has
-// just matched is one object seen twice. A stamped endpoint can reach the same conclusion from
-// the provenance stamp (duplicate.go), but an endpoint with no spec.managedBy is a supported
-// configuration and has no stamp to read (docs/operations/provenance.md), so the identity has
-// to come from the CR's own status.
+// Two pieces of evidence, either of which is exact rather than a heuristic.
+//
+// The stamp is asked first, because it is already in hand and it answers the harder version of
+// the question. `k8s_uid` carries this CR's own metadata.uid, written by this operator for this
+// CR and by nothing else (internal/provenance, docs/operations/provenance.md), so a match
+// carrying it was made by this CR whatever Kubernetes has since managed to record -- which is
+// the one route back for an object whose id was lost before it could be written at all. Until
+// this it was only consulted on the spec.allowDuplicate path (duplicate.go, claimStamped), so a
+// stamped endpoint was no better off here than an unstamped one.
+//
+// Then status.id: written by this operator for this CR and by nothing else either, so an id the
+// API server records there and the natural key has just matched is one object seen twice. This
+// is the half an endpoint with no spec.managedBy has -- a supported configuration, and the one
+// the e2e suite runs (test/e2e/fixtures/graph/README.md) -- since there is no stamp to read.
 //
 // The answer is decisive rather than merely fresher, because controller-runtime runs at most
 // one reconcile per key at a time: the pass whose status write this one missed has already
@@ -698,7 +706,19 @@ func (p *pass) claim(ctx context.Context, found match) (ctrl.Result, error) {
 //
 // One live read, on the natural-key path only, where being wrong is the most expensive mistake
 // the engine makes. A settled object locates by id and never gets here.
-func (p *pass) ownsMatch(ctx context.Context, id int) (bool, error) {
+func (p *pass) ownsMatch(ctx context.Context, matched netbox.Object, id int) (bool, error) {
+	if p.stampedMine(matched) {
+		logf.FromContext(ctx).V(1).Info("the natural key matched an object carrying this "+
+			"object's own provenance stamp", "netboxID", id, "action", "recover")
+
+		// The id only. status.adopted is whatever an earlier pass decided, and this pass
+		// adopted nothing -- the same argument the live-status branch below makes for taking
+		// both fields from the API server's copy rather than from this one.
+		p.obj.NetBoxStatus().ID = int64(id)
+
+		return true, nil
+	}
+
 	if p.engine.LiveStatus == nil {
 		return false, fmt.Errorf("%w: no status reader, so a natural-key match cannot be told "+
 			"apart from this object's own netbox object", errNotConfigured)
