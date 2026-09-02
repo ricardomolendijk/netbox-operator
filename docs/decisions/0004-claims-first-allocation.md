@@ -10,6 +10,9 @@ inline key is `claimFrom` rather than `fromPrefixRef`
 **Amended:** 2026-08-24 — [deleting a claim frees its address](#deleting-a-claim-frees-its-address)
 ([#225](https://github.com/ricardomolendijk/netbox-operator/issues/225), reversing
 [#182](https://github.com/ricardomolendijk/netbox-operator/issues/182)).
+**Amended:** 2026-09-02 — [never re-allocating](#statusaddress-is-immutable-the-operator-never-re-allocates)
+names the one restore that turns it into a double allocation, and points at the runbook row
+that carries it ([#167](https://github.com/ricardomolendijk/netbox-operator/issues/167)).
 
 ## Decision
 
@@ -165,6 +168,16 @@ Recovery belongs to the child `NetBoxIPAddress`, and the engine already does it:
 404s, the id is cleared, the natural-key lookup finds nothing, and the object is
 re-created — **at the same address**, because by then the address is literal in the child's
 spec. The claim goes `Bound=True` again and nothing else happens.
+
+**That recovery assumes the address is still the claim's to take back, and one restore breaks
+the assumption.** Restore NetBox from a snapshot older than the allocation and the restored
+database has no record of the address at all, so it is offered as free to whichever claim asks
+next — and neither claim reports a conflict: the first because a settled claim short-circuits
+above without asking NetBox anything, the second because there was nothing there to find. This
+decision is unchanged by that, because the alternative is the silent re-allocation this
+section exists to rule out. It is carried as an operational hazard instead, as a row in
+[what survives what](../operations/gitops.md#what-survives-what)
+([#167](https://github.com/ricardomolendijk/netbox-operator/issues/167)).
 
 If re-creation is genuinely impossible — a third party has taken the address, or the pool
 prefix is gone — the claim reports `Bound=False`, `Ready=False`,

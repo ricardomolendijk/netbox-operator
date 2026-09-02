@@ -12,6 +12,8 @@ rule, and why the operator ships none
 **Amended:** 2026-08-24 — §2 built: what writes the markers, and the field manager that keeps §1
 checkable while the operator converges a child's spec
 ([#45](https://github.com/ricardomolendijk/netbox-operator/issues/45)).
+**Amended:** 2026-09-02 — §4b says what a restore costs a claim whose *cluster* survived it,
+which is not re-allocation ([#167](https://github.com/ricardomolendijk/netbox-operator/issues/167)).
 
 ## The governing principle
 
@@ -235,6 +237,14 @@ plainly because it is the question Git write-back is usually reaching for:
 So: back up NetBox. After a restore, the operator reconciles against whatever the restore
 contains and reclaims by identity; anything the backup predates is allocated again, and the
 claims that changed are visible in `status.address`.
+
+That is the rebuild case, where every claim comes back with an empty `status`. A claim whose
+cluster survived the restore does **not** re-allocate — it keeps a pin the restored NetBox has
+no record of, and which NetBox is therefore free to hand to a second claim
+([#167](https://github.com/ricardomolendijk/netbox-operator/issues/167)). The runbook carries
+that as its own row in
+[what survives what](../operations/gitops.md#what-survives-what), because it is the one
+restore outcome `status.address` cannot show you by itself.
 
 What an operator actually does — in which order, and what survives which failure — is the
 runbook in
