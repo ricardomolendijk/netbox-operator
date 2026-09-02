@@ -233,7 +233,7 @@ diagnosing a `WaitingForRef`.
 | `Ready=False`, `Reason=WaitingForKey`, no `parentRef` | Not expected — check `spec.name` is non-empty and the descriptor validated at boot. |
 | `Ready=False`, `Reason=Conflict` | More than one NetBox region matched. Two CRs claiming one region, or a name duplicated under the same parent. `status.naturalKey` shows what was searched. |
 | A second region appeared after an edit | `spec.name` was changed. See [Renaming changes identity](#renaming-changes-identity). |
-| `Ready=False`, `Reason=WaitingForEndpoint` | The `NetBoxEndpoint` is not `Ready`. See [troubleshooting](../operations/troubleshooting.md). |
+| `Ready=False`, `Reason=WaitingForEndpoint` | The `NetBoxEndpoint` is not `Ready`. See [troubleshooting](../troubleshooting.md). |
 
 ## Related
 

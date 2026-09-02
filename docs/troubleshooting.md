@@ -15,7 +15,7 @@ kubectl describe <kind> <name> -n <namespace>                 # read the Conditi
 - **[Start here](#start-here)** if you do not.
 
 For *why* the operator reports rather than errors, and why the retry delays differ by reason,
-see [reconciliation](../concepts/reconciliation.md).
+see [reconciliation](concepts/reconciliation.md).
 
 ## Start here
 
@@ -73,7 +73,7 @@ kubectl get <kind> <name> -n <namespace> \
 | Symptom | Command | What it means |
 |---|---|---|
 | `READY` is empty and `describe` shows no conditions | `kubectl logs -n <ns> deploy/<manager>` | No reconcile has run. The controller is not running, not watching this namespace, or the manager is crash-looping. Check the pod, then leader election if you run more than one replica |
-| `no matches for kind "NetBoxSite"` on apply | `kubectl get crd \| grep netbox.kubeforge.org` | The CRDs are not installed. They are **not** part of the Helm release — see [installing](../install.md) |
+| `no matches for kind "NetBoxSite"` on apply | `kubectl get crd \| grep netbox.kubeforge.org` | The CRDs are not installed. They are **not** part of the Helm release — see [installing](install.md) |
 | The manager pod exits at startup with `no matches for kind` | as above | Same cause: the chart was installed with `crds.check=false` and no CRDs |
 
 ## The reason index
@@ -123,7 +123,7 @@ kubectl auth can-i get secrets -n <ns> \
 3. **The namespace is not granted.** The operator's `ClusterRole` carries no `secrets` rule at
    all; access is a `Role` per namespace, from the chart's `credentialNamespaces`. An endpoint
    in an ungranted namespace reports `SecretMissing` naming the namespace. See
-   [RBAC](rbac.md).
+   [RBAC](operations/rbac.md).
 
 ### `WaitingForRef`
 
@@ -154,20 +154,20 @@ kubectl get <kind> <name> -n <ns> \
 own, and only an edit or the arrival of the missing object clears it. That is a feature — a
 cycle retried every thirty seconds is a storm.
 
-[references](../concepts/references.md) has the full model; [stuck
-references](stuck-references.md) is the walkthrough for one that will not clear.
+[references](concepts/references.md) has the full model; [stuck
+references](operations/stuck-references.md) is the walkthrough for one that will not clear.
 
 ### `RefDenied`
 
 `RefsResolved=False`. A reference crossed a namespace boundary and no
-[`NetBoxRefGrant`](../reference/netboxrefgrant.md) permits it. The grant lives in the
+[`NetBoxRefGrant`](reference/netboxrefgrant.md) permits it. The grant lives in the
 **target's** namespace — the namespace being referenced, not the one referencing.
 
 ```sh
 kubectl get netboxrefgrants -A
 ```
 
-The [admission webhook](admission-webhooks.md) warns about this at apply time, if it is
+The [admission webhook](operations/admission-webhooks.md) warns about this at apply time, if it is
 enabled. Without cert-manager it is not, and the first you hear of it is this condition — which
 is the designed backstop, not a failure: a denied reference performs **zero** NetBox writes.
 
@@ -183,7 +183,7 @@ kubectl api-resources --api-group=netbox.kubeforge.org
 
 If the count is short, the CRDs and the chart are out of step — the CRDs are applied by you,
 and `helm upgrade` never touches them. Re-run `make upgrade-crds` (or apply the bundle) and
-then upgrade the chart. See [installing](../install.md#crds-and-why-they-are-not-in-the-chart).
+then upgrade the chart. See [installing](install.md#crds-and-why-they-are-not-in-the-chart).
 
 ### `Conflict`
 
@@ -199,13 +199,13 @@ over:
 | a protected foreign key | NetBox refused the write because of `on_delete=PROTECT` | Deal with the referencing object first |
 | two spec declarations for one column | Two fields of the same spec both want to write one NetBox column | The message names both. Remove one |
 
-**As a condition type, `Conflict=True`.** This is the [multi-writer](multi-writer.md) report,
+**As a condition type, `Conflict=True`.** This is the [multi-writer](operations/multi-writer.md) report,
 and its reasons are `ForeignCluster` (the object's cluster stamp names a different cluster) or
 `ForeignOwner` (our cluster, a different CR). The condition is *removed* rather than set to
 `False` when the conflict clears, so its presence is the signal.
 
 **As a `ChildrenReady=False` reason.** Two inline entries collide — a duplicate key, or two
-claims on one column. See [inline children](../concepts/inline-children.md).
+claims on one column. See [inline children](concepts/inline-children.md).
 
 ### Every other `Ready=False` reason, by kind
 
@@ -238,13 +238,13 @@ way, so you never actually wait out a 10-minute timer.
 | `Synced` | `Ready=True`. The NetBox object exists and matches | resync |
 | `WaitingForRef` | [above](#waitingforref) | see the ref reason |
 | `WaitingForEndpoint` | The `NetBoxEndpoint` this object references is not `Ready`. Fix the endpoint | 30s |
-| `WaitingForKey` | No natural-key candidate is usable, so the engine cannot tell whether the object exists. It writes **nothing** rather than risk a duplicate. See [lookups](../concepts/lookups.md) | timer |
+| `WaitingForKey` | No natural-key candidate is usable, so the engine cannot tell whether the object exists. It writes **nothing** rather than risk a duplicate. See [lookups](concepts/lookups.md) | timer |
 | `AdoptOnly` | `spec.onConflict: AdoptOnly` and nothing in NetBox matched. The operator will not create it | timer |
 | `Conflict` | [above](#conflict) | timer |
 | `Invalid` | NetBox returned a 400, or the spec asks for something the engine cannot express. The message says which | timer |
 | `Truncated` | A lookup paginated past the client's page cap; nothing was written | timer |
 | `APIError` | NetBox unreachable, 5xx, 429, or a 404 after the object had been located. Also a failed child write | backoff |
-| `ReservedByOperator` | The CR names the `k8s-managed` tag or one of the provenance custom fields the bootstrap owns. Pick another name — see [provenance](provenance.md) | timer |
+| `ReservedByOperator` | The CR names the `k8s-managed` tag or one of the provenance custom fields the bootstrap owns. Pick another name — see [provenance](operations/provenance.md) | timer |
 | `DeferredFieldPending` | The object exists; a deferred field has not been PATCHed on yet. `status.deferredPending` names them. Normal, and transient | short |
 | `DryRunPending` | The endpoint is `mode: DryRun`. **This is not a failure** — the write was reported, not sent | resync |
 | `ReportPending` | The endpoint is `driftMode: Report`. **Also not a failure** | resync |
@@ -258,7 +258,7 @@ The other conditions an object carries:
 | Condition | Reasons | Says |
 |---|---|---|
 | `Synced` | `NoDrift`, `DriftCorrected`, `DriftReported`, `DriftDetectedDryRun` | Whether the live object matches the spec, and whether anything was sent |
-| `DriftDetected` | `DriftDetected` when `True`; `NoDrift` / `DriftCorrected` when `False` | NetBox differs from the spec and nothing was sent. The message is the change set, `field: old → new`. See [drift](../concepts/drift.md) |
+| `DriftDetected` | `DriftDetected` when `True`; `NoDrift` / `DriftCorrected` when `False` | NetBox differs from the spec and nothing was sent. The message is the change set, `field: old → new`. See [drift](concepts/drift.md) |
 | `ParentOwned` | `ParentOwned`, `CascadeUnavailable`, `ParentOwnershipDisabled` | Whether deleting the containment parent will garbage-collect this object. `CascadeUnavailable` means the parent is in another namespace, or was written as a `slug`/`lookup`/raw `id` rather than a sibling CR name |
 | `ChildrenReady` | `AllReady`, `PendingChildren`, `Conflict`, `PruneBlocked`, `APIError` | For kinds with inline children. `PendingChildren` is normal on a first apply; `PruneBlocked` means the prune wanted to delete more children than the parent declares and so deleted **none** |
 | `Deleting` | see below — **only ever `False`** | Why a delete is not finishing |
@@ -280,7 +280,7 @@ The other conditions an object carries:
 | `IdempotencyKeyUnavailable` | The endpoint has nowhere to store an allocation identity, so a POST could not be made exactly-once. **Zero POSTs**, no override. Set `spec.managedBy.allocationIdentityField` on the endpoint |
 | `AllocationContended` | `NetBoxIPRangeClaim` only: every computed placement lost a race to another writer. Distinct from `PoolExhausted` |
 
-[claims](../concepts/claims.md) explains each of these and what to go and fix.
+[claims](concepts/claims.md) explains each of these and what to go and fix.
 
 #### On a `NetBoxSweep`
 
@@ -298,7 +298,7 @@ The other conditions an object carries:
 | `Timeout` | The run exceeded `spec.timeout` |
 | `APIError` | NetBox unreachable, rate limiting, or failing |
 
-[sweeps](sweeps.md) has the whole model, including why a sweep reports and never deletes.
+[sweeps](operations/sweeps.md) has the whole model, including why a sweep reports and never deletes.
 
 ## `kubectl delete` is hanging
 
@@ -314,7 +314,7 @@ finished. `kubectl get <kind> <name> -o jsonpath='{.status.conditions}' | jq` sh
 
 If you want the NetBox objects to survive a `kubectl delete`, that is
 `spec.deletionPolicy: Retain` on the CR *before* you delete it.
-[deletion](../concepts/deletion.md) has the full order of precedence.
+[deletion](concepts/deletion.md) has the full order of precedence.
 
 ## Events
 
@@ -416,7 +416,7 @@ renders a `Service` by default (`metrics.enabled: true`); the kustomize path doe
 | `controller_runtime_reconcile_errors_total` | Same signal. Safe to alert on precisely because NetBox's uptime does not feed it |
 | `controller_runtime_reconcile_time_seconds` | A slow NetBox shows up here. A single reconcile can legitimately take minutes — see below |
 
-[observability](observability.md) has the operator's own metrics, which are the ones that say
+[observability](operations/observability.md) has the operator's own metrics, which are the ones that say
 something about NetBox rather than about controller-runtime.
 
 ## A slow NetBox delays other endpoints
@@ -455,13 +455,13 @@ the most common consequence, and [the first symptom on this page](#secretmissing
 If the manager is being OOM-killed, check how many Secrets carry the credential label, and how
 many namespaces are in `credentialNamespaces`.
 
-[RBAC](rbac.md) has the `kubectl auth can-i` checks and the overlay to add a cluster-wide read
+[RBAC](operations/rbac.md) has the `kubectl auth can-i` checks and the overlay to add a cluster-wide read
 back if you genuinely want one.
 
 ## Underlying NetBox error types
 
 A reason is a translation of a typed client error, not an independent diagnosis. Full table and
-retry policy in [errors and retries](../concepts/errors-and-retries.md).
+retry policy in [errors and retries](concepts/errors-and-retries.md).
 
 | HTTP from NetBox | Client type | Becomes |
 |---|---|---|
@@ -475,8 +475,8 @@ retry policy in [errors and retries](../concepts/errors-and-retries.md).
 
 ## Related
 
-- [Stuck references](stuck-references.md) — the walkthrough for a reference that will not clear
-- [RBAC](rbac.md) — what the operator can read, and the label every credential Secret needs
-- [Reconciliation](../concepts/reconciliation.md) — why a failure is a condition and not an error
-- [Errors and retries](../concepts/errors-and-retries.md) — the retry tiers, and why they differ
-- [Observability](observability.md) — the operator's own metrics and what to alert on
+- [Stuck references](operations/stuck-references.md) — the walkthrough for a reference that will not clear
+- [RBAC](operations/rbac.md) — what the operator can read, and the label every credential Secret needs
+- [Reconciliation](concepts/reconciliation.md) — why a failure is a condition and not an error
+- [Errors and retries](concepts/errors-and-retries.md) — the retry tiers, and why they differ
+- [Observability](operations/observability.md) — the operator's own metrics and what to alert on

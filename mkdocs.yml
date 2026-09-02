@@ -5,10 +5,18 @@
 # build by default rather than included by default (NBO-086). hack/check-docs-links.py
 # asserts that against the built output; do not weaken it to a denylist.
 #
-# There is deliberately no `nav:`. MkDocs derives navigation from the docs/ tree, so
-# navigation cannot drift from what is on disk, and docs/README.md -- the hand-maintained
-# index, which becomes the site home page -- stays the single curated reading order.
-# A generated nav file would be a second copy of that index and would drift from it.
+# `nav:` below is hand-written, and it is the site's reading order. It used to be absent, on
+# the argument that a derived navigation cannot drift from what is on disk while a second copy
+# of docs/README.md's index would. That argument was right about drift and wrong about the
+# reader: MkDocs derives navigation alphabetically, so "Coverage" and "Custom fields" came
+# before "Getting started", and a first-time user's path was buried in the middle of a list
+# sorted by filename (#278).
+#
+# Two things make the copy safe. `validation.omitted_files: warn` below, plus the `--strict`
+# that `make docs-build` passes, turn *any* page under docs/ that this nav does not list into
+# a build failure -- so the nav cannot silently fall behind the tree. And the order here is
+# the order of docs/README.md's tables, section for section, so the index and the sidebar
+# agree by construction; keep them that way when you add a page.
 
 site_name: NetBox Operator
 site_description: A Kubernetes operator that reconciles NetBox objects from custom resources.
@@ -20,6 +28,118 @@ copyright: Apache-2.0
 
 docs_dir: docs
 site_dir: site
+
+nav:
+  - Home: README.md
+  - Using it:
+      - 'Getting started': getting-started.md
+      - 'Installing': install.md
+      - 'Troubleshooting': troubleshooting.md
+      - 'Examples': examples/README.md
+  - Operating it:
+      - 'RBAC and the blast radius': operations/rbac.md
+      - 'Coexisting with Flux and Argo CD': operations/gitops.md
+      - 'Exporting a live NetBox': operations/exporting.md
+      - 'Provenance': operations/provenance.md
+      - 'The admission webhook': operations/admission-webhooks.md
+      - 'Two writers, one NetBox object': operations/multi-writer.md
+      - 'Observability': operations/observability.md
+      - 'Sweeps': operations/sweeps.md
+      - 'Stuck references': operations/stuck-references.md
+  - Concepts:
+      - 'Reconciliation': concepts/reconciliation.md
+      - 'The reconcile engine': concepts/engine.md
+      - 'The Descriptor': concepts/descriptor.md
+      - 'Claims': concepts/claims.md
+      - 'Deletion': concepts/deletion.md
+      - 'Drift detection': concepts/drift.md
+      - 'Field ownership': concepts/field-ownership.md
+      - 'Generic references': concepts/generic-refs.md
+      - 'Errors and retries': concepts/errors-and-retries.md
+      - 'Inline children': concepts/inline-children.md
+      - 'Lookups': concepts/lookups.md
+      - 'Ownership': concepts/ownership.md
+      - 'References': concepts/references.md
+      - 'Custom fields': custom-fields.md
+  - Reference:
+      - '`NetBoxEndpoint`': reference/netboxendpoint.md
+      - '`NetBoxRegion`': reference/netboxregion.md
+      - '`NetBoxTag`': reference/netboxtag.md
+      - '`NetBoxSite`': reference/netboxsite.md
+      - '`NetBoxTenantGroup`': reference/netboxtenantgroup.md
+      - '`NetBoxTenant`': reference/netboxtenant.md
+      - '`NetBoxSiteGroup`': reference/netboxsitegroup.md
+      - '`NetBoxLocation`': reference/netboxlocation.md
+      - '`NetBoxPrefix`': reference/netboxprefix.md
+      - '`NetBoxVRF`': reference/netboxvrf.md
+      - '`NetBoxRouteTarget`': reference/netboxroutetarget.md
+      - '`NetBoxVLAN`': reference/netboxvlan.md
+      - '`NetBoxVLANGroup`': reference/netboxvlangroup.md
+      - '`NetBoxClusterType`': reference/netboxclustertype.md
+      - '`NetBoxClusterGroup`': reference/netboxclustergroup.md
+      - '`NetBoxCluster`': reference/netboxcluster.md
+      - '`NetBoxIPAddress`': reference/netboxipaddress.md
+      - '`NetBoxIPAddressClaim`': reference/netboxipaddressclaim.md
+      - '`NetBoxVirtualMachine`': reference/netboxvirtualmachine.md
+      - '`NetBoxVMInterface`': reference/netboxvminterface.md
+      - '`NetBoxVirtualDisk`': reference/netboxvirtualdisk.md
+      - '`NetBoxManufacturer`': reference/netboxmanufacturer.md
+      - '`NetBoxDeviceRole`': reference/netboxdevicerole.md
+      - '`NetBoxDeviceType`': reference/netboxdevicetype.md
+      - '`NetBoxPlatform`': reference/netboxplatform.md
+      - '`NetBoxDevice`': reference/netboxdevice.md
+      - '`NetBoxInterface`': reference/netboxinterface.md
+      - '`NetBoxIPRange`': reference/netboxiprange.md
+      - '`NetBoxPrefixClaim`': reference/netboxprefixclaim.md
+      - '`NetBoxIPRangeClaim`': reference/netboxiprangeclaim.md
+      - '`NetBoxContactGroup`': reference/netboxcontactgroup.md
+      - '`NetBoxContactRole`': reference/netboxcontactrole.md
+      - '`NetBoxContact`': reference/netboxcontact.md
+      - '`NetBoxContactAssignment`': reference/netboxcontactassignment.md
+      - '`NetBoxCable`': reference/netboxcable.md
+      - '`NetBoxCableBundle`': reference/netboxcablebundle.md
+      - '`NetBoxCustomField`': reference/netboxcustomfield.md
+      - '`NetBoxCustomFieldChoiceSet`': reference/netboxcustomfieldchoiceset.md
+      - '`NetBoxCustomLink`': reference/netboxcustomlink.md
+      - '`NetBoxSavedFilter`': reference/netboxsavedfilter.md
+      - '`NetBoxExportTemplate`': reference/netboxexporttemplate.md
+      - '`NetBoxConfigTemplate`': reference/netboxconfigtemplate.md
+      - '`NetBoxConfigContextProfile`': reference/netboxconfigcontextprofile.md
+      - '`NetBoxConfigContext`': reference/netboxconfigcontext.md
+      - '`NetBoxRIR`': reference/netboxrir.md
+      - '`NetBoxAggregate`': reference/netboxaggregate.md
+      - '`NetBoxASN`': reference/netboxasn.md
+      - '`NetBoxASNRange`': reference/netboxasnrange.md
+      - '`NetBoxRole`': reference/netboxrole.md
+      - '`NetBoxFHRPGroup`': reference/netboxfhrpgroup.md
+      - '`NetBoxFHRPGroupAssignment`': reference/netboxfhrpgroupassignment.md
+      - '`NetBoxService`': reference/netboxservice.md
+      - '`NetBoxServiceTemplate`': reference/netboxservicetemplate.md
+      - '`NetBoxMACAddress`': reference/netboxmacaddress.md
+      - '`NetBoxWirelessLANGroup`': reference/netboxwirelesslangroup.md
+      - '`NetBoxWirelessLAN`': reference/netboxwirelesslan.md
+      - '`NetBoxWirelessLink`': reference/netboxwirelesslink.md
+      - '`NetBoxRackRole`': reference/netboxrackrole.md
+      - '`NetBoxRackGroup`': reference/netboxrackgroup.md
+      - '`NetBoxRackType`': reference/netboxracktype.md
+      - '`NetBoxRack`': reference/netboxrack.md
+      - '`NetBoxRackReservation`': reference/netboxrackreservation.md
+      - 'Generic references': reference/genericref.md
+      - '`NetBoxRefGrant`': reference/netboxrefgrant.md
+      - '`NetBoxSweep`': reference/netboxsweep.md
+  - Contributing and maintenance:
+      - 'Object lifecycle: what is still designed': concepts/object-lifecycle.md
+      - 'The e2e suite': operations/e2e.md
+      - 'NetBox schema reference': netbox-schema.md
+      - 'Coverage': coverage.md
+      - 'Regenerating the schema': regenerating.md
+  - Decisions:
+      - 'All decisions, and their status': decisions/README.md
+      - '0001 — API group and kind naming': decisions/0001-api-group-and-kind-naming.md
+      - '0002 — CRD scoping': decisions/0002-crd-scoping.md
+      - '0003 — Ownership and references': decisions/0003-ownership-and-references.md
+      - '0004 — Claims-first allocation': decisions/0004-claims-first-allocation.md
+      - '0005 — Coexisting with Flux and Argo CD': decisions/0005-gitops-coexistence.md
 
 # --strict promotes all of these to errors, which is how CI runs it. A relative link that
 # resolves on GitHub but not in the site fails the build instead of shipping a 404.

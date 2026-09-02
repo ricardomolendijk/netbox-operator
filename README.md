@@ -32,6 +32,9 @@ spec:
   dnsName: dns.home.arpa
 ```
 
+**New here? [Start with the ten-minute walkthrough](docs/getting-started.md)** — CRDs, chart,
+one Secret, one `NetBoxEndpoint`, one `NetBoxSite`, and the object visible in NetBox.
+
 > **Status: pre-alpha, under active construction.** The API group is `v1alpha1` and is
 > expected to change. The whole 64-CRD catalogue is on `main` and installable from a
 > checkout, but **no release has published an installable artefact yet** — every release run
@@ -84,10 +87,11 @@ Longer form, one page each:
   answer is a report and never a deletion, and why a sweep only ever considers objects
   stamped with its own cluster id.
 
-Full index: [`docs/README.md`](docs/README.md). Decisions and their rationale:
-[`docs/decisions/README.md`](docs/decisions/README.md). Running it, including what the
-operator can read and the label every credential Secret needs:
-[`docs/operations/rbac.md`](docs/operations/rbac.md).
+Full index: [`docs/README.md`](docs/README.md). When something goes wrong:
+[`docs/troubleshooting.md`](docs/troubleshooting.md), which lists every condition reason the
+operator emits. Decisions and their rationale:
+[`docs/decisions/README.md`](docs/decisions/README.md). What the operator can read and the
+label every credential Secret needs: [`docs/operations/rbac.md`](docs/operations/rbac.md).
 
 ## Installing
 
@@ -102,6 +106,7 @@ helm install netbox-operator ./charts/netbox-operator \
 ```
 
 No release has published an installable artefact yet, so the chart installs from a checkout.
+[Getting started](docs/getting-started.md) walks the whole path including the first object;
 [`docs/install.md`](docs/install.md) has every value, both upgrade commands, and the one thing
 to know before you upgrade — the CRDs are applied by you, before the chart, every time. The
 chart values that change GitOps and drift behaviour are documented alongside the behaviour, in

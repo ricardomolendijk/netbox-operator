@@ -1,8 +1,7 @@
 # RBAC and the operator's blast radius
 
 What the operator can read, why credential Secrets need both a label and a listed
-namespace, and what happens when one of them is missing. Tracked as
-[#100](https://github.com/ricardomolendijk/netbox-operator/issues/100) (NBO-072).
+namespace, and what happens when one of them is missing.
 
 ## What the operator holds
 

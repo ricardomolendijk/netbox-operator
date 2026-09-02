@@ -4,8 +4,8 @@ Every example here is **runnable as it stands**. Each one carries the credential
 the `NetBoxEndpoint` it needs, so it is a single `kubectl apply` and not a prerequisite hunt.
 Edit the URL and the token first.
 
-If this is your first one, [`site.yaml`](site.yaml) is the smallest complete path from an
-empty cluster to an object in NetBox.
+If this is your first one, [`site.yaml`](site.yaml) is the one the
+[getting-started walkthrough](../getting-started.md) uses line by line.
 
 ```sh
 kubectl apply -f docs/examples/site.yaml

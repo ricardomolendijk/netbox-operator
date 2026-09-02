@@ -1,18 +1,50 @@
 # Documentation
 
-Start with [the root README](../README.md) for what this operator is. This page is the
-index of everything under `docs/`.
+**[Getting started](getting-started.md)** is the ten-minute path: install the CRDs, install
+the chart, create a Secret and a `NetBoxEndpoint`, apply one `NetBoxSite`, and see it in
+NetBox. Start there if you have never run this before.
 
-Docs ship in the same pull request as the code they describe — a feature PR that touches
-neither `docs/` nor `README.md` is incomplete ([`CONTRIBUTING.md`](../CONTRIBUTING.md),
-definition of done). Every kind gets a reference page; every concept gets a concept page.
+**[Troubleshooting](troubleshooting.md)** is the other page to bookmark. Every failure in this
+operator surfaces as a `Ready` condition with a reason on it, and that page is the index of
+every reason the code emits.
 
-## Concepts
+[The root README](../README.md) says what the operator is. This page is the index of
+everything under `docs/`, in reading order.
 
-How the engine behaves, and why.
+## Using it
 
 | Page | Answers |
 |---|---|
+| [Getting started](getting-started.md) | An empty cluster to an object in NetBox in six steps, and what `Ready=False` means the first time you see it |
+| [Installing](install.md) | Helm, `make deploy`, every chart value and what it reaches, which values are the chart's and which belong in a CR, what the chart deliberately does not expose, and why a chart upgrade does not upgrade the CRDs |
+| [Troubleshooting](troubleshooting.md) | Every condition reason the operator emits, keyed on the symptom: what `SecretMissing`, `RefDenied`, `Conflict`, `WaitingForRef` and `RefKindUnavailable` each mean and what to do; a delete that will not finish; the Events, the logs and the metrics |
+| [Examples](examples/README.md) | Runnable manifests, each carrying the Secret and endpoint it needs |
+
+## Operating it
+
+Running the operator against a NetBox you care about.
+
+| Page | Answers |
+|---|---|
+| [RBAC and the blast radius](operations/rbac.md) | What the operator is allowed to read, why a credential Secret needs both the `netbox.kubeforge.org/endpoint-credential` label **and** a namespace on the granted list, how to add a namespace, how to give it a cluster-wide read back if you want one, and what each of the two failure modes looks like |
+| [Coexisting with Flux and Argo CD](operations/gitops.md) | Why the operator never writes a `spec` and how that is enforced, the Argo CD `ignoreDifferences` and Flux `Kustomization` snippets that make it quiet, the three `driftMode` values, the cluster-rebuild and NetBox-restore walkthroughs, the chart values that configure all of it and which of them are per-endpoint rather than per-install, and the NetBox permission model |
+| [Exporting a live NetBox](operations/exporting.md) | How `nbctl export` turns a live NetBox into manifests, why references are emitted by CR name and what that trades away, how a CR name is derived and what a collision looks like, why an operator-managed object is skipped, and why a truncated read fails the whole run |
+| [Provenance](operations/provenance.md) | What `spec.managedBy` writes into every NetBox object the operator manages, how the tag and custom-field definitions get bootstrapped, why stamping is not mandatory, what stops working when you turn it off, and why two clusters sharing one NetBox are never serialised |
+| [The admission webhook](operations/admission-webhooks.md) | What the validating webhook checks and what CEL already covers, the degradation table for when it is down, why its `failurePolicy` is `Ignore`, why there is no defaulting webhook, and why cert-manager is the only certificate path |
+| [Two writers, one NetBox object](operations/multi-writer.md) | The three multi-cluster shapes and which are supported, what the operator reports when two writers claim one object, what it deliberately does not call a conflict, the runbook for resolving one, and why writes are never serialised |
+| [Observability](operations/observability.md) | Every metric with its labels, cardinality and what to alert on; which Events fire and when; the log levels and the stable key set, with `kubectl logs \| jq` recipes |
+| [Sweeps](operations/sweeps.md) | What this cluster has left behind in NetBox: why a sweep reports and never reclaims, the three filters that decide what it can see, why the cluster stamp is what stops it accusing another cluster, the four verdicts and the grace period, the eight reasons it refuses to run, and what one run costs NetBox |
+| [Stuck references](operations/stuck-references.md) | Which condition says why an object is waiting for another one, what the reference metrics mean together, how to find an object's referrers by hand, and which references nothing will ever wake |
+
+## Concepts
+
+How the engine behaves, and why. Read these when something surprises you — none of them is a
+prerequisite for [getting started](getting-started.md).
+
+| Page | Answers |
+|---|---|
+| [Reconciliation](concepts/reconciliation.md) | How the operator gets from "here is an object" to "NetBox agrees with it", why a failure is a condition rather than a returned error, the tiered backoff and what sets each tier, and why a Secret event is a reconcile trigger |
+| [The reconcile engine](concepts/engine.md) | The one place a create, adopt or update decision is made: how the ordered natural-key candidates decide identity, why adoption is opt-in, how drift decides the PATCH, and what wiring a new kind actually costs |
 | [The Descriptor](concepts/descriptor.md) | What per-kind facts the engine needs, why they are data rather than code, and how natural keys establish identity before a `status.id` exists |
 | [Claims](concepts/claims.md) | What "allocates exactly once" means when a POST can lose its answer, how the deterministic allocation identity gets the same address back after a cluster rebuild and exactly when it does not, why an exhausted pool waits on a timer *and* a watch when neither alone is enough, why deleting a claim frees its address and what that costs, and how the operator reports the allocations it does leave behind, and what `AllocationConflict`, `ReclaimedOutsidePool` and `PoolNotAllocatable` each want you to go and fix |
 | [Deletion](concepts/deletion.md) | What `deletionPolicy: Delete` and `Retain` each do, which kinds default to `Retain` and why, why `NetBoxVLANGroup` sits in `ipam` and does not, why `Retain` also refuses a destructive *update* on the one kind that has one, why the finalizer goes on before the first write and comes off after the last one, what a `PROTECT`-blocked delete looks like and how to get out of it |
@@ -101,6 +133,37 @@ their pages.
 | [`NetBoxRefGrant`](reference/netboxrefgrant.md) | The kind that describes no NetBox object: which namespaces may reference into this one, the wildcard and selector forms that keep one grant per catalogue namespace, why `NetBoxEndpoint` is the one exception, and why a grant is not NetBox authorisation |
 | [`NetBoxSweep`](reference/netboxsweep.md) | The kind that reports rather than reconciles: what a sweep can and cannot see, why the tag and the cluster stamp are load-bearing, why it never deletes and has no flag that makes it, why a `DryRun` or `driftMode: Off` endpoint refuses the run, and why a truncated list is a refusal rather than a partial report |
 
+## Contributing and maintenance
+
+Not needed to run the operator. This is the material for working *on* it: the schema pipeline
+the CRDs are generated from, the suite that proves convergence against a real NetBox, and the
+decisions that are expensive to reverse.
+
+Docs ship in the same pull request as the code they describe — a feature PR that touches
+neither `docs/` nor `README.md` is incomplete ([`CONTRIBUTING.md`](../CONTRIBUTING.md),
+definition of done). Every kind gets a reference page; every concept gets a concept page.
+
+| Page | Answers |
+|---|---|
+| [Object lifecycle: what is still designed](concepts/object-lifecycle.md) | The register of per-object behaviour that is designed and not built, kept separate from the pages that describe what runs, with a status marker per section |
+| [The e2e suite](operations/e2e.md) | How to run the operator against a kind cluster and a real NetBox, what the seven runs of the ordering gate each prove, how to reproduce a seeded failure and read a dump diff, every environment variable, where it runs and where it deliberately does not, and how the next gate reuses the harness |
+| [NetBox schema reference](netbox-schema.md) | The authoritative field list every CRD is derived from: 159 models, 138 endpoints, machine-extracted from NetBox 4.6.8. Grep it; do not read it |
+| [Coverage](coverage.md) | Which NetBox endpoints have a Kind, which are deliberately excluded and why, which writable columns a shipped Kind does not map, and which natural-key candidates cannot be issued as a query. Generated by `make coverage`; stale is a test failure |
+| [Regenerating the schema](regenerating.md) | How to retarget a newer NetBox release, how the Kind generator turns the IR into Go and what `overrides.yaml` may contain, how to test the extraction pipeline without a NetBox checkout, and how to cross-check the AST walk against a live instance |
+
+## Decisions
+
+Dated records of decisions that are expensive to reverse. Index and status:
+[`decisions/README.md`](decisions/README.md).
+
+| Page | Answers |
+|---|---|
+| [0001 — API group and kind naming](decisions/0001-api-group-and-kind-naming.md) | Why the group is `netbox.kubeforge.org` and every kind is prefixed `NetBox` |
+| [0002 — CRD scoping](decisions/0002-crd-scoping.md) | Why every kind is namespaced in `v1alpha1`, what that costs, and what would have to change to revisit it |
+| [0003 — Ownership and references](decisions/0003-ownership-and-references.md) | How a NetBox foreign key differs from a Kubernetes owner reference, where the operator adds each, what cross-namespace containment gives up as a result, and why inline child sugar is in `v1alpha1` on terms that let `v1beta1` drop it |
+| [0004 — Claims-first allocation](decisions/0004-claims-first-allocation.md) | Why "allocate me an address" is a separate kind rather than a mode of `NetBoxIPAddress`, why the inline form is sugar over a real claim, and why an exhausted pool waits rather than failing |
+| [0005 — Coexisting with Flux and Argo CD](decisions/0005-gitops-coexistence.md) | Why Git is authoritative, why a NetBox UI edit is drift rather than a competing opinion, and why there is no write-back |
+
 ### The shape of a reference page
 
 Around 111 CRDs will follow, so the shape is settled here rather than after twenty pages
@@ -146,40 +209,3 @@ template — copy its headings in this order:
 
 Document only what is in the code. If a spec and the code disagree, the code wins and the
 divergence gets reported.
-
-## Decisions
-
-Dated records of decisions that are expensive to reverse. Index and status:
-[`decisions/README.md`](decisions/README.md).
-
-| Page | Answers |
-|---|---|
-| [0001 — API group and kind naming](decisions/0001-api-group-and-kind-naming.md) | Why the group is `netbox.kubeforge.org` and every kind is prefixed `NetBox` |
-| [0002 — CRD scoping](decisions/0002-crd-scoping.md) | Why every kind is namespaced in `v1alpha1`, what that costs, and what would have to change to revisit it |
-| [0003 — Ownership and references](decisions/0003-ownership-and-references.md) | How a NetBox foreign key differs from a Kubernetes owner reference, where the operator adds each, what cross-namespace containment gives up as a result, and why inline child sugar is in `v1alpha1` on terms that let `v1beta1` drop it |
-| [0004 — Claims-first allocation](decisions/0004-claims-first-allocation.md) | Why "allocate me an address" is a separate kind rather than a mode of `NetBoxIPAddress`, why the inline form is sugar over a real claim, and why an exhausted pool waits rather than failing |
-| [0005 — Coexisting with Flux and Argo CD](decisions/0005-gitops-coexistence.md) | Why Git is authoritative, why a NetBox UI edit is drift rather than a competing opinion, and why there is no write-back |
-
-## Operations
-
-| Page | Answers |
-|---|---|
-| [Installing](install.md) | Helm, `make deploy`, every chart value and what it reaches, which values are the chart's and which belong in a CR, what the chart deliberately does not expose, and why a chart upgrade does not upgrade the CRDs |
-| [Coexisting with Flux and Argo CD](operations/gitops.md) | Why the operator never writes a `spec` and how that is enforced, the Argo CD `ignoreDifferences` and Flux `Kustomization` snippets that make it quiet, the three `driftMode` values, the cluster-rebuild and NetBox-restore walkthroughs, the chart values that configure all of it and which of them are per-endpoint rather than per-install, and the NetBox permission model |
-| [Exporting a live NetBox](operations/exporting.md) | How `nbctl export` turns a live NetBox into manifests, why references are emitted by CR name and what that trades away, how a CR name is derived and what a collision looks like, why an operator-managed object is skipped, and why a truncated read fails the whole run |
-| [Provenance](operations/provenance.md) | What `spec.managedBy` writes into every NetBox object the operator manages, how the tag and custom-field definitions get bootstrapped, why stamping is not mandatory, what stops working when you turn it off, and why two clusters sharing one NetBox are never serialised |
-| [The admission webhook](operations/admission-webhooks.md) | What the validating webhook checks and what CEL already covers, the degradation table for when it is down, why its `failurePolicy` is `Ignore`, why there is no defaulting webhook, and why cert-manager is the only certificate path |
-| [Two writers, one NetBox object](operations/multi-writer.md) | The three multi-cluster shapes and which are supported, what the operator reports when two writers claim one object, what it deliberately does not call a conflict, the runbook for resolving one, and why writes are never serialised |
-| [Observability](operations/observability.md) | Every metric with its labels, cardinality and what to alert on; which Events fire and when; the log levels and the stable key set, with `kubectl logs \| jq` recipes |
-| [Sweeps](operations/sweeps.md) | What this cluster has left behind in NetBox: why a sweep reports and never reclaims, the three filters that decide what it can see, why the cluster stamp is what stops it accusing another cluster, the four verdicts and the grace period, the eight reasons it refuses to run, and what one run costs NetBox |
-| [Stuck references](operations/stuck-references.md) | Which condition says why an object is waiting for another one, what the reference metrics mean together, how to find an object's referrers by hand, and which references nothing will ever wake |
-| [The e2e suite](operations/e2e.md) | How to run the operator against a kind cluster and a real NetBox, what the seven runs of the ordering gate each prove, how to reproduce a seeded failure and read a dump diff, every environment variable, where it runs and where it deliberately does not, and how the next gate reuses the harness |
-| [NetBox schema reference](netbox-schema.md) | The authoritative field list every CRD is derived from: 159 models, 138 endpoints, machine-extracted from NetBox 4.6.8. Grep it; do not read it |
-| [Coverage](coverage.md) | Which NetBox endpoints have a Kind, which are deliberately excluded and why, which writable columns a shipped Kind does not map, and which natural-key candidates cannot be issued as a query. Generated by `make coverage`; stale is a test failure |
-| [Regenerating the schema](regenerating.md) | How to retarget a newer NetBox release, how the Kind generator turns the IR into Go and what `overrides.yaml` may contain, how to test the extraction pipeline without a NetBox checkout, and how to cross-check the AST walk against a live instance |
-
-## Examples
-
-| Page | Answers |
-|---|---|
-| [Examples](examples/README.md) | Runnable manifests, and which milestone each one becomes real in |

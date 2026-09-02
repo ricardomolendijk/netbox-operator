@@ -244,8 +244,9 @@ verify: manifests generate ## Fail if generated output is not committed.
 
 # The docs site is built from docs/ and nothing else -- see the allowlist note in
 # mkdocs.yml. Its output (site/) is gitignored and never committed, so it is deliberately
-# absent from GENERATED_PATHS: there is no checked-in artefact for `make verify` to police,
-# and no generated navigation file that could drift from docs/README.md.
+# absent from GENERATED_PATHS: there is no checked-in artefact for `make verify` to police.
+# The site's nav lives in mkdocs.yml and is hand-written; `mkdocs build --strict` fails on any
+# page under docs/ the nav does not list, so it cannot fall behind the tree in silence.
 
 .PHONY: docs-tools
 docs-tools: ## Install the pinned docs site toolchain into the active Python environment.
