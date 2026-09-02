@@ -1104,6 +1104,37 @@ spec:
                 x-kubernetes-list-map-keys:
                 - name
                 x-kubernetes-list-type: map
+              localContextData:
+                description: |-
+                  LocalContextData is this VM's own slice of config context: the JSON document NetBox
+                  merges **last** when it renders the VM's configuration, after every
+                  extras.ConfigContext whose selectors matched (docs/netbox-schema.md ->
+                  virtualization.VirtualMachine, `local_context_data (ConfigContextModel) JSONField`;
+                  `netbox/extras/models/configs.py`, `ConfigContextModel.get_config_context()`).
+
+                  The same column dcim.Device carries, from the same mixin, and it behaves the same way
+                  on both: it is part of the object rather than a reference to a shared one, and it wins
+                  every merge collision. So this is where a single VM's exception goes, and a
+                  NetBoxConfigContext -- reviewed once, selecting many objects -- is where policy goes
+                  (api/v1alpha1/dcim_device.go states the reasoning at length).
+
+                  Compared as a whole document rather than as a scalar (registry.ClassJSON): the scalar
+                  rule unwraps any JSON object carrying an `id` or a `value` key, so a local context
+                  containing one -- ordinary in inventory data -- would differ from itself on every read
+                  and be PATCHed forever (docs/concepts/drift.md).
+
+                  An object rather than any JSON value, because `ConfigContextModel.clean()` refuses a
+                  `local_context_data` that is not a mapping. The marker turns NetBox's 400 into a
+                  rejection at admission.
+
+                  Omit it to leave NetBox's own value alone; set it to `{}` to clear the value in
+                  NetBox. The two are different intents and the operator can tell them apart
+                  (docs/concepts/field-ownership.md). `{}` and not `null`, although the column is
+                  nullable: the API server prunes a null under a schema that is not marked nullable
+                  before the operator ever reads the object back, so `null` could not be told from an
+                  omitted field.
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
               memory:
                 description: |-
                   Memory is the VM's RAM in megabytes (docs/netbox-schema.md ->

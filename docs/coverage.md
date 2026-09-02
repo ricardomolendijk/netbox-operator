@@ -22,10 +22,10 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 | in scope (endpoints − excluded) | 111 |
 | | |
 | writable columns on the implemented Kinds | 657 |
-| — written by a spec field, or engine-owned | 492 |
+| — written by a spec field, or engine-owned | 494 |
 | — deliberately omitted, with a reason | 10 |
 | — blocked: a reference whose target model has no Kind | 69 |
-| — **MISSING**: nothing declares it and nothing blocks it | 86 |
+| — **MISSING**: nothing declares it and nothing blocks it | 84 |
 | — of those, required on create (fails the audit) | 0 |
 | | |
 | natural-key candidates the IR calls unusable | 21 |
@@ -48,7 +48,6 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 | `comments` | MISSING | 3 | — |
 | `data_file` | blocked | 3 | `core.DataFile` is an excluded endpoint, so nothing will ever write this |
 | `auth_psk` | MISSING | 2 | deliberately unmapped on both wireless kinds and NOT excused: a pre-shared key may never be inline in a spec, so the field has to be `authPSKSecretRef` -> a Secret key, which needs a Secret read in the payload path and a Secret informer scoped to the object's own namespace. That is shared machinery and an RBAC decision (NBO-072), so it owes its own ticket rather than riding along with the kinds (api/v1alpha1/wireless_auth.go) |
-| `local_context_data` | MISSING | 2 | the ConfigContextModel column on dcim.Device and virtualization.VirtualMachine. NBO-059 added the ClassJSON field class it needs and stopped at the `extras` app; #241 adds the two spec fields, and nothing else blocks them |
 | `primary_mac_address` | MISSING | 2 | NBO-053 owns it. NBO-048 ships the forward half -- a NetBoxMACAddress names the interface it is assigned to -- and the reverse half is a deferred field on the two BaseInterface component specs, because modelling both directions as required references is the unresolvable cycle NBO-016 rejects (api/v1alpha1/dcim_macaddress.go) |
 | `vlan_translation_policy` | blocked | 2 | waits on a Kind for `ipam.VLANTranslationPolicy` |
 | `asns` | MISSING | 1 | deferred with dcim.Site's other optional foreign keys; NetBoxASN ships with NBO-055, so nothing blocks it any more (api/v1alpha1/dcim_site.go) |
@@ -114,8 +113,6 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 | `dcim.Device` | `face` | Enum | — | MISSING | — |
 | `dcim.DeviceType` | `front_image` | Scalar | — | MISSING | — |
 | `dcim.Site` | `group` | Ref | — | MISSING | deferred to NetBoxSiteGroup (NBO-066), which now ships -- nothing blocks it any more |
-| `dcim.Device` | `local_context_data` | JSON | — | MISSING | the ConfigContextModel column on dcim.Device and virtualization.VirtualMachine. NBO-059 added the ClassJSON field class it needs and stopped at the `extras` app; #241 adds the two spec fields, and nothing else blocks them |
-| `virtualization.VirtualMachine` | `local_context_data` | JSON | — | MISSING | the ConfigContextModel column on dcim.Device and virtualization.VirtualMachine. NBO-059 added the ClassJSON field class it needs and stopped at the `extras` app; #241 adds the two spec fields, and nothing else blocks them |
 | `dcim.Device` | `location` | Ref | — | MISSING | — |
 | `dcim.Interface` | `module` | Ref | — | blocked | waits on a Kind for `dcim.Module` |
 | `dcim.Cable` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |

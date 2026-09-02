@@ -185,12 +185,6 @@ notes:
       no ticket and no citation anywhere in the tree: a plain TimeZoneField with no
       dependency on another Kind
   - kind: "*"
-    column: local_context_data
-    reason: >-
-      the ConfigContextModel column on dcim.Device and virtualization.VirtualMachine. NBO-059
-      added the ClassJSON field class it needs and stopped at the `extras` app; #241 adds the
-      two spec fields, and nothing else blocks them
-  - kind: "*"
     column: primary_mac_address
     reason: >-
       NBO-053 owns it. NBO-048 ships the forward half -- a NetBoxMACAddress names the

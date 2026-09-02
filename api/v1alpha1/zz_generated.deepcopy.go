@@ -3026,6 +3026,11 @@ func (in *NetBoxDeviceSpec) DeepCopyInto(out *NetBoxDeviceSpec) {
 		*out = new(IPAddressRef)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.LocalContextData != nil {
+		in, out := &in.LocalContextData, &out.LocalContextData
+		*out = new(JSONDocument)
+		(*in).DeepCopyInto(*out)
+	}
 	if in.Interfaces != nil {
 		in, out := &in.Interfaces, &out.Interfaces
 		*out = make([]InlineInterface, len(*in))
@@ -6825,6 +6830,11 @@ func (in *NetBoxVirtualMachineSpec) DeepCopyInto(out *NetBoxVirtualMachineSpec) 
 	if in.PrimaryIP6Ref != nil {
 		in, out := &in.PrimaryIP6Ref, &out.PrimaryIP6Ref
 		*out = new(IPAddressRef)
+		(*in).DeepCopyInto(*out)
+	}
+	if in.LocalContextData != nil {
+		in, out := &in.LocalContextData, &out.LocalContextData
+		*out = new(JSONDocument)
 		(*in).DeepCopyInto(*out)
 	}
 	if in.Interfaces != nil {
