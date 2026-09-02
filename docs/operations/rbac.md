@@ -12,7 +12,8 @@ Two objects, and between them the whole of it. The cluster-wide `ClusterRole`
 |---|---|---|---|
 | `netbox.kubeforge.org` | `netboxendpoints`, `netboxregions`, `netboxsites`, `netboxtags` | `get`, `list`, `watch` (+ `patch`, `update` on the object kinds) | Its own kinds. |
 | `netbox.kubeforge.org` | `*/status`, `*/finalizers` | `get`, `update`, `patch` | Conditions and finalizers. |
-| `""` | `events` | `create`, `patch` | Events on the objects it reconciles. |
+| `events.k8s.io` | `events` | `create`, `patch` | Events on the objects it reconciles. |
+| `""` | `events` | `create`, `patch` | Leader election's Events, which controller-runtime still writes to the legacy group. |
 | `""` | `configmaps`, `coordination.k8s.io/leases` | `get`, `list`, `watch`, `create`, `update`, `patch`, `delete` — **in the operator's own namespace only** | Leader election. |
 
 **There is no `secrets` rule in the `ClusterRole`.** Secret access is granted one namespace

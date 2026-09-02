@@ -51,7 +51,20 @@ type NetBoxEndpointReconciler struct {
 
 // +kubebuilder:rbac:groups=netbox.kubeforge.org,resources=netboxendpoints,verbs=get;list;watch
 // +kubebuilder:rbac:groups=netbox.kubeforge.org,resources=netboxendpoints/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=events.k8s.io,resources=events,verbs=create;patch
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
+
+// Both event groups, and both are load-bearing. Every Event this operator emits goes to
+// events.k8s.io/v1 (#294), which is a different resource to the API server than the
+// core/v1 `events` the operator used to write -- a grant for one is not a grant for the
+// other, and the mistake fails only in a real cluster, where a rejected Event is a line in
+// the manager's log and nothing else.
+//
+// The legacy grant stays for two reasons. controller-runtime's own leader election still
+// takes a core/v1 recorder (pkg/leaderelection/leader_election.go), so the manager writes
+// core/v1 Events whatever this operator does; and during a rolling upgrade an old manager
+// pod is still emitting core/v1 Events under the new ClusterRole, which is applied before
+// the pods roll. Dropping it is a separate change, once no supported version writes them.
 
 // There is deliberately no `secrets` marker here, and the generated ClusterRole therefore
 // grants no Secret access at all. Secrets are read under one namespaced Role per namespace
