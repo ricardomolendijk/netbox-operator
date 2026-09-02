@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	netboxv1alpha1 "github.com/ricardomolendijk/netbox-operator/api/v1alpha1"
@@ -168,4 +170,48 @@ func (c cascaded) message(endpoint string, id int64, cause error) string {
 			"(%s); this delete retries once their own finalizers have removed their netbox "+
 			"objects. netbox said: %v",
 		endpoint, id, netboxv1alpha1.CascadeDeleteAnnotation, strings.Join(parts, "; "), cause)
+}
+
+// cascadeBlocked runs the cascade for a delete NetBox refused, and reports whether it took
+// the pass over.
+//
+// Three returns rather than two because "the cascade decided nothing" and "the cascade
+// decided to keep waiting" are different answers and the caller does different things with
+// them: the first falls through to the ordinary Protected report, the second is the whole
+// outcome of the pass. Both gates live here rather than at the call site so that the refusal
+// path in finalizer.go reads as one line -- the annotation is off for almost every object
+// that reaches it, and an unwired Referrers is a supported configuration.
+func (p *pass) cascadeBlocked(
+	ctx context.Context, cause error, wait time.Duration,
+) (ctrl.Result, bool, error) {
+	if !p.cascades() || p.engine.Referrers == nil {
+		return ctrl.Result{}, false, nil
+	}
+
+	out, err := p.cascade(ctx)
+	if err != nil {
+		return ctrl.Result{}, true, err
+	}
+
+	if !out.any() {
+		// Nothing in this cluster is in the way, so the blocker is somebody else's and the
+		// honest answer is the one the caller was about to give.
+		return ctrl.Result{}, false, nil
+	}
+
+	// A Warning, and only when this pass deleted something. Deleting Kubernetes objects the
+	// user did not name is not a thing to record at debug -- and repeating it on every retry
+	// while the same referrers finish going is how the Events somebody needed get evicted
+	// from the namespace.
+	if len(out.deleted) > 0 {
+		p.engine.warn(p.obj, netboxv1alpha1.EventCascadeDeleted,
+			"netbox refused to delete %s/%d, so %s=true deleted the CRs referencing it: %s",
+			p.desc.Endpoint, p.obj.NetBoxStatus().ID, netboxv1alpha1.CascadeDeleteAnnotation,
+			strings.Join(out.deleted, ", "))
+	}
+
+	result, err := p.blocked(ctx, netboxv1alpha1.ReasonCascading, wait,
+		out.message(p.desc.Endpoint, p.obj.NetBoxStatus().ID, cause))
+
+	return result, true, err
 }

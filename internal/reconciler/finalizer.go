@@ -555,31 +555,8 @@ func (p *pass) protected(ctx context.Context, err error) (ctrl.Result, error) {
 	// Before the threshold Event, because a cascade that clears the block makes
 	// DeleteBlocked the wrong thing to have said: the deletion is proceeding, and it is
 	// proceeding because the user asked for exactly this.
-	//
-	// A nil Referrers is a supported wiring rather than an error. The engine then reports
-	// the refusal the way it did before the annotation existed, which is the behaviour a
-	// test that never wired one is entitled to.
-	if p.cascades() && p.engine.Referrers != nil {
-		out, cascadeErr := p.cascade(ctx)
-		if cascadeErr != nil {
-			return ctrl.Result{}, cascadeErr
-		}
-
-		if out.any() {
-			// A Warning, and only when this pass deleted something. Deleting Kubernetes
-			// objects the user did not name is not a thing to record at debug -- and
-			// repeating it on every retry while the same referrers finish going is how the
-			// Events somebody needed get evicted from the namespace.
-			if len(out.deleted) > 0 {
-				p.engine.warn(p.obj, netboxv1alpha1.EventCascadeDeleted,
-					"netbox refused to delete %s/%d, so %s=true deleted the CRs referencing it: %s",
-					p.desc.Endpoint, status.ID, netboxv1alpha1.CascadeDeleteAnnotation,
-					strings.Join(out.deleted, ", "))
-			}
-
-			return p.blocked(ctx, netboxv1alpha1.ReasonCascading, wait,
-				out.message(p.desc.Endpoint, status.ID, err))
-		}
+	if result, handled, cascadeErr := p.cascadeBlocked(ctx, err, wait); handled {
+		return result, cascadeErr
 	}
 
 	// Once, at the threshold. NetBox's body names the protected relation, and it is
