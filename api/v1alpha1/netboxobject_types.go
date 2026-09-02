@@ -881,6 +881,14 @@ type NetBoxObjectStatus struct {
 	// +optional
 	DeletionAttempts int32 `json:"deletionAttempts,omitempty"`
 
+	// LastDeletionAttempt is when the last of those refused deletes was sent, and it is what
+	// makes the count above mean anything: the backoff is read off the clock rather than off
+	// whatever woke the controller, so a pass that arrives early re-queues for the remainder
+	// and calls nothing (#289, reconciler.deletionHold). In status for the same reason the
+	// count is -- it has to survive a requeue, a leader election and a restart.
+	// +optional
+	LastDeletionAttempt *metav1.Time `json:"lastDeletionAttempt,omitempty"`
+
 	// Conditions follow the standard Kubernetes vocabulary.
 	// +listType=map
 	// +listMapKey=type

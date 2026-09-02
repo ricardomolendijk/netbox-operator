@@ -384,6 +384,15 @@ spec:
                   here would make that bound unenforceable.
                 format: int32
                 type: integer
+              lastDeletionAttempt:
+                description: |-
+                  LastDeletionAttempt is when the last of those attempts was made, and it is what makes
+                  the bound above a bound on *time* (#289, reconciler.deletionHold). Without it a blocked
+                  claim spends one of its attempts on every wake-up -- including the ones its own status
+                  write causes -- so all of them go inside a millisecond and the address is reported
+                  retained before whatever blocked it had a chance to clear.
+                format: date-time
+                type: string
               netboxID:
                 description: |-
                   NetBoxID is the allocated object's NetBox primary key. Zero until an allocation is

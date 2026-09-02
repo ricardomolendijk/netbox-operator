@@ -1430,6 +1430,15 @@ spec:
                   canonicalises some values on write, so the request and the response legitimately
                   differ; this is the record of what was actually sent.
                 type: string
+              lastDeletionAttempt:
+                description: |-
+                  LastDeletionAttempt is when the last of those refused deletes was sent, and it is what
+                  makes the count above mean anything: the backoff is read off the clock rather than off
+                  whatever woke the controller, so a pass that arrives early re-queues for the remainder
+                  and calls nothing (#289, reconciler.deletionHold). In status for the same reason the
+                  count is -- it has to survive a requeue, a leader election and a restart.
+                format: date-time
+                type: string
               lastSyncTime:
                 description: |-
                   LastSyncTime is when the engine last wrote to NetBox. Unset until it does, and
