@@ -22,10 +22,10 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 | in scope (endpoints − excluded) | 111 |
 | | |
 | writable columns on the implemented Kinds | 657 |
-| — written by a spec field, or engine-owned | 494 |
+| — written by a spec field, or engine-owned | 495 |
 | — deliberately omitted, with a reason | 10 |
 | — blocked: a reference whose target model has no Kind | 69 |
-| — **MISSING**: nothing declares it and nothing blocks it | 84 |
+| — **MISSING**: nothing declares it and nothing blocks it | 83 |
 | — of those, required on create (fails the audit) | 0 |
 | | |
 | natural-key candidates the IR calls unusable | 21 |
@@ -50,7 +50,6 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 | `auth_psk` | MISSING | 2 | deliberately unmapped on both wireless kinds and NOT excused: a pre-shared key may never be inline in a spec, so the field has to be `authPSKSecretRef` -> a Secret key, which needs a Secret read in the payload path and a Secret informer scoped to the object's own namespace. That is shared machinery and an RBAC decision (NBO-072), so it owes its own ticket rather than riding along with the kinds (api/v1alpha1/wireless_auth.go) |
 | `primary_mac_address` | MISSING | 2 | NBO-053 owns it. NBO-048 ships the forward half -- a NetBoxMACAddress names the interface it is assigned to -- and the reverse half is a deferred field on the two BaseInterface component specs, because modelling both directions as required references is the unresolvable cycle NBO-016 rejects (api/v1alpha1/dcim_macaddress.go) |
 | `vlan_translation_policy` | blocked | 2 | waits on a Kind for `ipam.VLANTranslationPolicy` |
-| `asns` | MISSING | 1 | deferred with dcim.Site's other optional foreign keys; NetBoxASN ships with NBO-055, so nothing blocks it any more (api/v1alpha1/dcim_site.go) |
 | `auth_key` | MISSING | 1 | a pre-shared key, permitted only as spec.authKeySecretRef and never inline; the engine has no FieldClass that reads a Secret into a payload, so the column is unmapped rather than written, and it is in internal/netbox/do.go's redaction set because NetBox returns it (api/v1alpha1/ipam_fhrpgroup.go, docs/reference/netboxfhrpgroup.md) |
 | `auto_sync_enabled` | MISSING | 1 | — |
 | `data_path` | excluded | 1 | NetBox owns the git-sync trio and overwrites `data` from it (api/v1alpha1/extras_configcontext.go) |
@@ -81,7 +80,6 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 
 | model | column | class | required | status | detail |
 |---|---|---|---|---|---|
-| `dcim.Site` | `asns` | M2M | — | MISSING | deferred with dcim.Site's other optional foreign keys; NetBoxASN ships with NBO-055, so nothing blocks it any more (api/v1alpha1/dcim_site.go) |
 | `ipam.FHRPGroup` | `auth_key` | Scalar | — | MISSING | a pre-shared key, permitted only as spec.authKeySecretRef and never inline; the engine has no FieldClass that reads a Secret into a payload, so the column is unmapped rather than written, and it is in internal/netbox/do.go's redaction set because NetBox returns it (api/v1alpha1/ipam_fhrpgroup.go, docs/reference/netboxfhrpgroup.md) |
 | `wireless.WirelessLAN` | `auth_psk` | Scalar | — | MISSING | deliberately unmapped on both wireless kinds and NOT excused: a pre-shared key may never be inline in a spec, so the field has to be `authPSKSecretRef` -> a Secret key, which needs a Secret read in the payload path and a Secret informer scoped to the object's own namespace. That is shared machinery and an RBAC decision (NBO-072), so it owes its own ticket rather than riding along with the kinds (api/v1alpha1/wireless_auth.go) |
 | `wireless.WirelessLink` | `auth_psk` | Scalar | — | MISSING | deliberately unmapped on both wireless kinds and NOT excused: a pre-shared key may never be inline in a spec, so the field has to be `authPSKSecretRef` -> a Secret key, which needs a Secret read in the payload path and a Secret informer scoped to the object's own namespace. That is shared machinery and an RBAC decision (NBO-072), so it owes its own ticket rather than riding along with the kinds (api/v1alpha1/wireless_auth.go) |

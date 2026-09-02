@@ -67,22 +67,135 @@ spec:
               spec fields that a user writes alongside the rest -- and the engine excludes exactly
               those from the NetBox payload by reflecting over that struct.
 
-              Every optional foreign key dcim.Site has -- `region`, `group`, `tenant` and the `asns`
-              many-to-many (docs/netbox-schema.md -> dcim.Site) -- is still absent from this Kind, but
-              no longer for want of a resolver: internal/resolver landed in M2 and resolves references,
-              including to-many ones. What is left is per-field work on this Kind, and it waits on the
-              Kinds each field points at -- `group` on NetBoxSiteGroup (NBO-066), `tenant` on
-              NetBoxTenant (NBO-021), `asns` on NetBoxASN (NBO-055) -- all of which now ship, so what is
-              left is the per-field work on this Kind and nothing blocks it. A field that is accepted and
-              does nothing is worse than a field that is not there: `kubectl apply` reports success and
-              NetBox never sees the value, which is why each one waits for its own change rather than
-              arriving with the Kind it points at (docs/coverage.md records all four as gaps).
+              Of the optional foreign keys dcim.Site has -- `region`, `group`, `tenant` and the `asns`
+              many-to-many (docs/netbox-schema.md -> dcim.Site) -- only `asns` is declared here. It is the
+              first, and it arrived on its own rather than with the other three because each one is
+              per-field work on this Kind: a field that is accepted and does nothing is worse than a field
+              that is not there, because `kubectl apply` reports success and NetBox never sees the value.
+              `region`, `group` and `tenant` are still absent, and no longer for want of a resolver --
+              internal/resolver landed in M2 and resolves references, including to-many ones -- nor for want
+              of the Kinds they point at, since NetBoxRegion, NetBoxSiteGroup (NBO-066) and NetBoxTenant
+              (NBO-021) all ship. docs/coverage.md records those three as gaps.
 
               `tags` is the exception that is only waiting on this Kind: NetBoxTag exists, and the
               digest now carries the row to cite it against (`tags (TagsMixin) NetBoxTaggableManagerField
               M2M -> extras.Tag`), which it did not until the extractor was fixed to match NetBox's real
               manager class.
             properties:
+              asns:
+                description: |-
+                  ASNRefs are the autonomous system numbers this site announces
+                  (docs/netbox-schema.md -> dcim.Site, `asns ManyToManyField -> ipam.ASN`).
+
+                  A set and not a list: the schema IR records the column as
+                  `class: M2M, api: {many: true, serializer_field: SerializedPKRelatedField}` with
+                  `in_write_path: true` (hack/testdata/ir-4.6.8.json.gz -> dcim.Site.asns), so NetBox
+                  takes it as a list of ids and returns it as a list of nested objects, in an order
+                  nobody chose. `ClassRefMany` on the descriptor is what makes the comparison
+                  order-independent, so reordering the entries in a manifest produces no PATCH.
+
+                  It is a full replacement, like every to-many reference in this API: the list is the
+                  whole membership, so removing an entry removes the assignment. A partially resolvable
+                  list writes nothing at all -- writing the entries that did resolve would be a
+                  full-list replacement with a shorter list, which is a deletion reported as a success.
+                  The object then reports `RefsResolved=False` naming the entry that failed
+                  (docs/concepts/references.md).
+
+                  Omit it to leave NetBox's own value alone; set it to `[]` to clear the value in
+                  NetBox. The two are different intents and the operator can tell them apart
+                  (docs/concepts/field-ownership.md).
+
+                  `ASNRef` is the one reference alias whose target has no `slug`: ipam.ASN is unique on
+                  `asn` (docs/netbox-schema.md -> ipam.ASN), so use `name` for a sibling CR or
+                  `lookup: {asn: "64512"}` for an ASN this operator does not manage.
+
+                  MaxItems is not a NetBox limit. `ObjectRef` carries five CEL rules and the API server
+                  costs each at the list's maximum length, so an unbounded list of refs is refused at
+                  install; 256 is the project standard (docs/concepts/references.md, "A list needs a
+                  bound").
+                items:
+                  description: |-
+                    ASNRef points at a NetBoxASN (ipam.ASN, ipam/asns).
+
+                    The one alias whose target has **no `slug` column**: ipam.ASN is unique on `asn`
+                    (docs/netbox-schema.md -> ipam.ASN, `asn ASNField REQ UNIQUE`) and declares no slug of
+                    any kind, so `slug` mode matches nothing here and reports NotFound. Use `name` for a
+                    sibling CR, or `lookup: {asn: "64512"}` for an ASN the operator does not manage.
+                  properties:
+                    id:
+                      description: |-
+                        ID is a literal NetBox primary key: the escape hatch, and the only place in the API
+                        where a raw id is accepted.
+
+                        A pointer so that `id: 0` is distinguishable from unset. NetBox primary keys start
+                        at 1, so zero is never a real object and has to be rejected rather than silently
+                        treated as "no id".
+                      format: int64
+                      minimum: 1
+                      type: integer
+                    lookup:
+                      additionalProperties:
+                        type: string
+                      description: |-
+                        Lookup is a raw NetBox API filter, for an object no slug identifies -- a VLAN is
+                        `{vid: "20", site: "home"}` because its identity is a pair.
+
+                        `q` is rejected by the CEL rules along with the pagination and formatting
+                        parameters. It is NetBox's fuzzy search, and a fuzzy filter behind a reference that
+                        must identify exactly one object would make ambiguity the normal case rather than
+                        an error.
+                      maxProperties: 8
+                      type: object
+                    name:
+                      description: |-
+                        Name of a CR of the target Kind, resolved through that CR's `.status.id`.
+
+                        This is the mode to prefer: it is the only one that expresses a dependency the
+                        operator can wait on, which is what lets a graph applied in any order converge.
+                      maxLength: 253
+                      pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                      type: string
+                    namespace:
+                      description: |-
+                        Namespace of that CR. Defaults to the referring object's namespace.
+
+                        Load-bearing on the common path rather than an edge case: every Kind is namespaced
+                        in v1alpha1 (docs/decisions/0002-crd-scoping.md), so a team namespace pointing at a
+                        shared catalogue namespace is the normal shape. Crossing a namespace requires a
+                        NetBoxRefGrant in the target namespace (NBO-014).
+                      maxLength: 63
+                      pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                      type: string
+                    slug:
+                      description: |-
+                        Slug looks the object up in NetBox directly, for objects the operator does not
+                        manage. No CR needs to exist.
+
+                        Bounded at 100 characters because that is what NetBox's own column allows:
+                        `slug SlugField len=100` on every OrganizationalModel, NestedGroupModel and
+                        PrimaryModel (docs/netbox-schema.md -> dcim.Site, dcim.Region, extras.Tag).
+                      maxLength: 100
+                      pattern: ^[-a-zA-Z0-9_]+$
+                      type: string
+                  type: object
+                  x-kubernetes-validations:
+                  - message: exactly one of name, slug, lookup or id must be set
+                    rule: '[has(self.name) && size(self.name) > 0, has(self.slug)
+                      && size(self.slug) > 0, has(self.lookup) && size(self.lookup)
+                      > 0, has(self.id)].filter(x, x).size() == 1'
+                  - message: namespace may only be set together with name
+                    rule: '!has(self.namespace) || (has(self.name) && size(self.name)
+                      > 0)'
+                  - message: lookup keys must be lowercase NetBox filter names
+                    rule: '!has(self.lookup) || self.lookup.all(k, k.matches(''^[a-z][a-z0-9_]*$''))'
+                  - message: lookup may not set pagination, formatting or fuzzy-search
+                      parameters
+                    rule: '!has(self.lookup) || self.lookup.all(k, !(k in [''limit'',''offset'',''format'',''brief'',''ordering'',''q'']))'
+                  - message: lookup values are limited to 200 characters
+                    rule: '!has(self.lookup) || self.lookup.all(k, size(self.lookup[k])
+                      <= 200)'
+                maxItems: 256
+                type: array
               comments:
                 description: |-
                   Comments is the site's long-form notes field.

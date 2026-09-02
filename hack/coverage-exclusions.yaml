@@ -167,11 +167,6 @@ notes:
     column: group
     reason: >-
       deferred to NetBoxSiteGroup (NBO-066), which now ships -- nothing blocks it any more
-  - kind: dcim.Site
-    column: asns
-    reason: >-
-      deferred with dcim.Site's other optional foreign keys; NetBoxASN ships with NBO-055,
-      so nothing blocks it any more (api/v1alpha1/dcim_site.go)
   - kind: ipam.FHRPGroup
     column: auth_key
     reason: >-

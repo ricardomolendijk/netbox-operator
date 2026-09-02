@@ -23,6 +23,9 @@ spec:
     - jsonPath: .spec.endAddress
       name: End
       type: string
+    - jsonPath: .status.size
+      name: Size
+      type: integer
     - jsonPath: .spec.vrfRef.name
       name: VRF
       type: string
@@ -49,10 +52,10 @@ spec:
 
           Namespaced like every kind in v1alpha1 (docs/decisions/0002-crd-scoping.md).
 
-          There is no SIZE printer column, for the reason there is no `size` field: NetBox derives it
-          and the operator never sends it, so a column reading the spec would be empty on every object.
-          What a human wants side by side is where the block starts, where it ends, and whether NetBox
-          agrees.
+          The SIZE printer column reads `.status.size` and not the spec, because the spec does not
+          have it and must not: NetBox derives the count from the two endpoints. What a human wants
+          side by side is where the block starts, where it ends, how many addresses that came to, and
+          whether NetBox agrees.
         properties:
           apiVersion:
             description: |-
@@ -83,13 +86,14 @@ spec:
               delegated to another team -- recorded so that this operator and that somebody do not both
               hand out `10.0.30.150`.
 
-              **There is no `size` field, and that is not an omission.** `ipam.IPRange.size` is
+              **There is no `size` *spec* field, and that is not an omission.** `ipam.IPRange.size` is
               `editable=False` and computed in `save()` as `end - start + 1` (netbox/ipam/models/ip.py,
               NetBox 4.6.8), so it is not in the write serializer at all: a `size` in a payload is
               silently dropped. It is `REQ` in the schema digest because the *column* is not nullable,
               which is the trap docs/concepts/generic-refs.md#the-req-trap-in-the-schema-digest describes
               for a different pair of columns. The two endpoints are the input; the count is NetBox's
-              answer, and this kind reports it in status rather than accepting it in spec.
+              answer, and this kind reports it in `status.size` rather than accepting it in spec
+              (NetBoxIPRangeStatus).
 
               There is no scope union either -- `ipam.IPRange` is `ContactsMixin, PrimaryModel` with no
               `CachedScopeMixin` (docs/netbox-schema.md -> ipam.IPRange) -- and no `parentRef`: a range's
@@ -542,9 +546,12 @@ spec:
             type: object
           status:
             description: |-
-              NetBoxObjectStatus is the part of every object CR's status that the engine owns. It is
-              the only thing the operator writes: the spec belongs to Git
-              (docs/decisions/0005-gitops-coexistence.md).
+              NetBoxIPRangeStatus is the shared object status plus the one column NetBox computes.
+
+              The first status on a managed Kind that is not the plain NetBoxObjectStatus, and the
+              embedding is what keeps that from mattering: `status.id`, `status.conditions` and the rest
+              are in exactly the same places, `NetBoxStatus()` still hands the engine the envelope, and
+              the engine's only knowledge of the extra field is the ObservedColumns type assertion.
             properties:
               adopted:
                 description: Adopted reports that the engine took over an object it
@@ -806,6 +813,22 @@ spec:
                       `tags` column.
                     type: string
                 type: object
+              size:
+                description: |-
+                  Size is how many addresses the range covers, as NetBox counts them, inclusive of both
+                  endpoints (docs/netbox-schema.md -> ipam.IPRange, `size PositiveIntegerField REQ`; the
+                  schema IR records it in ipam.IPRange's serializer field list, so every read carries it).
+
+                  **Read back, never sent.** NetBox computes it in `IPRange.save()` as `end - start + 1`
+                  and the column is `editable=False`, which is why `size` is in the descriptor's ReadOnly
+                  list and why it cannot be a spec field. Reported here so that "how big is this range"
+                  is answerable from `kubectl get` rather than only from NetBox.
+
+                  Absent until the first pass that reaches a live object, and never cleared by one that
+                  does not: a response that did not carry the column leaves the last known count alone
+                  (ObservedColumns).
+                format: int64
+                type: integer
               url:
                 description: URL is the object's absolute NetBox URL, as returned
                   by the API.

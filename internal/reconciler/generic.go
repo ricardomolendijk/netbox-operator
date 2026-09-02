@@ -434,6 +434,14 @@ type pass struct {
 	// whichever step decided, read once by the deferred observation in Reconcile.
 	result string
 
+	// observed is whether this pass learned a NetBox-computed column the stored status did
+	// not already carry (netboxv1alpha1.ObserveColumns). It exists because finish()'s
+	// "nothing changed, do not write" comparison is over the shared envelope, which a
+	// mirrored column is not part of: without this a quiet pass would learn the value and
+	// throw it away, and `status.size` would only ever appear on a pass that changed
+	// something else. False for every Kind that mirrors nothing, which is all but one.
+	observed bool
+
 	// newID is a NetBox id this pass proved server-side and the stored status does not carry
 	// yet -- the id of an object it created or recreated. It is the one conclusion a pass may
 	// not drop when its status write is refused, because nothing recomputes it: see
