@@ -46,7 +46,13 @@ var shippedManifests = []string{
 	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxrackreservation.yaml"),
 	filepath.Join("..", "..", "docs", "examples", "tag.yaml"),
 	filepath.Join("..", "..", "docs", "examples", "contacts.yaml"),
-	filepath.Join("..", "..", "docs", "examples", "racks.yaml")}
+	filepath.Join("..", "..", "docs", "examples", "racks.yaml"),
+	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxprovider.yaml"),
+	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxprovideraccount.yaml"),
+	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxprovidernetwork.yaml"),
+	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxcircuittype.yaml"),
+	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxcircuit.yaml"),
+	filepath.Join("..", "..", "docs", "examples", "circuits.yaml")}
 
 // TestShippedManifestsAreAccepted applies every sample and example against the real CRDs.
 //

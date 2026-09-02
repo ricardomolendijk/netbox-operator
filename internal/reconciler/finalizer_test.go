@@ -760,6 +760,18 @@ var deletionDefaults = map[string]netboxv1alpha1.DeletionPolicy{
 	"NetBoxRackRole":        netboxv1alpha1.DeletionDelete,
 	"NetBoxRackType":        netboxv1alpha1.DeletionDelete,
 
+	// NBO-057: the circuits catalogue. A provider, a billing account, a provider network, a
+	// circuit type and a circuit are all records of a commercial arrangement, and every one of
+	// them is recreated verbatim from the manifest -- deleting one frees no address, no number
+	// and no range, which is the test #176 turns on. The provider family is additionally
+	// PROTECT-refused while any account, network or circuit still points at it, so a mistaken
+	// delete is reported as Deleting=False, Reason=Protected rather than acted on.
+	"NetBoxProvider":        netboxv1alpha1.DeletionDelete,
+	"NetBoxProviderAccount": netboxv1alpha1.DeletionDelete,
+	"NetBoxProviderNetwork": netboxv1alpha1.DeletionDelete,
+	"NetBoxCircuitType":     netboxv1alpha1.DeletionDelete,
+	"NetBoxCircuit":         netboxv1alpha1.DeletionDelete,
+
 	// Configuration: cheap to delete, cheap to recreate, and mostly PROTECT-refused while
 	// anything still points at it.
 	"NetBoxRouteTarget":       netboxv1alpha1.DeletionDelete,
