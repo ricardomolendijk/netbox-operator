@@ -1,0 +1,609 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.19.0
+  name: netboxikeproposals.netbox.kubeforge.org
+spec:
+  group: netbox.kubeforge.org
+  names:
+    kind: NetBoxIKEProposal
+    listKind: NetBoxIKEProposalList
+    plural: netboxikeproposals
+    shortNames:
+    - nbikeprop
+    singular: netboxikeproposal
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.encryptionAlgorithm
+      name: Encryption
+      type: string
+    - jsonPath: .spec.group
+      name: Group
+      type: integer
+    - jsonPath: .status.id
+      name: ID
+      type: integer
+    - jsonPath: .status.conditions[?(@.type=="Ready")].status
+      name: Ready
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          NetBoxIKEProposal is one vpn.IKEProposal in NetBox.
+
+          Namespaced like every kind in v1alpha1 (docs/decisions/0002-crd-scoping.md).
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              NetBoxIKEProposalSpec describes one vpn.IKEProposal: the set of algorithms one peer offers
+              for IKE phase 1.
+
+              NetBoxObjectSpec is inline, so endpointRef, onConflict and deletionPolicy are ordinary spec
+              fields that a user writes alongside the rest.
+
+              **No secret here, and none possible.** A proposal names algorithms; the pre-shared key that
+              `preshared-keys` implies is a column on `vpn.IKEPolicy`, which is where the operator's
+              refusal to hold a secret inline is documented. This kind is safe to ship complete because
+              nothing on it is secret-valued (docs/netbox-schema.md -> vpn.IKEProposal, every column).
+
+              **Identity is `name`, and NetBox enforces it.** `name CharField REQ UNIQUE len=100` -- a
+              column-level UNIQUE rather than a `meta.constraints` entry, of which this model has none.
+              So one candidate, no pin, and a duplicate is NetBox's own 409 rather than a silent
+              adoption. The ipam.RouteTarget derivation.
+
+              The combination of algorithms is not validated here. Nothing in this repository branches on
+              a cipher or a DH group: NetBox's own `clean()` is the authority on which cipher, HMAC and
+              group make sense together, exactly as it is for an interface type (api/v1alpha1/
+              dcim_interface.go), and a CRD rule that guessed would reject configurations a real device
+              accepts.
+            properties:
+              authenticationAlgorithm:
+                description: |-
+                  AuthenticationAlgorithm is the phase 1 HMAC (docs/netbox-schema.md -> vpn.IKEProposal,
+                  `authentication_algorithm CharField choices=AuthenticationAlgorithmChoices`).
+
+                  Optional, because the column is `blank=True, null=True`: an AEAD cipher such as
+                  `aes-256-gcm` authenticates as it encrypts and needs no separate HMAC.
+
+                  Omit it to leave NetBox's own value alone; set it to `""` to clear the value in NetBox.
+                  The two are different intents and the operator can tell them apart
+                  (docs/concepts/field-ownership.md). An emptied value is sent as `null` rather than
+                  `""`, because NetBox returns `null` for an unset choice and the two would differ on
+                  every pass (#170).
+                enum:
+                - ""
+                - hmac-sha1
+                - hmac-sha256
+                - hmac-sha384
+                - hmac-sha512
+                - hmac-md5
+                type: string
+              authenticationMethod:
+                description: |-
+                  AuthenticationMethod is how the peers authenticate in phase 1
+                  (docs/netbox-schema.md -> vpn.IKEProposal, `authentication_method CharField REQ`).
+
+                  Required by the column, so required here: NetBox rejects a proposal without one, and a
+                  CRD that accepted the object would turn a `kubectl apply` error into a condition
+                  nobody reads. The enum carries no empty member, so `""` is refused by the enum itself
+                  and needs no separate rule.
+                enum:
+                - preshared-keys
+                - certificates
+                - rsa-signatures
+                - dsa-signatures
+                type: string
+              comments:
+                description: |-
+                  Comments is the proposal's long-form notes field. Also inherited, and a TextField, so
+                  there is no MaxLength marker to derive.
+                type: string
+              customFields:
+                additionalProperties:
+                  nullable: true
+                  x-kubernetes-preserve-unknown-fields: true
+                description: |-
+                  CustomFields are NetBox custom-field values to write, keyed by NetBox custom-field
+                  name. Every key must already exist as an `extras.CustomField` covering this object
+                  type -- NetBox rejects the whole payload otherwise.
+
+                  The map is deliberately **not** exhaustive: only the keys named here are written and
+                  compared, and every other custom field on the NetBox object is left exactly as it is.
+                  NetBox merges a partial `custom_fields` PATCH and returns every custom field defined
+                  for the object type, including ones this operator knows nothing about, so treating
+                  the map as the whole container would null out every custom field another writer on
+                  that NetBox owns, on every reconcile. Omitting the map, or setting it to `{}`,
+                  therefore means "manage nothing" rather than "clear everything".
+
+                  A value is written as the JSON type it is given, because that is the only thing
+                  NetBox accepts. A custom field carries a `type` (extras/choices.py,
+                  CustomFieldTypeChoices) and its serializer validates against it, so `chef_managed:
+                  "true"` on a `boolean` field is rejected outright -- *"Invalid value for custom field
+                  'chef_managed': Value must be true or false"* -- and no amount of retrying makes a
+                  string into a boolean. Every non-text type is in the same position: `integer`,
+                  `decimal`, `boolean`, `json`, `multiselect` and `multiobject` each need their own JSON
+                  shape.
+
+                    customFields:
+                      chef_managed: true             # boolean
+                      extra_disk_1: 500              # integer
+                      rack_position: "12"            # text that happens to look like a number
+                      tiers: [gold, silver]          # multiselect
+
+                  So the type is the user's to state and the operator's to carry through unchanged
+                  (#303). Quoting is therefore load-bearing rather than noise: `"12"` on a text field
+                  and `12` on an integer field are both right, and each is wrong on the other -- which
+                  is a distinction a `map[string]string` could not make at all, and why this is not one.
+
+                  `null` and `""` are different intents and both are expressible:
+
+                    customFields:
+                      rack_position: ""      # set this custom field to the empty string
+                      audit_ticket: null     # remove this custom field's value
+
+                  `null` is sent to NetBox as JSON null, which is the value NetBox stores for a custom
+                  field that has no value and the value it returns on read -- indistinguishable from a
+                  field never set, which is what "removed" means here. `""` stores and returns the
+                  empty string. Removing the key from the manifest entirely is the third state: it
+                  hands the field back and NetBox keeps whatever it holds
+                  (docs/concepts/field-ownership.md).
+
+                  Set on a kind whose NetBox model carries no `custom_fields` column -- extras.Tag is
+                  one, so a NetBoxTag is the case -- and the object reports Ready=False,
+                  Reason=Invalid. Refused rather than dropped: a discarded value would leave the
+                  object claiming to be synced while NetBox never received it.
+                type: object
+              deletionPolicy:
+                description: |-
+                  DeletionPolicy is what happens to the NetBox object when this CR is deleted.
+
+                  Read fresh on every pass rather than latched when deletion starts, so switching it
+                  to Retain on an object whose delete NetBox keeps refusing is a way out of that
+                  state (docs/concepts/deletion.md).
+
+                  Left unset it is Delete for most kinds and Retain for the IPAM ones, where deleting
+                  the NetBox object destroys state rather than configuration -- an address freed for
+                  reallocation, a range whose ownership record is gone (decision #176). The default is
+                  therefore *not* a CRD marker: this field is declared once for every kind, so a marker
+                  here could only give them all the same answer. Each kind declares its own on its
+                  Descriptor and docs/concepts/deletion.md lists them.
+                enum:
+                - Delete
+                - Retain
+                type: string
+              description:
+                description: |-
+                  Description is free text shown next to the proposal. Inherited from PrimaryModel.
+
+                  Omit it to leave NetBox's own value alone; set it to `""` to clear the value in
+                  NetBox. The two are different intents and the operator can tell them apart
+                  (docs/concepts/field-ownership.md).
+                maxLength: 200
+                type: string
+              encryptionAlgorithm:
+                description: |-
+                  EncryptionAlgorithm is the phase 1 cipher (docs/netbox-schema.md -> vpn.IKEProposal,
+                  `encryption_algorithm CharField REQ`).
+
+                  One CEL rule on top of the shared enum, because EncryptionAlgorithm carries `""` as a
+                  member -- `vpn.IPSecProposal`'s column is nullable and this one is not. One type, two
+                  nullabilities, and the difference is expressed where it belongs: on the field. A
+                  `MinLength` marker cannot say it, because controller-gen refuses a length marker on a
+                  field whose schema comes from a named type ("must apply minlength to a textual value").
+                enum:
+                - ""
+                - aes-128-cbc
+                - aes-128-gcm
+                - aes-192-cbc
+                - aes-192-gcm
+                - aes-256-cbc
+                - aes-256-gcm
+                - 3des-cbc
+                - des-cbc
+                type: string
+                x-kubernetes-validations:
+                - message: encryptionAlgorithm is required on an IKE proposal and
+                    may not be empty
+                  rule: self != ''
+              endpointRef:
+                description: |-
+                  EndpointRef names the NetBoxEndpoint to write through, in this object's own
+                  namespace. Required: there is no cluster-wide default endpoint, so an omitted
+                  reference cannot be resolved into one.
+
+                  **Immutable.** Pointing a CR at a different NetBox is not a mutation of the object, it
+                  is a different object: the natural key is looked up in whichever NetBox this names, so
+                  an edit here would leave the old NetBox holding an object nothing manages and would
+                  adopt or create a second one in the new one, with the CR's status.id switching between
+                  the two. Edit it by deleting the CR -- which lets spec.deletionPolicy do what it says
+                  about the object being left behind -- and re-applying it.
+
+                  A CEL transition rule and not the admission webhook, which is the whole layer-1 test:
+                  it needs `self` and `oldSelf` and no second object, so the API server enforces it
+                  unconditionally and it survives every webhook in the cluster being down (NBO-044).
+                minLength: 1
+                type: string
+                x-kubernetes-validations:
+                - message: endpointRef is immutable; pointing a CR at a different
+                    NetBox is a different object, so delete this one and re-apply
+                    it
+                  rule: self == oldSelf
+              group:
+                description: |-
+                  Group is the Diffie-Hellman group number the proposal offers
+                  (docs/netbox-schema.md -> vpn.IKEProposal, `group PositiveSmallIntegerField REQ
+                  choices=DHGroupChoices`).
+
+                  Named `group` and not `dhGroup`, because that is the column: the field map is a
+                  spec-to-column table and a spec name that reads better than the column it writes makes
+                  the table the only place the connection is recorded. Nothing about it relates to
+                  `NetBoxTunnelGroup`.
+
+                  Required by the column. A DHGroup is an integer, so there is no zero value that means
+                  "unset" -- `group: 0` is rejected by the enum rather than treated as omitted.
+                enum:
+                - 1
+                - 2
+                - 5
+                - 14
+                - 15
+                - 16
+                - 17
+                - 18
+                - 19
+                - 20
+                - 21
+                - 22
+                - 23
+                - 24
+                - 25
+                - 26
+                - 27
+                - 28
+                - 29
+                - 30
+                - 31
+                - 32
+                - 33
+                - 34
+                format: int32
+                type: integer
+              name:
+                description: |-
+                  Name is the proposal's identity, and it is unique across the whole NetBox install
+                  (docs/netbox-schema.md -> vpn.IKEProposal, `name CharField REQ UNIQUE len=100`).
+
+                  Globally unique over namespaced CRDs, exactly like a Site's `slug`: two namespaces
+                  cannot both own `ike-aes256`, and the loser gets a Conflict.
+                maxLength: 100
+                minLength: 1
+                type: string
+              onConflict:
+                default: Fail
+                description: OnConflict is what to do when NetBox already holds a
+                  matching object.
+                enum:
+                - Fail
+                - Adopt
+                - AdoptOnly
+                type: string
+              saLifetime:
+                description: |-
+                  SALifetime is how long a phase 1 security association lives, in seconds
+                  (docs/netbox-schema.md -> vpn.IKEProposal, `sa_lifetime PositiveIntegerField`).
+
+                  A pointer, so omitting it leaves NetBox's value alone rather than clearing it, and so
+                  that `0` -- which NetBox accepts as a `PositiveIntegerField` -- is distinguishable from
+                  unset. The upper bound is Django's `PositiveIntegerField` ceiling, 2147483647; NetBox
+                  declares no validator of its own on the column.
+                format: int64
+                maximum: 2147483647
+                minimum: 0
+                type: integer
+            required:
+            - authenticationMethod
+            - encryptionAlgorithm
+            - endpointRef
+            - group
+            - name
+            type: object
+          status:
+            description: |-
+              NetBoxObjectStatus is the part of every object CR's status that the engine owns. It is
+              the only thing the operator writes: the spec belongs to Git
+              (docs/decisions/0005-gitops-coexistence.md).
+            properties:
+              adopted:
+                description: Adopted reports that the engine took over an object it
+                  did not create.
+                type: boolean
+              children:
+                description: |-
+                  Children are the child CRs this object's inline lists materialised, one entry per
+                  declared child (NBO-032).
+
+                  A status field rather than only a label query, so that `kubectl describe` answers
+                  "what did this VM create" without one. It is also what lets the pruner know which
+                  *kinds* to list after every inline entry has been removed: with an empty inline list
+                  there is no desired child left to read a GVK off, and the children recorded here are
+                  the only remaining record of what to go looking for.
+                items:
+                  description: ChildStatus is one child CR a parent's inline list
+                    materialised.
+                  properties:
+                    kind:
+                      description: Kind is the child's Kind, in this API group.
+                      type: string
+                    name:
+                      description: Name is the child CR's name, derived from the parent's
+                        metadata.name and Path.
+                      type: string
+                    path:
+                      description: |-
+                        Path is the key-based spec path that declared this child, the same string as the
+                        OwnedByPathAnnotation on the child itself: `spec.interfaces[eth0]`. The map key,
+                        because it is the child's identity within the parent -- the name is derived from it.
+                      type: string
+                    ready:
+                      description: |-
+                        Ready is the child's own Ready condition, as of this pass. False includes "the child
+                        was only just created", which is why the parent requeues rather than settling.
+                      type: boolean
+                  required:
+                  - kind
+                  - name
+                  - path
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - path
+                x-kubernetes-list-type: map
+              conditions:
+                description: Conditions follow the standard Kubernetes vocabulary.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              conflict:
+                description: |-
+                  Conflict is the other writer this object's NetBox counterpart says it belongs to, when
+                  its stamp names one (NBO-047). The write went ahead regardless -- see
+                  ConditionConflict and docs/operations/multi-writer.md.
+                properties:
+                  clusterID:
+                    description: |-
+                      ClusterID is the other writer's cluster stamp, verbatim. Empty when the live object
+                      carries none, which is what an endpoint whose clusterField is switched off writes.
+                    type: string
+                  firstObserved:
+                    description: |-
+                      FirstObserved is when this claimant was first seen on this object. Preserved across
+                      reconciles for as long as the claimant does not change.
+                    format: date-time
+                    type: string
+                  observations:
+                    description: |-
+                      Observations is how many consecutive reconciles have found this same claimant. One is a
+                      flap -- a migration, a hand edit, a cluster mid-rebuild; a number that keeps climbing is
+                      two writers taking turns, and only the second is worth waking somebody for.
+
+                      Consecutive reconciles rather than a duration, because a reconcile is when the operator
+                      can observe anything at all: multiply by the endpoint's resyncPeriod for the wall-clock
+                      answer, or read firstObserved. It resets to one when the claimant changes, since a
+                      different writer is a different fight.
+                    format: int32
+                    type: integer
+                  owner:
+                    description: |-
+                      Owner is the other writer's CR, as `<lowercased kind>/<namespace>/<name>` -- the
+                      manifest to go and edit, in the same spelling `status.provenance` and the
+                      netbox.kubeforge.org/generated-by annotation use. Empty when the live object carries no
+                      owner stamp.
+
+                      It names a CR in *another* cluster when Reason is ForeignCluster, so it is a lead rather
+                      than a resolvable reference: nothing in this cluster can look it up, and that is the
+                      point -- otherwise the only record of the other writer would be in a cluster you may not
+                      have.
+                    type: string
+                  reason:
+                    description: |-
+                      Reason is ForeignCluster or ForeignOwner -- the same value as the Conflict condition's
+                      reason, repeated here so a single `-o jsonpath` over `status.conflict` is a complete
+                      answer.
+                    type: string
+                required:
+                - reason
+                type: object
+              deferredPending:
+                description: |-
+                  DeferredPending are the CR spec fields the engine has declared deferred and has not
+                  yet written to NetBox: a `primary_ip4` whose address does not exist yet, or one that
+                  was stripped from the create and is waiting for its follow-up PATCH.
+
+                  A status field rather than only a condition message. The intermediate state is
+                  legitimate and can be long-lived -- a reference that never resolves stays here
+                  forever, on purpose -- so "what is this object still waiting to write" has to be
+                  answerable from `kubectl get -o yaml` and greppable across a namespace, which a
+                  sentence inside a condition is not (docs/concepts/object-lifecycle.md).
+
+                  Spec field names rather than NetBox column names, because it is the spelling the
+                  user wrote and the one the RefsResolved message already uses.
+                items:
+                  type: string
+                type: array
+                x-kubernetes-list-type: atomic
+              deletionAttempts:
+                description: |-
+                  DeletionAttempts counts the deletes NetBox refused because something still
+                  references the object.
+
+                  It is a status field rather than in-memory state because a controller has no memory
+                  between passes: the exponential backoff on a protected delete has to be computed
+                  from a count that survives a requeue, a leader election and a restart. Non-zero
+                  only while a CR is terminating.
+                format: int32
+                type: integer
+              id:
+                description: |-
+                  ID is the NetBox primary key. Zero until the object provably exists server-side --
+                  a DryRun write is reported and never sent, so it leaves this empty rather than
+                  inventing an id that nothing would ever match.
+                format: int64
+                type: integer
+              lastAppliedHash:
+                description: |-
+                  LastAppliedHash is a digest of the last payload NetBox accepted. NetBox
+                  canonicalises some values on write, so the request and the response legitimately
+                  differ; this is the record of what was actually sent.
+                type: string
+              lastDeletionAttempt:
+                description: |-
+                  LastDeletionAttempt is when the last of those refused deletes was sent, and it is what
+                  makes the count above mean anything: the backoff is read off the clock rather than off
+                  whatever woke the controller, so a pass that arrives early re-queues for the remainder
+                  and calls nothing (#289, reconciler.deletionHold). In status for the same reason the
+                  count is -- it has to survive a requeue, a leader election and a restart.
+                format: date-time
+                type: string
+              lastSyncTime:
+                description: |-
+                  LastSyncTime is when the engine last wrote to NetBox. Unset until it does, and
+                  untouched by a reconcile that found nothing to do -- otherwise every resync would
+                  bump the resourceVersion of every object in the cluster.
+                format: date-time
+                type: string
+              naturalKey:
+                additionalProperties:
+                  type: string
+                description: |-
+                  NaturalKey is the lookup that actually located the object, filter by filter. The
+                  first thing anyone needs when asking why an object was adopted, or was not.
+                type: object
+              observedGeneration:
+                description: |-
+                  ObservedGeneration is the spec generation this status refers to. Always set,
+                  because `kubectl wait` lies without it.
+                format: int64
+                type: integer
+              provenance:
+                description: |-
+                  Provenance is the stamp this object carries in NetBox: the tag and the custom fields
+                  the engine wrote, as it wrote them.
+
+                  Unset when the endpoint's spec.managedBy is unset, and unset for a kind whose NetBox
+                  model carries neither `tags` nor `custom_fields` -- extras.Tag is one, so a
+                  NetBoxTag is managed and unstamped by construction. That is the state NetBoxSweep
+                  (NBO-046) reports and never deletes; see docs/operations/provenance.md.
+                properties:
+                  clusterID:
+                    description: ClusterID is the cluster identifier written into
+                      the cluster custom field.
+                    type: string
+                  customFields:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      CustomFields are the custom fields written, as NetBox names to the values sent.
+                      Empty for a kind whose NetBox model has no `custom_fields` column.
+
+                      These keys are also the only ones compared: NetBox merges a partial `custom_fields`
+                      PATCH and returns every custom field defined for the object type, including ones the
+                      operator knows nothing about, so it compares the keys it sets and leaves the rest
+                      alone. An absent or empty map therefore still means "manage nothing" rather than
+                      "clear everything"; removing one key's value is said with a `null` under
+                      spec.customFields (docs/concepts/field-ownership.md, #196).
+                    type: object
+                  tag:
+                    description: |-
+                      Tag is the tag's slug, written by id. Empty for a kind whose NetBox model has no
+                      `tags` column.
+                    type: string
+                type: object
+              url:
+                description: URL is the object's absolute NetBox URL, as returned
+                  by the API.
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

@@ -427,6 +427,47 @@ type (
 	// `wireless.WirelessLAN.group` points at -- so one alias serves both the tree edge and
 	// the SSID's group.
 	WirelessLANGroupRef ObjectRef
+
+	// The six aliases below are the `vpn` crypto catalogue and its tunnel group. Every one of
+	// them points at a Kind this repository ships, so none of them can report
+	// RefKindUnavailable: the two termination models -- which would need aliases into `dcim`,
+	// `virtualization` and `ipam` through a generic foreign key -- are not part of the set
+	// (#59).
+
+	// IKEProposalRef points at a NetBoxIKEProposal (vpn.IKEProposal, vpn/ike-proposals).
+	//
+	// A to-many target: `vpn.IKEPolicy.proposals` is a ManyToManyField, so this alias is used
+	// as a list element rather than as a single reference
+	// (docs/netbox-schema.md -> vpn.IKEPolicy).
+	IKEProposalRef ObjectRef
+
+	// IKEPolicyRef points at a NetBoxIKEPolicy (vpn.IKEPolicy, vpn/ike-policies).
+	//
+	// The Kind whose NetBox row may hold a pre-shared key. Nothing about the reference reads
+	// it: an ObjectRef resolves to an id and the operator never writes or returns the column
+	// (api/v1alpha1/vpn_ikepolicy.go).
+	IKEPolicyRef ObjectRef
+
+	// IPSecProposalRef points at a NetBoxIPSecProposal (vpn.IPSecProposal,
+	// vpn/ipsec-proposals). A to-many target, like IKEProposalRef.
+	IPSecProposalRef ObjectRef
+
+	// IPSecPolicyRef points at a NetBoxIPSecPolicy (vpn.IPSecPolicy, vpn/ipsec-policies).
+	IPSecPolicyRef ObjectRef
+
+	// IPSecProfileRef points at a NetBoxIPSecProfile (vpn.IPSecProfile, vpn/ipsec-profiles).
+	//
+	// What `vpn.Tunnel.ipsec_profile` points at: the pair of policies a tunnel is protected
+	// by, bound together under one name.
+	IPSecProfileRef ObjectRef
+
+	// TunnelGroupRef points at a NetBoxTunnelGroup (vpn.TunnelGroup, vpn/tunnel-groups).
+	//
+	// An OrganizationalModel rather than the NestedGroupModel its name suggests, so this
+	// points at a flat set of labels and never at a tree (docs/netbox-schema.md ->
+	// vpn.TunnelGroup, bases). Half of `vpn.Tunnel`'s natural key, which is why declaring it
+	// changes which lookup candidate applies.
+	TunnelGroupRef ObjectRef
 )
 
 // TargetGVK reports the Kind this reference resolves against.
@@ -862,3 +903,51 @@ func (r WirelessLANGroupRef) TargetGVK() schema.GroupVersionKind {
 
 // AsObjectRef returns the underlying reference.
 func (r WirelessLANGroupRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r IKEProposalRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxIKEProposal")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r IKEProposalRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r IKEPolicyRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxIKEPolicy")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r IKEPolicyRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r IPSecProposalRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxIPSecProposal")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r IPSecProposalRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r IPSecPolicyRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxIPSecPolicy")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r IPSecPolicyRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r IPSecProfileRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxIPSecProfile")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r IPSecProfileRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r TunnelGroupRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxTunnelGroup")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r TunnelGroupRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
