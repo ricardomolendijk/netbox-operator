@@ -204,6 +204,13 @@ func objectTypeOf(value any) string {
 // The map the CRD declares is deliberately not exhaustive -- only the keys named are
 // managed -- so emitting the populated subset is the whole of what a manifest needs
 // (docs/concepts/field-ownership.md).
+//
+// Values are emitted as the JSON types NetBox returned them as, and this used to render
+// them with fmt.Sprint because the spec field was a map[string]string and a string was the
+// only thing that would round-trip. It no longer is (#303), and stringifying now would make
+// the export produce manifests the operator cannot apply: a `boolean` custom field written
+// back as `"true"` is refused by NetBox with *"Value must be true or false"*, which is the
+// bug this export would otherwise be a generator for.
 func customFields(raw netbox.Object) map[string]any {
 	live, ok := raw[provenance.CustomFieldsField].(map[string]any)
 	if !ok {
@@ -216,7 +223,7 @@ func customFields(raw netbox.Object) map[string]any {
 		if value == nil || value == "" || slices.Contains(skip, name) {
 			continue
 		}
-		out[name] = fmt.Sprint(value)
+		out[name] = value
 	}
 
 	return out

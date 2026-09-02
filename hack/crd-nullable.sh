@@ -54,10 +54,17 @@ out=$root/config/crd/bases
 
 # Matched as whole lines rather than by pattern, so the status-side
 # `status.provenance.customFields` -- a map[string]string that is never null -- and the YAML
-# example inside the field's own description are both untouched by construction.
+# example inside the field's own description are both untouched by construction. The example
+# is indented deeper than the schema key, so it cannot collide with `key` either.
+#
+# `marker` is what controller-gen emits for the map's value type. It was `type: string` until
+# the values became arbitrary JSON (#303, NetBoxObjectSpec.CustomFields), because a NetBox
+# custom field of type boolean or integer cannot be written as a string. The nullable line
+# below is unchanged by that: a null still means "remove this custom field's value", and the
+# API server still prunes one whose schema does not say it may be null.
 key='              customFields:'
 props='                additionalProperties:'
-type='                  type: string'
+marker='                  x-kubernetes-preserve-unknown-fields: true'
 nullable='                  nullable: true'
 
 patched=0
@@ -75,11 +82,11 @@ for file in "$src"/*.yaml; do
 
   # Written beside the destination rather than beside the source, because a rename is only
   # atomic within one filesystem and it is the destination's that has to be the one.
-  awk -v key="$key" -v props="$props" -v type="$type" -v nullable="$nullable" '
-    $0 == key              { at = 1; print; next }
-    at == 1 && $0 == props { at = 2; print; next }
-    at == 2 && $0 == type  { print nullable; print; at = 0; next }
-                           { at = 0; print }
+  awk -v key="$key" -v props="$props" -v marker="$marker" -v nullable="$nullable" '
+    $0 == key               { at = 1; print; next }
+    at == 1 && $0 == props  { at = 2; print; next }
+    at == 2 && $0 == marker { print nullable; print; at = 0; next }
+                            { at = 0; print }
   ' "$file" > "$published.tmp"
   mv "$published.tmp" "$published"
 
