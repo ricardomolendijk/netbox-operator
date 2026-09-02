@@ -58,8 +58,14 @@ rules:
   - netboxexporttemplates
   - netboxfhrpgroupassignments
   - netboxfhrpgroups
+  - netboxikepolicies
+  - netboxikeproposals
   - netboxiprangeclaims
   - netboxipranges
+  - netboxipsecpolicies
+  - netboxipsecprofiles
+  - netboxipsecproposals
+  - netboxl2vpns
   - netboxmacaddresses
   - netboxmanufacturers
   - netboxplatforms
@@ -76,6 +82,8 @@ rules:
   - netboxsavedfilters
   - netboxservices
   - netboxservicetemplates
+  - netboxtunnelgroups
+  - netboxtunnels
   - netboxvirtualmachines
   - netboxwirelesslangroups
   - netboxwirelesslans
@@ -113,11 +121,17 @@ rules:
   - netboxexporttemplates/finalizers
   - netboxfhrpgroupassignments/finalizers
   - netboxfhrpgroups/finalizers
+  - netboxikepolicies/finalizers
+  - netboxikeproposals/finalizers
   - netboxinterfaces/finalizers
   - netboxipaddressclaims/finalizers
   - netboxipaddresses/finalizers
   - netboxiprangeclaims/finalizers
   - netboxipranges/finalizers
+  - netboxipsecpolicies/finalizers
+  - netboxipsecprofiles/finalizers
+  - netboxipsecproposals/finalizers
+  - netboxl2vpns/finalizers
   - netboxlocations/finalizers
   - netboxmacaddresses/finalizers
   - netboxmanufacturers/finalizers
@@ -143,6 +157,8 @@ rules:
   - netboxtags/finalizers
   - netboxtenantgroups/finalizers
   - netboxtenants/finalizers
+  - netboxtunnelgroups/finalizers
+  - netboxtunnels/finalizers
   - netboxvirtualdisks/finalizers
   - netboxvirtualmachines/finalizers
   - netboxvlangroups/finalizers
@@ -182,11 +198,17 @@ rules:
   - netboxexporttemplates/status
   - netboxfhrpgroupassignments/status
   - netboxfhrpgroups/status
+  - netboxikepolicies/status
+  - netboxikeproposals/status
   - netboxinterfaces/status
   - netboxipaddressclaims/status
   - netboxipaddresses/status
   - netboxiprangeclaims/status
   - netboxipranges/status
+  - netboxipsecpolicies/status
+  - netboxipsecprofiles/status
+  - netboxipsecproposals/status
+  - netboxl2vpns/status
   - netboxlocations/status
   - netboxmacaddresses/status
   - netboxmanufacturers/status
@@ -213,6 +235,8 @@ rules:
   - netboxtags/status
   - netboxtenantgroups/status
   - netboxtenants/status
+  - netboxtunnelgroups/status
+  - netboxtunnels/status
   - netboxvirtualdisks/status
   - netboxvirtualmachines/status
   - netboxvlangroups/status
@@ -412,8 +436,14 @@ rules:
   - netboxexporttemplates
   - netboxfhrpgroupassignments
   - netboxfhrpgroups
+  - netboxikepolicies
+  - netboxikeproposals
   - netboxiprangeclaims
   - netboxipranges
+  - netboxipsecpolicies
+  - netboxipsecprofiles
+  - netboxipsecproposals
+  - netboxl2vpns
   - netboxmacaddresses
   - netboxmanufacturers
   - netboxplatforms
@@ -430,6 +460,8 @@ rules:
   - netboxsavedfilters
   - netboxservices
   - netboxservicetemplates
+  - netboxtunnelgroups
+  - netboxtunnels
   - netboxvirtualmachines
   - netboxwirelesslangroups
   - netboxwirelesslans
@@ -467,11 +499,17 @@ rules:
   - netboxexporttemplates/finalizers
   - netboxfhrpgroupassignments/finalizers
   - netboxfhrpgroups/finalizers
+  - netboxikepolicies/finalizers
+  - netboxikeproposals/finalizers
   - netboxinterfaces/finalizers
   - netboxipaddressclaims/finalizers
   - netboxipaddresses/finalizers
   - netboxiprangeclaims/finalizers
   - netboxipranges/finalizers
+  - netboxipsecpolicies/finalizers
+  - netboxipsecprofiles/finalizers
+  - netboxipsecproposals/finalizers
+  - netboxl2vpns/finalizers
   - netboxlocations/finalizers
   - netboxmacaddresses/finalizers
   - netboxmanufacturers/finalizers
@@ -497,6 +535,8 @@ rules:
   - netboxtags/finalizers
   - netboxtenantgroups/finalizers
   - netboxtenants/finalizers
+  - netboxtunnelgroups/finalizers
+  - netboxtunnels/finalizers
   - netboxvirtualdisks/finalizers
   - netboxvirtualmachines/finalizers
   - netboxvlangroups/finalizers
@@ -536,11 +576,17 @@ rules:
   - netboxexporttemplates/status
   - netboxfhrpgroupassignments/status
   - netboxfhrpgroups/status
+  - netboxikepolicies/status
+  - netboxikeproposals/status
   - netboxinterfaces/status
   - netboxipaddressclaims/status
   - netboxipaddresses/status
   - netboxiprangeclaims/status
   - netboxipranges/status
+  - netboxipsecpolicies/status
+  - netboxipsecprofiles/status
+  - netboxipsecproposals/status
+  - netboxl2vpns/status
   - netboxlocations/status
   - netboxmacaddresses/status
   - netboxmanufacturers/status
@@ -567,6 +613,8 @@ rules:
   - netboxtags/status
   - netboxtenantgroups/status
   - netboxtenants/status
+  - netboxtunnelgroups/status
+  - netboxtunnels/status
   - netboxvirtualdisks/status
   - netboxvirtualmachines/status
   - netboxvlangroups/status

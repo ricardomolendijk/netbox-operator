@@ -53,6 +53,20 @@ var shippedManifests = []string{
 	// ConfigItem read from the target installation.
 	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxpowerpanel.yaml"),
 	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxpowerfeed.yaml")}
+	// #59's eight vpn kinds. The samples carry the two integer enums in the catalogue --
+	// `group`/`pfsGroup` from DHGroupChoices, whose members are 1, 2, 5 and 14 through 34
+	// rather than a range, and `version` from IKEVersionChoices -- so admission is what
+	// catches a value that looks like a plausible DH group and is not one.
+	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxikeproposal.yaml"),
+	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxikepolicy.yaml"),
+	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxipsecproposal.yaml"),
+	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxipsecpolicy.yaml"),
+	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxipsecprofile.yaml"),
+	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxtunnelgroup.yaml"),
+	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxtunnel.yaml"),
+	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxl2vpn.yaml"),
+	filepath.Join("..", "..", "docs", "examples", "vpn.yaml"),
+}
 
 // TestShippedManifestsAreAccepted applies every sample and example against the real CRDs.
 //

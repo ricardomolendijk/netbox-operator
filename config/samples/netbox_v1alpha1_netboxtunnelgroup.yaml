@@ -1,0 +1,18 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxTunnelGroup
+metadata:
+  name: branch-offices
+  namespace: default
+spec:
+  endpointRef: homelab
+  onConflict: Fail
+  deletionPolicy: Delete
+
+  name: Branch offices
+  slug: branch-offices
+
+  # There is deliberately no `parentRef`. vpn.TunnelGroup is an OrganizationalModel with no
+  # columns of its own -- no `parent`, no MPTT base, no meta.constraints -- so a tunnel group
+  # is a flat label rather than a position in a tree. Its identity is `slug` alone.
+
+  description: Site-to-site tunnels terminating on the branch routers

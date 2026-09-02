@@ -1,0 +1,26 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxIKEPolicy
+metadata:
+  name: ike-branch
+  namespace: default
+spec:
+  endpointRef: homelab
+  onConflict: Fail
+  deletionPolicy: Delete
+
+  name: IKE branch policy
+  version: 2
+
+  # `mode` is IKEv1 only, so an IKEv2 policy leaves it unset. NetBox's own clean() is the
+  # authority on the combination; this schema does not model crypto rules.
+
+  # A to-many reference, written as the whole set: NetBox replaces a many-to-many wholesale on
+  # PATCH, so the listed set *is* the set and reordering it produces no write.
+  proposals:
+    - name: ike-aes256-sha256
+
+  # There is deliberately no `presharedKeySecretRef` and no `presharedKey`. NetBox's
+  # `preshared_key` column is a secret, a secret may never be inline in a spec, and the engine
+  # has no field class that reads a Secret into a payload (#241). The operator leaves the
+  # column alone: set it in NetBox by hand, and it is never cleared from here.
+  description: Phase 1 policy for the branch-office tunnels

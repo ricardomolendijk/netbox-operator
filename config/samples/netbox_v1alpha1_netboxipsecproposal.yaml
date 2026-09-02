@@ -1,0 +1,21 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxIPSecProposal
+metadata:
+  name: ipsec-aes256-gcm
+  namespace: default
+spec:
+  endpointRef: homelab
+  onConflict: Fail
+  deletionPolicy: Delete
+
+  name: IPSec AES-256-GCM
+  encryptionAlgorithm: aes-256-gcm
+
+  # No `authenticationAlgorithm`: GCM is an AEAD cipher and supplies its own integrity. Both
+  # algorithm columns are nullable on this model and only one of them is on vpn.IKEProposal,
+  # which is the single difference between the two.
+
+  saLifetimeSeconds: 3600
+  saLifetimeData: 4608000
+
+  description: Phase 2 proposal for the branch-office tunnels
