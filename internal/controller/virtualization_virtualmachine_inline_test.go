@@ -102,6 +102,11 @@ func newTreeStub(t *testing.T, kind stubKind, firstID int64) *netboxStubServer {
 
 	return &netboxStubServer{
 		t: t, endpoint: kind.endpoint, key: kind.key,
+		// Carried through for the same reason newNetBoxStub carries them: a composed stub
+		// that dropped the extra filters would answer a two-column lookup with a one-column
+		// match. Empty for every kind in this file, and not for
+		// ipam.VLANTranslationRule's.
+		refKeys: kind.refKeys, altKeys: kind.altKeys,
 		objects: map[int64]netbox.Object{}, nextID: firstID,
 	}
 }

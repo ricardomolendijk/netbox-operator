@@ -66,7 +66,12 @@ var shippedManifests = []string{
 	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxtunnel.yaml"),
 	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxl2vpn.yaml"),
 	filepath.Join("..", "..", "docs", "examples", "vpn.yaml"),
-}
+	// The two NBO-068 kinds, plus the inline list that is the first `+listType=map` keyed on
+	// an *integer* rather than a string: a duplicate `localVID` has to be a rejection from
+	// the API server, and the only way to know it is is to dry-run one.
+	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxvlantranslationpolicy.yaml"),
+	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxvlantranslationrule.yaml"),
+	filepath.Join("..", "..", "docs", "examples", "vlan-translation.yaml")}
 
 // TestShippedManifestsAreAccepted applies every sample and example against the real CRDs.
 //

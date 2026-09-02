@@ -190,6 +190,21 @@ type NetBoxVMInterfaceSpec struct {
 	// +optional
 	VRFRef *VRFRef `json:"vrfRef,omitempty"`
 
+	// VLANTranslationPolicyRef is the table of VLAN ID rewrites applied to this interface
+	// (docs/netbox-schema.md -> virtualization.VMInterface, `vlan_translation_policy
+	// (BaseInterface) ForeignKey -> ipam.VLANTranslationPolicy on_delete=PROTECT`).
+	//
+	// Inherited from BaseInterface, so it is the same column dcim.Interface carries and it
+	// points at the same Kind -- one NetBoxVLANTranslationPolicy can be shared by a physical
+	// interface and a VM interface at once. NBO-030 left it out because there was no Kind to
+	// point at; NBO-068 lands it.
+	//
+	// Not deferred: a policy is a standalone object with no dependency on this interface, so
+	// there is no ordering problem to solve. PROTECT, so it is not a containment parent
+	// (docs/decisions/0003-ownership-and-references.md rule 4).
+	// +optional
+	VLANTranslationPolicyRef *VLANTranslationPolicyRef `json:"vlanTranslationPolicyRef,omitempty"`
+
 	// Description is free text shown next to the interface. Declared on
 	// virtualization.ComponentModel rather than on VMInterface (docs/netbox-schema.md ->
 	// virtualization.ComponentModel, `description CharField len=200`); an inherited column

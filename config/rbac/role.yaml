@@ -74,6 +74,7 @@ rules:
   - netboxtunnelgroups
   - netboxtunnels
   - netboxvirtualmachines
+  - netboxvlantranslationpolicies
   - netboxwirelesslangroups
   - netboxwirelesslans
   - netboxwirelesslinks
@@ -152,6 +153,8 @@ rules:
   - netboxvirtualmachines/finalizers
   - netboxvlangroups/finalizers
   - netboxvlans/finalizers
+  - netboxvlantranslationpolicies/finalizers
+  - netboxvlantranslationrules/finalizers
   - netboxvminterfaces/finalizers
   - netboxvrfs/finalizers
   - netboxwirelesslangroups/finalizers
@@ -230,6 +233,8 @@ rules:
   - netboxvirtualmachines/status
   - netboxvlangroups/status
   - netboxvlans/status
+  - netboxvlantranslationpolicies/status
+  - netboxvlantranslationrules/status
   - netboxvminterfaces/status
   - netboxvrfs/status
   - netboxwirelesslangroups/status
@@ -267,6 +272,7 @@ rules:
   - netboxvirtualdisks
   - netboxvlangroups
   - netboxvlans
+  - netboxvlantranslationrules
   - netboxvminterfaces
   - netboxvrfs
   verbs:
