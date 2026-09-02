@@ -26,6 +26,16 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 | — deliberately omitted, with a reason | 10 |
 | — blocked: a reference whose target model has no Kind | 78 |
 | — **MISSING**: nothing declares it and nothing blocks it | 94 |
+| — implemented as a Kind | 72 |
+| — excluded, with a reason | 27 |
+| — **not implemented** | 39 |
+| in scope (endpoints − excluded) | 111 |
+| | |
+| writable columns on the implemented Kinds | 788 |
+| — written by a spec field, or engine-owned | 597 |
+| — deliberately omitted, with a reason | 10 |
+| — blocked: a reference whose target model has no Kind | 82 |
+| — **MISSING**: nothing declares it and nothing blocks it | 99 |
 | — of those, required on create (fails the audit) | 0 |
 | | |
 | natural-key candidates the IR calls unusable | 21 |
@@ -41,6 +51,8 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 |---|---|--:|---|
 | `owner` | blocked | 66 | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `tags` | MISSING | 60 | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
+| `owner` | blocked | 69 | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `tags` | MISSING | 64 | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `comments` | excluded | 6 | organisational kinds map name/slug/description only (api/v1alpha1/virtualization_clustertype.go) |
 | `tenant` | MISSING | 6 | deferred to NetBoxTenant (NBO-021), which now ships -- nothing blocks it any more |
 | `config_template` | MISSING | 4 | — |
@@ -59,7 +71,7 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 | `front_image` | MISSING | 1 | — |
 | `group` | MISSING | 1 | deferred to NetBoxSiteGroup (NBO-066), which now ships -- nothing blocks it any more |
 | `location` | MISSING | 1 | — |
-| `module` | blocked | 1 | waits on a Kind for `dcim.Module` |
+| `module` | MISSING | 1 | NBO-053 owns it, and this PR is the half of NBO-053 that unblocks it rather than the half that writes it. `dcim.ModularComponentModel.module` is a nullable `ForeignKey -> dcim.Module on_delete=CASCADE` on every component subclass (docs/netbox-schema.md), so the column was "blocked" while dcim.Module had no Kind and is a real gap now that it has one. It is not one column on one kind: adding `moduleRef` to dcim.Interface means adding it to every ModularComponentModel subclass at once, and on the ones whose unique constraint names `module` -- dcim.ModuleBay, which ships here -- it changes the natural key too. Deferred with the remaining component kinds (#54) |
 | `position` | MISSING | 1 | — |
 | `preshared_key` | MISSING | 1 | a pre-shared key, permitted only as spec.presharedKeySecretRef and never inline; the engine has no FieldClass that reads a Secret into a payload, which is #241's work, so the column is unmapped rather than written and NetBox keeps whatever key it holds. It is in internal/netbox/do.go's redaction set because NetBox returns it. The ipam.FHRPGroup.auth_key and wireless auth_psk precedent, and the only secret-valued column in the whole vpn app (api/v1alpha1/vpn_ikepolicy.go, docs/reference/netboxikepolicy.md) |
 | `rack` | MISSING | 1 | NBO-051 ships NetBoxRack, so nothing blocks this any more -- but the column does not arrive alone: `(rack, position, face)` is one of dcim.Device's UniqueConstraints (docs/netbox-schema.md), so mounting a device in a rack means adding all three at once and re-deriving that kind's natural keys. NBO-051's ticket calls it out of scope on the belief the three were already on NetBoxDevice from NBO-030; they are not (internal/registry/dcim_device.go, dcimDeviceFields) |
@@ -74,7 +86,7 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 | `virtual_machine_type` | blocked | 1 | waits on a Kind for `virtualization.VirtualMachineType` |
 | `weight` | MISSING | 1 | — |
 | `weight_unit` | MISSING | 1 | — |
-| `wireless_lans` | MISSING | 1 | NBO-053 owns it, with the rest of dcim.Interface's component fields. NBO-050 ships wireless.WirelessLAN, so the column is no longer blocked -- only unwritten    reason: NBO-059 owns it, with the rest of ConfigContextModel |
+| `wireless_lans` | MISSING | 1 | NBO-053 owns it, with the rest of dcim.Interface's component fields. NBO-050 ships wireless.WirelessLAN, so the column is no longer blocked -- only unwritten |
 
 ## Uncovered columns, per Kind
 
@@ -112,7 +124,7 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 | `dcim.DeviceType` | `front_image` | Scalar | — | MISSING | — |
 | `dcim.Site` | `group` | Ref | — | MISSING | deferred to NetBoxSiteGroup (NBO-066), which now ships -- nothing blocks it any more |
 | `dcim.Device` | `location` | Ref | — | MISSING | — |
-| `dcim.Interface` | `module` | Ref | — | blocked | waits on a Kind for `dcim.Module` |
+| `dcim.Interface` | `module` | Ref | — | MISSING | NBO-053 owns it, and this PR is the half of NBO-053 that unblocks it rather than the half that writes it. `dcim.ModularComponentModel.module` is a nullable `ForeignKey -> dcim.Module on_delete=CASCADE` on every component subclass (docs/netbox-schema.md), so the column was "blocked" while dcim.Module had no Kind and is a real gap now that it has one. It is not one column on one kind: adding `moduleRef` to dcim.Interface means adding it to every ModularComponentModel subclass at once, and on the ones whose unique constraint names `module` -- dcim.ModuleBay, which ships here -- it changes the natural key too. Deferred with the remaining component kinds (#54) |
 | `dcim.Cable` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `dcim.CableBundle` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `dcim.Device` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
@@ -122,6 +134,10 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 | `dcim.Location` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `dcim.MACAddress` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `dcim.Manufacturer` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `dcim.Module` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `dcim.ModuleBay` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `dcim.ModuleType` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `dcim.ModuleTypeProfile` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `dcim.Platform` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `dcim.PowerFeed` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `dcim.PowerPanel` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
@@ -195,6 +211,10 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 | `dcim.Location` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `dcim.MACAddress` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `dcim.Manufacturer` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
+| `dcim.Module` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
+| `dcim.ModuleBay` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
+| `dcim.ModuleType` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
+| `dcim.ModuleTypeProfile` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `dcim.Platform` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `dcim.PowerFeed` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `dcim.PowerPanel` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
@@ -261,7 +281,7 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 | `virtualization.VirtualMachine` | `virtual_machine_type` | Ref | — | blocked | waits on a Kind for `virtualization.VirtualMachineType` |
 | `dcim.DeviceType` | `weight` | Decimal | — | MISSING | — |
 | `dcim.DeviceType` | `weight_unit` | Enum | — | MISSING | — |
-| `dcim.Interface` | `wireless_lans` | M2M | — | MISSING | NBO-053 owns it, with the rest of dcim.Interface's component fields. NBO-050 ships wireless.WirelessLAN, so the column is no longer blocked -- only unwritten    reason: NBO-059 owns it, with the rest of ConfigContextModel |
+| `dcim.Interface` | `wireless_lans` | M2M | — | MISSING | NBO-053 owns it, with the rest of dcim.Interface's component fields. NBO-050 ships wireless.WirelessLAN, so the column is no longer blocked -- only unwritten |
 
 ## Natural-key candidates the IR calls unusable
 
@@ -341,10 +361,10 @@ each pinned column's class rather than from the IR's reason string.
 | `dcim/mac-addresses` | `dcim.MACAddress` | `NetBoxMACAddress` | implemented | — |
 | `dcim/manufacturers` | `dcim.Manufacturer` | `NetBoxManufacturer` | implemented | — |
 | `dcim/module-bay-templates` | `dcim.ModuleBayTemplate` | — | MISSING | — |
-| `dcim/module-bays` | `dcim.ModuleBay` | — | MISSING | — |
-| `dcim/module-type-profiles` | `dcim.ModuleTypeProfile` | — | MISSING | — |
-| `dcim/module-types` | `dcim.ModuleType` | — | MISSING | — |
-| `dcim/modules` | `dcim.Module` | — | MISSING | — |
+| `dcim/module-bays` | `dcim.ModuleBay` | `NetBoxModuleBay` | implemented | — |
+| `dcim/module-type-profiles` | `dcim.ModuleTypeProfile` | `NetBoxModuleTypeProfile` | implemented | — |
+| `dcim/module-types` | `dcim.ModuleType` | `NetBoxModuleType` | implemented | — |
+| `dcim/modules` | `dcim.Module` | `NetBoxModule` | implemented | — |
 | `dcim/platforms` | `dcim.Platform` | `NetBoxPlatform` | implemented | — |
 | `dcim/power-feeds` | `dcim.PowerFeed` | `NetBoxPowerFeed` | implemented | — |
 | `dcim/power-outlet-templates` | `dcim.PowerOutletTemplate` | — | MISSING | — |

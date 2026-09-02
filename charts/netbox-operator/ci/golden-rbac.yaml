@@ -306,8 +306,6 @@ rules:
   - patch
   - update
   - watch
-
-
 ---
 # Source: netbox-operator/templates/clusterrolebinding.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -326,8 +324,6 @@ subjects:
 - kind: ServiceAccount
   name: netbox-operator
   namespace: netbox-operator-system
-
-
 ---
 # Source: netbox-operator/templates/credential-rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -343,8 +339,6 @@ rules:
 - apiGroups: [""]
   resources: [secrets]
   verbs: [get, list, watch]
-
-
 ---
 # Source: netbox-operator/templates/credential-rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -364,8 +358,6 @@ subjects:
 - kind: ServiceAccount
   name: netbox-operator
   namespace: netbox-operator-system
-
-
 ---
 # Source: netbox-operator/templates/leader-election-rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -387,8 +379,6 @@ rules:
 - apiGroups: [""]
   resources: [events]
   verbs: [create, patch]
-
-
 ---
 # Source: netbox-operator/templates/leader-election-rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -408,8 +398,6 @@ subjects:
 - kind: ServiceAccount
   name: netbox-operator
   namespace: netbox-operator-system
-
-
 #
 # ===== all-features-values.yaml
 ---
@@ -714,8 +702,6 @@ rules:
   - patch
   - update
   - watch
-
-
 ---
 # Source: netbox-operator/templates/clusterrolebinding.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -734,8 +720,6 @@ subjects:
 - kind: ServiceAccount
   name: netbox-operator-ci
   namespace: netbox-operator-system
-
-
 ---
 # Source: netbox-operator/templates/credential-rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -751,8 +735,6 @@ rules:
 - apiGroups: [""]
   resources: [secrets]
   verbs: [get, list, watch]
-
-
 ---
 # Source: netbox-operator/templates/credential-rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -768,8 +750,6 @@ rules:
 - apiGroups: [""]
   resources: [secrets]
   verbs: [get, list, watch]
-
-
 ---
 # Source: netbox-operator/templates/credential-rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -785,8 +765,6 @@ rules:
 - apiGroups: [""]
   resources: [secrets]
   verbs: [get, list, watch]
-
-
 ---
 # Source: netbox-operator/templates/credential-rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -806,8 +784,6 @@ subjects:
 - kind: ServiceAccount
   name: netbox-operator-ci
   namespace: netbox-operator-system
-
-
 ---
 # Source: netbox-operator/templates/credential-rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -827,8 +803,6 @@ subjects:
 - kind: ServiceAccount
   name: netbox-operator-ci
   namespace: netbox-operator-system
-
-
 ---
 # Source: netbox-operator/templates/credential-rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -848,8 +822,6 @@ subjects:
 - kind: ServiceAccount
   name: netbox-operator-ci
   namespace: netbox-operator-system
-
-
 ---
 # Source: netbox-operator/templates/leader-election-rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -871,8 +843,6 @@ rules:
 - apiGroups: [""]
   resources: [events]
   verbs: [create, patch]
-
-
 ---
 # Source: netbox-operator/templates/leader-election-rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -892,5 +862,3 @@ subjects:
 - kind: ServiceAccount
   name: netbox-operator-ci
   namespace: netbox-operator-system
-
-

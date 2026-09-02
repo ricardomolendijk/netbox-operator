@@ -71,7 +71,8 @@ var shippedManifests = []string{
 	// the API server, and the only way to know it is is to dry-run one.
 	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxvlantranslationpolicy.yaml"),
 	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxvlantranslationrule.yaml"),
-	filepath.Join("..", "..", "docs", "examples", "vlan-translation.yaml")
+	filepath.Join("..", "..", "docs", "examples", "vlan-translation.yaml"),
+	// NBO-053's four module kinds, plus their shared example carrying every JSON column.
 	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxmoduletypeprofile.yaml"),
 	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxmoduletype.yaml"),
 	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxmodulebay.yaml"),
