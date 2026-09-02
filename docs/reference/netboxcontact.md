@@ -154,7 +154,7 @@ they are assigned to, which does cascade.
 
 ## `deletionPolicy` defaults to `Delete`
 
-Not an IPAM kind, so `Delete` (#176 option B).
+`Delete`, like every kind since [#304](https://github.com/ricardomolendijk/netbox-operator/issues/304).
 
 ## Printer columns
 

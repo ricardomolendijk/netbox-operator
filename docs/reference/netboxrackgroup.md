@@ -236,7 +236,7 @@ naming the blocker. Move the racks out of the group, or delete them, first.
 
 ### `deletionPolicy` defaults to `Delete`
 
-Not an IPAM kind, so `Delete` (#176 option B). A rack group is a label a manifest recreates
+`Delete`, like every kind since [#304](https://github.com/ricardomolendijk/netbox-operator/issues/304). A rack group is a label a manifest recreates
 verbatim; deleting one frees no resource anybody else can take, which is what `Retain` was
 reserved for. See [deletion](../concepts/deletion.md).
 

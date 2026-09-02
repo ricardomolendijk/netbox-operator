@@ -160,7 +160,7 @@ exactly its identity: keyed on `slug` alone, it stays identifiable with the pare
 
 ## `deletionPolicy` defaults to `Delete`
 
-Not an IPAM kind, so `Delete` (#176 option B). Deleting a group in NetBox cascades to its
+`Delete`, like every kind since [#304](https://github.com/ricardomolendijk/netbox-operator/issues/304). Deleting a group in NetBox cascades to its
 descendant groups; it does **not** delete the contacts in it — `Contact.groups` is a
 many-to-many, so the join rows go and the contacts stay.
 

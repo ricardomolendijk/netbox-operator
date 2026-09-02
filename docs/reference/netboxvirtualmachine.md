@@ -623,10 +623,9 @@ and it is not a failure — it is the operator saying it has the value and has n
 
 ## `deletionPolicy` defaults to `Delete`
 
-Unlike [`NetBoxPrefix`](netboxprefix.md), and that is deliberate. Issue #176 decided that
-IPAM kinds holding allocated state default to `Retain`, and enumerated them; a VM is not one.
-Deleting a VM record destroys no allocation, and re-creating it from the manifest that
-described it gives back the same object. Its interfaces and disks go with it, in NetBox by
+Like every kind, [`NetBoxPrefix`](netboxprefix.md) included, since [#304](https://github.com/ricardomolendijk/netbox-operator/issues/304). This kind never had
+a reason to be anything else: deleting a VM record destroys no allocation, and re-creating it
+from the manifest that described it gives back the same object. Its interfaces and disks go with it, in NetBox by
 `on_delete=CASCADE` and in Kubernetes by the owner reference.
 
 Set `deletionPolicy: Retain` on a VM the operator should stop managing without removing.

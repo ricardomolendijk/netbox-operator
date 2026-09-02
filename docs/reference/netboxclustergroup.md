@@ -84,7 +84,7 @@ in both `TagsMixin` and `CustomFieldsMixin`, so this kind is stamped in full.
 
 ## `deletionPolicy` defaults to `Delete`
 
-Not an IPAM kind, so `Delete` (#176 option B). `virtualization.Cluster.group` is
+`Delete`, like every kind since [#304](https://github.com/ricardomolendijk/netbox-operator/issues/304). `virtualization.Cluster.group` is
 `on_delete=PROTECT`, so NetBox refuses to delete a group any cluster still belongs to and the
 CR reports `Deleting=False, Reason=Protected` naming it.
 
