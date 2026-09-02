@@ -83,7 +83,11 @@ would miss:
 
 - **Quiescence.** Two full `resyncPeriod`s after convergence produce **zero** mutating NetBox
   requests. A resolver that converges by re-`PATCH`ing forever passes every other assertion
-  in the suite and fails this one.
+  in the suite and fails this one. *Mutating* is `POST`, `PATCH` and `DELETE`
+  (`harness.mutatingMethods`): a converged system still reads, and is meant to — the drift
+  check re-reads every object it owns each resync, and a settled claim re-reads its allocation
+  ([#167](https://github.com/ricardomolendijk/netbox-operator/issues/167)). Quiescence is a
+  promise about what the operator writes, not about it going to sleep.
 - **Write economy.** The whole run costs at most `objects + deferred fields` mutating
   requests. Convergence that costs forty `PATCH`es for seventeen objects is churn, not
   convergence.

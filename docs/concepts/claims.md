@@ -211,14 +211,50 @@ default is `loose`, which makes `?cf_...=` a substring match.
 ## `status.address` is immutable. The operator never re-allocates.
 
 Once a claim holds an address, the reconciler's first guard clause returns before anything
-can allocate again. That guard is also why the steady state of every claim in the cluster is
-a reconcile that makes **no NetBox request at all**.
+can allocate again. Past that line no code path can allocate, whatever it finds.
 
 If somebody deletes the allocated object in the NetBox UI, the claim does **not** pick a new
 address. By the time a claim has handed one out, something outside Kubernetes is using it — a
 NIC's static configuration, a DNS record, a firewall rule. Restoring the same address is
 always safe; picking a new one never is, and the operator is the last component that should
-be making that call ([ADR-0004](../decisions/0004-claims-first-allocation.md)).
+be making that call ([ADR-0004](../decisions/0004-claims-first-allocation.md)). It reports
+what it found instead — see [the pin is verified, not
+trusted](#the-pin-is-verified-not-trusted).
+
+## The pin is verified, not trusted
+
+**"Never allocate again" is not "never look again."** A settled claim re-reads its allocation
+once per the endpoint's `resyncPeriod`, and reports `Ready=False` when NetBox no longer agrees
+that it holds it ([#167](https://github.com/ricardomolendijk/netbox-operator/issues/167)).
+
+The query is one indexed `GET` on the allocation identity — the same one a reclaim makes,
+`?cf_k8s_allocation_identity=…` under whatever
+[`spec.managedBy.allocationIdentityField`](../reference/netboxendpoint.md) is called on that
+endpoint. Three outcomes:
+
+| What NetBox says | Condition |
+|---|---|
+| an object carrying this claim's identity holds the value in `status` | `Ready=True`, nothing written, nothing said |
+| something else holds it, or several objects do | `Ready=False, Reason=AllocationConflict`, naming the other object's id and identity |
+| nothing holds it and nothing carries the identity | `Ready=False, Reason=AllocationLost` |
+| NetBox could not be asked | unchanged — the claim keeps reporting what it holds, and asks again on the transient tier |
+
+`Allocated` stays `True` throughout: it is a historical fact, and no later event un-allocates
+an address that was allocated. Nothing is written to NetBox on any of these paths — no
+re-allocation, no adoption, no delete. When two claims hold one address both of them may be in
+service, and only a human knows which.
+
+The state this exists for is a **NetBox restored from a snapshot predating an allocation**: the
+restored database has no record of the address, so it offers it to the next claim that asks,
+while the claim already holding it goes on reporting success. Before this check nothing in the
+system ever noticed — see [what survives what](../operations/gitops.md#what-survives-what) for
+the restore runbook, and read that page's warning before deleting either claim.
+
+The cost is one read per claim per resync period on the quiet path, and it is a *read*: the
+steady state of a settled claim still makes **no mutating NetBox request at all**, which is
+what the e2e suite's quiescence gate asserts. The schedule is on the clock —
+`status.lastVerifiedAt` — rather than on the wake-up, so a claim reconciled fifty times inside
+one interval still costs one request between them.
 
 **"Never re-allocate" is not "never allocate."** A claim that failed to allocate has
 allocated nothing, and its next pass is still its first allocation. An exhausted pool leaves

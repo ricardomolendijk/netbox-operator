@@ -209,6 +209,7 @@ claim to `Retain` is the way out of a delete NetBox keeps refusing.
 | `allocationIdentity` | `string` | the derived or explicit identity | with `address` |
 | `claimUID` | `string` | `metadata.uid` of the claim that allocated | with `address` |
 | `allocatedAt` | `metav1.Time` | when the address was allocated or reclaimed | with `address` |
+| `lastVerifiedAt` | `metav1.Time` | when NetBox last confirmed the allocation is still this claim's | with `address`, then once per `resyncPeriod` — see [the pin is verified](#the-pin-is-verified-once-per-resync-period) |
 | `provenance` | `ProvenanceStatus` | the stamp the allocating POST carried | on allocation only — **not** on reclaim, because a reclaim writes nothing |
 | `observedGeneration` | `int64` | every pass | always, including every failure |
 | `deletionAttempts` | `int32` | deletes of the allocated object that did not succeed | only while the claim is terminating; both the backoff and the give-up bound are read from it |
@@ -231,10 +232,11 @@ filter and the object comes back whether or not the CR still exists.
 |---|---|---|---|
 | `Allocated` | NetBox has handed this claim an object. **Once `True`, never set `False`** | nothing has been allocated *yet* | `AddressAllocated`, `ReclaimedByIdentity`, `AllocationPending`, `PoolExhausted`, `PoolNotAllocatable`, `ReclaimedOutsidePool`, `AllocationConflict`, `ForeignAllocation`, `IdempotencyKeyUnavailable`, `Invalid`, `APIError` |
 | `RefsResolved` | the pool reference resolved | it did not | `AllResolved`, `RefNotFound`, `RefNotReady`, `RefTargetFailed`, `RefAmbiguous`, `RefDenied`, `RefCycle`, `RefKindUnavailable` |
-| `Ready` | the claim holds its allocation | anything else | `AddressAllocated`, `AllocationPending`, `WaitingForEndpoint`, `WaitingForRef`, `PoolExhausted`, `PoolNotAllocatable`, `ReclaimedOutsidePool`, `AllocationConflict`, `ForeignAllocation`, `IdempotencyKeyUnavailable`, `DryRunPending`, `ReportPending`, `Invalid`, `APIError` |
+| `Ready` | the claim holds its allocation | anything else | `AddressAllocated`, `AllocationPending`, `WaitingForEndpoint`, `WaitingForRef`, `PoolExhausted`, `PoolNotAllocatable`, `ReclaimedOutsidePool`, `AllocationConflict`, `AllocationLost`, `ForeignAllocation`, `IdempotencyKeyUnavailable`, `DryRunPending`, `ReportPending`, `Invalid`, `APIError` |
 
 `Allocated` is a **historical fact**, not a liveness signal: the address was allocated, and no
-later event un-allocates it. There is no `Degraded` condition and no `Synced` condition — a
+later event un-allocates it — including the pin verification finding that somebody else now
+holds it, which takes `Ready` away and leaves `Allocated` alone. There is no `Degraded` condition and no `Synced` condition — a
 claim has no drift to detect and no desired state to be synced with, and the liveness of the
 allocated object is the declarative `NetBoxIPAddress`'s business (NBO-025).
 
@@ -301,10 +303,37 @@ deterministic. Fix: delete the stale NetBox object, or set `spec.allocationIdent
 
 #### `AllocationConflict`
 
-On `Allocated` and on `Ready`. More than one NetBox object carries this claim's identity, which
-means a previous over-allocation. The message names every match. The operator never allocates
-and never deletes here: it cannot prove which object is unused, and a NIC or a DNS record may
-be pointing at either. A human chooses.
+NetBox holds an object this claim cannot prove is its own where its own should be. Two ways in,
+and they are the same finding at two points in a claim's life.
+
+**Before an allocation**, on `Allocated` and on `Ready`: more than one NetBox object carries
+this claim's identity, which means a previous over-allocation. The message names every match.
+
+**After one**, on `Ready` only: the [pin verification](#the-pin-is-verified-once-per-resync-period)
+found the value in `status.address` held by an object carrying a *different* allocation
+identity, or none this endpoint can read. The message names that object's id and identity.
+`Allocated` stays `True`.
+
+The operator never allocates and never deletes in either case: it cannot prove which object is
+unused, and a NIC or a DNS record may be pointing at either. A human chooses — and should read
+[do not simply delete the losing claim](../operations/gitops.md#what-survives-what) first,
+because deleting a claim `DELETE`s the object at its `status.netboxID` and a restored NetBox
+may have reissued that id.
+
+#### `AllocationLost`
+
+On `Ready`. No NetBox object holds the value in `status.address`, and none carries this claim's
+allocation identity: the allocation this claim reports is not in NetBox at all. `Allocated`
+stays `True`.
+
+A NetBox restored from a snapshot predating the allocation is the usual cause — and the value
+is then free for NetBox to hand to the next claim that asks, which is how this becomes
+`AllocationConflict` a moment later. Somebody deleting the object in the NetBox UI reaches the
+same state.
+
+Separate from `AllocationConflict` because the remedies differ: nothing holds the value, so
+nothing is in service at it and re-creating the object or re-applying the claim under a new name
+is safe. The condition clears on its own if the object comes back.
 
 #### `ForeignAllocation`
 
@@ -365,10 +394,10 @@ The shared vocabulary, behaving exactly as it does for every other kind
 
 | State | Requeue |
 |---|---|
-| allocated (`Ready=True`) | **none.** There is nothing left to re-check, and a timer would be one NetBox request per claim per interval that can only conclude what status already says |
+| allocated (`Ready=True`) | the endpoint's `resyncPeriod`, ±10% jitter — when the claim next re-reads its pin. One indexed `GET` per claim per interval, and no write of any kind |
 | `WaitingForEndpoint` | 30s |
 | `WaitingForRef` | none — the ref watch on the `NetBoxPrefix` is what ends the wait |
-| `PoolExhausted`, `PoolNotAllocatable`, `ReclaimedOutsidePool`, `AllocationConflict`, `ForeignAllocation`, `IdempotencyKeyUnavailable` | **10m**, fixed, ±10% jitter. Never an error: returning one would hand the object to the workqueue's exponential backoff, which starts in milliseconds |
+| `PoolExhausted`, `PoolNotAllocatable`, `ReclaimedOutsidePool`, `AllocationConflict`, `AllocationLost`, `ForeignAllocation`, `IdempotencyKeyUnavailable` | **10m**, fixed, ±10% jitter. Never an error: returning one would hand the object to the workqueue's exponential backoff, which starts in milliseconds |
 | `AllocationPending` after an unverified allocation | 30s |
 | `APIError` | the shared tiers — 30s transient, 2m auth, `Retry-After` for a 429 |
 | `DryRunPending`, `ReportPending` | the endpoint's `resyncPeriod` |
@@ -427,6 +456,37 @@ failure mode.
 
 `onConflict` is about adopting an object that matches a natural key. A claim has no natural
 key: it adopts by allocation identity and by nothing else.
+
+### The pin is verified once per resync period
+
+`status.address` is immutable and the operator never re-allocates — but it does re-read. Once
+per the endpoint's `resyncPeriod` a settled claim searches NetBox for the object carrying its
+`status.allocationIdentity` and checks that it still holds the value in `status.address`
+([#167](https://github.com/ricardomolendijk/netbox-operator/issues/167)):
+
+| What NetBox says | Result |
+|---|---|
+| the object carrying this claim's identity holds the value | `Ready=True`, and `status.lastVerifiedAt` moves |
+| something else holds it, or several objects carry the identity | `Ready=False, Reason=AllocationConflict` |
+| nothing holds it and nothing carries the identity | `Ready=False, Reason=AllocationLost` |
+| NetBox could not be asked, or this endpoint has no `allocationIdentityField` | unchanged — the claim keeps reporting what it holds |
+
+The search is by allocation identity rather than by `status.netboxID`, because a restored
+database reissues primary keys and a read by id can be answered by a stranger. It uses whatever
+`spec.managedBy.allocationIdentityField` is called on that endpoint, not the default name. A
+second read, on the failure path only, is what names the object holding the value now.
+
+**Nothing is written on any of those paths.** The verification cannot allocate, adopt, patch or
+delete — its only possible effect is to take `Ready` away and say why, so `kubectl wait` and
+anything keyed on `Ready` stop believing an allocation NetBox no longer backs. It costs one
+indexed `GET` per claim per interval, which is the same rate this endpoint already re-reads
+every `NetBoxObject` at, and the schedule is on the clock (`status.lastVerifiedAt`) rather than
+on the wake-up — a claim reconciled fifty times inside one interval still costs one request
+between them.
+
+`driftMode: Off` does not switch it off. That switch turns off the periodic *drift* re-check,
+the read whose purpose is to find a difference the operator would then write away; this read
+never writes anything in any mode, and the state it finds is one nothing else reports.
 
 ### The allocating POST is never retried
 
@@ -505,6 +565,8 @@ side by side. `nbipclaim` and `nbipc` both resolve.
 | `ADDRESS` empty, retrying every 10m | `Ready=False, Reason=PoolExhausted` | the prefix is full | widen the prefix (the claim wakes immediately) or free an address in NetBox (up to 10m) |
 | `ADDRESS` empty, refused immediately | `Ready=False, Reason=PoolNotAllocatable` | the prefix is a `container`, or has `mark_utilized` | allocate out of a child prefix, or clear the flag |
 | `ADDRESS` empty, message names two ids | `Ready=False, Reason=AllocationConflict` | two objects carry one identity | delete the one that is not in service |
+| `ADDRESS` set, `READY` False, message names another id and identity | `Ready=False, Reason=AllocationConflict` | something else holds the address this claim reports — usually a NetBox restored from before the allocation | decide which claim keeps it, then free the other by a route that cannot delete anything ([runbook](../operations/gitops.md#what-survives-what)) |
+| `ADDRESS` set, `READY` False, message says nothing holds it | `Ready=False, Reason=AllocationLost` | the allocated object is gone from NetBox | re-create it with this claim's `status.allocationIdentity`, or re-apply the claim under a new name |
 | `ADDRESS` empty, message names another cr | `Ready=False, Reason=ForeignAllocation` | `spec.allocationIdentity` names an object somebody else owns | unset it, or have the owner release the object |
 | `ADDRESS` empty, message names a custom field to set | `Ready=False, Reason=ForeignAllocation` | `spec.allocationIdentity` names an object this endpoint cannot attribute to this claim | stamp the object for this claim in NetBox as the message says, or unset the field |
 | `ADDRESS` empty, message names an address outside the prefix | `Ready=False, Reason=ReclaimedOutsidePool` | the claim was repointed, or its name reused | delete the stale NetBox object, or set `spec.allocationIdentity` |

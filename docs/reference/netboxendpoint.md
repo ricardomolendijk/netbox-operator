@@ -355,8 +355,10 @@ it, **± 10% jitter** so that endpoints applied in one manifest do not probe in 
 the life of the process.
 
 Ignored for objects when `spec.driftMode` is `Off`, which is the whole of what "no periodic
-resync" means. The endpoint's own re-probe continues either way: that checks the token, the
-version and reachability, none of which is drift.
+resync" means. Two things continue either way, because neither is drift: the endpoint's own
+re-probe, which checks the token, the version and reachability; and a settled claim's
+[pin verification](netboxipaddressclaim.md#the-pin-is-verified-once-per-resync-period), one
+indexed `GET` per claim per period, which never writes anything in any mode.
 
 **If it is wrong.** Zero or negative falls back to 10 minutes (`internal/reconciler`'s
 `DefaultResync`, the one Go definition of the default). A very short period
