@@ -59,11 +59,12 @@ const (
 //     `position`/`face` are meaningless without a rack -- so the
 //     `('rack', 'position', 'face')` constraint is unreachable and all four are left out
 //     rather than accepted and dropped.
-//   - `virtual_chassis`, `vc_position`, `vc_priority`, `config_template` and
-//     `local_context_data` are absent for the same reason: NBO-053 and NBO-059 own the
-//     Kinds behind them, and NetBox ignores a column it does not know rather than
-//     rejecting it, so a field accepted and silently dropped reports success while writing
-//     nothing.
+//   - `virtual_chassis`, `vc_position`, `vc_priority` and `config_template` are absent for
+//     the same reason: NBO-053 and NBO-059 own the Kinds behind them, and NetBox ignores a
+//     column it does not know rather than rejecting it, so a field accepted and silently
+//     dropped reports success while writing nothing. `local_context_data` was in that list
+//     until #241 and is not any more: it is the one ConfigContextModel column that
+//     references no other Kind, so nothing was ever blocking it (LocalContextData below).
 //
 // There is no `tags` field, on this Kind or any other in v1alpha1: `tags` is written by the
 // engine from Descriptor.Taggable as the provenance stamp (internal/reconciler, fieldRules),
@@ -276,6 +277,45 @@ type NetBoxDeviceSpec struct {
 	// (docs/concepts/field-ownership.md).
 	// +optional
 	Comments string `json:"comments,omitempty"`
+
+	// LocalContextData is this device's own slice of config context: the JSON document NetBox
+	// merges **last** when it renders the device's configuration, after every
+	// extras.ConfigContext whose selectors matched (docs/netbox-schema.md -> dcim.Device,
+	// `local_context_data (ConfigContextModel) JSONField`;
+	// `netbox/extras/models/configs.py`, `ConfigContextModel.get_config_context()`).
+	//
+	// It is a column on the device and not a reference to one, which is why it is a spec
+	// field here rather than a NetBoxConfigContext with a selector that picks out one device.
+	// The two are different mechanisms in NetBox and only this one is part of the device: it
+	// is created, updated and deleted with the row, so a device whose overrides live here
+	// cannot be left behind by a config context somebody else deleted. It is also the highest
+	// precedence in the merge, so what goes here is the per-object exception rather than the
+	// shared policy -- policy belongs in a NetBoxConfigContext, where it can be reviewed once
+	// and applied to everything it selects.
+	//
+	// Compared as a whole document rather than as a scalar (registry.ClassJSON). The scalar
+	// rule unwraps any JSON object carrying an `id` or a `value` key, because that is how
+	// NetBox renders a foreign key and a choice on read -- and an `id` key is ordinary inside
+	// inventory data, so a local context carrying one would differ from itself on every read
+	// and be PATCHed forever (docs/concepts/drift.md).
+	//
+	// An object rather than any JSON value, which is NetBox's rule and not this operator's:
+	// `ConfigContextModel.clean()` refuses a `local_context_data` that is not a mapping,
+	// because rendering merges it into a dict. Declaring the type here turns that 400 into a
+	// rejection at admission, where the message names the field.
+	//
+	// Omit it to leave NetBox's own value alone; set it to `{}` to clear the value in
+	// NetBox. The two are different intents and the operator can tell them apart
+	// (docs/concepts/field-ownership.md). `{}` and not `null`, although the column itself is
+	// nullable: the API server prunes a null under a schema that is not marked nullable,
+	// before validation and before the operator ever reads the object back
+	// (hack/crd-nullable.sh states the same rule from the other side), so a `null` here would
+	// be indistinguishable from omitting the field. An empty document merges to nothing,
+	// which is what clearing it is asking for.
+	// +kubebuilder:pruning:PreserveUnknownFields
+	// +kubebuilder:validation:Type=object
+	// +optional
+	LocalContextData *JSONDocument `json:"localContextData,omitempty"`
 
 	// Interfaces are this device's dcim.Interface components, declared inline and
 	// materialised as real NetBoxInterface CRs -- with their addresses as real

@@ -60,9 +60,11 @@ func virtualizationVirtualMachineDescriptor() Descriptor {
 		// ignores a field name it does not know rather than rejecting it, so either would
 		// write nothing and report success.
 		//
-		// `virtual_machine_type`, `config_template` and `local_context_data` are absent:
-		// NBO-060 and NBO-059 own them, and a field that is accepted and writes nothing is
-		// worse than a field that is not there.
+		// `virtual_machine_type` and `config_template` are absent: NBO-060 and NBO-059 own
+		// them, and a field that is accepted and writes nothing is worse than a field that is
+		// not there. `local_context_data` was absent for the same stated reason and should
+		// not have been (#241): unlike the other two it names no other Kind, so the only
+		// thing it ever needed was the ClassJSON class NBO-059 added.
 		Fields: []Field{
 			{Spec: "name", API: "name"},
 			{Spec: "status", API: "status"},
@@ -73,6 +75,13 @@ func virtualizationVirtualMachineDescriptor() Descriptor {
 			{Spec: "serial", API: "serial"},
 			{Spec: "description", API: "description"},
 			{Spec: "comments", API: "comments"},
+
+			// ClassJSON and not ClassValue: the scalar rule unwraps a JSON object carrying
+			// an `id` or a `value` key, because that is how NetBox renders a foreign key on
+			// read, so a local context carrying either would be compared against its own
+			// unwrapped self and PATCHed on every reconcile.
+			{Spec: "localContextData", API: "local_context_data", Class: ClassJSON},
+
 			{
 				Spec: "clusterRef", API: "cluster", Class: ClassRefOne,
 				Target: netboxv1alpha1.ClusterRef{}.TargetGVK(),

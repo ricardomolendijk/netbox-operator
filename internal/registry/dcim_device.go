@@ -113,10 +113,16 @@ func dcimDeviceDescriptor() Descriptor {
 // `RoleRef` names (docs/netbox-schema.md -> dcim.Device, `role ForeignKey REQ ->
 // dcim.DeviceRole`).
 //
-// `location`, `rack`, `position`, `face`, `virtual_chassis`, `vc_position`, `vc_priority`,
-// `config_template` and `local_context_data` are all absent: NBO-048, NBO-051, NBO-053 and
-// NBO-059 own the Kinds behind them, and a field that is accepted and writes nothing is worse
-// than a field that is not there.
+// `location`, `rack`, `position`, `face`, `virtual_chassis`, `vc_position`, `vc_priority` and
+// `config_template` are all absent: NBO-048, NBO-051, NBO-053 and NBO-059 own the Kinds behind
+// them, and a field that is accepted and writes nothing is worse than a field that is not
+// there.
+//
+// `local_context_data` was in that list and is not any more (#241). Every other column NBO-059
+// held back needs a Kind that does not exist; this one needs nothing but the ClassJSON class
+// NBO-059 itself added, because its value is a document rather than a reference. It is the
+// only ClassJSON entry outside the `extras` app, and the class is what keeps it out of the
+// scalar comparison -- see the entry below.
 //
 // `spec.interfaces` is absent for a different reason, and it is the one absence here that is
 // not a "not yet": there is no `interfaces` column on dcim.Device to map it to. The foreign
@@ -140,6 +146,13 @@ func dcimDeviceFields() []Field {
 		{Spec: "airflow", API: "airflow"},
 		{Spec: "description", API: "description"},
 		{Spec: "comments", API: "comments"},
+
+		// ClassJSON and not ClassValue, which is the whole of what this entry has to get
+		// right: the scalar rule unwraps a JSON object carrying an `id` or a `value` key
+		// because that is how NetBox renders a foreign key on read, and a local context
+		// carrying either -- ordinary in inventory data -- would then be compared against its
+		// own unwrapped self, never settle, and be PATCHed on every reconcile.
+		{Spec: "localContextData", API: "local_context_data", Class: ClassJSON},
 
 		// EmptyIsNull on both coordinates: they are the only nullable non-text columns this
 		// kind writes, so `latitude: ""` has to be sent as JSON null rather than as the empty
