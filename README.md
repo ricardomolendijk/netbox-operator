@@ -126,8 +126,8 @@ audited on every run of the test suite and written to
 
 ## Supported kinds
 
-**64 CRDs ship today**, and the catalogue is no longer delivered a milestone at a time:
-61 of them are NetBox objects driven by the same engine, and three are not NetBox objects at
+**68 CRDs ship today**, and the catalogue is no longer delivered a milestone at a time:
+65 of them are NetBox objects driven by the same engine, and three are not NetBox objects at
 all — [`NetBoxEndpoint`](docs/reference/netboxendpoint.md) is the connection,
 [`NetBoxRefGrant`](docs/reference/netboxrefgrant.md) authorises references between
 namespaces, and [`NetBoxSweep`](docs/reference/netboxsweep.md) reports what this cluster has
@@ -139,6 +139,7 @@ left behind in NetBox.
 | `dcim`, sites and locations | `NetBoxRegion`, `NetBoxSiteGroup`, `NetBoxSite`, `NetBoxLocation` |
 | `dcim`, physical plant | `NetBoxRackRole`, `NetBoxRackType`, `NetBoxRackGroup`, `NetBoxRack`, `NetBoxRackReservation`, `NetBoxCable`, `NetBoxCableBundle` |
 | `dcim`, devices | `NetBoxManufacturer`, `NetBoxDeviceRole`, `NetBoxDeviceType`, `NetBoxPlatform`, `NetBoxDevice`, `NetBoxInterface`, `NetBoxMACAddress` |
+| `dcim`, modules | `NetBoxModuleTypeProfile`, `NetBoxModuleType`, `NetBoxModuleBay`, `NetBoxModule` |
 | `tenancy` | `NetBoxTenantGroup`, `NetBoxTenant`, `NetBoxContactGroup`, `NetBoxContactRole`, `NetBoxContact`, `NetBoxContactAssignment` |
 | `ipam` | `NetBoxVRF`, `NetBoxRouteTarget`, `NetBoxVLANGroup`, `NetBoxVLAN`, `NetBoxPrefix`, `NetBoxIPRange`, `NetBoxIPAddress`, `NetBoxRIR`, `NetBoxAggregate`, `NetBoxASN`, `NetBoxASNRange`, `NetBoxRole`, `NetBoxFHRPGroup`, `NetBoxFHRPGroupAssignment`, `NetBoxService`, `NetBoxServiceTemplate` |
 | Claims | `NetBoxIPAddressClaim`, `NetBoxPrefixClaim`, `NetBoxIPRangeClaim` |

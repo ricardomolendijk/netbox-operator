@@ -124,6 +124,10 @@ nav:
       - '`NetBoxRackType`': reference/netboxracktype.md
       - '`NetBoxRack`': reference/netboxrack.md
       - '`NetBoxRackReservation`': reference/netboxrackreservation.md
+      - '`NetBoxModuleTypeProfile`': reference/netboxmoduletypeprofile.md
+      - '`NetBoxModuleType`': reference/netboxmoduletype.md
+      - '`NetBoxModuleBay`': reference/netboxmodulebay.md
+      - '`NetBoxModule`': reference/netboxmodule.md
       - 'Generic references': reference/genericref.md
       - '`NetBoxRefGrant`': reference/netboxrefgrant.md
       - '`NetBoxSweep`': reference/netboxsweep.md

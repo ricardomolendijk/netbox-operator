@@ -59,3 +59,7 @@ resources:
 - netbox_v1alpha1_netboxrackgroup.yaml
 - netbox_v1alpha1_netboxrack.yaml
 - netbox_v1alpha1_netboxrackreservation.yaml
+- netbox_v1alpha1_netboxmoduletypeprofile.yaml
+- netbox_v1alpha1_netboxmoduletype.yaml
+- netbox_v1alpha1_netboxmodulebay.yaml
+- netbox_v1alpha1_netboxmodule.yaml

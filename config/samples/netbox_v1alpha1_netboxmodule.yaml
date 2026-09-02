@@ -1,0 +1,39 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxModule
+metadata:
+  name: sw1-slot1-optic
+  namespace: default
+spec:
+  endpointRef: homelab
+  onConflict: Fail
+  deletionPolicy: Delete
+
+  # All three references are required, because all three columns are REQ.
+  #
+  # `deviceRef` is redundant with the bay in the data and required by NetBox anyway, which
+  # denormalises it so a module can be filtered by device without a join.
+  deviceRef:
+    name: sw1
+
+  # The whole natural key. `dcim.Module.module_bay` is a OneToOneField, so the bay carries a
+  # UNIQUE index and holds at most one module -- installing a second is a NetBox 400.
+  #
+  # It is the owner reference too: deleting the bay's CR deletes this one, and deleting the
+  # device's CR deletes the bay's, so the chain reaches the device without naming it twice.
+  moduleBayRef:
+    name: sw1-slot1
+
+  moduleTypeRef:
+    name: cisco-sfp-10g-lr
+
+  # Omitting it leaves NetBox's server-side default (`active`) on create and leaves an adopted
+  # module's own status alone. There is no "" member: the column is NOT NULL with a default.
+  status: active
+
+  serial: FNS12345678
+
+  # Globally UNIQUE in NetBox and deliberately not a lookup candidate: an asset tag identifies
+  # the hardware, and this CR describes the slot it is installed in.
+  assetTag: ASSET-SFP-0001
+
+  description: Uplink optic in slot 1

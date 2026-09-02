@@ -1,0 +1,35 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxModuleBay
+metadata:
+  name: sw1-slot1
+  namespace: default
+spec:
+  endpointRef: homelab
+  onConflict: Fail
+  deletionPolicy: Delete
+
+  # Required, and part of both natural keys: until it resolves no candidate applies and the
+  # object writes nothing. CASCADE on the NetBox side, so this is also the owner reference --
+  # deleting the device's CR deletes this one.
+  deviceRef:
+    name: sw1
+
+  name: Slot 1
+
+  # `moduleRef` is deliberately unset. A bay on the chassis has `module IS NULL`, and that is
+  # the state the null-pinned `(device, name)` candidate covers -- NetBox's own
+  # `(device, module, name)` constraint does not, because Postgres treats NULLs as distinct.
+  #
+  # Setting it would mean this bay is a slot *on a line card*, and it would be the third column
+  # of the lookup. It is never the module installed *in* this bay: that is
+  # NetBoxModule.moduleBayRef, pointing the other way.
+
+  # The slot identifier. NetBox substitutes it for the `{module}` token when it instantiates
+  # an installed module's component templates, so it is data rather than decoration. A string,
+  # because the column is a CharField and slot identifiers are routinely "A1" or "0/1".
+  position: "1"
+
+  enabled: true
+
+  label: SLOT1
+  description: Front-panel module slot 1

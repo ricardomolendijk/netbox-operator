@@ -46,7 +46,16 @@ var shippedManifests = []string{
 	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxrackreservation.yaml"),
 	filepath.Join("..", "..", "docs", "examples", "tag.yaml"),
 	filepath.Join("..", "..", "docs", "examples", "contacts.yaml"),
-	filepath.Join("..", "..", "docs", "examples", "racks.yaml")}
+	filepath.Join("..", "..", "docs", "examples", "racks.yaml"),
+	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxmoduletypeprofile.yaml"),
+	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxmoduletype.yaml"),
+	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxmodulebay.yaml"),
+	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxmodule.yaml"),
+	// One file carrying all four module kinds, so the `attributes` and `schema` JSON
+	// documents -- the only x-kubernetes-preserve-unknown-fields columns in the block -- are
+	// dry-run through real admission alongside every enum and bound around them (#54).
+	filepath.Join("..", "..", "docs", "examples", "modules.yaml"),
+}
 
 // TestShippedManifestsAreAccepted applies every sample and example against the real CRDs.
 //

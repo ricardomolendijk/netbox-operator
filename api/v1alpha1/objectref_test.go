@@ -46,7 +46,16 @@ func TestRefAliasTargets(t *testing.T) {
 		{"asn", ASNRef{}, "NetBoxASN"}, {"rackRole", RackRoleRef{}, "NetBoxRackRole"},
 		{"rackType", RackTypeRef{}, "NetBoxRackType"},
 		{"rackGroup", RackGroupRef{}, "NetBoxRackGroup"},
-		{"rack", RackRef{}, "NetBoxRack"}} {
+		{"rack", RackRef{}, "NetBoxRack"},
+		// The other reference target with no slug column, and the reason the module block
+		// has two: neither dcim.ModuleTypeProfile nor dcim.ModuleType has one, where
+		// dcim.Manufacturer, dcim.DeviceType, dcim.RackType and dcim.Platform all do
+		// (docs/netbox-schema.md). A slug-mode ref matches nothing against either.
+		{"moduleTypeProfile", ModuleTypeProfileRef{}, "NetBoxModuleTypeProfile"},
+		{"moduleType", ModuleTypeRef{}, "NetBoxModuleType"},
+		{"moduleBay", ModuleBayRef{}, "NetBoxModuleBay"},
+		{"module", ModuleRef{}, "NetBoxModule"},
+	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := tc.ref.TargetGVK()
 

@@ -405,6 +405,36 @@ type (
 	// RackRef points at a NetBoxRack (dcim.Rack, dcim/racks).
 	RackRef ObjectRef
 
+	// ModuleTypeProfileRef points at a NetBoxModuleTypeProfile (dcim.ModuleTypeProfile,
+	// dcim/module-type-profiles).
+	//
+	// The one kind in the module block with no `slug` column: `dcim.ModuleTypeProfile` is
+	// unique on `name` alone (docs/netbox-schema.md -> dcim.ModuleTypeProfile), so a
+	// slug-mode ref matches nothing there and `name` or `lookup` is the mode to use.
+	ModuleTypeProfileRef ObjectRef
+
+	// ModuleTypeRef points at a NetBoxModuleType (dcim.ModuleType, dcim/module-types).
+	//
+	// The hardware catalogue entry a module is built from, and what the eight
+	// `ModularComponentTemplateModel` kinds will point at when they land (#54): a template
+	// belongs to a device type *or* to a module type.
+	ModuleTypeRef ObjectRef
+
+	// ModuleBayRef points at a NetBoxModuleBay (dcim.ModuleBay, dcim/module-bays).
+	//
+	// `dcim.Module.module_bay` is a `OneToOneField`, so this reference is the module's whole
+	// identity rather than one column of it (docs/netbox-schema.md -> dcim.Module).
+	ModuleBayRef ObjectRef
+
+	// ModuleRef points at a NetBoxModule (dcim.Module, dcim/modules).
+	//
+	// What every `dcim.ModularComponentModel` subclass's `module` column points at -- a
+	// component may belong to a module rather than directly to the device
+	// (docs/netbox-schema.md -> dcim.ModularComponentModel). NetBoxModuleBay is the first
+	// subclass to carry it, because `module` is one of the three columns of its unique
+	// constraint; the rest follow with the remaining component kinds (#54).
+	ModuleRef ObjectRef
+
 	// CircuitTerminationRef points at a NetBoxCircuitTermination
 	// (circuits.CircuitTermination, circuits/circuit-terminations).
 	//
@@ -716,6 +746,10 @@ var (
 	_ RefTarget = RackTypeRef{}
 	_ RefTarget = RackGroupRef{}
 	_ RefTarget = RackRef{}
+	_ RefTarget = ModuleTypeProfileRef{}
+	_ RefTarget = ModuleTypeRef{}
+	_ RefTarget = ModuleBayRef{}
+	_ RefTarget = ModuleRef{}
 )
 
 // TargetGVK reports the Kind this reference resolves against.
@@ -749,6 +783,38 @@ func (r RackRef) TargetGVK() schema.GroupVersionKind {
 
 // AsObjectRef returns the underlying reference.
 func (r RackRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r ModuleTypeProfileRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxModuleTypeProfile")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r ModuleTypeProfileRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r ModuleTypeRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxModuleType")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r ModuleTypeRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r ModuleBayRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxModuleBay")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r ModuleBayRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r ModuleRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxModule")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r ModuleRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
 
 // TargetGVK reports the Kind this reference resolves against.
 func (r DeviceTypeRef) TargetGVK() schema.GroupVersionKind {
