@@ -179,6 +179,15 @@ notes:
       has no FieldClass that reads a Secret into a payload, so the column is unmapped rather
       than written, and it is in internal/netbox/do.go's redaction set because NetBox returns it
       (api/v1alpha1/ipam_fhrpgroup.go, docs/reference/netboxfhrpgroup.md)
+  - kind: vpn.IKEPolicy
+    column: preshared_key
+    reason: >-
+      a pre-shared key, permitted only as spec.presharedKeySecretRef and never inline; the
+      engine has no FieldClass that reads a Secret into a payload, which is #241's work, so the
+      column is unmapped rather than written and NetBox keeps whatever key it holds. It is in
+      internal/netbox/do.go's redaction set because NetBox returns it. The ipam.FHRPGroup.auth_key
+      and wireless auth_psk precedent, and the only secret-valued column in the whole vpn app
+      (api/v1alpha1/vpn_ikepolicy.go, docs/reference/netboxikepolicy.md)
   - kind: dcim.Site
     column: time_zone
     reason: >-
