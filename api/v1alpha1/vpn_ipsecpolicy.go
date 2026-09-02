@@ -78,6 +78,10 @@ type NetBoxIPSecPolicySpec struct {
 
 	// Comments is the policy's long-form notes field. Also inherited, and a TextField, so
 	// there is no MaxLength marker to derive.
+	//
+	// Omit it to leave NetBox's own value alone; set it to `""` to clear the value in
+	// NetBox. The two are different intents and the operator can tell them apart
+	// (docs/concepts/field-ownership.md).
 	// +optional
 	Comments string `json:"comments,omitempty"`
 }

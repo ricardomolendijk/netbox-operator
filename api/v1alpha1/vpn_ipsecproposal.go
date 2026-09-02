@@ -38,9 +38,14 @@ type NetBoxIPSecProposalSpec struct {
 	// integrity without encryption. No `MinLength` here, unlike NetBoxIKEProposal's field of
 	// the same type -- that is the one difference between the two columns.
 	//
-	// Omit it to leave NetBox's own value alone; set it to `""` to clear the value in NetBox.
-	// An emptied value is sent as `null` rather than `""`, because NetBox returns `null` for
-	// an unset choice and the two would differ on every pass (#170).
+	// Unset leaves NetBox's own value alone; `""` clears it -- two different instructions the
+	// operator tells apart from metadata.managedFields (docs/concepts/field-ownership.md).
+	// The wording differs from the other clearable fields here only because this one carries
+	// an enum, exactly as NetBoxRack.formFactor's does.
+	//
+	// Cleared as `null` rather than as an empty string, because NetBox returns `null` for an
+	// unset choice and a payload of `""` would differ from the value read back on every pass
+	// (#170).
 	// +optional
 	EncryptionAlgorithm EncryptionAlgorithm `json:"encryptionAlgorithm,omitempty"`
 
@@ -88,6 +93,10 @@ type NetBoxIPSecProposalSpec struct {
 
 	// Comments is the proposal's long-form notes field. Also inherited, and a TextField, so
 	// there is no MaxLength marker to derive.
+	//
+	// Omit it to leave NetBox's own value alone; set it to `""` to clear the value in
+	// NetBox. The two are different intents and the operator can tell them apart
+	// (docs/concepts/field-ownership.md).
 	// +optional
 	Comments string `json:"comments,omitempty"`
 }

@@ -97,11 +97,14 @@ type NetBoxIKEProposalSpec struct {
 	// Optional, because the column is `blank=True, null=True`: an AEAD cipher such as
 	// `aes-256-gcm` authenticates as it encrypts and needs no separate HMAC.
 	//
-	// Omit it to leave NetBox's own value alone; set it to `""` to clear the value in NetBox.
-	// The two are different intents and the operator can tell them apart
-	// (docs/concepts/field-ownership.md). An emptied value is sent as `null` rather than
-	// `""`, because NetBox returns `null` for an unset choice and the two would differ on
-	// every pass (#170).
+	// Unset leaves NetBox's own value alone; `""` clears it. Those are two different
+	// instructions and the operator tells them apart from metadata.managedFields
+	// (docs/concepts/field-ownership.md); the wording differs from the other clearable fields
+	// here only because this one carries an enum, exactly as NetBoxRack.formFactor's does.
+	//
+	// Cleared as `null` rather than as an empty string, because NetBox's serializer returns
+	// `null` for an unset choice and a payload of `""` would differ from the value read back
+	// on every pass (#170) -- see registry.Field.EmptyIsNull.
 	// +optional
 	AuthenticationAlgorithm AuthenticationAlgorithm `json:"authenticationAlgorithm,omitempty"`
 
@@ -141,6 +144,10 @@ type NetBoxIKEProposalSpec struct {
 
 	// Comments is the proposal's long-form notes field. Also inherited, and a TextField, so
 	// there is no MaxLength marker to derive.
+	//
+	// Omit it to leave NetBox's own value alone; set it to `""` to clear the value in
+	// NetBox. The two are different intents and the operator can tell them apart
+	// (docs/concepts/field-ownership.md).
 	// +optional
 	Comments string `json:"comments,omitempty"`
 }

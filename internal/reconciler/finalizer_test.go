@@ -718,6 +718,157 @@ func TestDeletionPolicyDefaultsToDelete(t *testing.T) {
 // walks the registry and asserts through the same function finalizer.go calls, so a kind that
 // somehow reintroduces a Retain default fails here rather than in somebody's cluster.
 func TestEveryKindDefaultsToDelete(t *testing.T) {
+// It is a written-out list rather than a derived one on purpose. Deriving it from
+// Descriptor.RetainOnDelete would make the test agree with whatever the registry says,
+// including the wrong thing -- which is exactly how five kinds shipped as `Delete` while the
+// docs promised `Retain` (#186) with `make test` green. Adding a kind therefore means adding a
+// row here and deciding, in writing, whether deleting its NetBox object destroys state.
+var deletionDefaults = map[string]netboxv1alpha1.DeletionPolicy{
+	// Decision #176: an IPAM object holds state. Deleting one frees an allocation or
+	// destroys the record of who a range belonged to, and neither is undone by a recreate.
+	"NetBoxIPAddress": netboxv1alpha1.DeletionRetain,
+	"NetBoxPrefix":    netboxv1alpha1.DeletionRetain,
+	"NetBoxIPRange":   netboxv1alpha1.DeletionRetain,
+	"NetBoxVLAN":      netboxv1alpha1.DeletionRetain,
+	"NetBoxVRF":       netboxv1alpha1.DeletionRetain,
+
+	// NBO-055: the same rule applied to the ipam remainder. Each holds an allocation or an
+	// identity nothing else records -- see docs/concepts/deletion.md's table for the reason
+	// per kind.
+	"NetBoxRIR":                 netboxv1alpha1.DeletionRetain,
+	"NetBoxAggregate":           netboxv1alpha1.DeletionRetain,
+	"NetBoxASN":                 netboxv1alpha1.DeletionRetain,
+	"NetBoxASNRange":            netboxv1alpha1.DeletionRetain,
+	"NetBoxRole":                netboxv1alpha1.DeletionRetain,
+	"NetBoxFHRPGroup":           netboxv1alpha1.DeletionRetain,
+	"NetBoxFHRPGroupAssignment": netboxv1alpha1.DeletionRetain,
+	"NetBoxService":             netboxv1alpha1.DeletionRetain,
+	"NetBoxServiceTemplate":     netboxv1alpha1.DeletionRetain,
+
+	// The carve-out inside ipam, and the row worth reading twice: a VLAN group is an
+	// organisational container rather than an allocation, so deleting one frees nothing and
+	// the rule the table turns on puts it with the configuration kinds.
+	"NetBoxVLANGroup": netboxv1alpha1.DeletionDelete,
+
+	// NBO-051: racks are configuration a manifest recreates, not allocated state -- see each
+	// kind's own RetainOnDelete comment in internal/registry/dcim_rack*.go.
+	"NetBoxRack":            netboxv1alpha1.DeletionDelete,
+	"NetBoxRackGroup":       netboxv1alpha1.DeletionDelete,
+	"NetBoxRackReservation": netboxv1alpha1.DeletionDelete,
+	"NetBoxRackRole":        netboxv1alpha1.DeletionDelete,
+	"NetBoxRackType":        netboxv1alpha1.DeletionDelete,
+
+	// Configuration: cheap to delete, cheap to recreate, and mostly PROTECT-refused while
+	// anything still points at it.
+	"NetBoxRouteTarget":       netboxv1alpha1.DeletionDelete,
+	"NetBoxTag":               netboxv1alpha1.DeletionDelete,
+	"NetBoxRegion":            netboxv1alpha1.DeletionDelete,
+	"NetBoxSite":              netboxv1alpha1.DeletionDelete,
+	"NetBoxSiteGroup":         netboxv1alpha1.DeletionDelete,
+	"NetBoxLocation":          netboxv1alpha1.DeletionDelete,
+	"NetBoxTenant":            netboxv1alpha1.DeletionDelete,
+	"NetBoxTenantGroup":       netboxv1alpha1.DeletionDelete,
+	"NetBoxContact":           netboxv1alpha1.DeletionDelete,
+	"NetBoxContactGroup":      netboxv1alpha1.DeletionDelete,
+	"NetBoxContactRole":       netboxv1alpha1.DeletionDelete,
+	"NetBoxContactAssignment": netboxv1alpha1.DeletionDelete,
+	"NetBoxManufacturer":      netboxv1alpha1.DeletionDelete,
+	"NetBoxDeviceRole":        netboxv1alpha1.DeletionDelete,
+	"NetBoxDeviceType":        netboxv1alpha1.DeletionDelete,
+	"NetBoxPlatform":          netboxv1alpha1.DeletionDelete,
+	"NetBoxDevice":            netboxv1alpha1.DeletionDelete,
+	"NetBoxInterface":         netboxv1alpha1.DeletionDelete,
+
+	// The physical plant. A cable is a statement about a connection that the manifest is the
+	// record of, so re-creating one loses nothing that was not in Git -- and a bundle is a
+	// label whose deletion clears `dcim.Cable.bundle` (SET_NULL) and destroys no cables at
+	// all. Neither holds allocated state, so neither is a #176 carve-out.
+	//
+	// `Retain` is nonetheless load-bearing on NetBoxCable if a user sets it: the kind is
+	// `UpdateStrategy: Recreate`, and a recreate destroys the object, so the engine refuses
+	// the destructive write rather than violating the policy (docs/reference/netboxcable.md,
+	// "deletionPolicy: Retain refuses a recreate").
+	"NetBoxCable":          netboxv1alpha1.DeletionDelete,
+	"NetBoxCableBundle":    netboxv1alpha1.DeletionDelete,
+	"NetBoxClusterType":    netboxv1alpha1.DeletionDelete,
+	"NetBoxClusterGroup":   netboxv1alpha1.DeletionDelete,
+	"NetBoxCluster":        netboxv1alpha1.DeletionDelete,
+	"NetBoxVirtualMachine": netboxv1alpha1.DeletionDelete,
+	"NetBoxVMInterface":    netboxv1alpha1.DeletionDelete,
+	"NetBoxVirtualDisk":    netboxv1alpha1.DeletionDelete,
+
+	// `extras` -- NetBox's own configuration, and the app where "cheap to recreate" is most
+	// literally true: a link, a filter or a template holds no state, and deleting one loses a
+	// button rather than a record.
+	//
+	// NetBoxCustomField is `Delete` too, and that is not the loose end it looks like. Deleting
+	// one *does* destroy data, on every object in NetBox that has the field -- which is why it
+	// declares DataLossOnDelete and the finalizer refuses by default with
+	// `Deleting=False, Reason=DataLossBlocked`. That guard is a separate axis from this one:
+	// `Retain` would mean "leave the definition in NetBox and forget it", and defaulting to
+	// that would leave a schema column nothing manages behind every deleted CR. Refusing until
+	// a human says the loss is acceptable is the honest default, and it is reversible.
+	"NetBoxCustomField":          netboxv1alpha1.DeletionDelete,
+	"NetBoxCustomFieldChoiceSet": netboxv1alpha1.DeletionDelete,
+	"NetBoxCustomLink":           netboxv1alpha1.DeletionDelete,
+	"NetBoxSavedFilter":          netboxv1alpha1.DeletionDelete,
+	"NetBoxExportTemplate":       netboxv1alpha1.DeletionDelete,
+	"NetBoxConfigTemplate":       netboxv1alpha1.DeletionDelete,
+	"NetBoxConfigContextProfile": netboxv1alpha1.DeletionDelete,
+	"NetBoxConfigContext":        netboxv1alpha1.DeletionDelete,
+
+	// A MAC address is a property of a component rather than an allocation: nothing hands it
+	// out and nothing else has to be told it was freed, so deleting one destroys no state a
+	// recreate does not restore. NetBox's own `GenericRelation` deletes it with its interface
+	// in any case, which is the shape the containment owner reference mirrors.
+	"NetBoxMACAddress": netboxv1alpha1.DeletionDelete, // Wireless. An SSID, its group and a radio link are all configuration: nothing is handed
+	// out, so deleting one destroys no state a recreate does not restore. The group and the
+	// SSID are `SET_NULL`/`PROTECT`-guarded on the way out anyway, and a link is pointed at by
+	// nothing at all.
+	"NetBoxWirelessLAN":      netboxv1alpha1.DeletionDelete,
+	"NetBoxWirelessLANGroup": netboxv1alpha1.DeletionDelete,
+	"NetBoxWirelessLink":     netboxv1alpha1.DeletionDelete,
+
+	// `vpn` (#59). A crypto proposal, policy or profile is a named set of algorithms, a
+	// tunnel group is a label, and a tunnel and an L2VPN are statements about a connection
+	// the manifest is the record of: nothing here is handed out, nothing else has to be told
+	// it was freed, and a recreate restores every column. So none of them is a #176 carve-out
+	// -- unlike ipam, where deleting an object frees an allocation.
+	//
+	// vpn.IKEPolicy is the row to read twice, and it is `Delete` for a reason that is *not*
+	// about the pre-shared key. The key is an unmapped column, so the operator never writes
+	// it, never clears it and never compares it; `Retain` would say "leave the policy in
+	// NetBox and forget it", which is a different question and not one this kind's data
+	// answers yes to. Deleting the CR deletes the policy and the key NetBox holds with it,
+	// exactly as deleting it in the NetBox UI would -- which is what a manifest that says
+	// "this policy should not exist" means (docs/reference/netboxikepolicy.md).
+	"NetBoxIKEProposal":   netboxv1alpha1.DeletionDelete,
+	"NetBoxIKEPolicy":     netboxv1alpha1.DeletionDelete,
+	"NetBoxIPSecProposal": netboxv1alpha1.DeletionDelete,
+	"NetBoxIPSecPolicy":   netboxv1alpha1.DeletionDelete,
+	"NetBoxIPSecProfile":  netboxv1alpha1.DeletionDelete,
+	"NetBoxTunnelGroup":   netboxv1alpha1.DeletionDelete,
+	"NetBoxTunnel":        netboxv1alpha1.DeletionDelete,
+	"NetBoxL2VPN":         netboxv1alpha1.DeletionDelete}
+
+// TestEveryKindsDeletionDefaultIsStated is criterion 2 of #186, and it is the test whose
+// absence was the bug. `Descriptor.RetainOnDelete` and `deletionPolicyOf` both shipped, five
+// of the six kinds docs/concepts/deletion.md documented as `Retain` did not set the flag, and
+// nothing failed -- because no test read the default *per kind* at all.
+//
+// So it reads it the way finalizer.go does, through Descriptor.RetainOnDelete and
+// deletionPolicyOf, rather than off the generated CRD. There is no `+kubebuilder:default` to
+// read there and cannot be: spec.deletionPolicy is declared once on the shared envelope, so a
+// marker would be one answer for every kind. A test against the schema would therefore pass
+// while the engine deleted a production prefix.
+//
+// It is exhaustive in both directions. A registered kind with no row fails, so adding a kind
+// forces somebody to state its default; a row naming a kind that is not registered fails too,
+// so the table cannot rot into a list of kinds that used to exist.
+//
+// Claims are not in it. A claim's default is claimRetainsByDefault rather than a Descriptor,
+// asserted in the last row of TestDeletionPolicyDefaultsToDelete above.
+func TestEveryKindsDeletionDefaultIsStated(t *testing.T) {
 	descriptors := registry.List()
 	if len(descriptors) == 0 {
 		t.Fatal("the registry is empty; this test would pass by describing nothing")
