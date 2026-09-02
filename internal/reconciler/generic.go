@@ -618,7 +618,7 @@ func (p *pass) claim(ctx context.Context, found match) (ctrl.Result, error) {
 	// own object is not an adoption under any policy: onConflict: Fail would refuse the
 	// operator's own write, and Adopt would emit an Adopted Event and set status.adopted for
 	// an object nobody adopted.
-	own, err := p.ownsMatch(ctx, id)
+	own, err := p.ownsMatch(ctx, found.live, id)
 	if err != nil {
 		// Returned rather than routed through stop(): the API server did not answer, so
 		// there is no writing a condition about it either, and controller-runtime's backoff
@@ -670,7 +670,11 @@ func (p *pass) claim(ctx context.Context, found match) (ctrl.Result, error) {
 //
 // One live read, on the natural-key path only, where being wrong is the most expensive mistake
 // the engine makes. A settled object locates by id and never gets here.
-func (p *pass) ownsMatch(ctx context.Context, id int) (bool, error) {
+//
+// The status is not the only evidence, and it is the weaker of the two: it says nothing about
+// a create whose status write never landed at all. ownsStamp is asked second, off the object
+// already in hand.
+func (p *pass) ownsMatch(ctx context.Context, matched netbox.Object, id int) (bool, error) {
 	if p.engine.LiveStatus == nil {
 		return false, fmt.Errorf("%w: no status reader, so a natural-key match cannot be told "+
 			"apart from this object's own netbox object", errNotConfigured)
@@ -683,7 +687,7 @@ func (p *pass) ownsMatch(ctx context.Context, id int) (bool, error) {
 	}
 
 	if live.ID != int64(id) {
-		return false, nil
+		return p.ownsStamp(ctx, matched, id), nil
 	}
 
 	logf.FromContext(ctx).V(1).Info("the natural key matched this object's own netbox object",
@@ -702,6 +706,41 @@ func (p *pass) ownsMatch(ctx context.Context, id int) (bool, error) {
 	status.ID, status.Adopted = live.ID, live.Adopted
 
 	return true, nil
+}
+
+// ownsStamp reports whether the matched object carries this CR's own metadata.uid, and takes
+// its id back onto this pass when it does.
+//
+// This is the case status cannot answer, because there is no status to read: the process died
+// between the POST and the update recording its id, so status.id is 0 in the cache *and* past
+// it. What survived is on the object in NetBox -- the stamp the POST itself carried.
+//
+// It is evidence and not a heuristic, which is the whole reason it is allowed to decide this.
+// metadata.uid is assigned by the API server, never reused, and written into `k8s_uid` by this
+// operator for this one CR, so an object carrying it was created by this CR and by nothing
+// else. duplicate.go already picks one address out of several on exactly that reasoning.
+//
+// Without it the operator's own object is reported as somebody else's and advised for
+// adoption, status.id stays 0 for the life of the CR -- so every later pass re-asks the same
+// question -- and deleting the CR leaves the object in NetBox forever (finalizer.go). A
+// re-applied manifest is unaffected: `kubectl delete && kubectl apply` gives the CR a new uid,
+// which matches nothing here and reaches the adoption question exactly as it does today.
+//
+// status.adopted is deliberately not touched. This pass adopted nothing: it recognised an
+// object it had made itself.
+func (p *pass) ownsStamp(ctx context.Context, matched netbox.Object, id int) bool {
+	if !p.stampIdentifies() || p.endpoint.Provenance.Read(matched).UID != string(p.obj.GetUID()) {
+		return false
+	}
+
+	// Info rather than V(1): this is the operator recovering from a write it lost, which is
+	// the one thing anybody reading these logs afterwards is looking for.
+	logf.FromContext(ctx).Info("the natural-key match carries this object's own provenance stamp",
+		"netboxID", id, "action", "recover")
+
+	p.obj.NetBoxStatus().ID = int64(id)
+
+	return true
 }
 
 // create writes a new object. AdoptOnly stops here: it exists for objects a human owns,

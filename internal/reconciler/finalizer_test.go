@@ -714,3 +714,120 @@ func TestClaimWithoutAFinalizerWriterFailsLoudly(t *testing.T) {
 		t.Error("the finalizer was left on the object after a failed claim")
 	}
 }
+
+// stampedLiveTag is a NetBox object carrying stampedObject()'s own metadata.uid: what a
+// create that reached NetBox left behind when the status write recording its id did not.
+func stampedLiveTag(id int) netbox.Object {
+	live := liveTag(id)
+	live["custom_fields"] = map[string]any{"k8s_uid": "6f1a-uid"}
+
+	return live
+}
+
+// deletingStampedObject is stampedObject() as the API server hands it back after
+// `kubectl delete`, with the status.id the lost write never recorded.
+func deletingStampedObject() *fakeKind {
+	obj := stampedObject()
+	obj.DeletionTimestamp = &metav1.Time{Time: metav1.Now().Time}
+	obj.Finalizers = []string{netboxv1alpha1.Finalizer}
+
+	return obj
+}
+
+// TestDeleteFindsTheObjectALostStatusWriteLeftBehind is the orphan this operator could
+// previously only report. status.id is 0 because the update that would have set it never
+// landed, and the object in NetBox carries this CR's own uid stamp -- which is proof of
+// authorship a natural key could never be, so the delete goes out.
+func TestDeleteFindsTheObjectALostStatusWriteLeftBehind(t *testing.T) {
+	client := &fakeClient{list: []netbox.Object{stampedLiveTag(9)}}
+	events := &fakeRecorder{}
+
+	engine := stampedEngine(t, stampableDescriptor(), client)
+	engine.Events = events
+
+	obj := deletingStampedObject()
+	if _, err := engine.Reconcile(context.Background(), obj); err != nil {
+		t.Fatalf("Reconcile() = %v", err)
+	}
+
+	if got := client.methods(); !slices.Equal(got, []string{"GETONE", "DELETE"}) {
+		t.Fatalf("netbox calls = %v, want the stamp search and then the DELETE", got)
+	}
+
+	// The id came from the search, and the DELETE has to have used it rather than the 0 in
+	// status: an operator that deletes /0 has recovered nothing.
+	if got := client.calls[1].id; got != 9 {
+		t.Errorf("DELETE id = %d, want 9", got)
+	}
+
+	// The search is by the uid custom field. A natural-key filter here would be the lookup
+	// this file refuses to make -- it would delete whatever happened to match.
+	if got := client.calls[0].params["cf_k8s_uid"]; got != "6f1a-uid" {
+		t.Errorf("search params = %v, want cf_k8s_uid=6f1a-uid", client.calls[0].params)
+	}
+
+	if got := obj.GetFinalizers(); len(got) != 0 {
+		t.Errorf("finalizers = %v, want none", got)
+	}
+
+	if !slices.Equal(events.events, []string{"Normal/Deleted"}) {
+		t.Errorf("events = %v, want Normal/Deleted", events.events)
+	}
+}
+
+// TestDeleteReportsNothingToDeleteAfterSearching is the other answer the same search gives,
+// and the reason it is worth making: an empty result proves the create never happened, where
+// before the operator could only say it could not tell.
+func TestDeleteReportsNothingToDeleteAfterSearching(t *testing.T) {
+	client := &fakeClient{}
+	events := &fakeRecorder{}
+
+	engine := stampedEngine(t, stampableDescriptor(), client)
+	engine.Events = events
+
+	obj := deletingStampedObject()
+	if _, err := engine.Reconcile(context.Background(), obj); err != nil {
+		t.Fatalf("Reconcile() = %v", err)
+	}
+
+	if got := client.methods(); !slices.Equal(got, []string{"GETONE"}) {
+		t.Fatalf("netbox calls = %v, want the search and nothing else", got)
+	}
+
+	if got := obj.GetFinalizers(); len(got) != 0 {
+		t.Errorf("finalizers = %v, want none: nothing exists to hold the CR back", got)
+	}
+
+	if !slices.Equal(events.events, []string{"Normal/NothingToDelete"}) {
+		t.Errorf("events = %v, want Normal/NothingToDelete", events.events)
+	}
+}
+
+// TestDeleteWithoutAnEndpointStillCompletes keeps the property the search must not cost: a CR
+// that never created anything deletes while NetBox is unreachable. An escape hatch that only
+// works when it is not needed is not an escape hatch.
+func TestDeleteWithoutAnEndpointStillCompletes(t *testing.T) {
+	client := &fakeClient{}
+	events := &fakeRecorder{}
+
+	engine := stampedEngine(t, stampableDescriptor(), client)
+	engine.Events = events
+	engine.Endpoints = fakeEndpoints{endpoint: stampedEndpoint(client), ready: false}
+
+	obj := deletingStampedObject()
+	if _, err := engine.Reconcile(context.Background(), obj); err != nil {
+		t.Fatalf("Reconcile() = %v", err)
+	}
+
+	if got := client.methods(); len(got) != 0 {
+		t.Errorf("netbox calls = %v, want none: there is no client to search with", got)
+	}
+
+	if got := obj.GetFinalizers(); len(got) != 0 {
+		t.Errorf("finalizers = %v, want none", got)
+	}
+
+	if !slices.Equal(events.events, []string{"Normal/NothingToDelete"}) {
+		t.Errorf("events = %v, want Normal/NothingToDelete", events.events)
+	}
+}

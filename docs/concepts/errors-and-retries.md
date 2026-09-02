@@ -157,14 +157,30 @@ That read costs one `GET`, on the natural-key path only — a settled object loc
 never reaches it. It buys the correctness of the most consequential decision the engine makes:
 reporting `Conflict` on an object nothing else has touched tells the user to set
 `spec.onConflict: Adopt`, and [on a shared catalogue kind that advice makes things worse rather
-than better](../reference/netboxtenantgroup.md#two-namespaces-one-slug). An endpoint with
-`spec.managedBy` set has a second way to recognise its own objects — the [provenance
-stamp](../operations/provenance.md) — but running without a stamp is a supported configuration,
-so identity comes from the CR's own status instead.
+than better](../reference/netboxtenantgroup.md#two-namespaces-one-slug). Running without a
+stamp is a supported configuration, so this identity comes from the CR's own status and needs
+nothing else.
 
-A match under **any other** id is still somebody else's object and is still refused: an id
-NetBox lost, whose natural key now matches something unrelated, reports `Conflict` exactly as
-before.
+**The stamp answers the case the status cannot.** A live status of `0` is not always a stale
+read: it is also what a create whose status write *never landed at all* leaves behind — the
+process died between the `POST` and the update, so there is no id to re-read past the cache
+either. On an endpoint with [`spec.managedBy`](../operations/provenance.md) the evidence has
+survived anyway, on the object in NetBox: the `POST` carried `k8s_uid`, holding this CR's
+`metadata.uid`. That value is assigned by the API server, is never reused, and is written into
+that field by this operator for one CR only, so an object carrying it was created by this CR
+and by nothing else. So it is claimed, `status.id` is recovered from it, and the pass updates
+it as its own — no `Conflict`, no `Adopted` Event, and `status.adopted` untouched, exactly as
+on the status path.
+
+Without that check the operator's own object is reported as somebody else's on *every*
+subsequent pass, because nothing about the next one is any different — and deleting the CR
+[leaves the NetBox object behind for good](deletion.md#step-3--why-an-unset-statusid-deletes-nothing).
+
+A match under **any other** id, and under any other uid, is still somebody else's object and is
+still refused: an id NetBox lost whose natural key now matches something unrelated reports
+`Conflict` exactly as before, and so does the same manifest deleted and re-applied — that CR is
+a new object with a new `metadata.uid`, and adopting what the old one left is a decision
+`spec.onConflict` owns.
 
 **A status write that lost the race is retried, not failed.** A pass whose status was stale
 carries a `resourceVersion` the API server has already moved past, so its write comes back as a

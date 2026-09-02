@@ -146,6 +146,15 @@ func (p *pass) deleting(ctx context.Context) (ctrl.Result, error) {
 	endpoint, ok := p.engine.Endpoints.Endpoint(ctx,
 		p.obj.GetNamespace(), p.obj.NetBoxSpec().EndpointRef)
 	if !ok {
+		// A CR with no recorded id has no client to search with, and this is the answer
+		// releaseWithoutDeleting gave outright before the stamp made a search possible.
+		// Keeping it here is what stops that search from becoming a way to block a deletion
+		// that needs no NetBox call at all: a CR that never created anything still completes
+		// while NetBox is down, which is the whole point of the ordering in this function.
+		if p.obj.NetBoxStatus().ID == 0 {
+			return p.release(ctx, p.nothingToDelete(false))
+		}
+
 		// Blocking rather than orphaning. The object is real, its id is known, and it will
 		// still be deletable when the endpoint comes back; dropping the finalizer here
 		// would turn a wait that resolves itself into an orphan that nothing ever finds,
@@ -159,6 +168,60 @@ func (p *pass) deleting(ctx context.Context) (ctrl.Result, error) {
 				p.obj.GetNamespace(), netboxv1alpha1.SkipFinalizerAnnotation))
 	}
 	p.endpoint = endpoint
+
+	if p.obj.NetBoxStatus().ID == 0 {
+		return p.deleteByStamp(ctx)
+	}
+
+	return p.deleteObject(ctx)
+}
+
+// deleteByStamp deletes the object a lost status write left behind, found by the provenance
+// stamp rather than by an id nothing recorded.
+//
+// Only reachable on an endpoint that stamps `k8s_uid` on this kind, because
+// releaseWithoutDeleting answers every other CR with an unset id without a NetBox call at
+// all. The search is `?cf_k8s_uid=<this CR's metadata.uid>`, and it is not the natural-key
+// lookup this file refuses to do wearing a disguise: metadata.uid is assigned by the API
+// server, never reused, and written into that field by this operator for this one CR, so a
+// match was created by this CR and by nothing else. It is the same evidence duplicate.go
+// picks one address out of several with, and the same shape of recovery the allocation
+// engine already performs against a lost allocation (claim.go, findByIdentity).
+//
+// A search that fails or comes back ambiguous blocks and keeps the finalizer, for the reason
+// the endpoint-unavailable case blocks: "there may be an object of mine out there and I could
+// not check" has one reversible answer, and orphaning is not it.
+func (p *pass) deleteByStamp(ctx context.Context) (ctrl.Result, error) {
+	// The other half of the question releaseWithoutDeleting could only half-answer: this
+	// endpoint writes no uid, so there is nothing to search by and nothing has changed.
+	if !p.stampIdentifies() {
+		return p.release(ctx, p.nothingToDelete(false))
+	}
+
+	params := netbox.Params{}.Match(customFieldFilter+p.endpoint.Provenance.UIDField,
+		netbox.LookupExact, string(p.obj.GetUID()))
+
+	live, err := p.endpoint.Client.GetOne(ctx, p.desc.Endpoint, params)
+	if err != nil {
+		out := classify(err, p.resync())
+
+		return p.blocked(ctx, out.reason, out.requeue, fmt.Sprintf(
+			"searching netbox %s for this object's own stamp %v: %v", p.desc.Endpoint, params, err))
+	}
+
+	if live == nil {
+		return p.release(ctx, p.nothingToDelete(true))
+	}
+
+	id, ok := live.ID()
+	if !ok {
+		return p.blocked(ctx, netboxv1alpha1.ReasonAPIError, p.resync(), fmt.Sprintf(
+			"netbox %s answered %v with an object carrying no id", p.desc.Endpoint, params))
+	}
+
+	logf.FromContext(ctx).Info("recovered a netbox object from its provenance stamp",
+		"action", "recover", "netboxID", id)
+	p.obj.NetBoxStatus().ID = int64(id)
 
 	return p.deleteObject(ctx)
 }
@@ -249,27 +312,55 @@ func (p *pass) releaseWithoutDeleting() (release, bool) {
 	}
 
 	// status.id is the operator's claim on an object. Without one there is nothing it can
-	// prove it owns, and it will not go looking: a natural-key lookup at deletion time
-	// would find whatever happens to match right now, which is how an operator deletes
-	// somebody else's data. An object adopted under onConflict: Adopt has an id and is
-	// deleted; one this CR never wrote does not and is not.
+	// prove it owns *by natural key*, and it will not go looking that way: a natural-key
+	// lookup at deletion time would find whatever happens to match right now, which is how
+	// an operator deletes somebody else's data. An object adopted under onConflict: Adopt
+	// has an id and is deleted; one this CR never wrote does not and is not.
 	//
-	// Two things produce an unset id -- nothing was ever created, or a create succeeded
-	// and the status write recording its id did not -- and the operator genuinely cannot
-	// tell them apart, because the id and the hash that would have distinguished them are
-	// written together in the update that failed. So it names both rather than picking the
-	// flattering one. This is the only place the operator can leave an orphan it will
-	// never find again.
-	if id == 0 {
-		return release{
-			event: netboxv1alpha1.EventNothingToDelete,
-			message: "no netbox object is recorded in status.id, so nothing was deleted; " +
-				"either nothing was ever created, or a create succeeded and the status write " +
-				"recording its id did not" + lookedFor(p.obj.NetBoxStatus().NaturalKey, p.desc.Endpoint),
-		}, true
+	// Two things produce an unset id -- nothing was ever created, or a create succeeded and
+	// the status write recording its id did not. On an endpoint that stamps `k8s_uid` on this
+	// kind the two are distinguishable and deleteByStamp asks, because that stamp holds this
+	// CR's own metadata.uid and nothing else in NetBox can be carrying it.
+	//
+	// Without such a stamp nothing has changed and nothing can: the id and the hash that
+	// would have distinguished the two cases are written together in the update that failed.
+	// So it names both rather than picking the flattering one, and an unstamped endpoint
+	// keeps the one place where the operator can leave an orphan it will never find again.
+	//
+	// mayBeStamped rather than stampIdentifies, because the endpoint is deliberately not
+	// resolved yet: this is the half of the question a CR answers about itself, and the
+	// other half is asked in deleteByStamp once there is a client to ask it with.
+	if id == 0 && !p.mayBeStamped() {
+		return p.nothingToDelete(false), true
 	}
 
 	return release{}, false
+}
+
+// nothingToDelete is the finalizer coming off with no NetBox object to remove, in the two
+// wordings the two ways of reaching it have earned.
+//
+// searched is the difference between "the operator cannot tell" and "the operator looked".
+// A CR whose endpoint stamps its uid gets the second, and it is a stronger statement than
+// this file has ever been able to make: no object in NetBox carries this CR's stamp, so
+// nothing was ever created and nothing is left behind.
+func (p *pass) nothingToDelete(searched bool) release {
+	if searched {
+		return release{
+			event: netboxv1alpha1.EventNothingToDelete,
+			message: fmt.Sprintf(
+				"nothing was deleted: no netbox %s carries this object's %s=%s stamp, so the create"+
+					" never happened and nothing is left behind",
+				p.desc.Endpoint, p.endpoint.Provenance.UIDField, p.obj.GetUID()),
+		}
+	}
+
+	return release{
+		event: netboxv1alpha1.EventNothingToDelete,
+		message: "no netbox object is recorded in status.id, so nothing was deleted; " +
+			"either nothing was ever created, or a create succeeded and the status write " +
+			"recording its id did not" + lookedFor(p.obj.NetBoxStatus().NaturalKey, p.desc.Endpoint),
+	}
 }
 
 // dataLossBlocked reports whether this delete is one the operator refuses to make, and why.
