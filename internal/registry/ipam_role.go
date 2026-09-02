@@ -33,12 +33,6 @@ func ipamRoleDescriptor() Descriptor {
 		Taggable:        true,
 		CustomFieldable: true,
 
-		// Decision #176: IPAM defaults to Retain. A role is pointed at by prefixes, VLANs, IP
-		// ranges and ASNs through `on_delete=SET_NULL` columns, so deleting the row silently
-		// clears the role on every one of them -- an edit the operator never asked for and
-		// cannot see.
-		RetainOnDelete: true,
-
 		Fields: []Field{
 			{Spec: "name", API: "name"},
 			{Spec: "slug", API: "slug"},

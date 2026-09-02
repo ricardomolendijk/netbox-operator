@@ -153,7 +153,7 @@ Omit either to leave NetBox's own value alone; set it to `""` to clear it
 
 ## Deletion
 
-**`deletionPolicy` defaults to `Retain`** (decision #176).
+**`deletionPolicy` defaults to `Delete`**, like every kind, since [#304](https://github.com/ricardomolendijk/netbox-operator/issues/304) reversed decision #176. The reasoning that used to put `Retain` here still describes a real cost.
 
 ## Ownership
 

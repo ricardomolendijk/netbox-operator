@@ -61,10 +61,6 @@ func dcimRackDescriptor() Descriptor {
 		UpdateStrategy: UpdatePatch,
 
 		// No ContainmentRef -- see the doc comment.
-		//
-		// RetainOnDelete is left false: a rack is configuration a manifest recreates, not
-		// allocated state, so `deletionPolicy` defaults to Delete (#176,
-		// docs/concepts/deletion.md). The IPAM kinds are the exception and this is not one.
 
 		// The four columns every ChangeLoggedModel carries, the two counters the serializer
 		// returns and the API refuses, and RackBase's two weight caches.

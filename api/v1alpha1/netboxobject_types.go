@@ -205,6 +205,43 @@ const (
 // (docs/concepts/deletion.md).
 const AllowDataLossAnnotation = "netbox.kubeforge.org/allow-data-loss"
 
+// CascadeDeleteAnnotation lets a delete NetBox refuses take the CRs standing in its way with
+// it.
+//
+// NetBox declares almost every foreign key `on_delete=PROTECT`, so deleting a site whose
+// VLANs still exist is refused and the CR sits at `Deleting=False, Reason=Protected` until
+// somebody deletes the VLANs. That is the right default -- the alternative is an operator
+// that deletes objects nobody named -- but it makes tearing down a graph a manual
+// topological sort, which is the job this operator exists to avoid.
+//
+// With this set to "true", a refused delete instead deletes **every CR that references this
+// one**, and waits. Each of those runs its own deletion sequence, removes its own NetBox
+// object, and the retry then finds nothing in the way.
+//
+// One level. The annotation is not copied onto what it deletes -- that would mean writing
+// metadata onto CRs Git owns, which is the fight ADR-0005 section 1 exists to prevent, and a
+// cascade whose reach is not visible in any manifest. It costs less than it sounds, because
+// NetBox's graph fans out from one object rather than hanging off itself: a site's prefixes
+// and its VLANs both reference the site, so one annotation on the site covers both. A
+// referrer whose own delete is then refused says so, names what is in the way, and annotating
+// that one is the next move.
+//
+// Three things it deliberately is not:
+//
+//   - It is not "delete whatever NetBox named". The blockers NetBox reports are rows, and
+//     the operator will not delete a row it has no CR for -- an object a human made in the
+//     UI is never touched. What it deletes are Kubernetes objects it can see, whose own
+//     finalizers then do the NetBox work.
+//   - It is not narrowed to the blockers. Every referrer goes, not only the ones NetBox
+//     cited: a CR pointing at an object that is being deleted has a reference about to
+//     dangle either way, and matching NetBox's prose back to CRs would be a parser standing
+//     between a user and their data.
+//   - It is not a way around `PROTECT`. If something outside this cluster still references
+//     the object, the delete is still refused and the CR still says so.
+//
+// Only "true" enables it, so a typo is safe in the direction that deletes nothing.
+const CascadeDeleteAnnotation = "netbox.kubeforge.org/cascade-delete"
+
 // Condition reasons for an object CR. The vocabulary is deliberately small: a reason is
 // keyed on by tooling and by the docs, so a new one is a documented addition rather than
 // a phrase invented at the call site.
@@ -422,6 +459,12 @@ const (
 	// and the message names what NetBox said is in the way.
 	ReasonProtected = "Protected"
 
+	// ReasonCascading is on Deleting: NetBox refused the delete, the cascade annotation is
+	// set, and the CRs standing in the way have been deleted and not yet finished going.
+	// Distinct from Protected because the two need different things from a human -- one is
+	// waiting on work already in flight, the other is waiting on a decision nobody has made.
+	ReasonCascading = "Cascading"
+
 	// ReasonForeignCluster is on Conflict: the live NetBox object's cluster stamp names a
 	// cluster that is not this one, so two operators are managing one object and each undoes
 	// the other (NBO-047, case 1).
@@ -524,6 +567,11 @@ const (
 	// EventDeleteBlocked is a delete NetBox has now refused several times. Emitted once,
 	// so a permanently stuck deletion is visible rather than silent.
 	EventDeleteBlocked = "DeleteBlocked"
+
+	// EventCascadeDeleted names the CRs a cascading delete removed. A Warning, and emitted
+	// on the object whose deletion caused it: deleting Kubernetes objects the user did not
+	// name is exactly the kind of thing that must not be discoverable only from a log line.
+	EventCascadeDeleted = "CascadeDeleted"
 
 	// EventFinalizerSkipped is the break-glass annotation being honoured, which leaves an
 	// object behind in NetBox.

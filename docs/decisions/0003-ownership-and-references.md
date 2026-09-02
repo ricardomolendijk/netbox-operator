@@ -383,7 +383,7 @@ for migrating off the operator, or for objects that are shared with something el
 `Delete` everywhere else
 ([#176](https://github.com/ricardomolendijk/netbox-operator/issues/176)). The table of which
 is which, and the reasoning, live in
-[deletion — the default depends on the Kind](../concepts/deletion.md#the-default-depends-on-the-kind).
+[deletion — the default depends on the Kind](../concepts/deletion.md#the-two-policies).
 
 A `PROTECT`-ed deletion is not an error to retry quickly: it becomes a
 `Deleting=False, Reason=Protected` condition naming the objects that block it, and a

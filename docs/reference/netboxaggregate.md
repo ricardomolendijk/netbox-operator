@@ -152,7 +152,7 @@ the id. One row in NetBox, one `Ready`, one `Conflict` — never two rows.
 
 ## Deletion
 
-**`deletionPolicy` defaults to `Retain`** (decision #176). An aggregate is the record of a
+**`deletionPolicy` defaults to `Delete`**, like every kind, since [#304](https://github.com/ricardomolendijk/netbox-operator/issues/304) reversed decision #176. The reasoning that used to put `Retain` here still describes a real cost. An aggregate is the record of a
 registry allocation; deleting it destroys the change log and journal entries that say when the
 block was assigned.
 
@@ -212,4 +212,4 @@ ten-slash-eight   10.0.0.0/8   rfc-1918   52   True    7m
 - [`NetBoxPrefix`](netboxprefix.md) — the prefixes carved out underneath, matched by containment
   rather than by a foreign key
 - [lookups](../concepts/lookups.md) — why a required filter is never omitted
-- [deletion](../concepts/deletion.md) — why IPAM defaults to `Retain`
+- [deletion](../concepts/deletion.md#why-this-reversed) — why every kind defaults to `Delete`

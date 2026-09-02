@@ -64,10 +64,6 @@ func dcimRackRoleDescriptor() Descriptor {
 		// it is `Rack.role ForeignKey -> dcim.RackRole on_delete=PROTECT`, so deleting a role
 		// in use is refused rather than cascading, reported here as
 		// Deleting=False, Reason=Protected.
-		//
-		// RetainOnDelete is left false: a rack role is configuration a manifest can recreate,
-		// not allocated state, so `deletionPolicy` defaults to Delete (#176,
-		// docs/concepts/deletion.md).
 
 		// The four columns every ChangeLoggedModel carries, plus the CounterCacheField
 		// dcim.RackRole declares. NetBox maintains `rack_count` from the racks pointing here

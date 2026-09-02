@@ -309,23 +309,29 @@ match that is not this CR's is either somebody else's (create another) or uniden
 |---|---|
 | Type | `string`, one of `Delete` `Retain` |
 | Required | no |
-| Default | **`Retain`** on this Kind |
+| Default | `Delete` |
+| Validation | `Enum=Delete;Retain` |
 
 Whether deleting the CR deletes the NetBox address.
 
-**`Retain`, unlike most Kinds** (decision
-[#176](https://github.com/ricardomolendijk/netbox-operator/issues/176)). Deleting an
-`ipam.IPAddress` frees the address for reallocation: if a claim allocated it, deleting the CR
-hands somebody else an address this cluster believes it owns, and there is no undo. A tag is
-configuration and cheap to recreate; an address is state. Set `deletionPolicy: Delete`
-explicitly where `kubectl delete` really should free the address —
-[deletion](../concepts/deletion.md) carries the table of per-Kind defaults.
+**`Delete`, like every kind** since
+[#304](https://github.com/ricardomolendijk/netbox-operator/issues/304), which reverses
+[#176](https://github.com/ricardomolendijk/netbox-operator/issues/176). This kind used to
+default to `Retain` on the argument that it holds state rather than configuration — deleting
+an `ipam.IPAddress` frees the address for reallocation.
 
-The default is not a CRD marker. The field is declared once on the envelope every Kind embeds,
-so a marker there could only give every Kind the same answer; the per-Kind value is data on
-this Kind's Descriptor (`registry.Descriptor.RetainOnDelete`), which means
-`kubectl explain netboxipaddress.spec.deletionPolicy` describes the field and points here
-rather than printing `Retain`.
+That cost is real and the default was still the wrong place to answer it: `Retain` deleted the
+CR, kept the address, and left an unmanaged object that NetBox then cites with a `PROTECT` to
+refuse the delete of the thing above it — with no CR left to fix. The risk is answered by
+NetBox instead: the `DELETE` goes out, anything still referenced is refused, and the CR stays
+saying what is in the way ([deletion](../concepts/deletion.md#why-this-reversed)).
+
+Write `deletionPolicy: Retain` where this address should outlive its CR. It is one line, in
+Git, where the next reader can see it.
+
+There is no CRD default to read: `deletionPolicy` is declared once on the shared envelope
+every object kind embeds, so `kubectl explain netboxipaddress.spec.deletionPolicy` describes the
+field and prints no default.
 
 ## `status`
 
@@ -513,7 +519,7 @@ has one.
 | Address created, `Ready=False` | `Reason=WaitingForRef`, `RefsResolved` names `assignedObject` | The target Kind does not exist in this build | Expected until M4. Use `slug`, `lookup` or `id` once the Kind is registered |
 | Two objects, one address, both `Ready` | none | Two CRs with `allowDuplicate`, each holding its own stamped object | Working as intended. If it was not intended, unset the field on one and reconcile |
 | `Ready=False` naming a ring | `Reason=RefCycle` | Two addresses each name the other in `natInsideRef` | Break the ring; NAT is directional |
-| Deleting the CR left the address in NetBox | `Retained` Event | This Kind defaults to `deletionPolicy: Retain` | Set `deletionPolicy: Delete` if freeing the address is what you want |
+| Deleting the CR left the address in NetBox | `Retained` Event | `deletionPolicy: Retain` is set on this CR | Remove it if freeing the address is what you want. `Delete` is the default |
 
 ## Related
 

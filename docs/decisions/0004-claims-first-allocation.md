@@ -246,7 +246,7 @@ configured to use the old address is now pointed at somebody else's. Under `Reta
 mistake was recoverable by hand.
 
 That is a real regression in one direction, accepted in exchange for the other. It is not a free
-improvement and the [documentation says so](../concepts/deletion.md#the-claim-is-the-exception-to-the-exception)
+improvement and the [documentation says so](../concepts/deletion.md#netboxipaddressclaim-already-worked-this-way)
 rather than selling it.
 
 ### What #182's answer keeps

@@ -461,17 +461,6 @@ type Descriptor struct {
 	// outside it a 400.
 	CustomFieldable bool
 
-	// RetainOnDelete makes spec.deletionPolicy default to Retain rather than Delete on this
-	// kind.
-	//
-	// Data here rather than a `+kubebuilder:default` marker because the field is declared
-	// once, on the shared NetBoxObjectSpec, so a marker there is the same default for every
-	// kind. Decision #176 answered that IPAM is the exception: deleting an ipam.IPAddress
-	// frees the address for reallocation and deleting an ipam.Prefix destroys the record of
-	// who a range belonged to, while a tag or a site is cheap to recreate. See
-	// docs/concepts/deletion.md for the table.
-	RetainOnDelete bool
-
 	// DuplicateSpec is the CR spec field that declares several NetBox objects may match
 	// this object's natural key, and that the provenance stamp decides which one is the
 	// CR's own (decision #177, NBO-025).

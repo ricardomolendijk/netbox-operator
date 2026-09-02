@@ -28,11 +28,6 @@ func ipamRIRDescriptor() Descriptor {
 		Taggable:        true,
 		CustomFieldable: true,
 
-		// Decision #176: IPAM defaults to Retain. Deleting an RIR is refused by NetBox while
-		// anything points at it, and recreating one gives every aggregate and ASN underneath
-		// a different id -- so the CR going away must not take the row with it.
-		RetainOnDelete: true,
-
 		// `isPrivate` -> `is_private` is the entry that earns an explicit table: NetBox
 		// ignores a field name it does not know rather than rejecting it, so `isPrivate`
 		// sent verbatim would write nothing and report success.

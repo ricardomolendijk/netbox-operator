@@ -29,11 +29,6 @@ func ipamAggregateDescriptor() Descriptor {
 		Taggable:        true,
 		CustomFieldable: true,
 
-		// Decision #176: IPAM defaults to Retain. An aggregate is the record of a registry
-		// allocation; deleting it destroys the change log and journal entries that say when
-		// the block was assigned.
-		RetainOnDelete: true,
-
 		// `dateAdded` -> `date_added` is the entry that earns an explicit table, and it is
 		// also the one field on this kind that needs EmptyIsNull: the column is a nullable
 		// DateField, and NetBox rejects `""` for a DateField outright, so an emptied value has

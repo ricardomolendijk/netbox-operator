@@ -149,7 +149,7 @@ A real database guarantee. `ipam.ASN`'s only other table-level line is
 
 ## Deletion
 
-**`deletionPolicy` defaults to `Retain`** (decision #176). An ASN is an allocation from a
+**`deletionPolicy` defaults to `Delete`**, like every kind, since [#304](https://github.com/ricardomolendijk/netbox-operator/issues/304) reversed decision #176. The reasoning that used to put `Retain` here still describes a real cost. An ASN is an allocation from a
 registry: deleting the row destroys the record of who holds it, and a fresh row with the same
 number is a different object with a different id.
 

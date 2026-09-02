@@ -41,11 +41,6 @@ func ipamFHRPGroupDescriptor() Descriptor {
 		Taggable:        true,
 		CustomFieldable: true,
 
-		// Decision #176: IPAM defaults to Retain. Deleting a group cascades in NetBox --
-		// `ipam.FHRPGroupAssignment.group` is `on_delete=CASCADE` -- so it takes every
-		// assignment with it, including ones no CR describes.
-		RetainOnDelete: true,
-
 		// `groupId` -> `group_id` and `authType` -> `auth_type` are the entries that earn an
 		// explicit table: NetBox ignores a field name it does not know rather than rejecting
 		// it, so `groupId` sent verbatim would write nothing and report success.
