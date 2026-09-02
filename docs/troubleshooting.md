@@ -307,7 +307,8 @@ finished. `kubectl get <kind> <name> -o jsonpath='{.status.conditions}' | jq` sh
 
 | `Reason` | Means | Get out of it by |
 |---|---|---|
-| `Protected` | NetBox refused the delete: another object references this one through a protected foreign key. The message carries NetBox's own body | Deleting the referencing object first. The retry backs off and completes on its own — this is **not** an error to retry faster |
+| `Protected` | NetBox refused the delete: another object references this one through a protected foreign key. The message carries NetBox's own body | Deleting the referencing object first. The retry backs off and completes on its own — this is **not** an error to retry faster. When the blockers are CRs in this cluster: `kubectl annotate <kind> <name> netbox.kubeforge.org/cascade-delete=true` and the operator deletes them for you ([deletion](concepts/deletion.md#cascading-a-refused-delete)) |
+| `Cascading` | The delete was refused, `cascade-delete` is set, and the CRs referencing this one have been deleted and not yet finished going | Waiting. Their own finalizers remove their NetBox objects and this delete retries |
 | `PendingDependents` | The child CRs this object materialised still exist | Waiting. They are being deleted |
 | `WaitingForEndpoint` | The object is real and its id is known, so the finalizer holds rather than orphaning it in NetBox | Fixing the endpoint. To force it through and accept the orphan: `kubectl annotate <kind> <name> netbox.kubeforge.org/skip-finalizer=true` |
 | `DataLossBlocked` | The delete would destroy data NetBox will not warn about — today that is `NetBoxCustomField`, whose deletion drops every value of it | `kubectl annotate <kind> <name> netbox.kubeforge.org/allow-data-loss=true`, deliberately, once you have read what goes |
