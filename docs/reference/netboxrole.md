@@ -126,7 +126,7 @@ No `meta.constraints` on `ipam.Role`, and none needed.
 
 ## Deletion
 
-**`deletionPolicy` defaults to `Retain`** (decision #176). This kind has a specific reason
+**`deletionPolicy` defaults to `Delete`**, like every kind, since [#304](https://github.com/ricardomolendijk/netbox-operator/issues/304) reversed decision #176. The reasoning that used to put `Retain` here still describes a real cost. This kind has a specific reason
 beyond the general one: every column that points at a role — on `ipam.Prefix`, `ipam.VLAN`,
 `ipam.IPRange`, `ipam.ASN` — is `on_delete=SET_NULL`, so deleting the row does not fail. It
 silently clears the role on every object that had it, which is an edit nobody asked for and

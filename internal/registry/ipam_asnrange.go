@@ -29,9 +29,6 @@ func ipamASNRangeDescriptor() Descriptor {
 		Taggable:        true,
 		CustomFieldable: true,
 
-		// Decision #176: IPAM defaults to Retain.
-		RetainOnDelete: true,
-
 		Fields: []Field{
 			{Spec: "name", API: "name"},
 			{Spec: "slug", API: "slug"},

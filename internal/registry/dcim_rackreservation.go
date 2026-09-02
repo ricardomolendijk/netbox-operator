@@ -111,12 +111,6 @@ func dcimRackReservationDescriptor() Descriptor {
 		// create-if-absent step resurrects what NetBox deliberately deleted
 		// (docs/decisions/0003-ownership-and-references.md rule 4). `tenant` is PROTECT and is
 		// not a candidate for the slot.
-		//
-		// RetainOnDelete is left false. A reservation looks like allocated state, and it is
-		// worth saying why it is not: what it holds is a promise about rack units, recorded
-		// nowhere else and recreated verbatim from the manifest, unlike an ipam.IPAddress whose
-		// deletion frees an address for somebody else to take (#176,
-		// docs/concepts/deletion.md).
 		ContainmentRef: "rackRef",
 
 		// The four columns every ChangeLoggedModel carries, plus the counter NetBox derives

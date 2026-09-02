@@ -62,13 +62,6 @@ func TestRackDescriptorsAreRegisteredAndValid(t *testing.T) {
 				t.Errorf("Taggable/CustomFieldable = %v/%v, want both: the model mixes in "+
 					"TagsMixin and CustomFieldsMixin", d.Taggable, d.CustomFieldable)
 			}
-
-			// Racks are configuration, not allocated state: nothing here frees a resource
-			// when it is deleted, which is what #176 reserved Retain for.
-			if d.RetainOnDelete {
-				t.Errorf("RetainOnDelete = true; a rack is configuration a manifest " +
-					"recreates (#176, docs/concepts/deletion.md)")
-			}
 		})
 	}
 }

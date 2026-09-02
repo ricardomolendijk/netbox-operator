@@ -463,7 +463,7 @@ created.
 ### `deletionPolicy` defaults to `Delete`
 
 Not an IPAM kind, so `Delete`
-([deletion](../concepts/deletion.md#the-default-depends-on-the-kind)).
+([deletion](../concepts/deletion.md#the-two-policies)).
 
 ## Printer columns
 

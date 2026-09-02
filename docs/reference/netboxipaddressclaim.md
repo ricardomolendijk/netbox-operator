@@ -389,9 +389,11 @@ The same two values and the same meanings as
 
 A claim's CR is the only record that its allocation exists — "give me any free address out of
 `home-lan`" is not a statement about `10.0.20.37`, and nothing in Git names that address — so a
-retained address is litter nobody can attribute. A
-[`NetBoxIPAddress`](netboxipaddress.md) with an explicit `spec.address` is the opposite case and
-still defaults to `Retain`.
+retained address is litter nobody can attribute. This kind reached `Delete` first, in
+[#225](https://github.com/ricardomolendijk/netbox-operator/issues/225);
+[#304](https://github.com/ricardomolendijk/netbox-operator/issues/304) took every other kind
+there too, [`NetBoxIPAddress`](netboxipaddress.md) included, so there is no longer a split
+to explain.
 
 **The cost, plainly: a freed address can be reallocated immediately, so an accidental
 `kubectl delete` is unrecoverable** where a leak was recoverable by hand. Re-applying the same

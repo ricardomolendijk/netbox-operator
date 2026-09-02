@@ -127,10 +127,9 @@ reached when the object does not exist.
 
 ## Deletion
 
-**`deletionPolicy` defaults to `Retain` on this kind**, as it does on every IPAM kind
-(decision #176, [deletion](../concepts/deletion.md)). Unlike the M3 kinds this is not advice in
-a comment: `Descriptor.RetainOnDelete` makes it the API server's default, so a manifest that
-says nothing gets `Retain`.
+**`deletionPolicy` defaults to `Delete`**, like every kind, since [#304](https://github.com/ricardomolendijk/netbox-operator/issues/304) reversed decision #176. The reasoning that used to put `Retain` here still describes a real cost
+([deletion](../concepts/deletion.md#why-this-reversed)). What answers it now is NetBox rather
+than a default: an RIR that anything points at cannot be deleted, so the CR stays and says so.
 
 Deleting an RIR in NetBox is refused while anything points at it, and recreating one gives
 every aggregate and ASN underneath a different id.
@@ -191,5 +190,5 @@ rfc-1918   rfc-1918   true      12   True    3m
 
 - [`NetBoxASN`](netboxasn.md), [`NetBoxASNRange`](netboxasnrange.md),
   [`NetBoxAggregate`](netboxaggregate.md) — the three kinds that require one
-- [deletion](../concepts/deletion.md) — why IPAM defaults to `Retain`
+- [deletion](../concepts/deletion.md#why-this-reversed) — why every kind defaults to `Delete`
 - [ADR-0002](../decisions/0002-crd-scoping.md) — why every kind is namespaced

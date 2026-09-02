@@ -69,11 +69,6 @@ func ipamFHRPGroupAssignmentDescriptor() Descriptor {
 		Taggable:        false,
 		CustomFieldable: false,
 
-		// Decision #176: IPAM defaults to Retain. The row is one end of a redundancy pair --
-		// deleting it silently demotes an interface out of its group, which is a traffic
-		// change rather than a bookkeeping one.
-		RetainOnDelete: true,
-
 		// `interface` is absent from this table on purpose: one spec field writing two
 		// columns is a GenericFKSpec, not a Field.
 		Fields: []Field{

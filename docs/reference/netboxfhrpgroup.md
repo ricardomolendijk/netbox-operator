@@ -167,7 +167,7 @@ apart. Manage them by hand, or use one namespace per segment and accept one `Rea
 
 ## Deletion
 
-**`deletionPolicy` defaults to `Retain`** (decision #176), and this kind has a sharp reason
+**`deletionPolicy` defaults to `Delete`**, like every kind, since [#304](https://github.com/ricardomolendijk/netbox-operator/issues/304) reversed decision #176. The reasoning that used to put `Retain` here still describes a real cost, and this kind has a sharp reason
 beyond the general one: `ipam.FHRPGroupAssignment.group` is `on_delete=CASCADE`, so deleting a
 group takes **every assignment with it** — including assignments no CR describes.
 

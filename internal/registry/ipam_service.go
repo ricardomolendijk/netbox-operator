@@ -65,9 +65,6 @@ func ipamServiceDescriptor() Descriptor {
 		Taggable:        true,
 		CustomFieldable: true,
 
-		// Decision #176: IPAM defaults to Retain.
-		RetainOnDelete: true,
-
 		// `parent` is absent from this table on purpose: one spec field writing two columns is
 		// a GenericFKSpec, not a Field. So is `_ports_lowest` -- NetBox recomputes it from
 		// `ports` on every save (netbox/ipam/models/services.py:41-47), and it appears in

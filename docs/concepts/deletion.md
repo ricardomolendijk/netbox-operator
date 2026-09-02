@@ -11,117 +11,78 @@ Implemented in `internal/reconciler/finalizer.go`.
 
 ## The two policies
 
-`spec.deletionPolicy` is `Delete` or `Retain`. Which one it defaults to
-[depends on the Kind](#the-default-depends-on-the-kind).
+`spec.deletionPolicy` is `Delete` or `Retain`, and it defaults to **`Delete` on every Kind**.
 
 | Value | What happens when the CR is deleted |
 |---|---|
-| `Delete` | `DELETE /api/<endpoint>/<id>/`, then the finalizer comes off. |
+| `Delete` | `DELETE /api/<endpoint>/<id>/`, then the finalizer comes off. If NetBox refuses, [the CR stays](#what-protect-looks-like) and says why. |
 | `Retain` | The finalizer comes off, a `Retained` Event is recorded, and NetBox is not called at all. |
 
-`Delete` is the usual default because a CR that creates an object and then walks away from it
-is a leak nobody asked for. `Retain` is for the cases where the NetBox object outliving the CR
-is the *point*: migrating off the operator, an object that is shared with something else, and
-the IPAM kinds below.
+One rule, no per-Kind table, and `kubectl delete -f .` undoes `kubectl apply -f .`.
 
-### Except for IPAM, where the default is mostly `Retain`
+### Why this reversed
 
-Deleting a tag or a site destroys *configuration*, which is cheap to recreate. Deleting an
-IPAM object destroys *state*: an `ipam.IPAddress` that is deleted is free for reallocation, so
-if a claim allocated it ([ADR-0004](../decisions/0004-claims-first-allocation.md)) deleting the
-CR hands somebody else an address this cluster believes it owns — and a `kubectl delete
-namespace` would do it to a whole range at once. That asymmetry is real, so it is encoded
-rather than averaged away (decision
-[#176](https://github.com/ricardomolendijk/netbox-operator/issues/176)).
+**Decided** on [#304](https://github.com/ricardomolendijk/netbox-operator/issues/304), which
+reverses [#176](https://github.com/ricardomolendijk/netbox-operator/issues/176). The IPAM
+kinds — prefixes, addresses, ranges, VLANs, VRFs, RIRs, aggregates, ASNs, roles, services —
+used to default to `Retain`, on the argument that they hold *state* rather than
+*configuration*: deleting an `ipam.IPAddress` frees it for reallocation, deleting an
+`ipam.Prefix` destroys the record of who a range belonged to, and a `kubectl delete namespace`
+could do that to a whole range at once.
 
-"IPAM" is shorthand rather than the rule, and two kinds in `ipam` do not follow it:
-`NetBoxVLANGroup` and `NetBoxIPAddressClaim` both default to `Delete`. Which Kind gets which
-is [one table](#the-default-depends-on-the-kind), below — one table and not a paragraph per
-Kind, because the answer to "what does `kubectl delete` do to my NetBox object" has to be
-readable in a single place.
+**The argument was right about the risk and wrong about where to put it.** What a default of
+`Retain` actually produces:
 
-The default is **not** a `+kubebuilder:default` marker, and cannot be: `deletionPolicy` is
-declared once, on the envelope every Kind embeds, so a marker there would give ~120 Kinds one
-answer. The per-Kind value is data on the Kind's Descriptor
-(`registry.Descriptor.RetainOnDelete`), which the engine reads when the spec states nothing.
-One consequence worth knowing: `kubectl explain <kind>.spec.deletionPolicy` prints no default,
-so [the table below](#the-default-depends-on-the-kind) is where the answer lives.
+1. `kubectl delete netboxvlan max-acc-vlan-1301` deletes the CR, emits a `Retained` Event, and
+   leaves the VLAN in NetBox. The CR is *gone* — there is nothing left to `kubectl describe`,
+   and the Event ages out of the namespace within the hour.
+2. That VLAN is now unmanaged, and it is also the object NetBox cites, with a `PROTECT`, when
+   you delete the **site** it belongs to.
+3. The site's CR parks at `Deleting=False, Reason=Protected` naming VLANs whose CRs no longer
+   exist, so the operator cannot remove them and neither can a re-apply.
 
-```yaml
-spec:
-  endpointRef: homelab
-  deletionPolicy: Retain
-```
+A namespace torn down that way leaves a NetBox nothing can clean up through the operator at
+all. Retaining by default did not protect state; it converted a recoverable deletion into an
+unrecoverable one, silently, and in the direction the user had already said no to by running
+`kubectl delete`.
 
-The field is read fresh on every pass, not latched when deletion starts. That is deliberate,
-and it is documented under [getting out of a blocked delete](#getting-out-of-a-blocked-delete).
+So the risk is answered where it is visible instead. The `DELETE` goes out, and:
 
-It is not called `reclaimPolicy`. That is PersistentVolume vocabulary, where it decides what
-happens to *storage* after a claim is released and carries a `Recycle` value with no analogue
-here. `deletionPolicy` is the spelling in
-[ADR-0003](../decisions/0003-ownership-and-references.md#deletion-policy).
+- **NetBox refuses what is still referenced.** Almost every IPAM foreign key is
+  `on_delete=PROTECT` (`docs/netbox-schema.md`), so a prefix inside a VRF, a VLAN with
+  prefixes scoped to it, or a role in use is refused by the server. The CR **stays**, with
+  `Deleting=False` naming exactly what is in the way. Nothing is lost and nothing is hidden.
+- **What is not referenced is deleted**, which is what deleting the manifest asked for.
+- **`deletionPolicy: Retain` is one line** for the objects that should outlive their CR —
+  migrating off the operator, an object shared with something else — and it says so in Git,
+  where the next reader can see it. A default said nothing to anybody.
 
-### `deletionPolicy` is not sent to NetBox
+The cost, stated rather than sold: **an unreferenced IPAM object is now deleted by
+`kubectl delete`, and a freed address can be reallocated immediately.** That is a real
+regression for anyone who was relying on the old default as a safety net. It is traded for a
+teardown that completes, and for the property that what happens to a NetBox object is
+readable in the manifest rather than inferred from a table of which Kind is which.
 
-It is a field of `NetBoxObjectSpec`, the envelope every kind embeds, and the engine excludes
-every envelope field from every payload by reflecting over that struct rather than by keeping
-a list (`internal/reconciler/payload.go`, `envelopeFields`). This matters more than it looks:
-NetBox *ignores* a column it does not know rather than rejecting it, so a leaked envelope
-field would not fail — it would just quietly travel over the wire forever.
+### `NetBoxIPAddressClaim` already worked this way
 
-## The default depends on the Kind
+Claims defaulted to `Delete` before this
+([#225](https://github.com/ricardomolendijk/netbox-operator/issues/225), reversing
+[#182](https://github.com/ricardomolendijk/netbox-operator/issues/182)) and the reasoning
+generalises: a claim's CR is the only record its allocation exists at all, so a retained
+address is not protected, it is unattributable — invisible litter by construction. An inline
+`claimFrom` on a VM materialises a claim owned by that VM
+([#174](https://github.com/ricardomolendijk/netbox-operator/issues/174)), so uniform `Retain`
+leaked one address per VM deletion, and pool exhaustion is a wait-forever state.
 
-**Decided** on
-[#176](https://github.com/ricardomolendijk/netbox-operator/issues/176): a Kind whose NetBox
-object holds *state* defaults to `Retain`, and everything else defaults to `Delete`. This is
-the table, and there is no second one.
+`deletionPolicy: Retain` on a claim still keeps the old behaviour exactly: no NetBox call, an
+`AddressRetained` Event naming the address, the id and the identity, and
+`netbox_operator_allocations_retained_total{kind}` ([claims](claims.md#deleting-a-claim)).
 
-| Kind | Default `deletionPolicy` | Why |
-|---|---|---|
-| [`NetBoxPrefix`](../reference/netboxprefix.md) | `Retain` | Deleting destroys the record of who a range of addresses belonged to, and recomputes its parents' hierarchy columns |
-| [`NetBoxIPAddress`](../reference/netboxipaddress.md) | `Retain` | Deleting frees the address for reallocation, and if a claim allocated it that is destructive with no undo |
-| [`NetBoxIPRange`](../reference/netboxiprange.md) | `Retain` | Deleting frees every address in the block at once |
-| [`NetBoxVLAN`](../reference/netboxvlan.md) | `Retain` | Deleting takes every prefix scoped to it and every termination hanging off it, and a fresh VLAN with the same `vid` is a different object |
-| [`NetBoxVRF`](../reference/netboxvrf.md) | `Retain` | A VRF is the table its prefixes and addresses are unique *within*, so deleting one changes what every address inside it means |
-| [`NetBoxRIR`](../reference/netboxrir.md) | `Retain` | The root of the allocation registry every aggregate and ASN below it points at |
-| [`NetBoxAggregate`](../reference/netboxaggregate.md) | `Retain` | Deleting loses the record of which registry allocated the block, on a table with no uniqueness constraint to recover it from |
-| [`NetBoxASN`](../reference/netboxasn.md) | `Retain` | Frees the number for reallocation under the same registry |
-| [`NetBoxASNRange`](../reference/netboxasnrange.md) | `Retain` | Deleting loses the record of which range a member ASN was drawn from |
-| [`NetBoxRole`](../reference/netboxrole.md) | `Retain` | Every referrer's foreign key is `SET_NULL`, so deleting one silently un-roles every prefix, range and VLAN using it rather than being refused |
-| [`NetBoxFHRPGroup`](../reference/netboxfhrpgroup.md) | `Retain` | Deleting loses the `(protocol, group_id)` pairing nothing in the database enforces |
-| [`NetBoxFHRPGroupAssignment`](../reference/netboxfhrpgroupassignment.md) | `Retain` | The only record of which interface backs which group at which priority |
-| [`NetBoxService`](../reference/netboxservice.md) | `Retain` | Deleting loses which addresses and ports a service was actually bound to |
-| [`NetBoxServiceTemplate`](../reference/netboxservicetemplate.md) | `Retain` | Backs real `NetBoxService` objects created from it; deleting the template should not imply deleting what it stamped out |
-| [`NetBoxVLANGroup`](../reference/netboxvlangroup.md) | **`Delete`** | A container, not an allocation — [see below](#netboxvlangroup-is-a-container-not-an-allocation) |
-| [`NetBoxIPAddressClaim`](../reference/netboxipaddressclaim.md) | **`Delete`** | The claim's CR is the only record its allocation exists — [see below](#the-claim-is-the-exception-to-the-exception) |
-| [`NetBoxCustomField`](../reference/netboxcustomfield.md) | **`Delete`**, and refused | Deleting one destroys data and NetBox does not refuse it, so the *finalizer* does — [see below](#delete-and-refused-are-not-the-same-axis) |
-| every other Kind (`NetBoxTag`, `NetBoxSite`, the catalogue kinds, the `extras` kinds, …) | `Delete` | Configuration: cheap to delete, cheap to recreate |
-
-The table is checked rather than merely written down.
-`TestEveryKindsDeletionDefaultIsStated` (`internal/reconciler/finalizer_test.go`) reads the
-effective default of every registered Kind through the same `deletionPolicyOf` the finalizer
-calls, and fails on a registered Kind that states none — so adding a Kind means deciding, in
-writing, whether deleting its NetBox object destroys state.
-
-The test exists because for a while this page and the operator disagreed
-([#186](https://github.com/ricardomolendijk/netbox-operator/issues/186)). Six Kinds were
-listed here as `Retain`; only `NetBoxIPAddress` set the flag, so the docs promised `Retain`
-and five Kinds deleted. Four of those five are the `Retain` rows above and got the flag; the
-fifth was `NetBoxVLANGroup`, which the table was simply wrong about.
-
-### `NetBoxVLANGroup` is a container, not an allocation
-
-It is in `ipam` and it does not retain, which looks inconsistent until the rule is read as
-what it says. `Retain` protects *state*; `Delete` is fine for *configuration*. A VLAN group
-allocates nothing: it is an organisational box with a `vid_ranges` list, and deleting one
-frees no VLAN, no address and no range. So there is nothing for `Retain` to protect, and the
-group belongs with the catalogue kinds it behaves like.
-
-It is also the case where `Delete` is least likely to lose anything by accident.
-`ipam.VLAN.group` is `on_delete=PROTECT` (`docs/netbox-schema.md` → `ipam.VLAN`), so NetBox
-*refuses* to delete a group that still holds VLANs, and the operator can only
-[report the refusal](#what-protect-looks-like). The VLANs themselves default to `Retain` —
-which is the pair worth remembering: the container goes, the contents stay.
+A claim's deletion pass also gives up where the declarative engine does not: after **8
+attempts** (~20 minutes) it releases its finalizer and reports the address as retained. Claims
+are created by machinery rather than by hand, and a namespace full of wedged ones would have
+to be unstuck one CR at a time
+([the claim reference](../reference/netboxipaddressclaim.md#it-still-cannot-make-a-namespace-undeletable)).
 
 ### `Retain` also blocks a destructive *update*
 
@@ -151,7 +112,7 @@ one edit away from either outcome.
 
 ### `Delete` and refused are not the same axis
 
-`NetBoxCustomField` is the row that looks like a contradiction: its default is `Delete`, and
+`NetBoxCustomField` is the case that looks like a contradiction: its default is `Delete`, and
 deleting one is *refused* by default with `Deleting=False, Reason=DataLossBlocked`
 (step 4 above). Both are right, because they answer different questions.
 
@@ -172,80 +133,6 @@ each finish it, and they finish it differently
 So: the policy says what the end state should be, and the guard says who has to agree to it.
 Every other Kind in the catalogue answers the second question with "nobody" because NetBox
 answers it for us.
-
-### The claim is the exception to the exception
-
-**Decided** on
-[#225](https://github.com/ricardomolendijk/netbox-operator/issues/225), which reverses
-[#182](https://github.com/ricardomolendijk/netbox-operator/issues/182): a claim defaults to
-`Delete`, and its `deletionPolicy` field exists so that a specific claim can opt into `Retain`.
-
-The rule the whole table turns on is not "IPAM is special". It is **whether anything still
-names the NetBox object once the CR is gone.**
-
-- A `NetBoxIPAddress` with an explicit `spec.address` is a deliberate statement about one
-  address. Somebody typed `10.0.0.9/24` and something outside Kubernetes very likely agrees
-  with them. `Retain` protects real intent.
-- A claim says "give me any free address out of `mgmt-net`". That is *not* a statement about
-  `10.0.20.37`, and nothing in Git names that address — the claim's CR is the only record the
-  allocation exists at all. So a retained address is not protected, it is unattributable:
-  invisible litter by construction.
-
-The arithmetic settled it. An inline `claimFrom` on a VM materialises a claim owned by that VM
-([#174](https://github.com/ricardomolendijk/netbox-operator/issues/174)), so uniform `Retain`
-leaked **one address per VM deletion** — and pool exhaustion is a wait-forever state, so in a
-CI-driven cluster the leak did not degrade allocation, it eventually stopped it.
-
-**What the new default costs, stated rather than sold: a freed address can be reallocated
-immediately, so an accidental `kubectl delete` on a claim is unrecoverable** where a leak was
-recoverable by hand. Re-applying the same manifest derives the same allocation identity, but if
-something has taken the address meanwhile the claim gets a different one. That is a real
-regression in one direction, traded for a leak that stopped the operator working in the other.
-
-`deletionPolicy: Retain` on a claim keeps the previous behaviour exactly: no NetBox call, an
-`AddressRetained` Event naming the address, the id and the identity, and
-`netbox_operator_allocations_retained_total{kind}`
-([claims](claims.md#deleting-a-claim)).
-
-A claim's `deletionPolicy` is also the one copy of this field with a real CRD default, so
-`kubectl explain netboxipaddressclaim.spec.deletionPolicy` says `Delete`. It is declared on
-`NetBoxClaimSpec`, which only claim kinds embed and which all want the same answer, rather than
-on the envelope ~120 kinds embed
-([#186](https://github.com/ricardomolendijk/netbox-operator/issues/186)).
-
-The deletion pass used to make **no NetBox call whatsoever**, which made "a claim's finalizer
-cannot get stuck" free. `Delete` spends that, so it is bought back explicitly: a refusal or a
-failure is reported the way the [sequence below](#the-deletion-sequence) reports one, and after
-**8 attempts** (~20 minutes) the claim releases its finalizer anyway and reports the address as
-retained. The declarative engine never gives up and relies on a human writing the
-[skip annotation](#getting-out-of-a-blocked-delete); a claim cannot afford that, because claims are created by
-machinery rather than by hand and a namespace full of them would have to be unwedged one CR at a
-time. It gives up into exactly the behaviour that shipped before this reversal — a reported,
-counted leak — which is why the trade is acceptable and a wedged namespace would not have been.
-
-The asymmetry is deliberate, and the reason it is honest rather than inconsistent is that the
-two groups hold different sorts of thing: **an address a claim allocated is *state*; a tag is
-*configuration*.** Configuration is cheap to delete and recreate. State is not — deleting an
-`ipam.IPAddress` frees it for reallocation to somebody else, and deleting an `ipam.Prefix`
-destroys the record of who the range belonged to and recomputes its parents' hierarchy columns,
-none of which a recreate restores. `Delete` therefore stays where it is expected, and `Retain`
-sits where deletion is destructive and irreversible.
-
-Two things make the split liveable rather than confusing:
-
-- **Almost every IPAM foreign key is `on_delete=PROTECT`** (`tenant`, `vrf`, `vlan`, `role` —
-  `docs/netbox-schema.md`), so NetBox refuses many of these deletions anyway and the operator
-  can only [report the refusal](#what-protect-looks-like). `Retain` is closer to what actually
-  happens than `Delete` was.
-- **Each affected Kind states its own default in its `spec` description**, so
-  `kubectl explain netboxprefix.spec` says `Retain` and says why. It cannot be on the
-  `deletionPolicy` field itself — that description is the envelope's and is therefore shared —
-  which is why the table lives here, once, rather than as prose repeated across five Kind pages.
-
-The cost, accepted: the default is now something a user has to *learn* rather than infer, and
-`kubectl delete -f .` no longer undoes `kubectl apply -f .` for the IPAM kinds. The alternative
-— a uniform `Delete` — puts a production IP range one `kubectl delete namespace` away from
-being handed to somebody else.
 
 ## The finalizer, and why the order is that way round
 
@@ -289,6 +176,7 @@ unreachable**. An escape hatch that only works when it is not needed is not an e
 | 7 | `DELETE` returns success | Drop the finalizer, `Normal`/`Deleted`. |
 | 8 | `DELETE` returns 404 | Drop the finalizer, `Normal`/`Deleted`. Already gone is the end state that was asked for. |
 | 9 | `DELETE` returns 409, or a body naming a protected relation | `Deleting=False, Reason=Protected`, NetBox's message verbatim. Keep the finalizer, requeue with capped backoff. |
+| 9a | ...and `netbox.kubeforge.org/cascade-delete: "true"` is set, and CRs reference this one | Delete those CRs, `Warning`/`CascadeDeleted` naming them, `Deleting=False, Reason=Cascading`. Keep the finalizer. [See below](#cascading-a-refused-delete). |
 | 10 | Anything else | `Deleting=False`, reason and interval from the [error table](errors-and-retries.md). Keep the finalizer. |
 
 A CR that carries no finalizer of ours is left alone entirely: something else is holding it
@@ -528,7 +416,8 @@ In order of preference:
 
 1. **Delete the blocker.** This is the intended path, and usually it is already happening —
    the message names the model and the field. Nothing else is required: the next retry
-   succeeds on its own.
+   succeeds on its own. When the blockers are CRs in this cluster,
+   [cascade](#cascading-a-refused-delete) does it for you.
 2. **Switch to `Retain`.** `spec.deletionPolicy` is read fresh on every pass and not latched
    when deletion begins, so setting it to `Retain` on a terminating object takes effect on the
    next pass: the finalizer comes off and the NetBox object stays. It is the gentle way out —
@@ -546,6 +435,57 @@ undeletable forever, and no operator should be able to do that to a cluster. It 
 break-glass rather than a feature because it *guarantees* an object left behind in NetBox.
 That is sometimes the right trade; it is never the default, and it records a
 `Warning`/`FinalizerSkipped` Event naming what was left.
+
+## Cascading a refused delete
+
+`PROTECT` plus a backed-off retry sorts an order; it does not supply the deletes. So deleting
+a site whose VLANs still exist parks the CR at `Reason=Protected` until somebody works out,
+from NetBox's prose, which other CRs to delete — the manual topological sort this design was
+supposed to remove.
+
+The annotation supplies them:
+
+```sh
+kubectl annotate netboxsite max-acc netbox.kubeforge.org/cascade-delete=true
+```
+
+With it set, a refused delete **deletes every CR that references this one** and waits. Each of
+those runs its own deletion sequence, removes its own NetBox object, and this delete retries
+and finds nothing in the way.
+
+```console
+Type:     Deleting
+Status:   False
+Reason:   Cascading
+Message:  netbox refused to delete dcim/sites/1 and netbox.kubeforge.org/cascade-delete=true,
+          so the CRs referencing this one go first (deleted NetBoxVLAN netbox/max-acc-vlan-1301,
+          NetBoxPrefix netbox/max-acc-10-18-0-0-24); this delete retries once their own
+          finalizers have removed their netbox objects. netbox said: ...
+```
+
+Four things it deliberately is not:
+
+- **It is not "delete whatever NetBox named."** The blockers NetBox reports are rows. The
+  operator will not delete a row it has no CR for, so an object a human made in the NetBox UI
+  is never touched however loudly NetBox cites it. What gets deleted are Kubernetes objects,
+  and their own finalizers do the NetBox work — every safety property of an ordinary delete,
+  including `PROTECT` handling, applies to each one unchanged.
+- **It is not narrowed to the blockers.** Every CR referencing this one goes, not only the ones
+  NetBox cited. Matching *"MAX_a_DMZ (1301) (19)"* back to a CR means parsing a Django
+  translation string, and a parser between a user and their data is not a thing to build. A CR
+  pointing at an object that is being deleted has a reference about to dangle either way.
+- **It is not a way around `PROTECT`.** If something outside this cluster still references the
+  object, the delete is still refused and the CR still says so.
+- **It is not recursive.** The annotation is not copied onto what it deletes — that would mean
+  writing metadata onto CRs Git owns ([ADR-0005 §1](../decisions/0005-gitops-coexistence.md)),
+  and a cascade whose reach is not visible in any manifest. It costs less than it sounds:
+  NetBox's graph fans out from one object rather than hanging off itself, so a site's prefixes
+  and its VLANs both reference the *site* and are all in the one set. A referrer whose own
+  delete is then refused says so and names what is in the way.
+
+The referrers are found through the same reverse index the [reference
+watches](references.md) are built on, so a CR the operator would re-enqueue when this object
+changes is exactly one it can find here. Only "true" enables it, so a typo deletes nothing.
 
 ## Two things worth knowing
 
