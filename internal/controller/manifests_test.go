@@ -46,7 +46,13 @@ var shippedManifests = []string{
 	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxrackreservation.yaml"),
 	filepath.Join("..", "..", "docs", "examples", "tag.yaml"),
 	filepath.Join("..", "..", "docs", "examples", "contacts.yaml"),
-	filepath.Join("..", "..", "docs", "examples", "racks.yaml")}
+	filepath.Join("..", "..", "docs", "examples", "racks.yaml"),
+	// NBO-052's first two kinds. The feed's sample is the one worth dry-running: it sets four
+	// enums and deliberately sets none of `voltage`, `amperage` or `maxUtilization`, so
+	// admission is what proves the CRD adds no default to the three whose NetBox default is a
+	// ConfigItem read from the target installation.
+	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxpowerpanel.yaml"),
+	filepath.Join("..", "..", "config", "samples", "netbox_v1alpha1_netboxpowerfeed.yaml")}
 
 // TestShippedManifestsAreAccepted applies every sample and example against the real CRDs.
 //
