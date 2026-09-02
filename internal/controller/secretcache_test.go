@@ -302,7 +302,7 @@ func TestSecretScopeCacheOptions(t *testing.T) {
 	}) {
 		t.Errorf("Label = %v, want it to select the credential label", scoped.Label)
 	}
-	namespaces := []string{}
+	namespaces := make([]string, 0, len(scoped.Namespaces))
 	for namespace := range scoped.Namespaces {
 		namespaces = append(namespaces, namespace)
 	}

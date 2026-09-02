@@ -636,7 +636,8 @@ func TestRequeuesAreJittered(t *testing.T) {
 			// One reconciler over all of them, created in one pass, which is the shape the
 			// defect has: not one endpoint reconciled repeatedly, but several reconciled
 			// once each.
-			objects := []client.Object{credentialSecret()}
+			objects := make([]client.Object, 0, 1+endpoints)
+			objects = append(objects, credentialSecret())
 			for i := range endpoints {
 				e := endpointFor(srv.URL)
 				e.Name = fmt.Sprintf("nb-%d", i)

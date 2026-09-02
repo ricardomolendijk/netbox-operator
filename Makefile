@@ -12,7 +12,18 @@ IMG ?= netbox-operator:latest
 # Tool versions -- pinned, never @latest.
 CONTROLLER_TOOLS_VERSION ?= v0.19.0
 KUSTOMIZE_VERSION        ?= v5.5.0
-GOLANGCI_LINT_VERSION    ?= v2.6.1
+# Unlike every other pin here, this one is tied to the Go toolchain and not only to the tool's
+# own behaviour: golangci-lint links its own copy of the type-checker (through x/tools) and can
+# only read the export data written by the Go releases it was built for. v2.6.1 links x/tools
+# v0.38.0, which stops at export data version 2; Go 1.27 writes version 4, so on a 1.27 machine
+# the linter failed every import of the standard library with "export data version 4 is greater
+# than maximum supported version 2" and linted nothing at all. The pin therefore stopped meaning
+# "local and CI agree" and started meaning "only CI can run this" -- which is how #275 merged
+# with a one-line prealloc finding its author had no way to see (#283, and #279 to repair it).
+# v2.13.0 added Go 1.27 support; v2.13.2 is that line's current patch. It still declares Go
+# 1.26.0 as its minimum, so it runs on the toolchain go.mod pins for CI as well as on a
+# contributor's 1.27.
+GOLANGCI_LINT_VERSION    ?= v2.13.2
 ENVTEST_VERSION          ?= release-0.22
 ENVTEST_K8S_VERSION      ?= 1.34.0
 KIND_VERSION             ?= v0.30.0
@@ -84,7 +95,35 @@ vet: ## Run go vet.
 
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint.
-	$(GOLANGCI_LINT) run
+	@# The run goes through a log so the failure the pin above describes can be translated
+	@# the next time it happens -- and it will happen again, because roughly once a year a Go
+	@# release changes the export data format and every linter built before it stops being
+	@# able to typecheck anything. The diagnostic golangci-lint emits for that names neither
+	@# Go nor golangci-lint: it reports the standard-library imports of some package nobody
+	@# touched as typecheck errors and gives up, which reads as a broken repository rather
+	@# than a stale tool. It read that way for long enough to merge #275 with lint red, so
+	@# say which two versions disagree and which line moves, rather than leaving the next
+	@# contributor to decode it (#283).
+	@# --color is passed explicitly because tee makes stdout a pipe, and the linter would
+	@# otherwise drop the colour it prints when run from a terminal.
+	@set -o pipefail; \
+	if [ -t 1 ]; then color=always; else color=never; fi; \
+	log=$$(mktemp); \
+	trap 'rm -f "$$log"' EXIT; \
+	if $(GOLANGCI_LINT) run --color=$$color 2>&1 | tee "$$log"; then exit 0; fi; \
+	if grep -q 'export data version' "$$log"; then \
+		echo; \
+		echo "The linter typechecked nothing above: it cannot read this Go toolchain."; \
+		echo "  local toolchain:  $$(go version)"; \
+		echo "  pinned linter:    golangci-lint $(GOLANGCI_LINT_VERSION), built against an older Go"; \
+		echo "golangci-lint carries its own copy of the Go type-checker, so a Go release that"; \
+		echo "changes the export data format makes an older linter unusable. The errors above"; \
+		echo "are the standard library failing to import; they are not your change."; \
+		echo "Fix: raise GOLANGCI_LINT_VERSION in the Makefile to a release that supports this"; \
+		echo "Go (https://github.com/golangci/golangci-lint/releases), send that bump as its own"; \
+		echo "PR, and keep go.mod's toolchain and CI on the same Go. Do not reach for nolint."; \
+	fi; \
+	exit 1
 
 .PHONY: lint-fix
 lint-fix: golangci-lint ## Run golangci-lint and apply fixes.
