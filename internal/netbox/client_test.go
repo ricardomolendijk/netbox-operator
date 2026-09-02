@@ -789,3 +789,91 @@ func TestRedactURLMasksCredentials(t *testing.T) {
 		}
 	}
 }
+
+// TestUpstreamBodyIsNotReflected is #298's exfiltration channel. classify's errors are
+// written into a NetBoxEndpoint's Ready condition and a Warning Event by the endpoint
+// controller, so whatever a body says is readable by whoever chose the host that said it.
+func TestUpstreamBodyIsNotReflected(t *testing.T) {
+	const marker = "eyJzZWNyZXQiOiJub3QteW91cnMifQ"
+
+	for name, tc := range map[string]struct {
+		status      int
+		contentType string
+		body        string
+	}{
+		"401":              {http.StatusUnauthorized, "application/json", `{"Token":"` + marker + `"}`},
+		"403":              {http.StatusForbidden, "application/json", `{"Token":"` + marker + `"}`},
+		"400":              {http.StatusBadRequest, "text/plain", marker},
+		"409":              {http.StatusConflict, "text/plain", marker},
+		"418":              {http.StatusTeapot, "text/plain", marker},
+		"200 but not json": {http.StatusOK, "text/html", "<html><body>" + marker + "</body></html>"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", tc.contentType)
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer srv.Close()
+
+			_, err := newTestClient(t, srv, nil).Status(context.Background())
+			if err == nil {
+				t.Fatal("expected an error")
+			}
+			if strings.Contains(err.Error(), marker) {
+				t.Errorf("the upstream body reached the error string, which is the condition"+
+					" message and the Event: %v", err)
+			}
+			// Suppressing is not the goal; a message that says nothing costs the
+			// diagnosability these errors exist for. The shape has to survive.
+			if !strings.Contains(err.Error(), "bytes") {
+				t.Errorf("error = %v, want it to report the body's length", err)
+			}
+		})
+	}
+}
+
+// TestNetBoxsOwnErrorSentenceSurvives is the other half: the summary is shaped so that a
+// real NetBox still says the thing an operator acts on. DRF puts it under `detail`, and a
+// host that is not a DRF application does not produce that key.
+func TestNetBoxsOwnErrorSentenceSurvives(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"detail":"Invalid token."}`))
+	}))
+	defer srv.Close()
+
+	_, err := newTestClient(t, srv, nil).Status(context.Background())
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if !strings.Contains(err.Error(), "Invalid token.") {
+		t.Errorf("error = %v, want netbox's own detail to survive the summary", err)
+	}
+	if !strings.Contains(err.Error(), "application/json") {
+		t.Errorf("error = %v, want the media type", err)
+	}
+}
+
+// TestFieldErrorsAreOrderedAndBounded covers the other thing a 400 puts in a condition.
+// Sorted because an unsorted map join rewrites the condition on every reconcile, and
+// bounded because the names and the messages are the server's, not NetBox's by definition.
+func TestFieldErrorsAreOrderedAndBounded(t *testing.T) {
+	fields := map[string][]string{"slug": {"must be unique"}, "name": {"required"}}
+	err := &ValidationError{Status: 400, Fields: fields}
+	for range 20 {
+		if got, want := err.Error(),
+			"netbox rejected the payload (400): name: required, slug: must be unique"; got != want {
+			t.Fatalf("Error() = %q, want %q", got, want)
+		}
+	}
+
+	long := map[string][]string{}
+	for i := range 40 {
+		long[fmt.Sprintf("field%02d", i)] = []string{strings.Repeat("x", 200)}
+	}
+	if got := len((&ValidationError{Status: 400, Fields: long}).Error()); got > 700 {
+		t.Errorf("a 40-field 400 rendered %d characters; the budget is 512 plus the prefix", got)
+	}
+}

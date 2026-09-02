@@ -4,7 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
+	"mime"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 )
@@ -22,20 +25,51 @@ type ValidationError struct {
 	Status int
 	// Fields maps a field name to its errors, as DRF returns them. Non-field errors are
 	// under the key "__all__". Preserved because "which field" is the only useful part
-	// of a 400 for whoever has to fix the manifest.
+	// of a 400 for whoever has to fix the manifest. Rendered within a fixed character
+	// budget for the reason summariseBody gives.
 	Fields map[string][]string
-	Body   string
+	// Body is a summary of what the server said, not the body itself: see summariseBody.
+	Body string
+
+	// raw is the body verbatim, for the two in-package predicates that have to match on
+	// NetBox's wording (overlapping, and isProtected's caller). Unexported so that it
+	// cannot be rendered into a condition by accident, which is the whole point of Body
+	// being a summary.
+	raw string
 }
 
 func (e *ValidationError) Error() string {
 	if len(e.Fields) == 0 {
 		return fmt.Sprintf("netbox rejected the payload (%d): %s", e.Status, e.Body)
 	}
-	parts := make([]string, 0, len(e.Fields))
-	for field, msgs := range e.Fields {
-		parts = append(parts, fmt.Sprintf("%s: %s", field, strings.Join(msgs, "; ")))
+	return fmt.Sprintf("netbox rejected the payload (%d): %s", e.Status, summariseFields(e.Fields))
+}
+
+// summariseFields renders Fields in a stable order and within a fixed budget.
+//
+// Sorted because the message is written into a condition: Go randomises map iteration, so
+// an unsorted join makes a two-field 400 produce a different message every reconcile, and
+// every reconcile a real status write.
+//
+// Budgeted because the field names and messages come from the server, and on a 400 the
+// server is whatever host spec.url named (#298). Trimming to a few hundred characters
+// keeps "which field" -- the reason this map is parsed at all -- without turning a
+// condition into a general-purpose readout of someone else's response.
+func summariseFields(fields map[string][]string) string {
+	const budget = 512
+
+	parts := make([]string, 0, len(fields))
+	spent := 0
+	for _, field := range slices.Sorted(maps.Keys(fields)) {
+		if spent >= budget {
+			parts = append(parts, fmt.Sprintf("and %d more", len(fields)-len(parts)))
+			break
+		}
+		part := clipText(fmt.Sprintf("%s: %s", field, strings.Join(fields[field], "; ")), budget-spent)
+		spent += len(part)
+		parts = append(parts, part)
 	}
-	return fmt.Sprintf("netbox rejected the payload (%d): %s", e.Status, strings.Join(parts, ", "))
+	return strings.Join(parts, ", ")
 }
 
 // AuthError is a 401 or 403: the token is missing, wrong, or lacks permission. This
@@ -43,7 +77,8 @@ func (e *ValidationError) Error() string {
 // token scatters identical failures across every CR in the cluster.
 type AuthError struct {
 	Status int
-	Body   string
+	// Body is a summary of what the server said, not the body itself: see summariseBody.
+	Body string
 }
 
 func (e *AuthError) Error() string {
@@ -69,7 +104,8 @@ func (e *NotFoundError) Error() string {
 // names the protection). Not a fast-retry error: something else must be deleted first.
 type ProtectedError struct {
 	Status int
-	Body   string
+	// Body is a summary of what the server said, not the body itself: see summariseBody.
+	Body string
 }
 
 func (e *ProtectedError) Error() string {
@@ -80,7 +116,8 @@ func (e *ProtectedError) Error() string {
 // sent one; the engine requeues after that rather than guessing.
 type RateLimitError struct {
 	RetryAfter time.Duration
-	Body       string
+	// Body is a summary of what the server said, not the body itself: see summariseBody.
+	Body string
 }
 
 func (e *RateLimitError) Error() string {
@@ -259,24 +296,97 @@ func Retryable(err error) bool {
 // already-read response body.
 func classify(endpoint string, status int, header http.Header, body []byte) error {
 	text := strings.TrimSpace(string(body))
+	summary := summariseBody(header.Get("Content-Type"), body)
 	switch {
 	case status == http.StatusUnauthorized, status == http.StatusForbidden:
-		return &AuthError{Status: status, Body: text}
+		return &AuthError{Status: status, Body: summary}
 	case status == http.StatusNotFound:
 		return &NotFoundError{Endpoint: endpoint}
 	case status == http.StatusTooManyRequests:
-		return &RateLimitError{RetryAfter: retryAfter(header), Body: text}
+		return &RateLimitError{RetryAfter: retryAfter(header), Body: summary}
 	case status == http.StatusConflict, isProtected(text):
-		return &ProtectedError{Status: status, Body: text}
+		return &ProtectedError{Status: status, Body: summary}
 	case status == http.StatusBadRequest:
-		return &ValidationError{Status: status, Fields: parseFieldErrors(body), Body: text}
+		return &ValidationError{Status: status, Fields: parseFieldErrors(body), Body: summary, raw: text}
 	case status >= 500:
 		return &TransientError{Status: status}
 	default:
 		// Any other 4xx is a client-side problem that a retry will not fix. Treated as
 		// validation so the engine backs off rather than hammering.
-		return &ValidationError{Status: status, Body: text}
+		return &ValidationError{Status: status, Body: summary, raw: text}
 	}
+}
+
+// summariseBody is everything a response body is allowed to contribute to an error string.
+//
+// Every error above is rendered into a NetBoxEndpoint's `Ready` condition message and into
+// a Warning Event by internal/controller/netboxendpoint_controller.go's fail(). Both are
+// readable by whoever can read the CR -- which is whoever wrote `spec.url`. So the body
+// being summarised here is a body from a host of the CR author's choosing, fetched with the
+// operator's network position and the operator's token, and putting it back verbatim turns
+// a misconfigured field into a read primitive (#298).
+//
+// What survives is what diagnoses a *real* NetBox and nothing else:
+//
+//   - the media type and the length, which is what distinguishes "NetBox answered" from
+//     "an HTML error page from the proxy in front of it" -- the single most common cause of
+//     a baffling endpoint failure, and the one firstLine() used to exist for;
+//   - DRF's `detail` string, when the body parses as JSON and carries one. That is NetBox's
+//     own error shape ("Invalid token.", "You do not have permission to perform this
+//     action."), it is the sentence an operator actually acts on, and a host that is not a
+//     DRF application does not produce it.
+//
+// The verbatim body is not lost: attempt() logs it, redacted, at debug -- an operator-only
+// surface, unlike a condition on a namespaced object.
+func summariseBody(contentType string, body []byte) string {
+	shape := fmt.Sprintf("%s, %d bytes", mediaType(contentType), len(body))
+	if len(strings.TrimSpace(string(body))) == 0 {
+		return "empty body (" + shape + ")"
+	}
+	if detail := netboxDetail(body); detail != "" {
+		return fmt.Sprintf("%q (%s)", clipText(detail, maxDetail), shape)
+	}
+	return "body withheld, it is not netbox's error shape (" + shape +
+		"); run the manager with -v=1 to log it"
+}
+
+// maxDetail bounds the one piece of server-chosen prose that reaches a condition.
+const maxDetail = 200
+
+// netboxDetail returns DRF's `detail`, the key NetBox puts a single error sentence under.
+// Empty for a body that is not a JSON object, or does not carry one, or carries something
+// other than a string there.
+func netboxDetail(body []byte) string {
+	var decoded map[string]any
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		return ""
+	}
+	detail, _ := decoded["detail"].(string)
+	return strings.TrimSpace(detail)
+}
+
+// mediaType is the Content-Type without its parameters, and without trusting its length:
+// the header is as server-chosen as the body is.
+func mediaType(contentType string) string {
+	parsed, _, err := mime.ParseMediaType(contentType)
+	if err != nil || parsed == "" {
+		return "unknown content type"
+	}
+	return clipText(parsed, 64)
+}
+
+// clip bounds a server-chosen string, marking that it was cut. Cut on runes rather than
+// bytes: a body is arbitrary input, and slicing one mid-rune writes U+FFFD into a
+// condition.
+func clipText(text string, max int) string {
+	if len(text) <= max {
+		return text
+	}
+	runes := []rune(text)
+	if len(runes) <= max {
+		return text
+	}
+	return string(runes[:max]) + "…"
 }
 
 // isProtected detects a Django ProtectedError that arrived with a non-409 status.
@@ -318,7 +428,7 @@ const nonFieldKey = "__all__"
 // model clean() surfaces as {"detail": "msg"} or {"non_field_errors": ["msg"]}, and a
 // nested serializer (scope, assigned_object) nests one level deeper. All four are
 // flattened here, nested keys joined with a dot, so the caller gets one flat map.
-// An unparseable body yields nil and the raw text survives in ValidationError.Body.
+// An unparseable body yields nil, and ValidationError.Body reports its shape instead.
 func parseFieldErrors(body []byte) map[string][]string {
 	var decoded map[string]any
 	if err := json.Unmarshal(body, &decoded); err != nil {

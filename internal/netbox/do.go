@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-logr/logr"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/ricardomolendijk/netbox-operator/internal/metrics"
@@ -106,12 +107,19 @@ func (c *Client) attempt(ctx context.Context, method, target, endpoint string, p
 		return nil, &TransientError{Err: fmt.Errorf("reading response from %s: %w", endpoint, readErr)}
 	}
 
+	// The verbatim body goes here and nowhere else. classify() and decode() below reduce
+	// it to a summary, because their errors are rendered into a condition and an Event on
+	// a CR whose author chose the host that produced it (#298) -- while this line goes to
+	// the manager's own stdout, behind -v=1, and is the diagnosability that pays for the
+	// summary.
 	if resp.StatusCode >= http.StatusBadRequest {
+		logBody(debug, "netbox error response", resp, body)
 		return nil, classify(endpoint, resp.StatusCode, resp.Header, body)
 	}
 
-	decoded, err := decode(endpoint, body)
+	decoded, err := decode(endpoint, resp.Header, body)
 	if err != nil {
+		logBody(debug, "netbox unparseable response", resp, body)
 		return nil, err
 	}
 	if debug.Enabled() {
@@ -144,7 +152,7 @@ func (c *Client) newRequest(ctx context.Context, method, target string, payload 
 }
 
 // decode parses a successful response. An empty body is normal for 204 on DELETE.
-func decode(endpoint string, body []byte) (Object, error) {
+func decode(endpoint string, header http.Header, body []byte) (Object, error) {
 	if len(bytes.TrimSpace(body)) == 0 {
 		return nil, nil
 	}
@@ -152,24 +160,43 @@ func decode(endpoint string, body []byte) (Object, error) {
 	if err := json.Unmarshal(body, &obj); err != nil {
 		// A body we cannot parse is not transient: the same request will produce the
 		// same unparseable body. Most often it is an HTML error page from a proxy in
-		// front of NetBox, so the first line is the useful part.
+		// front of NetBox, and the media type and the length say that as well as the
+		// first line did -- without a 200 from an arbitrary host being quoted into a
+		// condition, which is what the first line was (#298).
 		return nil, &ValidationError{
-			Body: fmt.Sprintf("unparseable response from %s: %s", endpoint, firstLine(body)),
+			Body: fmt.Sprintf("unparseable response from %s: %s",
+				endpoint, summariseBody(header.Get("Content-Type"), body)),
+			raw: strings.TrimSpace(string(body)),
 		}
 	}
 	return obj, nil
 }
 
-func firstLine(body []byte) string {
-	text := strings.TrimSpace(string(body))
-	if idx := strings.IndexByte(text, '\n'); idx >= 0 {
-		text = text[:idx]
+// logBody is the one place a response body is written out in full.
+//
+// Enabled() is checked rather than relying on the logger to drop the line, for the reason
+// the request log above gives: redactBody copies the whole body, and an HTML error page is
+// routinely tens of kilobytes.
+func logBody(debug logr.Logger, msg string, resp *http.Response, body []byte) {
+	if !debug.Enabled() {
+		return
 	}
-	const max = 200
-	if len(text) > max {
-		return text[:max] + "…"
+	debug.Info(msg, "code", resp.StatusCode,
+		"contentType", resp.Header.Get("Content-Type"), "body", redactBody(body))
+}
+
+// redactBody renders a response body for the debug log: through the same field redaction
+// as a request payload when it parses as a JSON object, and as bounded text when it does
+// not. Only ever reached behind debug.Enabled(), because it copies the whole body.
+func redactBody(body []byte) any {
+	var obj Object
+	if err := json.Unmarshal(body, &obj); err == nil {
+		return redact(obj)
 	}
-	return text
+	// Bounded even here. An HTML error page from a proxy is routinely tens of kilobytes,
+	// and a log line that large per failed request is its own outage.
+	const max = 4096
+	return clipText(strings.TrimSpace(string(body)), max)
 }
 
 // secretFields are payload keys whose values must never reach a log, at any level.
