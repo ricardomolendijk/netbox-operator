@@ -79,6 +79,31 @@ func TestEngineReconcileDeleting(t *testing.T) {
 			wantWrites:     1,
 		},
 		{
+			// The pass that arrives between two attempts, which on a live cluster is most of
+			// them: the refusal's own status write wakes the controller straight away (#289).
+			name: "a pass inside the backoff window sends nothing and writes nothing",
+			object: func() *fakeKind {
+				obj := deletingObject()
+				obj.Status.DeletionAttempts = 1
+				now := metav1.Now()
+				obj.Status.LastDeletionAttempt = &now
+				// The pass that recorded the refusal stamped this too, and it is what makes
+				// "writes nothing" observable: without it the write below would be the
+				// generation being stamped for the first time rather than the deletion path.
+				obj.Status.ObservedGeneration = obj.Generation
+
+				return obj
+			},
+			client: func() *fakeClient {
+				return &fakeClient{deleteErr: &netbox.ProtectedError{Status: 409, Body: protectedBody}}
+			},
+			wantMethods:    nil,
+			wantFinalizers: []string{netboxv1alpha1.Finalizer},
+			wantRequeue:    protectedRetryBase,
+			wantAttempts:   1,
+			wantWrites:     0,
+		},
+		{
 			name:   "a netbox object that is already gone completes the deletion",
 			object: deletingObject,
 			client: func() *fakeClient {
@@ -395,10 +420,11 @@ func TestProtectedBackoffIsCapped(t *testing.T) {
 	}{
 		{attempts: 0, want: protectedRetryBase},
 		{attempts: 1, want: protectedRetryBase},
-		{attempts: 2, want: 20 * time.Second},
-		{attempts: 3, want: 40 * time.Second},
-		{attempts: 5, want: 160 * time.Second},
-		{attempts: 6, want: protectedRetryCap},
+		{attempts: 2, want: 4 * time.Second},
+		{attempts: 3, want: 8 * time.Second},
+		{attempts: 5, want: 32 * time.Second},
+		{attempts: 8, want: 256 * time.Second},
+		{attempts: 9, want: protectedRetryCap},
 		{attempts: 64, want: protectedRetryCap},
 		// int32 is what status carries, so the shift has to survive its whole range.
 		{attempts: 1 << 30, want: protectedRetryCap},
@@ -439,6 +465,11 @@ func TestProtectedDeleteEventuallyWarns(t *testing.T) {
 		if _, err := engine.Reconcile(context.Background(), obj); err != nil {
 			t.Fatalf("Reconcile() pass %d = %v", i, err)
 		}
+
+		// Each pass here is meant to be the next *attempt*, and since #289 that takes the
+		// backoff having run out -- a pass that arrives early sends nothing, which is the
+		// whole fix. Rewinding is what a test does instead of sleeping for minutes.
+		obj.Status.LastDeletionAttempt = rewound(obj.Status.LastDeletionAttempt)
 	}
 
 	if want := []string{"Warning/" + netboxv1alpha1.EventDeleteBlocked}; !slices.Equal(events.events, want) {
@@ -452,6 +483,163 @@ func TestProtectedDeleteEventuallyWarns(t *testing.T) {
 
 	if got := obj.GetFinalizers(); !slices.Equal(got, []string{netboxv1alpha1.Finalizer}) {
 		t.Errorf("finalizers = %v, want the finalizer still on: the netbox object is still there", got)
+	}
+}
+
+// rewound moves a last-attempt timestamp far enough into the past that the backoff after it
+// has certainly run out, so that the next Reconcile is the next attempt.
+//
+// A test helper rather than a clock seam on the Engine: what the engine has to get right is
+// that it reads the *stored* timestamp, and a test that rewinds the stored value exercises
+// exactly that. The alternative is sleeping for the interval, which is minutes.
+func rewound(last *metav1.Time) *metav1.Time {
+	if last == nil {
+		return nil
+	}
+
+	out := metav1.NewTime(last.Add(-protectedRetryCap - time.Second))
+
+	return &out
+}
+
+// TestARefusedDeleteIsNotRetriedUntilItsBackoffHasRun is the regression test for #289.
+//
+// The engine chose an interval and returned it in a ctrl.Result, which says when to come back
+// *at the latest*. What it did not account for is that the status write recording the refusal
+// is itself an event on the object, so the controller wakes immediately, and every wake-up
+// sent another DELETE and wrote another status: measured in envtest at ~320 refused DELETEs a
+// second against a single object, with the attempt count past six thousand inside twenty
+// seconds. Five referenced CRs doing that at once is why a two-minute teardown ran out.
+//
+// So the assertion is not "it retries" but "it does not retry *yet*": a second pass a moment
+// after the first must send nothing, write nothing, and come back with what is left of the
+// interval.
+func TestARefusedDeleteIsNotRetriedUntilItsBackoffHasRun(t *testing.T) {
+	client := &fakeClient{deleteErr: &netbox.ProtectedError{Status: 409, Body: protectedBody}}
+	status := &fakeStatus{}
+	obj := deletingObject()
+
+	engine := &Engine{
+		Descriptors: fakeDescriptors{descriptor: fakeDescriptor(), registered: true},
+		Endpoints: fakeEndpoints{
+			endpoint: Endpoint{Client: client, Resync: testResync},
+			ready:    true,
+		},
+		Status:     status,
+		LiveStatus: &fakeLiveStatus{},
+		Finalizers: &fakeFinalizers{},
+		Events:     &fakeRecorder{},
+		Scheme:     fakeScheme(t),
+	}
+
+	if _, err := engine.Reconcile(context.Background(), obj); err != nil {
+		t.Fatalf("the first pass = %v", err)
+	}
+
+	if got := len(client.methods()); got != 1 {
+		t.Fatalf("the first pass made %d netbox calls, want the one DELETE", got)
+	}
+
+	// Every wake-up a live cluster produces between two attempts: the object's own status
+	// write, a resync, a reference target changing. None of them is new information about
+	// whether NetBox will accept the delete this time.
+	const wakeUps = 20
+
+	for i := range wakeUps {
+		result, err := engine.Reconcile(context.Background(), obj)
+		if err != nil {
+			t.Fatalf("wake-up %d = %v", i, err)
+		}
+
+		// The remainder of the interval, give or take Jitter's tenth either way.
+		if ceiling := protectedBackoff(1) * 11 / 10; result.RequeueAfter <= 0 ||
+			result.RequeueAfter > ceiling {
+			t.Fatalf("wake-up %d asked to come back in %s, want what is left of %s",
+				i, result.RequeueAfter, protectedBackoff(1))
+		}
+	}
+
+	if got := len(client.methods()); got != 1 {
+		t.Errorf("netbox saw %d calls over %d wake-ups, want the one DELETE: the interval the"+
+			" engine chose has to hold whatever wakes it", got, wakeUps+1)
+	}
+
+	if obj.Status.DeletionAttempts != 1 {
+		t.Errorf("status.deletionAttempts = %d, want 1: a wake-up is not an attempt, and a count"+
+			" that says otherwise takes the backoff to its ceiling in milliseconds",
+			obj.Status.DeletionAttempts)
+	}
+
+	if status.writes != 1 {
+		t.Errorf("status writes = %d, want 1: a write per wake-up is what wakes the next one",
+			status.writes)
+	}
+
+	if got := obj.GetFinalizers(); !slices.Equal(got, []string{netboxv1alpha1.Finalizer}) {
+		t.Errorf("finalizers = %v, want the finalizer still on", got)
+	}
+
+	// And the other half: once the interval has run, the retry happens. A hold-off that never
+	// releases is the stuck finalizer this fix exists to prevent, wearing a different hat.
+	obj.Status.LastDeletionAttempt = rewound(obj.Status.LastDeletionAttempt)
+	client.deleteErr = nil
+
+	if _, err := engine.Reconcile(context.Background(), obj); err != nil {
+		t.Fatalf("the pass after the interval = %v", err)
+	}
+
+	if got := obj.GetFinalizers(); len(got) != 0 {
+		t.Errorf("finalizers = %v after the delete succeeded, want none", got)
+	}
+}
+
+// TestDeletionHold is the arithmetic on its own, including the two ways it must refuse to
+// hold: no attempt has been made yet, and a clock that has moved backwards. Stranding an
+// object on a wait that never expires would be the same bug in the other direction.
+func TestDeletionHold(t *testing.T) {
+	now := time.Now()
+	at := func(d time.Duration) *metav1.Time {
+		out := metav1.NewTime(now.Add(d))
+
+		return &out
+	}
+
+	tests := []struct {
+		name     string
+		attempts int32
+		last     *metav1.Time
+		wantHold bool
+		want     time.Duration
+	}{
+		{name: "no attempt yet", attempts: 0, last: nil},
+		{name: "a count with no timestamp is not a schedule", attempts: 3, last: nil},
+		{name: "a timestamp with no count is not one either", attempts: 0, last: at(0)},
+		{name: "inside the first interval", attempts: 1, last: at(-time.Second),
+			wantHold: true, want: protectedRetryBase - time.Second},
+		{name: "exactly at the interval", attempts: 1, last: at(-protectedRetryBase)},
+		{name: "past the interval", attempts: 1, last: at(-time.Hour)},
+		{name: "inside a later interval", attempts: 4, last: at(-time.Second),
+			wantHold: true, want: protectedBackoff(4) - time.Second},
+		{name: "at the ceiling", attempts: 40, last: at(-time.Minute),
+			wantHold: true, want: protectedRetryCap - time.Minute},
+		// A last attempt in the future is a clock that jumped. Waiting for it would hold the
+		// finalizer for however far the jump was.
+		{name: "a last attempt in the future is due now", attempts: 4, last: at(time.Hour)},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, holding := deletionHold(tc.attempts, tc.last, now)
+
+			if holding != tc.wantHold {
+				t.Fatalf("deletionHold(%d, %v) holding = %v, want %v",
+					tc.attempts, tc.last, holding, tc.wantHold)
+			}
+
+			if got != tc.want {
+				t.Errorf("deletionHold(%d, %v) = %s, want %s", tc.attempts, tc.last, got, tc.want)
+			}
+		})
 	}
 }
 

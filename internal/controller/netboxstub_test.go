@@ -72,6 +72,16 @@ type netboxStubServer struct {
 	// extrasStatus, when set, is returned for a POST to an extras path. A NetBox token
 	// without extras.add_customfield is the case it stands for.
 	extrasStatus int
+
+	// protected is the set of object ids whose DELETE is refused with the 409 Django
+	// raises for a protected foreign key. The stub models no foreign keys of its own, so a
+	// test that needs "netbox refuses this delete while a dependent exists" stages it --
+	// exactly as `cascade` stages `on_delete=CASCADE`.
+	//
+	// A set of ids rather than a flag, because the case worth testing is a *chain*: one
+	// object refusing while another does not is what makes a teardown ordered, and a flag
+	// could only make every delete refuse at once.
+	protected map[int64]bool
 }
 
 // provenanceEndpoints are the two paths the provenance bootstrap talks to.
@@ -424,6 +434,18 @@ func (s *netboxStubServer) object(w http.ResponseWriter, r *http.Request, id int
 		writeStubJSON(w, http.StatusOK, obj)
 	case http.MethodDelete:
 		s.writes = append(s.writes, stubWrite{Method: http.MethodDelete, ID: id})
+
+		if s.protected[id] {
+			// NetBox's own wording, and a 409, which is what internal/netbox classifies as
+			// a *ProtectedError (errors.go, classify).
+			writeStubJSON(w, http.StatusConflict, netbox.Object{
+				"detail": fmt.Sprintf(
+					"Unable to delete object %d. There are dependent objects: protected foreign key", id),
+			})
+
+			return
+		}
+
 		delete(s.objects, id)
 		w.WriteHeader(http.StatusNoContent)
 	default:
@@ -653,6 +675,49 @@ func (s *netboxStubServer) seed(obj netbox.Object) int64 {
 	id, _ := s.store(obj)
 
 	return id
+}
+
+// protect makes the stub refuse a DELETE of these ids with the 409 Django's ProtectedError
+// surfaces as, and release stops refusing -- which is what a dependent going away does in a
+// real NetBox.
+func (s *netboxStubServer) protect(ids ...int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.protected == nil {
+		s.protected = map[int64]bool{}
+	}
+
+	for _, id := range ids {
+		s.protected[id] = true
+	}
+}
+
+// release stops refusing the delete of these ids.
+func (s *netboxStubServer) release(ids ...int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, id := range ids {
+		delete(s.protected, id)
+	}
+}
+
+// deletes counts the DELETEs the stub has seen for one id, refused ones included. It is how
+// a test tells "retried once" from "retried in a hot loop".
+func (s *netboxStubServer) deletes(id int64) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	count := 0
+
+	for _, write := range s.writes {
+		if write.Method == http.MethodDelete && write.ID == id {
+			count++
+		}
+	}
+
+	return count
 }
 
 // cascade removes rows server-side without the operator having asked, which is what
