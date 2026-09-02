@@ -57,7 +57,8 @@ to be evidence of anything.
 > confirmation annotation that must equal `metadata.name`, a deletion budget that aborts
 > before the first delete rather than partway, and a per-object re-verification immediately
 > before each `DELETE`. It is deliberately not implemented here — see
-> [`specs/NBO-046-sweep.md`](../../specs/NBO-046-sweep.md) and the discussion on #182.
+> NBO-046 ([#70](https://github.com/ricardomolendijk/netbox-operator/issues/70)) and the
+> discussion on #182.
 
 ## What makes an object visible to a sweep
 

@@ -45,7 +45,13 @@ repository, so `actions/configure-pages` runs with `enablement: true` and turns 
 
 **Follow-up, deliberately not done here:** `site_url` in `mkdocs.yml` is already the final
 `https://netbox.kubeforge.org/`, so canonical links and `sitemap.xml` will not need
-rewriting. Until the domain is registered and a `CNAME` is configured, the site serves from
-the `github.io` URL and those canonical links point at a domain that does not resolve yet.
-Adding the custom domain is a repository setting plus a `docs/CNAME` file; it does not
-touch this workflow.
+rewriting. Until the domain is registered and configured, the site serves from the
+`github.io` URL and those canonical links point at a domain that does not resolve yet.
+
+Adding the custom domain is a repository setting and **nothing else** -- there is no
+`docs/CNAME` file and there should not be one. GitHub's documentation on managing a custom
+domain is explicit that "if you are publishing from a custom GitHub Actions workflow, no
+`CNAME` file is created, and any existing `CNAME` file is ignored and is not required".
+A `CNAME` under `docs/` would build, publish (`docs_dir` is the allowlist, so it would pass
+`hack/check-docs-links.py --site`) and do nothing, while reading like the thing keeping the
+domain resolving. The setting is the only thing keeping it resolving.

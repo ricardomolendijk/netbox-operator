@@ -1,0 +1,123 @@
+name: docs
+
+# Two jobs, split on the one thing that cannot be shared: permissions.
+#
+# `build` runs the same two `make` targets a contributor runs locally and packages the
+# result as a Pages artifact. It holds nothing but `contents: read`, so it is safe on a
+# pull request from a fork. `deploy` holds `pages: write` and `id-token: write` and is
+# gated on a push to `main`, so those two scopes exist only on runs of code that has
+# already been merged. A pull request builds, checks and packages, then stops.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: docs-${{ github.workflow }}-${{ github.ref }}
+  # A newer push to the same PR makes the older run irrelevant, as in ci.yaml -- but a run
+  # on main ends in a Pages deployment, and cancelling that halfway leaves the live site
+  # mid-swap. So: cancel PR runs, queue main runs.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# The default workflow token is read-only. This is what makes the split above real: the
+# only grant of a Pages scope in this file is the job-level block on `deploy`, so no
+# repository setting has to be relaxed and no other job can deploy.
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: check and build the docs site
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      # The runner's system python3 is externally managed (PEP 668), and `make docs-tools`
+      # is a plain `pip install`. A pinned interpreter of our own gives that a writable
+      # site-packages without `--break-system-packages`, and keeps the version the site is
+      # built with from moving underneath us when the runner image rolls.
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+
+      # Keyed on the Makefile, like ci.yaml's tool cache, because the Makefile is where
+      # MKDOCS_MATERIAL_VERSION lives -- so bumping the pin invalidates the cache instead
+      # of silently reinstalling from a stale wheel set.
+      - name: Cache the pip download cache
+        uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-${{ hashFiles('Makefile') }}
+
+      # Never `pip install mkdocs-material` here. The version is pinned in the Makefile and
+      # this job has to build with the same one a contributor gets from `make docs-tools`,
+      # or "works locally" and "works in CI" stop meaning the same thing.
+      - name: Install the pinned docs toolchain
+        run: make docs-tools
+
+      # Cheap, needs no toolchain, and catches the failure people actually make: a relative
+      # link or heading anchor that does not resolve, or a page under docs/ that nothing in
+      # docs/README.md indexes.
+      - name: Check the docs links
+        run: make docs-check
+
+      # `mkdocs build --strict` plus the allowlist assertion over site/: mkdocs.yml's
+      # docs_dir is the whole allowlist, and hack/check-docs-links.py --site proves it held,
+      # failing on plan.md, roadmap.md or specs/ by name and on any published path with no
+      # source under docs/.
+      - name: Build the site
+        run: make docs-build
+
+      # Packaged on every run, including pull requests. That is the point of building on a
+      # PR at all: the artifact the deploy job would upload is produced and inspectable
+      # before merge, and only the upload to Pages waits for main.
+      - name: Package the site as a Pages artifact
+        uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3.0.1
+        with:
+          path: site
+
+  deploy:
+    name: deploy to github pages
+    needs: build
+    # The whole reason this is a second job. `push` to `main` only -- a pull_request run,
+    # including one from a fork, never reaches a job that can write to Pages.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    # Nothing wider than these two, and `contents` is not among them: the deploy job needs
+    # no checkout. `pages: write` publishes; `id-token: write` mints the OIDC token
+    # actions/deploy-pages exchanges for its deployment credential.
+    permissions:
+      pages: write
+      id-token: write
+    # Names the deployment in the UI and gives the run its live URL. The environment is
+    # also where a branch protection rule on deployments would hang, if one is ever added.
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      # Pages has never been enabled on this repository, so the first run has to turn it on
+      # rather than fail on a 404. `enablement: true` does that with `build_type: workflow`.
+      #
+      # Caveat worth knowing before reading the first failure: the action's own input
+      # documentation says enablement "requires a token other than GITHUB_TOKEN" -- creating
+      # a Pages site is an administration-scoped call. If this step 403s, somebody with
+      # admin has to flip Settings -> Pages -> Source to "GitHub Actions" once, by hand,
+      # and after that this step is a no-op that only reads back the site's URL.
+      - name: Configure Pages
+        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5.0.0
+        with:
+          enablement: true
+
+      # Takes the artifact the build job uploaded in this same run. No checkout, no rebuild:
+      # what ships is byte-for-byte what the gate above checked.
+      #
+      # No docs/CNAME accompanies this. GitHub's custom-domain documentation is explicit
+      # that "if you are publishing from a custom GitHub Actions workflow, no CNAME file is
+      # created, and any existing CNAME file is ignored and is not required" -- the domain
+      # is a repository setting, and a CNAME file in the artifact would be dead weight that
+      # reads like the thing keeping netbox.kubeforge.org resolving when it is not.
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4.0.5
