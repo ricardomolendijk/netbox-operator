@@ -36,10 +36,10 @@ spec:
 one Secret, one `NetBoxEndpoint`, one `NetBoxSite`, and the object visible in NetBox.
 
 > **Status: pre-alpha, under active construction.** The API group is `v1alpha1` and is
-> expected to change. The whole 64-CRD catalogue is on `main` and installable from a
-> checkout, but **no release has published an installable artefact yet** — every release run
-> so far has failed before uploading its assets, so the tagged releases carry none. Install
-> from a checkout; [`docs/install.md`](docs/install.md) has the detail.
+> expected to change. All 64 CRDs ship, and `v0.0.9` is the first release to publish an
+> installable chart, CRD bundle and signed image — every tag before it carries no assets, so
+> pin the version rather than taking the newest tag. See
+> [`docs/install.md`](docs/install.md#what-is-published).
 
 ## Why this exists
 
@@ -96,16 +96,18 @@ label every credential Secret needs: [`docs/operations/rbac.md`](docs/operations
 ## Installing
 
 ```sh
+# The CRDs are their own artefact, not part of the Helm release.
+kubectl apply --server-side --force-conflicts \
+  -f https://github.com/ricardomolendijk/netbox-operator/releases/download/v0.0.9/netbox-operator-crds-0.0.9.yaml
+
 kubectl create namespace homelab
 
-make install-crds        # the CRDs are their own artefact, not part of the Helm release
-
-helm install netbox-operator ./charts/netbox-operator \
+helm install netbox-operator oci://ghcr.io/ricardomolendijk/charts/netbox-operator \
+  --version 0.0.9 \
   --namespace netbox-operator-system --create-namespace \
   --set credentialNamespaces={homelab}
 ```
 
-No release has published an installable artefact yet, so the chart installs from a checkout.
 [Getting started](docs/getting-started.md) walks the whole path including the first object;
 [`docs/install.md`](docs/install.md) has every value, both upgrade commands, and the one thing
 to know before you upgrade — the CRDs are applied by you, before the chart, every time. The

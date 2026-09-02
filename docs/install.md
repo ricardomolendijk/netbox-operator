@@ -16,14 +16,42 @@ and then puts an object into NetBox at the end of it.
 
 ## Helm
 
-### From a checkout
-
-**This is the only install that works today.** No release has published an installable
-artefact yet ([details](#what-is-published-today)), so until one does, install from a
-checkout:
+### From a release
 
 ```sh
+kubectl apply --server-side --force-conflicts \
+  -f https://github.com/ricardomolendijk/netbox-operator/releases/download/v0.0.9/netbox-operator-crds-0.0.9.yaml
+
 kubectl create namespace homelab          # a namespace you will keep credentials in
+
+helm install netbox-operator oci://ghcr.io/ricardomolendijk/charts/netbox-operator \
+  --version 0.0.9 \
+  --namespace netbox-operator-system --create-namespace \
+  --set credentialNamespaces={homelab}
+```
+
+Four things about those commands:
+
+- **The CRDs first.** `netbox-operator-crds-<version>.yaml` is attached to the GitHub release,
+  and it is what replaces the `crds/` directory an OCI chart no longer has. Skipping it is an
+  install-time error naming the command you missed, not a manager that CrashLoops twenty
+  seconds later — see [the precondition](#the-precondition-and-when-to-turn-it-off).
+- **One version, both halves.** Use the bundle from the release whose chart you are
+  installing. They are one artefact split in two, not two independently versioned things, and
+  `--version` pins the half Helm can pin.
+- **Create the credential namespace before the chart.** `--create-namespace` only creates the
+  *release* namespace (`netbox-operator-system` above). It says nothing about the namespaces
+  listed in `credentialNamespaces`, and the chart renders a `Role`/`RoleBinding` into each of
+  those — Helm refuses to create either in a namespace that does not exist yet.
+- **`credentialNamespaces` is the one value most installs have to set**, and it is worth
+  understanding before you do — see [the Secret blast radius](#the-secret-blast-radius).
+
+### From a checkout
+
+The same two steps against your working tree, with the CRD apply behind a make target:
+
+```sh
+kubectl create namespace homelab
 
 make install-crds                         # kubectl apply --server-side -f config/crd/bases/
 
@@ -32,46 +60,25 @@ helm install netbox-operator ./charts/netbox-operator \
   --set credentialNamespaces={homelab}
 ```
 
-Three things about those commands:
+### What is published
 
-- **`make install-crds` first.** Skipping it is an install-time error naming the command you
-  missed, not a manager that CrashLoops twenty seconds later — see
-  [the precondition](#the-precondition-and-when-to-turn-it-off).
-- **Create the credential namespace before the chart.** `--create-namespace` only creates the
-  *release* namespace (`netbox-operator-system` above). It says nothing about the namespaces
-  listed in `credentialNamespaces`, and the chart renders a `Role`/`RoleBinding` into each of
-  those — Helm refuses to create either in a namespace that does not exist yet.
-- **`credentialNamespaces` is the one value most installs have to set**, and it is worth
-  understanding before you do — see [the Secret blast radius](#the-secret-blast-radius).
+**`0.0.9` is the first release that published anything installable**, and it is the version
+the commands above pin. Everything a release is supposed to produce is there: the chart
+(`netbox-operator-0.0.9.tgz`, 18 KB — the post-split chart, with no `crds/` in it), the CRD
+bundle (`netbox-operator-crds-0.0.9.yaml`, 2.7 MB, all 64 of them), an SPDX SBOM, the OCI
+chart at `oci://ghcr.io/ricardomolendijk/charts/netbox-operator:0.0.9`, and the image at
+`ghcr.io/ricardomolendijk/netbox-operator:0.0.9` with its cosign signature and attestation.
 
-### From a release, once one publishes
+Two things to know about what came before it, because both are still visible:
 
-The intended path, and the one to use as soon as a release carries its assets:
-
-```sh
-kubectl apply --server-side --force-conflicts \
-  -f https://github.com/ricardomolendijk/netbox-operator/releases/download/vX.Y.Z/netbox-operator-crds-X.Y.Z.yaml
-
-kubectl create namespace homelab
-
-helm install netbox-operator oci://ghcr.io/ricardomolendijk/charts/netbox-operator \
-  --namespace netbox-operator-system --create-namespace \
-  --set credentialNamespaces={homelab}
-```
-
-`netbox-operator-crds-<version>.yaml` is attached to the GitHub release, and it is what
-replaces the `crds/` directory an OCI chart no longer has. Use the file from the release whose
-version you are installing — the chart and its CRDs are one artefact split in two, not two
-independently versioned things.
-
-### What is published today
-
-**Nothing installable.** Every release run so far has failed, so no GitHub release carries an
-asset and the CRD bundle URL 404s for every tag. The only chart in the OCI registry is
-`0.0.6`, pushed before the CRDs came out of it — it is the 348 KB package whose release
-`Secret` the API server rejects, so pulling it produces the failure this whole split exists to
-avoid. The commands above are deliberately written with a placeholder version rather than a
-real one, because there is no version they would work with yet.
+- **`v0.0.1` through `v0.0.8` carry no assets at all.** Every one of those release runs
+  failed — the early ones on the version check, the later ones on a release that already
+  existed by the time `gh release create` ran. So any
+  `releases/download/v0.0.x/netbox-operator-crds-*.yaml` URL below `v0.0.9` 404s.
+- **`0.0.6` is still in the OCI registry**, and it is the only other chart tag there. It was
+  pushed before the CRDs came out of the chart, so it is the 348 KB package whose release
+  `Secret` the API server rejects — pulling it reproduces exactly the failure this split
+  exists to avoid. Pin `--version`; do not take the newest tag on faith.
 
 ### Values
 
@@ -260,20 +267,20 @@ What that changes, in three lines:
   uninstall that emptied somebody's NetBox would be a catastrophe with a plausible-looking
   command in front of it.
 
-So upgrading is two commands, in this order:
+So upgrading is two commands, in this order — the same version in both, because the two are
+one artefact:
+
+```sh
+kubectl apply --server-side --force-conflicts \
+  -f https://github.com/ricardomolendijk/netbox-operator/releases/download/v0.0.9/netbox-operator-crds-0.0.9.yaml
+helm upgrade netbox-operator oci://ghcr.io/ricardomolendijk/charts/netbox-operator --version 0.0.9
+```
+
+or, from a checkout:
 
 ```sh
 make upgrade-crds        # kubectl apply --server-side -f config/crd/bases/
 helm upgrade netbox-operator ./charts/netbox-operator
-```
-
-or, once a release publishes both halves — the version is the same in both commands, because
-they are one artefact:
-
-```sh
-kubectl apply --server-side --force-conflicts \
-  -f https://github.com/ricardomolendijk/netbox-operator/releases/download/vX.Y.Z/netbox-operator-crds-X.Y.Z.yaml
-helm upgrade netbox-operator oci://ghcr.io/ricardomolendijk/charts/netbox-operator --version X.Y.Z
 ```
 
 CRDs first, because a new chart whose manager reconciles a field the old CRD prunes is the

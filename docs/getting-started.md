@@ -8,9 +8,9 @@ prior knowledge of the operator's design.
 - A Kubernetes cluster you can `kubectl apply` to (kind, k3s, EKS — anything at 1.27 or
   later) and `helm`.
 - A NetBox at 4.2 or later, reachable **from inside the cluster**, and an API token for it.
-- A checkout of this repository. No release has published an installable artefact yet, so a
-  checkout is the only working install today — see [installing](install.md) for why and for
-  what changes when one does.
+- Nothing else. The commands below install from the published `v0.0.9` release. If you would
+  rather install from a checkout of this repository, [installing](install.md#from-a-checkout)
+  has that path and it is the same shape.
 
 Everything below uses one namespace, `netbox-demo`, for your objects, and installs the
 operator into `netbox-operator-system`.
@@ -18,14 +18,15 @@ operator into `netbox-operator-system`.
 ## 1. Install the CRDs
 
 **The CRDs are not part of the Helm release.** You apply them yourself, before the chart, on
-install and on every upgrade. From your checkout:
+install and on every upgrade:
 
 ```sh
-make install-crds
+kubectl apply --server-side --force-conflicts \
+  -f https://github.com/ricardomolendijk/netbox-operator/releases/download/v0.0.9/netbox-operator-crds-0.0.9.yaml
 ```
 
-That is `kubectl apply --server-side --force-conflicts -f config/crd/bases/`. It installs 64
-CRDs. Check:
+From a checkout that is `make install-crds`, which runs the same `kubectl apply` against
+`config/crd/bases/`. Either way it installs 64 CRDs. Check:
 
 ```sh
 kubectl get crd | grep netbox.kubeforge.org | wc -l     # 64
@@ -55,10 +56,15 @@ kubectl create namespace netbox-demo
 ## 3. Install the chart
 
 ```sh
-helm install netbox-operator ./charts/netbox-operator \
+helm install netbox-operator oci://ghcr.io/ricardomolendijk/charts/netbox-operator \
+  --version 0.0.9 \
   --namespace netbox-operator-system --create-namespace \
   --set credentialNamespaces={netbox-demo}
 ```
+
+Pin `--version`, and pin it to the same version as the CRD bundle above: the two are one
+artefact split in two, and the registry still holds a `0.0.6` chart from before the split
+that does not install at all.
 
 `credentialNamespaces` is the one value nearly every install has to set. It does two things
 from one list: it grants the operator read access to Secrets in those namespaces, and it
