@@ -136,6 +136,10 @@ nav:
       - '`NetBoxIPSecPolicy`': reference/netboxipsecpolicy.md
       - '`NetBoxIPSecProfile`': reference/netboxipsecprofile.md
       - '`NetBoxL2VPN`': reference/netboxl2vpn.md
+      - '`NetBoxModuleTypeProfile`': reference/netboxmoduletypeprofile.md
+      - '`NetBoxModuleType`': reference/netboxmoduletype.md
+      - '`NetBoxModuleBay`': reference/netboxmodulebay.md
+      - '`NetBoxModule`': reference/netboxmodule.md
       - 'Generic references': reference/genericref.md
       - '`NetBoxRefGrant`': reference/netboxrefgrant.md
       - '`NetBoxSweep`': reference/netboxsweep.md

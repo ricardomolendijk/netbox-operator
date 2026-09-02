@@ -1,0 +1,241 @@
+# Modules, end to end: a profile, a catalogue module type, a bay on a switch, and the module
+# installed in it.
+#
+#   kubectl create namespace homelab
+#   kubectl apply -f docs/examples/modules.yaml
+#   kubectl get nbmoduletype,nbmodulebay,nbmodule -n homelab -w
+#
+# Replace the URL and the token before applying.
+#
+# What this file is really showing is four identities derived four different ways over one
+# NetBox source file:
+#
+#   - `optic` is looked up by `name`, because `dcim.ModuleTypeProfile` has no `slug` column and
+#     no `meta.constraints` -- just a column-level UNIQUE on `name`.
+#   - `sfp-10g-lr` is looked up by `(manufacturer, model)`, the model's only constraint. There
+#     is no `slug` here either, so unlike a device type there is no second candidate.
+#   - `slot-1` is looked up by `(device, name)` with `module_id` pinned null, because NetBox's
+#     `(device, module, name)` constraint does nothing for a bay on the chassis: `module` is
+#     nullable and Postgres treats NULLs as distinct.
+#   - `slot-1-optic` is looked up by its bay alone, because `dcim.Module.module_bay` is a
+#     `OneToOneField` -- one module per bay, enforced by a UNIQUE index.
+#
+# See docs/reference/netboxmodule.md and the three pages beside it.
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: netbox-token
+  namespace: homelab
+  labels:
+    # Required. The operator's Secret cache selects on this label, so a Secret without it is
+    # invisible even when the name on the endpoint is right.
+    netbox.kubeforge.org/endpoint-credential: "true"
+type: Opaque
+stringData:
+  # A NetBox API token with write access to the dcim app.
+  token: "0123456789abcdef0123456789abcdef01234567"
+---
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxEndpoint
+metadata:
+  name: homelab
+  namespace: homelab
+spec:
+  url: https://netbox.home.arpa
+  tokenSecretRef:
+    name: netbox-token
+  resyncPeriod: 2m
+  mode: Apply
+---
+# The catalogue prerequisites. A module type needs a manufacturer for the same reason a device
+# type does: `manufacturer` is REQ and the natural key starts at it, so an unresolved reference
+# means the object writes nothing at all rather than landing under whichever manufacturer
+# NetBox defaulted to.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxManufacturer
+metadata:
+  name: cisco
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  name: Cisco
+  slug: cisco
+---
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxSite
+metadata:
+  name: home
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  name: Home
+  slug: home
+  status: active
+---
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxDeviceRole
+metadata:
+  name: access-switch
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  name: Access switch
+  slug: access-switch
+  color: "2196f3"
+---
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxDeviceType
+metadata:
+  name: c9300-48p
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  manufacturerRef:
+    name: cisco
+
+  model: Catalyst 9300-48P
+  slug: c9300-48p
+  uHeight: "1"
+---
+# The switch the bay is on. `dcim.ComponentModel.device` is REQ and on_delete=CASCADE, so this
+# object is the module bay's owner reference: deleting it deletes the bay's CR, and deleting the
+# bay's CR deletes the module's.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxDevice
+metadata:
+  name: sw1
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  name: sw1
+  deviceTypeRef:
+    name: c9300-48p
+  roleRef:
+    name: access-switch
+  siteRef:
+    name: home
+  status: active
+---
+# The schema half of NetBox's module-attribute feature. Everything under `schema` is opaque to
+# the operator: NetBox validates each module type's `attributes` against it server-side and
+# returns a field-level 400 when it does not match, which the operator surfaces verbatim in the
+# Ready message. A client-side copy of the check would be a second validator that drifts from
+# the one that actually runs.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxModuleTypeProfile
+metadata:
+  name: optic
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  name: Optic
+  description: Pluggable optical transceivers
+
+  schema:
+    type: object
+    properties:
+      form_factor:
+        type: string
+        enum: [SFP, "SFP+", SFP28, QSFP+, QSFP28]
+      reach_km:
+        type: number
+        minimum: 0
+      wavelength_nm:
+        type: integer
+    required: [form_factor]
+---
+# The catalogue entry. `attributes` is the model's `attribute_data` column under the name the
+# serializer gives it -- writing `attributeData` or `attribute_data` would be a field NetBox
+# drops in silence.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxModuleType
+metadata:
+  name: sfp-10g-lr
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  manufacturerRef:
+    name: cisco
+  model: SFP-10G-LR
+
+  profileRef:
+    name: optic
+
+  partNumber: SFP-10G-LR=
+  airflow: passive
+
+  attributes:
+    form_factor: "SFP+"
+    reach_km: 10
+    wavelength_nm: 1310
+
+  # A string, not a number: NetBox returns `weight` padded to two places, and the engine
+  # compares the two numerically, so "0.08" and "0.08" produce no PATCH.
+  weight: "0.08"
+  weightUnit: kg
+
+  description: 10GBASE-LR SFP+ transceiver, 1310 nm, 10 km
+---
+# A bay on the chassis. `moduleRef` is left unset, which is what puts this object on the
+# null-pinned `(device, name)` candidate; setting it would mean the bay is a slot on a line
+# card and would add `module_id` to the lookup.
+#
+# `moduleRef` is never the module installed *in* this bay. That is the other direction, and it
+# is `NetBoxModule.moduleBayRef` below.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxModuleBay
+metadata:
+  name: slot-1
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  deviceRef:
+    name: sw1
+
+  name: Slot 1
+
+  # The slot identifier. NetBox substitutes it for the `{module}` token when it instantiates
+  # an installed module's component templates. A string, because the column is a CharField.
+  position: "1"
+
+  enabled: true
+  label: SLOT1
+  description: Front-panel module slot 1
+---
+# The module itself. All three references are required because all three columns are REQ, and
+# `deviceRef` is redundant with the bay in the data and required by NetBox anyway -- it is
+# denormalised so a module can be filtered by device without a join.
+#
+# `moduleBayRef` is the whole natural key and the owner reference at once.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxModule
+metadata:
+  name: slot-1-optic
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  deviceRef:
+    name: sw1
+  moduleBayRef:
+    name: slot-1
+  moduleTypeRef:
+    name: sfp-10g-lr
+
+  status: active
+  serial: FNS12345678
+
+  # Globally UNIQUE in NetBox and deliberately not a lookup candidate: an asset tag identifies
+  # the hardware, and this CR describes the slot it is installed in.
+  assetTag: ASSET-SFP-0001
+
+  description: Uplink optic in slot 1
