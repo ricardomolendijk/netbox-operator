@@ -26,7 +26,7 @@ kubectl apply --server-side --force-conflicts \
 
 kubectl create namespace homelab
 
-helm install netbox-operator oci://ghcr.io/ricardomolendijk/netbox-operator/charts/netbox-operator \
+helm install netbox-operator oci://ghcr.io/ricardomolendijk/charts/netbox-operator \
   --namespace netbox-operator-system --create-namespace \
   --set credentialNamespaces={homelab}
 ```
@@ -36,8 +36,12 @@ replaces the `crds/` directory an OCI chart no longer has. Use the file from the
 whose version you are installing — the chart and its CRDs are one artefact split in two, not
 two independently versioned things.
 
-Nothing is published yet — the chart lives in `charts/netbox-operator/` and installs from a
-checkout in the meantime, where the CRD step is a make target:
+**Neither half is published yet, so the two commands above do not work today.** No GitHub
+release has ever carried an asset — every release run so far failed before uploading them —
+so the CRD bundle URL 404s. The only chart in the registry is `0.0.6`, pushed before the CRDs
+came out of it, which is the 348 KB package whose release `Secret` the API server rejects.
+Until a release publishes both halves together, install from a checkout, where the CRD step
+is a make target:
 
 ```sh
 make install-crds        # kubectl apply --server-side -f config/crd/bases/
@@ -237,7 +241,7 @@ or, against a release:
 ```sh
 kubectl apply --server-side --force-conflicts \
   -f https://github.com/ricardomolendijk/netbox-operator/releases/download/v0.0.6/netbox-operator-crds-0.0.6.yaml
-helm upgrade netbox-operator oci://ghcr.io/ricardomolendijk/netbox-operator/charts/netbox-operator --version 0.0.6
+helm upgrade netbox-operator oci://ghcr.io/ricardomolendijk/charts/netbox-operator --version 0.0.6
 ```
 
 CRDs first, because a new chart whose manager reconciles a field the old CRD prunes is the
