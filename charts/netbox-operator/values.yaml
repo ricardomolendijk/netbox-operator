@@ -18,7 +18,8 @@ fullnameOverride: ""
 #
 # They are applied out of band now -- `make install-crds` from a checkout, or the
 # netbox-operator-crds-<version>.yaml attached to the release -- and that has to happen
-# before this chart is installed. docs/install.md#crds has the sequence.
+# before this chart is installed. docs/install.md#crds-and-why-they-are-not-in-the-chart
+# has the sequence.
 #
 # `check` is what makes forgetting it a legible failure instead of a manager that
 # CrashLoops on "no matches for kind". Turn it off only where the render happens away from
