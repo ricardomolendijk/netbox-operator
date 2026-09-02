@@ -67,6 +67,10 @@ rules:
   - netboxl2vpns
   - netboxmacaddresses
   - netboxmanufacturers
+  - netboxmodulebays
+  - netboxmodules
+  - netboxmoduletypeprofiles
+  - netboxmoduletypes
   - netboxplatforms
   - netboxpowerfeeds
   - netboxpowerpanels
@@ -135,6 +139,10 @@ rules:
   - netboxlocations/finalizers
   - netboxmacaddresses/finalizers
   - netboxmanufacturers/finalizers
+  - netboxmodulebays/finalizers
+  - netboxmodules/finalizers
+  - netboxmoduletypeprofiles/finalizers
+  - netboxmoduletypes/finalizers
   - netboxplatforms/finalizers
   - netboxpowerfeeds/finalizers
   - netboxpowerpanels/finalizers
@@ -214,6 +222,10 @@ rules:
   - netboxlocations/status
   - netboxmacaddresses/status
   - netboxmanufacturers/status
+  - netboxmodulebays/status
+  - netboxmodules/status
+  - netboxmoduletypeprofiles/status
+  - netboxmoduletypes/status
   - netboxplatforms/status
   - netboxpowerfeeds/status
   - netboxpowerpanels/status

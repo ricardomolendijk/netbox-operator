@@ -71,3 +71,7 @@ resources:
 - netbox_v1alpha1_netboxl2vpn.yaml
 - netbox_v1alpha1_netboxvlantranslationpolicy.yaml
 - netbox_v1alpha1_netboxvlantranslationrule.yaml
+- netbox_v1alpha1_netboxmoduletypeprofile.yaml
+- netbox_v1alpha1_netboxmoduletype.yaml
+- netbox_v1alpha1_netboxmodulebay.yaml
+- netbox_v1alpha1_netboxmodule.yaml

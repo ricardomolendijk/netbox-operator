@@ -68,6 +68,10 @@ rules:
   - netboxl2vpns
   - netboxmacaddresses
   - netboxmanufacturers
+  - netboxmodulebays
+  - netboxmodules
+  - netboxmoduletypeprofiles
+  - netboxmoduletypes
   - netboxplatforms
   - netboxpowerfeeds
   - netboxpowerpanels
@@ -136,6 +140,10 @@ rules:
   - netboxlocations/finalizers
   - netboxmacaddresses/finalizers
   - netboxmanufacturers/finalizers
+  - netboxmodulebays/finalizers
+  - netboxmodules/finalizers
+  - netboxmoduletypeprofiles/finalizers
+  - netboxmoduletypes/finalizers
   - netboxplatforms/finalizers
   - netboxpowerfeeds/finalizers
   - netboxpowerpanels/finalizers
@@ -215,6 +223,10 @@ rules:
   - netboxlocations/status
   - netboxmacaddresses/status
   - netboxmanufacturers/status
+  - netboxmodulebays/status
+  - netboxmodules/status
+  - netboxmoduletypeprofiles/status
+  - netboxmoduletypes/status
   - netboxplatforms/status
   - netboxpowerfeeds/status
   - netboxpowerpanels/status
@@ -294,6 +306,8 @@ rules:
   - patch
   - update
   - watch
+
+
 ---
 # Source: netbox-operator/templates/clusterrolebinding.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -312,6 +326,8 @@ subjects:
 - kind: ServiceAccount
   name: netbox-operator
   namespace: netbox-operator-system
+
+
 ---
 # Source: netbox-operator/templates/credential-rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -327,6 +343,8 @@ rules:
 - apiGroups: [""]
   resources: [secrets]
   verbs: [get, list, watch]
+
+
 ---
 # Source: netbox-operator/templates/credential-rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -346,6 +364,8 @@ subjects:
 - kind: ServiceAccount
   name: netbox-operator
   namespace: netbox-operator-system
+
+
 ---
 # Source: netbox-operator/templates/leader-election-rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -367,6 +387,8 @@ rules:
 - apiGroups: [""]
   resources: [events]
   verbs: [create, patch]
+
+
 ---
 # Source: netbox-operator/templates/leader-election-rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -386,6 +408,8 @@ subjects:
 - kind: ServiceAccount
   name: netbox-operator
   namespace: netbox-operator-system
+
+
 #
 # ===== all-features-values.yaml
 ---
@@ -452,6 +476,10 @@ rules:
   - netboxl2vpns
   - netboxmacaddresses
   - netboxmanufacturers
+  - netboxmodulebays
+  - netboxmodules
+  - netboxmoduletypeprofiles
+  - netboxmoduletypes
   - netboxplatforms
   - netboxpowerfeeds
   - netboxpowerpanels
@@ -520,6 +548,10 @@ rules:
   - netboxlocations/finalizers
   - netboxmacaddresses/finalizers
   - netboxmanufacturers/finalizers
+  - netboxmodulebays/finalizers
+  - netboxmodules/finalizers
+  - netboxmoduletypeprofiles/finalizers
+  - netboxmoduletypes/finalizers
   - netboxplatforms/finalizers
   - netboxpowerfeeds/finalizers
   - netboxpowerpanels/finalizers
@@ -599,6 +631,10 @@ rules:
   - netboxlocations/status
   - netboxmacaddresses/status
   - netboxmanufacturers/status
+  - netboxmodulebays/status
+  - netboxmodules/status
+  - netboxmoduletypeprofiles/status
+  - netboxmoduletypes/status
   - netboxplatforms/status
   - netboxpowerfeeds/status
   - netboxpowerpanels/status
@@ -678,6 +714,8 @@ rules:
   - patch
   - update
   - watch
+
+
 ---
 # Source: netbox-operator/templates/clusterrolebinding.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -696,6 +734,8 @@ subjects:
 - kind: ServiceAccount
   name: netbox-operator-ci
   namespace: netbox-operator-system
+
+
 ---
 # Source: netbox-operator/templates/credential-rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -711,6 +751,8 @@ rules:
 - apiGroups: [""]
   resources: [secrets]
   verbs: [get, list, watch]
+
+
 ---
 # Source: netbox-operator/templates/credential-rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -726,6 +768,8 @@ rules:
 - apiGroups: [""]
   resources: [secrets]
   verbs: [get, list, watch]
+
+
 ---
 # Source: netbox-operator/templates/credential-rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -741,6 +785,8 @@ rules:
 - apiGroups: [""]
   resources: [secrets]
   verbs: [get, list, watch]
+
+
 ---
 # Source: netbox-operator/templates/credential-rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -760,6 +806,8 @@ subjects:
 - kind: ServiceAccount
   name: netbox-operator-ci
   namespace: netbox-operator-system
+
+
 ---
 # Source: netbox-operator/templates/credential-rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -779,6 +827,8 @@ subjects:
 - kind: ServiceAccount
   name: netbox-operator-ci
   namespace: netbox-operator-system
+
+
 ---
 # Source: netbox-operator/templates/credential-rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -798,6 +848,8 @@ subjects:
 - kind: ServiceAccount
   name: netbox-operator-ci
   namespace: netbox-operator-system
+
+
 ---
 # Source: netbox-operator/templates/leader-election-rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -819,6 +871,8 @@ rules:
 - apiGroups: [""]
   resources: [events]
   verbs: [create, patch]
+
+
 ---
 # Source: netbox-operator/templates/leader-election-rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -838,3 +892,5 @@ subjects:
 - kind: ServiceAccount
   name: netbox-operator-ci
   namespace: netbox-operator-system
+
+

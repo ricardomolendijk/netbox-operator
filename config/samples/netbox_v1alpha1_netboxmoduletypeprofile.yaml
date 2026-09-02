@@ -1,0 +1,32 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxModuleTypeProfile
+metadata:
+  name: optic
+  namespace: default
+spec:
+  endpointRef: homelab
+  onConflict: Fail
+  deletionPolicy: Delete
+
+  # The whole natural key. `dcim.ModuleTypeProfile` has no `slug` column and no
+  # meta.constraints; `name CharField REQ UNIQUE len=100` is the only unique it has, and it is
+  # a column-level one (docs/reference/netboxmoduletypeprofile.md).
+  name: Optic
+
+  description: Pluggable optical transceivers
+
+  # Opaque to the operator. NetBox validates every NetBoxModuleType.attributes document that
+  # names this profile against this schema, server-side, and returns a field-level 400 when it
+  # does not match. There is deliberately no client-side copy of that check.
+  schema:
+    type: object
+    properties:
+      form_factor:
+        type: string
+        enum: [SFP, "SFP+", SFP28, QSFP+, QSFP28]
+      reach_km:
+        type: number
+        minimum: 0
+      wavelength_nm:
+        type: integer
+    required: [form_factor]
