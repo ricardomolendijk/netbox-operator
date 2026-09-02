@@ -10,6 +10,7 @@ import (
 
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/expfmt"
+	"github.com/prometheus/common/model"
 )
 
 // Counters is one scrape of the manager's counter metrics, keyed by metric name and then by
@@ -41,7 +42,12 @@ func (op *Operator) Scrape(ctx context.Context) (Counters, error) {
 		return nil, fmt.Errorf("scraping %s: unexpected status %s", op.MetricsURL, response.Status)
 	}
 
-	var parser expfmt.TextParser
+	// NewTextParser and not a zero-value TextParser: prometheus/common v0.70 gave the parser
+	// an unexported validation scheme whose zero value is invalid, and parsing with it panics
+	// with "Invalid name validation scheme requested: unset" rather than returning an error.
+	// UTF8Validation is what the package's own NameValidationScheme global defaults to, so
+	// this asks for the behaviour the harness already had.
+	parser := expfmt.NewTextParser(model.UTF8Validation)
 	families, err := parser.TextToMetricFamilies(response.Body)
 	if err != nil {
 		return nil, fmt.Errorf("parsing the exposition from %s: %w", op.MetricsURL, err)
