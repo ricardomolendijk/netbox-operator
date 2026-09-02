@@ -8,8 +8,8 @@ type: application
 # `version` is the chart's, `appVersion` is the operator image tag. They are kept equal
 # and the release workflow refuses a tag that does not match `appVersion`, so there is no
 # second place to bump -- see .github/workflows/release.yaml and docs/install.md.
-version: 0.0.9
-appVersion: "0.0.9"
+version: 0.0.11
+appVersion: "0.0.11"
 
 home: https://github.com/ricardomolendijk/netbox-operator
 sources:
