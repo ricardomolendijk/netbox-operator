@@ -16,16 +16,16 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 | | count |
 |---|--:|
 | NetBox REST endpoints | 138 |
-| — implemented as a Kind | 60 |
+| — implemented as a Kind | 68 |
 | — excluded, with a reason | 27 |
-| — **not implemented** | 51 |
+| — **not implemented** | 43 |
 | in scope (endpoints − excluded) | 111 |
 | | |
-| writable columns on the implemented Kinds | 680 |
-| — written by a spec field, or engine-owned | 513 |
+| writable columns on the implemented Kinds | 752 |
+| — written by a spec field, or engine-owned | 568 |
 | — deliberately omitted, with a reason | 10 |
-| — blocked: a reference whose target model has no Kind | 71 |
-| — **MISSING**: nothing declares it and nothing blocks it | 86 |
+| — blocked: a reference whose target model has no Kind | 79 |
+| — **MISSING**: nothing declares it and nothing blocks it | 95 |
 | — of those, required on create (fails the audit) | 0 |
 | | |
 | natural-key candidates the IR calls unusable | 21 |
@@ -39,8 +39,8 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 
 | column | status | Kinds | detail |
 |---|---|--:|---|
-| `owner` | blocked | 57 | `users.Owner` is an excluded endpoint, so nothing will ever write this |
-| `tags` | MISSING | 52 | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
+| `owner` | blocked | 65 | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `tags` | MISSING | 60 | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `comments` | excluded | 6 | organisational kinds map name/slug/description only (api/v1alpha1/virtualization_clustertype.go) |
 | `tenant` | MISSING | 6 | deferred to NetBoxTenant (NBO-021), which now ships -- nothing blocks it any more |
 | `config_template` | MISSING | 4 | — |
@@ -63,6 +63,7 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 | `location` | MISSING | 1 | — |
 | `module` | blocked | 1 | waits on a Kind for `dcim.Module` |
 | `position` | MISSING | 1 | — |
+| `preshared_key` | MISSING | 1 | a pre-shared key, permitted only as spec.presharedKeySecretRef and never inline; the engine has no FieldClass that reads a Secret into a payload, which is #241's work, so the column is unmapped rather than written and NetBox keeps whatever key it holds. It is in internal/netbox/do.go's redaction set because NetBox returns it. The ipam.FHRPGroup.auth_key and wireless auth_psk precedent, and the only secret-valued column in the whole vpn app (api/v1alpha1/vpn_ikepolicy.go, docs/reference/netboxikepolicy.md) |
 | `rack` | MISSING | 1 | NBO-051 ships NetBoxRack, so nothing blocks this any more -- but the column does not arrive alone: `(rack, position, face)` is one of dcim.Device's UniqueConstraints (docs/netbox-schema.md), so mounting a device in a rack means adding all three at once and re-deriving that kind's natural keys. NBO-051's ticket calls it out of scope on the belief the three were already on NetBoxDevice from NBO-030; they are not (internal/registry/dcim_device.go, dcimDeviceFields) |
 | `rear_image` | MISSING | 1 | — |
 | `region` | MISSING | 1 | deferred with dcim.Site's other optional foreign keys; NetBoxRegion now ships, so nothing blocks it any more (api/v1alpha1/dcim_site.go) |
@@ -169,10 +170,19 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 | `virtualization.VMInterface` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `virtualization.VirtualDisk` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `virtualization.VirtualMachine` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `vpn.IKEPolicy` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `vpn.IKEProposal` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `vpn.IPSecPolicy` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `vpn.IPSecProfile` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `vpn.IPSecProposal` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `vpn.L2VPN` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `vpn.Tunnel` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `vpn.TunnelGroup` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `wireless.WirelessLAN` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `wireless.WirelessLANGroup` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `wireless.WirelessLink` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `dcim.Device` | `position` | Decimal | — | MISSING | — |
+| `vpn.IKEPolicy` | `preshared_key` | Scalar | — | MISSING | a pre-shared key, permitted only as spec.presharedKeySecretRef and never inline; the engine has no FieldClass that reads a Secret into a payload, which is #241's work, so the column is unmapped rather than written and NetBox keeps whatever key it holds. It is in internal/netbox/do.go's redaction set because NetBox returns it. The ipam.FHRPGroup.auth_key and wireless auth_psk precedent, and the only secret-valued column in the whole vpn app (api/v1alpha1/vpn_ikepolicy.go, docs/reference/netboxikepolicy.md) |
 | `dcim.Interface` | `primary_mac_address` | Ref | — | MISSING | NBO-053 owns it. NBO-048 ships the forward half -- a NetBoxMACAddress names the interface it is assigned to -- and the reverse half is a deferred field on the two BaseInterface component specs, because modelling both directions as required references is the unresolvable cycle NBO-016 rejects (api/v1alpha1/dcim_macaddress.go) |
 | `virtualization.VMInterface` | `primary_mac_address` | Ref | — | MISSING | NBO-053 owns it. NBO-048 ships the forward half -- a NetBoxMACAddress names the interface it is assigned to -- and the reverse half is a deferred field on the two BaseInterface component specs, because modelling both directions as required references is the unresolvable cycle NBO-016 rejects (api/v1alpha1/dcim_macaddress.go) |
 | `dcim.Device` | `rack` | Ref | — | MISSING | NBO-051 ships NetBoxRack, so nothing blocks this any more -- but the column does not arrive alone: `(rack, position, face)` is one of dcim.Device's UniqueConstraints (docs/netbox-schema.md), so mounting a device in a rack means adding all three at once and re-deriving that kind's natural keys. NBO-051's ticket calls it out of scope on the belief the three were already on NetBoxDevice from NBO-030; they are not (internal/registry/dcim_device.go, dcimDeviceFields) |
@@ -227,6 +237,14 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 | `virtualization.VMInterface` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `virtualization.VirtualDisk` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `virtualization.VirtualMachine` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
+| `vpn.IKEPolicy` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
+| `vpn.IKEProposal` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
+| `vpn.IPSecPolicy` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
+| `vpn.IPSecProfile` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
+| `vpn.IPSecProposal` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
+| `vpn.L2VPN` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
+| `vpn.Tunnel` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
+| `vpn.TunnelGroup` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `wireless.WirelessLAN` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `wireless.WirelessLANGroup` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `wireless.WirelessLink` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
@@ -278,7 +296,7 @@ each pinned column's class rather than from the IR's reason string.
 | `virtualization.VirtualMachine` | yes | `%(app_label)s_%(class)s_unique_name_cluster` | usable via #216 | null pins are all foreign keys: `?<column>_id=null` (registry.NullColumnRef) |
 | `virtualization.VirtualMachine` | yes | `%(app_label)s_%(class)s_unique_name_device` | usable via #216 | null pins are all foreign keys: `?<column>_id=null` (registry.NullColumnRef) |
 | `virtualization.VirtualMachine` | yes | `%(app_label)s_%(class)s_unique_name_device_tenant` | usable via #216 | null pins are all foreign keys: `?<column>_id=null` (registry.NullColumnRef) |
-| `vpn.Tunnel` | — | `%(app_label)s_%(class)s_name` | usable via #216 | null pins are all foreign keys: `?<column>_id=null` (registry.NullColumnRef) |
+| `vpn.Tunnel` | yes | `%(app_label)s_%(class)s_name` | usable via #216 | null pins are all foreign keys: `?<column>_id=null` (registry.NullColumnRef) |
 
 ## Endpoints
 
@@ -409,16 +427,16 @@ each pinned column's class rather than from the IR's reason string.
 | `virtualization/virtual-disks` | `virtualization.VirtualDisk` | `NetBoxVirtualDisk` | implemented | — |
 | `virtualization/virtual-machine-types` | `virtualization.VirtualMachineType` | — | MISSING | — |
 | `virtualization/virtual-machines` | `virtualization.VirtualMachine` | `NetBoxVirtualMachine` | implemented | — |
-| `vpn/ike-policies` | `vpn.IKEPolicy` | — | MISSING | — |
-| `vpn/ike-proposals` | `vpn.IKEProposal` | — | MISSING | — |
-| `vpn/ipsec-policies` | `vpn.IPSecPolicy` | — | MISSING | — |
-| `vpn/ipsec-profiles` | `vpn.IPSecProfile` | — | MISSING | — |
-| `vpn/ipsec-proposals` | `vpn.IPSecProposal` | — | MISSING | — |
+| `vpn/ike-policies` | `vpn.IKEPolicy` | `NetBoxIKEPolicy` | implemented | — |
+| `vpn/ike-proposals` | `vpn.IKEProposal` | `NetBoxIKEProposal` | implemented | — |
+| `vpn/ipsec-policies` | `vpn.IPSecPolicy` | `NetBoxIPSecPolicy` | implemented | — |
+| `vpn/ipsec-profiles` | `vpn.IPSecProfile` | `NetBoxIPSecProfile` | implemented | — |
+| `vpn/ipsec-proposals` | `vpn.IPSecProposal` | `NetBoxIPSecProposal` | implemented | — |
 | `vpn/l2vpn-terminations` | `vpn.L2VPNTermination` | — | MISSING | — |
-| `vpn/l2vpns` | `vpn.L2VPN` | — | MISSING | — |
-| `vpn/tunnel-groups` | `vpn.TunnelGroup` | — | MISSING | — |
+| `vpn/l2vpns` | `vpn.L2VPN` | `NetBoxL2VPN` | implemented | — |
+| `vpn/tunnel-groups` | `vpn.TunnelGroup` | `NetBoxTunnelGroup` | implemented | — |
 | `vpn/tunnel-terminations` | `vpn.TunnelTermination` | — | MISSING | — |
-| `vpn/tunnels` | `vpn.Tunnel` | — | MISSING | — |
+| `vpn/tunnels` | `vpn.Tunnel` | `NetBoxTunnel` | implemented | — |
 | `wireless/wireless-lan-groups` | `wireless.WirelessLANGroup` | `NetBoxWirelessLANGroup` | implemented | — |
 | `wireless/wireless-lans` | `wireless.WirelessLAN` | `NetBoxWirelessLAN` | implemented | — |
 | `wireless/wireless-links` | `wireless.WirelessLink` | `NetBoxWirelessLink` | implemented | — |

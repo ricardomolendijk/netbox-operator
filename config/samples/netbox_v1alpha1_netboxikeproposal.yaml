@@ -1,0 +1,25 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxIKEProposal
+metadata:
+  name: ike-aes256-sha256
+  namespace: default
+spec:
+  endpointRef: homelab
+  onConflict: Fail
+  deletionPolicy: Delete
+
+  name: IKE AES-256 SHA-256
+  authenticationMethod: preshared-keys
+  encryptionAlgorithm: aes-256-cbc
+  authenticationAlgorithm: hmac-sha256
+
+  # The Diffie-Hellman group number, from NetBox's DHGroupChoices. An integer, because the
+  # column is a PositiveSmallIntegerField -- and not a range: 3, 4 and 6 through 13 are not
+  # members, so 14 here and 5 are legal while 6 is not.
+  group: 14
+
+  saLifetime: 28800
+
+  # `preshared-keys` above names the *method*. The key itself is a column on vpn.IKEPolicy,
+  # and the operator never writes it -- see docs/reference/netboxikepolicy.md.
+  description: Phase 1 proposal for the branch-office tunnels

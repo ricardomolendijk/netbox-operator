@@ -1,0 +1,22 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxIPSecProfile
+metadata:
+  name: branch-esp
+  namespace: default
+spec:
+  endpointRef: homelab
+  onConflict: Fail
+  deletionPolicy: Delete
+
+  name: Branch ESP
+  mode: esp
+
+  # Both references are required by NetBox's columns. Applied in any order the graph
+  # converges: until both resolve the profile reports RefsResolved=False and nothing is
+  # written, rather than a create NetBox would refuse with a 400.
+  ikePolicyRef:
+    name: ike-branch
+  ipsecPolicyRef:
+    name: ipsec-branch
+
+  description: The pair of policies the branch-office tunnels are protected by

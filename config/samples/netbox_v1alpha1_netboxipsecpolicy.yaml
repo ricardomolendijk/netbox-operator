@@ -1,0 +1,20 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxIPSecPolicy
+metadata:
+  name: ipsec-branch
+  namespace: default
+spec:
+  endpointRef: homelab
+  onConflict: Fail
+  deletionPolicy: Delete
+
+  name: IPSec branch policy
+
+  proposals:
+    - name: ipsec-aes256-gcm
+
+  # Perfect forward secrecy, as a Diffie-Hellman group number. Optional here because the
+  # column is nullable: a policy without PFS is an ordinary policy.
+  pfsGroup: 14
+
+  description: Phase 2 policy for the branch-office tunnels

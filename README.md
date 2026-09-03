@@ -36,7 +36,7 @@ spec:
 one Secret, one `NetBoxEndpoint`, one `NetBoxSite`, and the object visible in NetBox.
 
 > **Status: pre-alpha, under active construction.** The API group is `v1alpha1` and is
-> expected to change. All 66 CRDs ship, and `v0.0.9` is the first release to publish an
+> expected to change. All 74 CRDs ship, and `v0.0.9` is the first release to publish an
 > installable chart, CRD bundle and signed image — every tag before it carries no assets, so
 > pin the version rather than taking the newest tag. See
 > [`docs/install.md`](docs/install.md#what-is-published).
@@ -126,8 +126,8 @@ audited on every run of the test suite and written to
 
 ## Supported kinds
 
-**66 CRDs ship today**, and the catalogue is no longer delivered a milestone at a time:
-63 of them are NetBox objects driven by the same engine, and three are not NetBox objects at
+**74 CRDs ship today**, and the catalogue is no longer delivered a milestone at a time:
+71 of them are NetBox objects driven by the same engine, and three are not NetBox objects at
 all — [`NetBoxEndpoint`](docs/reference/netboxendpoint.md) is the connection,
 [`NetBoxRefGrant`](docs/reference/netboxrefgrant.md) authorises references between
 namespaces, and [`NetBoxSweep`](docs/reference/netboxsweep.md) reports what this cluster has
@@ -138,20 +138,22 @@ left behind in NetBox.
 | Connection and authorisation | `NetBoxEndpoint`, `NetBoxRefGrant`, `NetBoxSweep` |
 | `dcim`, sites and locations | `NetBoxRegion`, `NetBoxSiteGroup`, `NetBoxSite`, `NetBoxLocation` |
 | `dcim`, physical plant | `NetBoxRackRole`, `NetBoxRackType`, `NetBoxRackGroup`, `NetBoxRack`, `NetBoxRackReservation`, `NetBoxCable`, `NetBoxCableBundle` |
-| `dcim`, power | [`NetBoxPowerPanel`](docs/reference/netboxpowerpanel.md), [`NetBoxPowerFeed`](docs/reference/netboxpowerfeed.md) |
 | `dcim`, devices | `NetBoxManufacturer`, `NetBoxDeviceRole`, `NetBoxDeviceType`, `NetBoxPlatform`, `NetBoxDevice`, `NetBoxInterface`, `NetBoxMACAddress` |
 | `tenancy` | `NetBoxTenantGroup`, `NetBoxTenant`, `NetBoxContactGroup`, `NetBoxContactRole`, `NetBoxContact`, `NetBoxContactAssignment` |
 | `ipam` | `NetBoxVRF`, `NetBoxRouteTarget`, `NetBoxVLANGroup`, `NetBoxVLAN`, `NetBoxPrefix`, `NetBoxIPRange`, `NetBoxIPAddress`, `NetBoxRIR`, `NetBoxAggregate`, `NetBoxASN`, `NetBoxASNRange`, `NetBoxRole`, `NetBoxFHRPGroup`, `NetBoxFHRPGroupAssignment`, `NetBoxService`, `NetBoxServiceTemplate` |
 | Claims | `NetBoxIPAddressClaim`, `NetBoxPrefixClaim`, `NetBoxIPRangeClaim` |
 | `virtualization` | `NetBoxClusterType`, `NetBoxClusterGroup`, `NetBoxCluster`, `NetBoxVirtualMachine`, `NetBoxVMInterface`, `NetBoxVirtualDisk` |
 | `wireless` | `NetBoxWirelessLANGroup`, `NetBoxWirelessLAN`, `NetBoxWirelessLink` |
+| `vpn` | `NetBoxTunnelGroup`, `NetBoxTunnel`, `NetBoxIKEProposal`, `NetBoxIKEPolicy`, `NetBoxIPSecProposal`, `NetBoxIPSecPolicy`, `NetBoxIPSecProfile`, `NetBoxL2VPN` |
 | `extras` | `NetBoxTag`, `NetBoxCustomField`, `NetBoxCustomFieldChoiceSet`, `NetBoxCustomLink`, `NetBoxSavedFilter`, `NetBoxExportTemplate`, `NetBoxConfigTemplate`, `NetBoxConfigContextProfile`, `NetBoxConfigContext` |
 
 Every one of them has a reference page — the index is
 [`docs/README.md`](docs/README.md#reference). What of NetBox's 138 REST endpoints that
 leaves implemented, deliberately excluded or still missing is audited on every run of the
-test suite and written to [`docs/coverage.md`](docs/coverage.md); circuits, power, modules
-and VPN are the largest remaining gaps.
+test suite and written to [`docs/coverage.md`](docs/coverage.md); circuits, power and modules
+are the largest remaining gaps. In `vpn`, eight of the ten models ship and only the two
+termination kinds — `vpn.TunnelTermination` and `vpn.L2VPNTermination`, whose identity is a
+generic foreign key — are deferred.
 
 ## Migrating an existing NetBox
 

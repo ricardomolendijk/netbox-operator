@@ -126,6 +126,14 @@ nav:
       - '`NetBoxRackReservation`': reference/netboxrackreservation.md
       - '`NetBoxPowerPanel`': reference/netboxpowerpanel.md
       - '`NetBoxPowerFeed`': reference/netboxpowerfeed.md
+      - '`NetBoxTunnelGroup`': reference/netboxtunnelgroup.md
+      - '`NetBoxTunnel`': reference/netboxtunnel.md
+      - '`NetBoxIKEProposal`': reference/netboxikeproposal.md
+      - '`NetBoxIKEPolicy`': reference/netboxikepolicy.md
+      - '`NetBoxIPSecProposal`': reference/netboxipsecproposal.md
+      - '`NetBoxIPSecPolicy`': reference/netboxipsecpolicy.md
+      - '`NetBoxIPSecProfile`': reference/netboxipsecprofile.md
+      - '`NetBoxL2VPN`': reference/netboxl2vpn.md
       - 'Generic references': reference/genericref.md
       - '`NetBoxRefGrant`': reference/netboxrefgrant.md
       - '`NetBoxSweep`': reference/netboxsweep.md
