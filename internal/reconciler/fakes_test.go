@@ -3,6 +3,7 @@ package reconciler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"maps"
 	"slices"
 	"testing"
@@ -11,7 +12,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	netboxv1alpha1 "github.com/ricardomolendijk/netbox-operator/api/v1alpha1"
@@ -23,7 +24,7 @@ import (
 // the real thing satisfies them too. These are the second implementations.
 var (
 	_ NetBoxClient = (*netbox.Client)(nil)
-	_ Recorder     = record.EventRecorder(nil)
+	_ Recorder     = events.EventRecorder(nil)
 	_ Object       = (*fakeKind)(nil)
 	_ Endpoints    = fakeEndpoints{}
 	_ Endpoints    = (*blockingEndpoints)(nil)
@@ -436,13 +437,31 @@ func (f *fakeFinalizers) UpdateFinalizers(_ context.Context, obj client.Object) 
 // errFinalizerWrite stands in for an API-server rejection of a finalizer update.
 var errFinalizerWrite = errors.New("finalizer update rejected")
 
-// fakeRecorder collects Events as "Type/Reason".
+// fakeRecorder collects Events as "Type/Reason", and keeps the whole of each one for the
+// tests that care what events.k8s.io/v1 was actually handed (events_test.go).
 type fakeRecorder struct {
-	events []string
+	events   []string
+	recorded []recordedEvent
 }
 
-func (f *fakeRecorder) Eventf(_ runtime.Object, eventtype, reason, _ string, _ ...any) {
+// recordedEvent is one Eventf call, unpacked.
+type recordedEvent struct {
+	regarding runtime.Object
+	related   runtime.Object
+	eventtype string
+	reason    string
+	action    string
+	note      string
+}
+
+func (f *fakeRecorder) Eventf(regarding, related runtime.Object,
+	eventtype, reason, action, note string, args ...any,
+) {
 	f.events = append(f.events, eventtype+"/"+reason)
+	f.recorded = append(f.recorded, recordedEvent{
+		regarding: regarding, related: related, eventtype: eventtype,
+		reason: reason, action: action, note: fmt.Sprintf(note, args...),
+	})
 }
 
 // errStatusWrite stands in for an API-server rejection of a status update.

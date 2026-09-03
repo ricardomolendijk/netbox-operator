@@ -13,7 +13,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
@@ -40,7 +40,7 @@ type NetBoxEndpointReconciler struct {
 	// answer to "why is this endpoint not working" that needs no knowledge of conditions.
 	// Optional: a nil recorder simply records nothing, so a test that does not care about
 	// Events does not have to wire one.
-	Recorder record.EventRecorder
+	Recorder events.EventRecorder
 
 	// Secrets is the deploy-time namespace list the manager's Secret informer and RBAC
 	// were built from, so an endpoint in a namespace nobody granted gets a condition
@@ -51,7 +51,20 @@ type NetBoxEndpointReconciler struct {
 
 // +kubebuilder:rbac:groups=netbox.kubeforge.org,resources=netboxendpoints,verbs=get;list;watch
 // +kubebuilder:rbac:groups=netbox.kubeforge.org,resources=netboxendpoints/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=events.k8s.io,resources=events,verbs=create;patch
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
+
+// Both event groups, and both are load-bearing. Every Event this operator emits goes to
+// events.k8s.io/v1 (#294), which is a different resource to the API server than the
+// core/v1 `events` the operator used to write -- a grant for one is not a grant for the
+// other, and the mistake fails only in a real cluster, where a rejected Event is a line in
+// the manager's log and nothing else.
+//
+// The legacy grant stays for two reasons. controller-runtime's own leader election still
+// takes a core/v1 recorder (pkg/leaderelection/leader_election.go), so the manager writes
+// core/v1 Events whatever this operator does; and during a rolling upgrade an old manager
+// pod is still emitting core/v1 Events under the new ClusterRole, which is applied before
+// the pods roll. Dropping it is a separate change, once no supported version writes them.
 
 // There is deliberately no `secrets` marker here, and the generated ClusterRole therefore
 // grants no Secret access at all. Secrets are read under one namespaced Role per namespace
@@ -487,11 +500,15 @@ func debugUnless(changed bool) int {
 // event records an Event, when there is a recorder to record it to. Callers emit only on
 // a transition: an Event per resync would put one line per endpoint per interval into the
 // namespace, and `kubectl describe` would show a page of the same thing.
+// The Event names no `related` object and never will: an endpoint's Events are about the
+// endpoint. The action comes from the reason, so the two vocabularies cannot drift apart
+// for the same reason the condition reason and the Event reason cannot (v1alpha1.EventAction).
 func (r *NetBoxEndpointReconciler) event(e *netboxv1alpha1.NetBoxEndpoint, eventtype, reason, message string) {
 	if r.Recorder == nil {
 		return
 	}
-	r.Recorder.Event(e, eventtype, reason, message)
+	r.Recorder.Eventf(e, nil, eventtype, reason, netboxv1alpha1.EventAction(reason),
+		"%s", netboxv1alpha1.EventNote(message))
 }
 
 func setCondition(e *netboxv1alpha1.NetBoxEndpoint, condType string, status metav1.ConditionStatus, reason, message string) {

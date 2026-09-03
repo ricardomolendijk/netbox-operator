@@ -347,6 +347,21 @@ Three are worth knowing about specifically:
 A `NetBoxEndpoint` reuses its condition reason as the Event reason, and emits only on
 transition.
 
+Every Event also carries an **action** — the operation the operator was performing, in the
+same words as the `action` key on the log line beside it: `Probe`, `Bootstrap`, `Create`,
+`Update`, `Recreate`, `Adopt`, `Write`, `ReportDrift`, `Claim`, `Delete`, `Materialise`,
+`Prune`, `Allocate`, `Sweep`. `kubectl describe` does not show it; ask for it by name:
+
+```sh
+kubectl get events.events.k8s.io -n <ns> \
+  -o custom-columns='REASON:.reason,ACTION:.action,OBJECT:.regarding.name,NOTE:.note'
+```
+
+Grouping by action is the quickest way to answer "is this a NetBox problem or a Kubernetes
+problem": a namespace full of `Probe` warnings is one endpoint, a namespace full of
+`Allocate` warnings is one pool. The reason/action table is in
+[observability](operations/observability.md#events).
+
 ## Confirming which Secret is actually in use
 
 The controller indexes endpoints by both referenced Secret names. To see the reference the

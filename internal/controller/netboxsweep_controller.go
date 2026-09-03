@@ -13,7 +13,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -68,7 +68,7 @@ type NetBoxSweepReconciler struct {
 
 	// Recorder emits the Events a `kubectl describe` shows. Optional: a nil recorder
 	// records nothing.
-	Recorder record.EventRecorder
+	Recorder events.EventRecorder
 }
 
 // +kubebuilder:rbac:groups=netbox.kubeforge.org,resources=netboxsweeps,verbs=get;list;watch
@@ -431,7 +431,8 @@ func (r *NetBoxSweepReconciler) event(sweep *netboxv1alpha1.NetBoxSweep, eventty
 		return
 	}
 
-	r.Recorder.Event(sweep, eventtype, reason, message)
+	r.Recorder.Eventf(sweep, nil, eventtype, reason, netboxv1alpha1.EventAction(reason),
+		"%s", netboxv1alpha1.EventNote(message))
 }
 
 // SetupWithManager registers the sweep controller.

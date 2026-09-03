@@ -108,7 +108,7 @@ func startManager(cfg *rest.Config) (func(), error) {
 		// The real recorder, so the envtest suite exercises the same path production
 		// does; Event *content* is asserted against a FakeRecorder in events_test.go,
 		// where one test's Events cannot be another's.
-		Recorder: mgr.GetEventRecorderFor("netboxendpoint-controller"), //nolint:staticcheck // SA1019: the events-API migration is #294 group 1
+		Recorder: mgr.GetEventRecorder("netboxendpoint-controller"),
 	}
 	if err := reconciler.SetupWithManager(mgr); err != nil {
 		return nil, fmt.Errorf("setup: %w", err)
@@ -130,7 +130,7 @@ func startManager(cfg *rest.Config) (func(), error) {
 		Client:   mgr.GetClient(),
 		Clients:  clients,
 		Scheme:   mgr.GetScheme(),
-		Recorder: mgr.GetEventRecorderFor("netboxsweep-controller"), //nolint:staticcheck // SA1019: the events-API migration is #294 group 1
+		Recorder: mgr.GetEventRecorder("netboxsweep-controller"),
 	}
 	if err := sweeps.SetupWithManager(mgr); err != nil {
 		return nil, fmt.Errorf("sweep controller: %w", err)

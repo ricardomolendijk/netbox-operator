@@ -182,19 +182,18 @@ type StatusReader interface {
 	LiveStatus(ctx context.Context, obj Object) (netboxv1alpha1.NetBoxObjectStatus, error)
 }
 
-// Recorder emits Kubernetes Events, narrowed from record.EventRecorder so the engine is
-// testable without an event broadcaster.
+// Recorder emits Kubernetes Events, narrowed from client-go's events.EventRecorder so the
+// engine is testable without an event broadcaster.
 //
-// Manager.GetEventRecorderFor, which is what fills this field, is deprecated in favour of
-// GetEventRecorder and client-go's events package. That migration is deliberately not part
-// of #294's first pass, because it is not a change of type but a change of shape: the new
-// Eventf takes a second object, an *action* and a note, so this interface, its four
-// emitters and every fake change with it; the Events move to events.k8s.io/v1, which the
-// manager's RBAC does not grant today; and every emission has to be given an action it
-// does not currently have, which is a decision about what users see rather than a
-// refactor. #294 group 1 carries it, and the call sites are marked.
+// The signature is that interface's exactly, rather than something smaller: it is the
+// shape the manager hands out, and a narrower one would only mean an adapter per wiring
+// site. `related` is the second object an Event may name -- the child a parent's write
+// created or deleted -- and is nil everywhere the Event is about one object only.
+//
+// Nothing here calls Eventf directly; emit() below is the single door, because `action`
+// and the note's length are decisions this package must not make twice (#294).
 type Recorder interface {
-	Eventf(object runtime.Object, eventtype, reason, messageFmt string, args ...any)
+	Eventf(regarding, related runtime.Object, eventtype, reason, action, note string, args ...any)
 }
 
 // Object is the CR the engine reconciles: any kind that embeds the shared envelope. The
@@ -1174,9 +1173,39 @@ func payloadOf(changes []netbox.Change) netbox.Object {
 
 // event records a Kubernetes Event, when there is a recorder to record it to.
 func (e *Engine) event(obj Object, reason, format string, args ...any) {
-	if e.Events == nil {
+	emit(e.Events, obj, nil, "Normal", reason, format, args...)
+}
+
+// eventAbout is event() for something the object did to a second object -- the `related`
+// half of an events.k8s.io/v1 Event, which is exactly what a materialised or pruned child
+// is to its parent.
+//
+// It is not decoration. The new API aggregates Events on (type, reason, action, regarding,
+// related) and *not* on the note, so two children materialised from one parent within the
+// series window would otherwise collapse into one Event with the first child's note and a
+// count of two. Naming the child keeps one Event per child, which is what the parent's
+// `kubectl describe` showed before.
+func (e *Engine) eventAbout(obj Object, related runtime.Object, reason, format string, args ...any) {
+	emit(e.Events, obj, related, "Normal", reason, format, args...)
+}
+
+// warnAbout is eventAbout for a state that needs a human.
+func (e *Engine) warnAbout(obj Object, related runtime.Object, reason, format string, args ...any) {
+	emit(e.Events, obj, related, "Warning", reason, format, args...)
+}
+
+// emit is the one place this package hands an Event to a recorder.
+//
+// It fills in the two things events.k8s.io/v1 demands and callers should not have to think
+// about: the action, which the reason decides (v1alpha1.EventAction), and a note inside the
+// API server's 1024-byte limit. The message is formatted here rather than by the recorder
+// so that the limit applies to what is actually sent -- a `%s` and one argument, so a note
+// containing a stray percent sign is a note and not a format directive.
+func emit(recorder Recorder, obj, related runtime.Object, eventtype, reason, format string, args ...any) {
+	if recorder == nil {
 		return
 	}
 
-	e.Events.Eventf(obj, "Normal", reason, format, args...)
+	recorder.Eventf(obj, related, eventtype, reason, netboxv1alpha1.EventAction(reason),
+		"%s", netboxv1alpha1.EventNote(fmt.Sprintf(format, args...)))
 }

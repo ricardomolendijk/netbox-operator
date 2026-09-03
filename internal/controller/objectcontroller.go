@@ -194,9 +194,8 @@ func newObjectController(mgr ctrl.Manager, endpoints reconciler.Endpoints, kind 
 			// referring kind and decode each spec, per attempt, on a path that already
 			// runs on a backed-off retry loop.
 			Referrers: referrers{client: mgr.GetClient(), scheme: mgr.GetScheme()},
-
-			Events: mgr.GetEventRecorderFor(kind.name), //nolint:staticcheck // SA1019: the events-API migration is #294 group 1
-			Scheme: mgr.GetScheme(),
+			Events:    mgr.GetEventRecorder(kind.name),
+			Scheme:    mgr.GetScheme(),
 			// Descriptors is left nil deliberately: the engine then reads the
 			// package-level registry, which is the one every kind's init() filled.
 		},

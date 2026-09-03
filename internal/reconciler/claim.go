@@ -1687,18 +1687,10 @@ func (p *claimPass) finish(ctx context.Context, requeue time.Duration) (ctrl.Res
 
 // event records a Kubernetes Event for a claim, when there is a recorder.
 func (e *ClaimEngine) event(claim Claim, reason, format string, args ...any) {
-	if e.Events == nil {
-		return
-	}
-
-	e.Events.Eventf(claim, "Normal", reason, format, args...)
+	emit(e.Events, claim, nil, "Normal", reason, format, args...)
 }
 
 // warnClaim records a Warning Event for a state that needs a human.
 func (e *ClaimEngine) warnClaim(claim Claim, reason, format string, args ...any) {
-	if e.Events == nil {
-		return
-	}
-
-	e.Events.Eventf(claim, "Warning", reason, format, args...)
+	emit(e.Events, claim, nil, "Warning", reason, format, args...)
 }

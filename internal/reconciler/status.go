@@ -368,9 +368,5 @@ func Jitter(d time.Duration) time.Duration {
 // into that state: an Event per resync would put one line per object per interval into the
 // namespace, and `kubectl describe` would show a page of the same sentence.
 func (e *Engine) warn(obj Object, reason, format string, args ...any) {
-	if e.Events == nil {
-		return
-	}
-
-	e.Events.Eventf(obj, "Warning", reason, format, args...)
+	emit(e.Events, obj, nil, "Warning", reason, format, args...)
 }
