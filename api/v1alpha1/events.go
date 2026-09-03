@@ -126,6 +126,10 @@ var eventActions = map[string]string{
 	EventNothingToDelete:  ActionDelete,
 	EventDeleteBlocked:    ActionDelete,
 	EventFinalizerSkipped: ActionDelete,
+	// The cascade is part of the delete that provoked it, not an operation of its own: it
+	// only ever runs because NetBox refused this object's DELETE, and it is reported on the
+	// same object. A reader filtering action=Delete wants to see it.
+	EventCascadeDeleted: ActionDelete,
 
 	// Inline children.
 	EventChildMaterialised:  ActionMaterialise,
@@ -143,6 +147,11 @@ var eventActions = map[string]string{
 	EventPoolNotAllocatable:   ActionAllocate,
 	EventPoolUnexpectedStatus: ActionAllocate,
 	EventReclaimedOutsidePool: ActionAllocate,
+	// A settled claim discovering its address is gone from NetBox. Allocate rather than
+	// Probe: the subject is the allocation, and this is the operation that would hand the
+	// claim a different address if the engine ever re-allocated -- which ADR-0004 says it
+	// never does, which is exactly why the Event exists.
+	EventAllocationLost: ActionAllocate,
 }
 
 // EventAction returns the action to record an Event with, given its reason.
