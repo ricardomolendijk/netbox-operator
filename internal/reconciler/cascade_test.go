@@ -64,7 +64,7 @@ func cascadingObject() *fakeKind {
 // cascadeEngine wires an engine whose DELETE is refused and whose referrers are canned.
 func cascadeEngine(
 	t *testing.T, refs *fakeReferrers, children ChildWriter, events *fakeRecorder,
-) (*Engine, *fakeClient) {
+) *Engine {
 	t.Helper()
 
 	client := &fakeClient{deleteErr: &netbox.ProtectedError{Status: 409, Body: protectedBody}}
@@ -79,7 +79,7 @@ func cascadeEngine(
 		Referrers:   refs,
 		Events:      events,
 		Scheme:      fakeScheme(t),
-	}, client
+	}
 }
 
 // TestCascadeDeletesTheCRsInTheWay is #304's headline: a delete NetBox refuses because
@@ -96,7 +96,7 @@ func TestCascadeDeletesTheCRsInTheWay(t *testing.T) {
 	children.plant(netboxv1alpha1.GroupVersion.WithKind("NetBoxPrefix"), "prefix-10-18", nil, nil)
 
 	events := &fakeRecorder{}
-	engine, _ := cascadeEngine(t, refs, children, events)
+	engine := cascadeEngine(t, refs, children, events)
 
 	obj := cascadingObject()
 	if _, err := engine.Reconcile(context.Background(), obj); err != nil {
@@ -137,7 +137,7 @@ func TestCascadeNeedsTheAnnotation(t *testing.T) {
 	children.plant(netboxv1alpha1.GroupVersion.WithKind("NetBoxVLAN"), "vlan-1301", nil, nil)
 
 	events := &fakeRecorder{}
-	engine, _ := cascadeEngine(t, refs, children, events)
+	engine := cascadeEngine(t, refs, children, events)
 
 	obj := deletingObject()
 	if _, err := engine.Reconcile(context.Background(), obj); err != nil {
@@ -163,7 +163,7 @@ func TestCascadeNeedsTheAnnotation(t *testing.T) {
 func TestCascadeWithNothingToDeleteReportsProtected(t *testing.T) {
 	refs := &fakeReferrers{}
 	events := &fakeRecorder{}
-	engine, _ := cascadeEngine(t, refs, newFakeChildren(), events)
+	engine := cascadeEngine(t, refs, newFakeChildren(), events)
 
 	obj := cascadingObject()
 	if _, err := engine.Reconcile(context.Background(), obj); err != nil {
@@ -190,7 +190,7 @@ func TestCascadeDoesNotRedeleteWhatIsAlreadyGoing(t *testing.T) {
 	children.plant(netboxv1alpha1.GroupVersion.WithKind("NetBoxVLAN"), "vlan-1301", nil, nil)
 
 	events := &fakeRecorder{}
-	engine, _ := cascadeEngine(t, refs, children, events)
+	engine := cascadeEngine(t, refs, children, events)
 
 	obj := cascadingObject()
 	if _, err := engine.Reconcile(context.Background(), obj); err != nil {
@@ -217,7 +217,7 @@ func TestCascadeDoesNotRedeleteWhatIsAlreadyGoing(t *testing.T) {
 // blocker is somebody else's and give up, on a deletion that is actually recoverable.
 func TestCascadeFailureIsAnError(t *testing.T) {
 	refs := &fakeReferrers{err: errReferrers}
-	engine, _ := cascadeEngine(t, refs, newFakeChildren(), &fakeRecorder{})
+	engine := cascadeEngine(t, refs, newFakeChildren(), &fakeRecorder{})
 
 	obj := cascadingObject()
 

@@ -560,25 +560,13 @@ func (p *pass) protected(ctx context.Context, err error) (ctrl.Result, error) {
 	// the refusal the way it did before the annotation existed, which is the behaviour a
 	// test that never wired one is entitled to.
 	if p.cascades() && p.engine.Referrers != nil {
-		out, cascadeErr := p.cascade(ctx)
+		result, handled, cascadeErr := p.cascadeRefusal(ctx, status.ID, wait, err)
 		if cascadeErr != nil {
 			return ctrl.Result{}, cascadeErr
 		}
 
-		if out.any() {
-			// A Warning, and only when this pass deleted something. Deleting Kubernetes
-			// objects the user did not name is not a thing to record at debug -- and
-			// repeating it on every retry while the same referrers finish going is how the
-			// Events somebody needed get evicted from the namespace.
-			if len(out.deleted) > 0 {
-				p.engine.warn(p.obj, netboxv1alpha1.EventCascadeDeleted,
-					"netbox refused to delete %s/%d, so %s=true deleted the CRs referencing it: %s",
-					p.desc.Endpoint, status.ID, netboxv1alpha1.CascadeDeleteAnnotation,
-					strings.Join(out.deleted, ", "))
-			}
-
-			return p.blocked(ctx, netboxv1alpha1.ReasonCascading, wait,
-				out.message(p.desc.Endpoint, status.ID, err))
+		if handled {
+			return result, nil
 		}
 	}
 
@@ -593,6 +581,43 @@ func (p *pass) protected(ctx context.Context, err error) (ctrl.Result, error) {
 
 	return p.blocked(ctx, netboxv1alpha1.ReasonProtected, wait,
 		fmt.Sprintf("%v; attempt %d, retrying in %s", err, status.DeletionAttempts, wait))
+}
+
+// cascadeRefusal runs the cascade for a refused delete and reports whether it took over the
+// pass. handled is false when the cascade found nothing to delete, which leaves the caller to
+// report the refusal exactly as it would have without the annotation.
+//
+// Its own method rather than a branch: nested inside protected() it is four levels deep and
+// the linter is right that that is one too many to read, but the real argument is that "what
+// the annotation does" and "how a refusal is reported" are two decisions that happen to meet
+// at one call site.
+func (p *pass) cascadeRefusal(
+	ctx context.Context, id int64, wait time.Duration, err error,
+) (ctrl.Result, bool, error) {
+	out, cascadeErr := p.cascade(ctx)
+	if cascadeErr != nil {
+		return ctrl.Result{}, false, cascadeErr
+	}
+
+	if !out.any() {
+		return ctrl.Result{}, false, nil
+	}
+
+	// A Warning, and only when this pass deleted something. Deleting Kubernetes objects the
+	// user did not name is not a thing to record at debug -- and repeating it on every retry
+	// while the same referrers finish going is how the Events somebody needed get evicted
+	// from the namespace.
+	if len(out.deleted) > 0 {
+		p.engine.warn(p.obj, netboxv1alpha1.EventCascadeDeleted,
+			"netbox refused to delete %s/%d, so %s=true deleted the CRs referencing it: %s",
+			p.desc.Endpoint, id, netboxv1alpha1.CascadeDeleteAnnotation,
+			strings.Join(out.deleted, ", "))
+	}
+
+	result, blockErr := p.blocked(ctx, netboxv1alpha1.ReasonCascading, wait,
+		out.message(p.desc.Endpoint, id, err))
+
+	return result, true, blockErr
 }
 
 // protectedBackoff doubles the wait per refusal, up to protectedRetryCap.
