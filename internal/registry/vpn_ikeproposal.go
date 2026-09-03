@@ -66,7 +66,7 @@ func vpnIKEProposalDescriptor() Descriptor {
 		// No ContainmentRef: the model has no foreign key bar `owner`, and the policies that
 		// point *at* a proposal do so through a ManyToManyField, which cascades nothing.
 		//
-		// RetainOnDelete is left false: a crypto proposal is configuration a manifest
+		// DataLossOnDelete is left false: a crypto proposal is configuration a manifest
 		// recreates, not allocated state (#176, docs/concepts/deletion.md).
 
 		// The four columns every ChangeLoggedModel carries and the operator must never write

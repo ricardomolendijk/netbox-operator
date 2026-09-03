@@ -46,7 +46,7 @@ func vpnTunnelDescriptor() Descriptor {
 		// refuses to delete a tunnel group that still has tunnels, so a cluster-side cascade
 		// would delete the CR and leave the row.
 		//
-		// RetainOnDelete is left false: a tunnel is configuration a manifest recreates, not
+		// DataLossOnDelete is left false: a tunnel is configuration a manifest recreates, not
 		// allocated state (#176, docs/concepts/deletion.md).
 
 		// The four columns every ChangeLoggedModel carries, plus the counter the serializer

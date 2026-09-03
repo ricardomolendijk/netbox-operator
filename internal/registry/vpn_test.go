@@ -70,11 +70,13 @@ func TestVPNDescriptorsAreRegisteredAndValid(t *testing.T) {
 			}
 
 			// Crypto parameters and tunnels are configuration a manifest recreates, not
-			// allocated state: nothing here frees a resource when it is deleted, which is what
-			// #176 reserved Retain for.
-			if d.RetainOnDelete {
-				t.Errorf("RetainOnDelete = true; a vpn catalogue object is configuration a " +
-					"manifest recreates (#176, docs/concepts/deletion.md)")
+			// allocated state: nothing here frees a resource when it is deleted. #316 replaced
+			// RetainOnDelete with DataLossOnDelete and a universal Delete default, so the
+			// question is now the other way round -- does deleting destroy something a manifest
+			// cannot put back -- and for this app the answer is no.
+			if d.DataLossOnDelete {
+				t.Errorf("DataLossOnDelete = true; a vpn catalogue object is configuration a " +
+					"manifest recreates (docs/concepts/deletion.md)")
 			}
 
 			// Every foreign key in the app bar the two termination models' parents is PROTECT
