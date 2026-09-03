@@ -57,6 +57,7 @@ func TestEventActionVocabulary(t *testing.T) {
 		EventFinalizerSkipped: ActionDelete,
 
 		// Inline children.
+		EventCascadeDeleted:     ActionDelete,
 		EventChildMaterialised:  ActionMaterialise,
 		EventChildFieldReverted: ActionMaterialise,
 		EventChildPruned:        ActionPrune,
@@ -71,6 +72,7 @@ func TestEventActionVocabulary(t *testing.T) {
 		EventPoolNotAllocatable:   ActionAllocate,
 		EventPoolUnexpectedStatus: ActionAllocate,
 		EventReclaimedOutsidePool: ActionAllocate,
+		EventAllocationLost:       ActionAllocate,
 	}
 
 	for reason, action := range want {
