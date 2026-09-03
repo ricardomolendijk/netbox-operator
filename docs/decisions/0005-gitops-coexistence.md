@@ -13,7 +13,8 @@ rule, and why the operator ships none
 checkable while the operator converges a child's spec
 ([#45](https://github.com/ricardomolendijk/netbox-operator/issues/45)).
 **Amended:** 2026-09-02 — §4b says what a restore costs a claim whose *cluster* survived it,
-which is not re-allocation ([#167](https://github.com/ricardomolendijk/netbox-operator/issues/167)).
+which is not re-allocation but is now reported: the identity search runs again on the settled
+path ([#167](https://github.com/ricardomolendijk/netbox-operator/issues/167)).
 
 ## The governing principle
 
@@ -241,10 +242,14 @@ claims that changed are visible in `status.address`.
 That is the rebuild case, where every claim comes back with an empty `status`. A claim whose
 cluster survived the restore does **not** re-allocate — it keeps a pin the restored NetBox has
 no record of, and which NetBox is therefore free to hand to a second claim
-([#167](https://github.com/ricardomolendijk/netbox-operator/issues/167)). The runbook carries
-that as its own row in
-[what survives what](../operations/gitops.md#what-survives-what), because it is the one
-restore outcome `status.address` cannot show you by itself.
+([#167](https://github.com/ricardomolendijk/netbox-operator/issues/167)). It does now **check**
+that pin: once per `resyncPeriod` a settled claim searches for the identity above and reports
+`Ready=False, Reason=AllocationConflict` or `AllocationLost` when NetBox no longer agrees the
+value is its own. Reclaim-by-identity and this check are the same query pointed at two moments
+of a claim's life — before the allocation it is how the address is recovered, after it is how
+its loss is noticed. The runbook carries the remedy as its own row in
+[what survives what](../operations/gitops.md#what-survives-what), because it is the one restore
+outcome `status.address` cannot show you by itself.
 
 What an operator actually does — in which order, and what survives which failure — is the
 runbook in

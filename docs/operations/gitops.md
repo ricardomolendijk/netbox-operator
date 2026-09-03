@@ -320,21 +320,32 @@ If the cluster is being rebuilt from Git *and* NetBox from backup, the order mat
 | What was lost | Does an allocated address survive? | Because |
 |---|---|---|
 | NetBox, restored from a backup **taken after** the allocation; cluster intact | **Yes** | The child `NetBoxIPAddress` holds the address literally in its spec, and the claim never re-allocates |
-| NetBox, restored from a snapshot **predating** the allocation; cluster intact | **Yes — and a second claim may be handed it too** | The restored database has no record of the address, so NetBox offers it as free to the next claim that asks, and the claim already holding it never re-reads its pin to notice ([#167](https://github.com/ricardomolendijk/netbox-operator/issues/167)) |
+| NetBox, restored from a snapshot **predating** the allocation; cluster intact | **Yes — and a second claim may be handed it too, but both now say so** | The restored database has no record of the address, so NetBox offers it as free to the next claim that asks. The claim already holding it re-reads its pin once per `resyncPeriod` and reports `Ready=False, Reason=AllocationConflict` or `AllocationLost` rather than going on claiming success ([#167](https://github.com/ricardomolendijk/netbox-operator/issues/167)) |
 | Cluster, rebuilt from Git; NetBox intact | **Yes** | The deterministic allocation identity finds the existing object and adopts it (ADR-0005 §3) |
 | Both; NetBox restored first | **Yes, for everything the backup contains** | Reclaim by identity finds the restored object |
 | Both; NetBox empty or restored afterwards | **No** | Nothing holds the value any more, so every claim allocates afresh |
 
-**The second row is the one to plan against, because nothing in the system reports it.**
-`status.address` is a pin, not a lease: a claim that has allocated short-circuits before it
-reaches the endpoint at all — the steady state of a settled claim is a reconcile that talks to
-nobody, which is what makes "reconcile fifty times, POST once" structural
+**The second row is the one to plan against.** `status.address` is a pin, not a lease: a claim
+that has allocated short-circuits the allocation before it reaches the endpoint at all, which
+is what makes "reconcile fifty times, POST once" structural
 ([ADR-0004](../decisions/0004-claims-first-allocation.md#statusaddress-is-immutable-the-operator-never-re-allocates)).
-So a claim that allocated its address after the snapshot goes on reporting `Allocated=True`
-for it, while the restored NetBox — which has never heard of that address — offers it to the
-next claim that asks. Two claims, one address, both `Ready=True`, and neither of them did
-anything wrong. Each of the three mechanisms this page recommends misses it for its own
-reason:
+So a claim that allocated its address after the snapshot keeps `Allocated=True` for it, while
+the restored NetBox — which has never heard of that address — offers it to the next claim that
+asks. Two claims, one address, and neither of them did anything wrong.
+
+Since [#167](https://github.com/ricardomolendijk/netbox-operator/issues/167) the *first* of
+those two claims reports it. A settled claim re-reads its allocation once per the endpoint's
+`resyncPeriod` and compares what NetBox says against its own allocation identity — see [the pin
+is verified, not trusted](../concepts/claims.md#the-pin-is-verified-not-trusted). After a
+restore it finds either nothing (`Ready=False, Reason=AllocationLost`) or somebody else's
+allocation (`Ready=False, Reason=AllocationConflict`, naming the other object's id and
+identity), so the state is visible in `kubectl get` and alertable on
+`netbox_operator_reconcile_total{result="error"}` within one resync period. It is still a
+hazard to plan against — the operator will not choose between two claims — but it is no longer
+a silent one.
+
+None of the three mechanisms this page recommends is what finds it, and each misses it for its
+own reason:
 
 - **Reclaim by identity** ([ADR-0005 §3](../decisions/0005-gitops-coexistence.md#3-allocations-survive-a-cluster-rebuild-without-writing-to-git))
   works by finding the object that already holds the address. The restore erased the row it
@@ -350,16 +361,40 @@ reason:
 - **Reading `status.address` afterwards**, [step 3 of a both-lost restore](#both-were-lost),
   reads the pin — and the pin is the thing that is wrong.
 
-The check that does find it compares the pin against NetBox rather than trusting it: for each
-claim, `GET /api/ipam/ip-addresses/?address=<status.address>` and compare the object's
-allocation-identity custom field with the claim's `status.allocationIdentity`. The field is
-`cf_k8s_allocation_identity` unless the endpoint renamed it — `spec.managedBy.allocationIdentityField`
-is configurable, and reading the default on an endpoint that set something else returns
-nothing and reads as "no hazard here". No object where a settled claim says there is one, or
-an object carrying somebody else's identity, is this hazard.
+**What finds it is the operator's own pin verification**, which compares the pin against NetBox
+rather than trusting it: once per `resyncPeriod` a settled claim searches for the object
+carrying its `status.allocationIdentity` and checks that it still holds `status.address`. So
+after a restore the check to run is `kubectl get netboxipaddressclaims -A` and to read the
+`READY` column, rather than a query per claim by hand:
 
-The remedy is a human's, because both claims are entitled to the address and only you know
-which NIC, DNS record or firewall rule is already using it.
+```console
+$ kubectl get netboxipaddressclaims -A
+NAMESPACE   NAME       ADDRESS         PREFIX          READY   AGE
+homelab     dns-eth0   10.0.20.37/24   10.0.20.0/24    False   34d
+homelab     ntp-eth0   10.0.20.38/24   10.0.20.0/24    False   34d
+
+$ kubectl -n homelab get netboxipaddressclaim dns-eth0 \
+    -o jsonpath='{.status.conditions[?(@.type=="Ready")].message}'
+netbox ipam/ip-addresses/57 holds address="10.0.20.37/24", which this claim reports as its
+own, and carries allocation identity 9f2c41b7ae05d813 rather than this claim's f3fb013aa1d2ffc2.
+```
+
+An address with `READY False` is one of these two; anything still `True` was confirmed against
+NetBox within the last `resyncPeriod`.
+
+The equivalent by hand — for a claim on an endpoint that cannot verify, or to confirm what the
+condition says — is `GET /api/ipam/ip-addresses/?address=<status.address>`, comparing the
+object's allocation-identity custom field with the claim's `status.allocationIdentity`. The
+field is `cf_k8s_allocation_identity` unless the endpoint renamed it —
+`spec.managedBy.allocationIdentityField` is configurable, and reading the default on an
+endpoint that set something else returns nothing and reads as "no hazard here". No object where
+a settled claim says there is one, or an object carrying somebody else's identity, is this
+hazard.
+
+The remedy is still a human's, because both claims are entitled to the address and only you
+know which NIC, DNS record or firewall rule is already using it. The operator reports and
+changes nothing: it never re-allocates, never adopts the other object, and never deletes
+either.
 
 !!! danger "Do not simply delete the losing claim"
 
@@ -368,7 +403,7 @@ which NIC, DNS record or firewall rule is already using it.
     [allocation identity](#claims-which-have-no-onconflict-to-set) and allocate afresh. **In
     this scenario that can delete the address you decided to keep.** Deleting a claim frees
     its address by `DELETE`ing the NetBox object at the id in `status.netboxID`
-    (`internal/reconciler/claim.go:1286`), unconditionally — nothing re-checks that the object
+    (`internal/reconciler/claim.go:1715`), unconditionally — nothing re-checks that the object
     still carries this claim's allocation identity. After a restore, that id came from the
     pre-restore database and the restored one has reissued it, quite possibly to the surviving
     claim's address.
@@ -376,19 +411,15 @@ which NIC, DNS record or firewall rule is already using it.
     Free the losing claim by a route that cannot delete anything, in order of preference:
 
     1. Set `spec.deletionPolicy: Retain` on it **before** deleting the CR
-       (`internal/reconciler/claim.go:1229`), which leaves the NetBox object alone.
+       (`internal/reconciler/claim.go:1658`), which leaves the NetBox object alone.
     2. Or delete the NetBox object by hand first, then delete the CR, so the id is stale in
        the harmless direction.
     3. Break-glass only: the `netbox.kubeforge.org/skip-finalizer: "true"` annotation
-       (`internal/reconciler/claim.go:1218`) drops the finalizer without touching NetBox.
+       (`internal/reconciler/claim.go:1647`) drops the finalizer without touching NetBox.
 
 The rule the whole row reduces to: **do not restore a snapshot older than your live
-allocations without reconciling them against `status.address` first.**
-
-Whether the engine should catch this itself — a settled claim re-reading its address on the
-quiet path and reporting `Conflict` when another allocation identity holds it — is tracked on
-[#167](https://github.com/ricardomolendijk/netbox-operator/issues/167). Until that lands, the
-check above is the only thing standing in front of it.
+allocations without reconciling them against `status.address` first.** The operator now does
+that reconciling for you and reports the result; it does not make the restore safe.
 
 The bottom row is the only *unrecoverable* loss, and it is a NetBox backup problem rather than
 a Git one — the second row is recoverable, but only by the human check above, which is why it

@@ -11,8 +11,9 @@ inline key is `claimFrom` rather than `fromPrefixRef`
 ([#225](https://github.com/ricardomolendijk/netbox-operator/issues/225), reversing
 [#182](https://github.com/ricardomolendijk/netbox-operator/issues/182)).
 **Amended:** 2026-09-02 — [never re-allocating](#statusaddress-is-immutable-the-operator-never-re-allocates)
-names the one restore that turns it into a double allocation, and points at the runbook row
-that carries it ([#167](https://github.com/ricardomolendijk/netbox-operator/issues/167)).
+names the one restore that turns it into a double allocation, and a settled claim now verifies
+its pin against NetBox once per resync period and reports it rather than leaving it to a
+runbook ([#167](https://github.com/ricardomolendijk/netbox-operator/issues/167)).
 
 ## Decision
 
@@ -172,16 +173,23 @@ spec. The claim goes `Bound=True` again and nothing else happens.
 **That recovery assumes the address is still the claim's to take back, and one restore breaks
 the assumption.** Restore NetBox from a snapshot older than the allocation and the restored
 database has no record of the address at all, so it is offered as free to whichever claim asks
-next — and neither claim reports a conflict: the first because a settled claim short-circuits
-above without asking NetBox anything, the second because there was nothing there to find. This
-decision is unchanged by that, because the alternative is the silent re-allocation this
-section exists to rule out. It is carried as an operational hazard instead, as a row in
-[what survives what](../operations/gitops.md#what-survives-what)
-([#167](https://github.com/ricardomolendijk/netbox-operator/issues/167)).
+next. This decision is unchanged by that, because the alternative is the silent re-allocation
+this section exists to rule out — the operator will not choose which of two claims keeps an
+address that something outside Kubernetes may already be using.
+
+**What did change is that both claims now say so** ([#167](https://github.com/ricardomolendijk/netbox-operator/issues/167)).
+Immutable is not the same as unexamined: a settled claim re-reads its allocation once per the
+endpoint's `resyncPeriod` and compares what NetBox holds against its own allocation identity.
+It still never re-allocates, adopts or deletes — the verification's only possible effect is to
+take `Ready` away. `Allocated` stays `True`, because it is a historical fact and no later event
+un-allocates an address that was allocated. The runbook row in
+[what survives what](../operations/gitops.md#what-survives-what) is now a state the operator
+reports rather than one a human has to go looking for.
 
 If re-creation is genuinely impossible — a third party has taken the address, or the pool
-prefix is gone — the claim reports `Bound=False`, `Ready=False`,
-`Reason=AllocationLost` with a long backoff, and waits for a human.
+prefix is gone — the claim reports `Ready=False` with a long backoff and waits for a human:
+`Reason=AllocationConflict` when something else holds the value, `Reason=AllocationLost` when
+nothing does.
 
 The reason this is worth stating as a guarantee rather than leaving to the code: by the
 time a claim has handed out an address, something outside Kubernetes is using it — a NIC's
