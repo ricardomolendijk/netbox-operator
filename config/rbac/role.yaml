@@ -51,6 +51,8 @@ rules:
   - netboxmacaddresses
   - netboxmanufacturers
   - netboxplatforms
+  - netboxpowerfeeds
+  - netboxpowerpanels
   - netboxprefixclaims
   - netboxrackgroups
   - netboxrackreservations
@@ -108,6 +110,8 @@ rules:
   - netboxmacaddresses/finalizers
   - netboxmanufacturers/finalizers
   - netboxplatforms/finalizers
+  - netboxpowerfeeds/finalizers
+  - netboxpowerpanels/finalizers
   - netboxprefixclaims/finalizers
   - netboxprefixes/finalizers
   - netboxrackgroups/finalizers
@@ -175,6 +179,8 @@ rules:
   - netboxmacaddresses/status
   - netboxmanufacturers/status
   - netboxplatforms/status
+  - netboxpowerfeeds/status
+  - netboxpowerpanels/status
   - netboxprefixclaims/status
   - netboxprefixes/status
   - netboxrackgroups/status

@@ -1,0 +1,43 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxPowerFeed
+metadata:
+  name: feed-a1
+  namespace: default
+spec:
+  endpointRef: homelab
+  onConflict: Fail
+  deletionPolicy: Delete
+
+  name: Feed A1
+
+  # Required, and half the identity: `(power_panel, name)` is dcim.PowerFeed's one unique
+  # constraint. `name` alone is unique nowhere, so a lookup that dropped the panel would match
+  # every feed of that name in the whole NetBox and adopt one -- which is why nothing is written
+  # until this resolves. on_delete=PROTECT, so it is not a containment parent either: NetBox
+  # refuses to delete a panel that still has feeds.
+  powerPanelRef:
+    name: panel-a
+
+  # Optional and in no natural-key candidate: NetBox constrains nothing on `rack`, so two feeds
+  # called `Feed A1` on this panel are refused however their racks differ.
+  rackRef:
+    name: a1
+
+  # The four enums with model-level constant defaults. Restated here at NetBox's own values so
+  # the operator manages them from the first reconcile -- a defaulted field that never reaches a
+  # payload is a field the operator can never correct.
+  status: active
+  type: primary
+  supply: ac
+  phase: single-phase
+
+  # `voltage`, `amperage` and `maxUtilization` are deliberately absent, and this is the field
+  # this Kind exists to get right. Their NetBox column defaults are
+  # ConfigItem('POWERFEED_DEFAULT_VOLTAGE') and friends -- resolved from the *target NetBox's*
+  # own configuration rather than from the model -- so omitting them means "whatever this NetBox
+  # is configured for". The POST body carries no `voltage` key at all, and no later reconcile
+  # reports drift against whatever NetBox defaulted to. Setting `voltage: 230` here would write
+  # it and drift-correct it like any other column; hardcoding NetBox's shipped 120 into a
+  # manifest is what silently reconfigures a European installation.
+
+  description: A feed for rack A1

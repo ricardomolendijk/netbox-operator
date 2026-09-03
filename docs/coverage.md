@@ -16,16 +16,16 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 | | count |
 |---|--:|
 | NetBox REST endpoints | 138 |
-| — implemented as a Kind | 58 |
+| — implemented as a Kind | 60 |
 | — excluded, with a reason | 27 |
-| — **not implemented** | 53 |
+| — **not implemented** | 51 |
 | in scope (endpoints − excluded) | 111 |
 | | |
-| writable columns on the implemented Kinds | 657 |
-| — written by a spec field, or engine-owned | 494 |
+| writable columns on the implemented Kinds | 680 |
+| — written by a spec field, or engine-owned | 513 |
 | — deliberately omitted, with a reason | 10 |
-| — blocked: a reference whose target model has no Kind | 69 |
-| — **MISSING**: nothing declares it and nothing blocks it | 84 |
+| — blocked: a reference whose target model has no Kind | 71 |
+| — **MISSING**: nothing declares it and nothing blocks it | 86 |
 | — of those, required on create (fails the audit) | 0 |
 | | |
 | natural-key candidates the IR calls unusable | 21 |
@@ -39,8 +39,8 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 
 | column | status | Kinds | detail |
 |---|---|--:|---|
-| `owner` | blocked | 55 | `users.Owner` is an excluded endpoint, so nothing will ever write this |
-| `tags` | MISSING | 50 | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
+| `owner` | blocked | 57 | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `tags` | MISSING | 52 | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `comments` | excluded | 6 | organisational kinds map name/slug/description only (api/v1alpha1/virtualization_clustertype.go) |
 | `tenant` | MISSING | 6 | deferred to NetBoxTenant (NBO-021), which now ships -- nothing blocks it any more |
 | `config_template` | MISSING | 4 | — |
@@ -125,6 +125,8 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 | `dcim.MACAddress` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `dcim.Manufacturer` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `dcim.Platform` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `dcim.PowerFeed` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
+| `dcim.PowerPanel` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `dcim.Rack` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `dcim.RackGroup` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
 | `dcim.RackReservation` | `owner` | Ref | — | blocked | `users.Owner` is an excluded endpoint, so nothing will ever write this |
@@ -186,6 +188,8 @@ Regenerate with `make coverage` after every schema regeneration (`docs/regenerat
 | `dcim.MACAddress` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `dcim.Manufacturer` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `dcim.Platform` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
+| `dcim.PowerFeed` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
+| `dcim.PowerPanel` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `dcim.Rack` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `dcim.RackGroup` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
 | `dcim.RackReservation` | `tags` | M2M | — | MISSING | writable on every TagsMixin model and no Kind maps it. NBO-073 makes the citation possible; no ticket adds the spec field, so this is one systematic gap and not eighteen individual ones |
@@ -328,10 +332,10 @@ each pinned column's class rather than from the IR's reason string.
 | `dcim/module-types` | `dcim.ModuleType` | — | MISSING | — |
 | `dcim/modules` | `dcim.Module` | — | MISSING | — |
 | `dcim/platforms` | `dcim.Platform` | `NetBoxPlatform` | implemented | — |
-| `dcim/power-feeds` | `dcim.PowerFeed` | — | MISSING | — |
+| `dcim/power-feeds` | `dcim.PowerFeed` | `NetBoxPowerFeed` | implemented | — |
 | `dcim/power-outlet-templates` | `dcim.PowerOutletTemplate` | — | MISSING | — |
 | `dcim/power-outlets` | `dcim.PowerOutlet` | — | MISSING | — |
-| `dcim/power-panels` | `dcim.PowerPanel` | — | MISSING | — |
+| `dcim/power-panels` | `dcim.PowerPanel` | `NetBoxPowerPanel` | implemented | — |
 | `dcim/power-port-templates` | `dcim.PowerPortTemplate` | — | MISSING | — |
 | `dcim/power-ports` | `dcim.PowerPort` | — | MISSING | — |
 | `dcim/rack-groups` | `dcim.RackGroup` | `NetBoxRackGroup` | implemented | — |

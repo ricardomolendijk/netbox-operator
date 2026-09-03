@@ -26,6 +26,7 @@ var stampedObjectTypes = []string{
 	"dcim.cable", "dcim.cablebundle",
 	"dcim.device", "dcim.devicerole", "dcim.devicetype", "dcim.interface",
 	"dcim.location", "dcim.macaddress", "dcim.manufacturer", "dcim.platform",
+	"dcim.powerfeed", "dcim.powerpanel",
 	"dcim.rack", "dcim.rackgroup", "dcim.rackreservation", "dcim.rackrole", "dcim.racktype",
 	"dcim.region", "dcim.site", "dcim.sitegroup",
 	// ipam.fhrpgroupassignment is deliberately absent: ipam.FHRPGroupAssignment's model is a
