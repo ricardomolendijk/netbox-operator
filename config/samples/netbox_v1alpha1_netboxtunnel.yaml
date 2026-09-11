@@ -1,0 +1,29 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxTunnel
+metadata:
+  name: rotterdam-hq
+  namespace: default
+spec:
+  endpointRef: homelab
+  onConflict: Fail
+  deletionPolicy: Delete
+
+  name: rotterdam-hq
+  status: active
+  encapsulation: ipsec-tunnel
+
+  # Declaring `groupRef` changes which natural key applies: with a group the tunnel is looked
+  # up as `(group_id, name)`, and without one as `name` with `?group_id=null` pinned. Omitting
+  # it here would make this a groupless tunnel, which is a different object.
+  groupRef:
+    name: branch-offices
+
+  ipsecProfileRef:
+    name: branch-esp
+
+  tunnelId: 100
+
+  # No `terminations`. vpn.TunnelTermination is a separate model whose identity is a generic
+  # foreign key, and it is not part of this release (#59); what terminates on this tunnel is
+  # set in NetBox until that Kind ships.
+  description: Rotterdam branch to headquarters

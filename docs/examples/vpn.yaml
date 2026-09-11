@@ -1,0 +1,294 @@
+# The `vpn` app, end to end: the crypto catalogue, a tunnel group, two tunnels and an L2VPN.
+#
+#   kubectl create namespace homelab
+#   kubectl apply -f docs/examples/vpn.yaml
+#   kubectl get nbtunnel,nbl2vpn -n homelab -w
+#
+# Replace the URL and the token before applying.
+#
+# Two things this file is really showing.
+#
+# The first is a **conditional identity**. `vpn.Tunnel` carries two unique constraints --
+# (group, name), and (name) with condition=Q(group__isnull=True) -- so `rotterdam-hq` below,
+# which names a group, is looked up as `(group_id, name)`, and `lab-gre`, which does not, as
+# `?name=lab-gre&group_id=null`. Declaring `groupRef` is what decides which applies; the null
+# is pinned rather than omitted, because omitting it would match a tunnel of that name inside
+# somebody else's group and the follow-up PATCH would move it out. See
+# docs/reference/netboxtunnel.md.
+#
+# The second is what is **not** here. `vpn.IKEPolicy.preshared_key` is a secret, and a secret
+# may never be inline in a spec: there is no `presharedKey` field and no `presharedKeySecretRef`
+# either, because the engine has no field class that reads a Secret into a payload (#241). The
+# operator neither writes nor clears the key NetBox holds -- set it in NetBox by hand. See
+# docs/reference/netboxikepolicy.md.
+#
+# Two of the ten `vpn` models are not Kinds at all: vpn.TunnelTermination and
+# vpn.L2VPNTermination are deferred, because the identity of each is a generic foreign key
+# (#59). What terminates on a tunnel or an L2VPN is set in NetBox until they ship.
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: netbox-token
+  namespace: homelab
+  labels:
+    # Required. The operator's Secret cache selects on this label, so a Secret without it is
+    # invisible even when the name on the endpoint is right. See docs/operations/rbac.md.
+    netbox.kubeforge.org/endpoint-credential: "true"
+type: Opaque
+stringData:
+  # A NetBox API token with write access to the vpn app.
+  token: "0123456789abcdef0123456789abcdef01234567"
+---
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxEndpoint
+metadata:
+  name: homelab
+  namespace: homelab
+spec:
+  url: https://netbox.home.arpa
+  tokenSecretRef:
+    name: netbox-token
+  resyncPeriod: 2m
+  mode: Apply
+---
+# The tenant both the tunnel and the L2VPN are filed under. Not part of either identity: no
+# constraint on either model names `tenant`, so the lookups do not filter on it.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxTenant
+metadata:
+  name: acme
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  name: Acme
+  slug: acme
+---
+# A tunnel group -- and, like dcim.RackGroup, not the tree its name suggests. vpn.TunnelGroup is
+# an OrganizationalModel with no columns of its own: no `parent`, no MPTT base and no
+# meta.constraints, so there is no `parentRef` here and the identity is `slug` alone.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxTunnelGroup
+metadata:
+  name: branch-offices
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  name: Branch offices
+  slug: branch-offices
+  description: Site-to-site tunnels terminating on the branch routers
+---
+# Phase 1 algorithms. The plainest kind in the app: six writable columns, no reference and no
+# secret -- `preshared-keys` names the *method*, and the key itself is a column on the policy.
+#
+# `group` is a Diffie-Hellman group number from NetBox's DHGroupChoices, and an integer because
+# the column is a PositiveSmallIntegerField. Not a range: 1, 2, 5 and 14 through 34 are members
+# and 3, 4 and 6 through 13 are not, so `group: 6` is refused by admission.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxIKEProposal
+metadata:
+  name: ike-aes256-sha256
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  name: IKE AES-256 SHA-256
+  authenticationMethod: preshared-keys
+  encryptionAlgorithm: aes-256-cbc
+  authenticationAlgorithm: hmac-sha256
+  group: 14
+  saLifetime: 28800
+  description: Phase 1 proposal for the branch-office tunnels
+---
+# The phase 1 policy, and the kind whose NetBox row can hold a pre-shared key. There is no field
+# for it here and there is not meant to be -- see the header of this file.
+#
+# `proposals` is a to-many reference: NetBox replaces a many-to-many wholesale on PATCH, so the
+# listed set *is* the set and reordering it produces no write. It is optional in the CRD and
+# required by NetBox on a create, so that adopting a policy somebody else's proposals belong to
+# stays possible; `[]` is refused by admission, because NetBox refuses to leave it empty.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxIKEPolicy
+metadata:
+  name: ike-branch
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  name: IKE branch policy
+  version: 2
+
+  # `mode` is IKEv1 only, so an IKEv2 policy leaves it unset. NetBox's own clean() is the
+  # authority on the combination; this schema models no crypto rules.
+
+  proposals:
+    - name: ike-aes256-sha256
+
+  description: Phase 1 policy for the branch-office tunnels
+---
+# Phase 2 algorithms. The one place this model differs from vpn.IKEProposal is nullability:
+# `encryption_algorithm` is REQ there and nullable here, so a proposal that offers integrity
+# and no encryption is legal.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxIPSecProposal
+metadata:
+  name: ipsec-aes256-gcm
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  name: IPSec AES-256-GCM
+  encryptionAlgorithm: aes-256-gcm
+
+  # No `authenticationAlgorithm`: GCM is an AEAD cipher and supplies its own integrity.
+
+  # Two independent nullable columns: either, both or neither may be set, and the operator
+  # infers neither from the other.
+  saLifetimeSeconds: 3600
+  saLifetimeData: 4608000
+  description: Phase 2 proposal for the branch-office tunnels
+---
+# The phase 2 policy. Same `proposals` relation as the IKE policy above, plus perfect forward
+# secrecy as a DH group number -- optional, because the column is nullable and a policy without
+# PFS is an ordinary policy.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxIPSecPolicy
+metadata:
+  name: ipsec-branch
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  name: IPSec branch policy
+
+  proposals:
+    - name: ipsec-aes256-gcm
+
+  pfsGroup: 14
+  description: Phase 2 policy for the branch-office tunnels
+---
+# The join of the two policies, and the first object in this file with references the engine has
+# to resolve before it can write anything: both foreign keys are REQ. Applied in any order the
+# graph converges -- until both resolve this object reports RefsResolved=False and writes
+# nothing, rather than attempting a create NetBox would refuse with a 400.
+#
+# Both are on_delete=PROTECT, so neither is a containment parent: deleting a policy a profile
+# still uses is refused by NetBox rather than cascading.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxIPSecProfile
+metadata:
+  name: branch-esp
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  name: Branch ESP
+  mode: esp
+
+  ikePolicyRef:
+    name: ike-branch
+  ipsecPolicyRef:
+    name: ipsec-branch
+
+  description: The pair of policies the branch-office tunnels are protected by
+---
+# A tunnel *in* a group, so its identity is the first constraint, `(group_id, name)`.
+#
+# `encapsulation` is required and undefaulted: NetBox declares no Django default, and choosing
+# one here would put an encapsulation into every tunnel the operator adopted. `status` is
+# defaulted to NetBox's own default so the operator manages the field from the first reconcile.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxTunnel
+metadata:
+  name: rotterdam-hq
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  name: rotterdam-hq
+  status: active
+  encapsulation: ipsec-tunnel
+
+  groupRef:
+    name: branch-offices
+  ipsecProfileRef:
+    name: branch-esp
+  tenantRef:
+    name: acme
+
+  # A VNI, a key, an ifindex -- whatever the devices call it. Deliberately not part of the
+  # identity: no constraint names it, so two tunnels may carry the same number.
+  tunnelId: 100
+
+  description: Rotterdam branch to headquarters
+---
+# A tunnel with **no** group, which is the interesting case: the second constraint applies, so
+# this is looked up by `?name=lab-gre&group_id=null`. The null is pinned rather than omitted --
+# omitting it would match a tunnel called lab-gre inside any group and adopt it.
+#
+# No `ipsecProfileRef` either: a GRE tunnel is not protected by IPSec, and NetBox's own clean()
+# -- not this schema -- is the authority on which encapsulations need a profile.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxTunnel
+metadata:
+  name: lab-gre
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  name: lab-gre
+  status: planned
+  encapsulation: gre
+  tunnelId: 4242
+  description: Lab GRE tunnel, no group and no crypto
+---
+# The route target the L2VPN below imports and exports. ipam.RouteTarget has one column of
+# substance -- `name`, with a real UNIQUE -- and no reverse many-to-many field: every write to
+# the relation goes through the object that declares it.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxRouteTarget
+metadata:
+  name: rt-65000-1000
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  name: "65000:1000"
+  description: Campus EVPN import and export
+---
+# The L2VPN, and the second kind in the catalogue with the two ipam.RouteTarget many-to-many
+# relations ipam.VRF introduced. They behave exactly as they do there: omitting a list leaves
+# NetBox's own targets alone, `[]` clears them, a list replaces them, the ids are sent sorted
+# and deduplicated, and reordering produces no API write.
+#
+# Identity is `slug`. Both `name` and `slug` are column-unique here and there is deliberately no
+# `name` fallback: reaching it would mean adopting the object whose slug disagrees and PATCHing
+# this slug onto it, which is a rename of somebody else's L2VPN.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxL2VPN
+metadata:
+  name: campus-evpn
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  name: Campus EVPN
+  slug: campus-evpn
+  type: vxlan-evpn
+  status: active
+
+  # A signed BigIntegerField, so there is no minimum: NetBox accepts a negative identifier and
+  # a bound this schema invented would refuse a value NetBox stores.
+  identifier: 65000
+
+  importTargets:
+    - name: rt-65000-1000
+  exportTargets:
+    - name: rt-65000-1000
+
+  tenantRef:
+    name: acme
+
+  description: Campus-wide VXLAN EVPN overlay

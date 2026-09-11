@@ -13,7 +13,7 @@ kubectl get nbep,nbsite -n netbox-demo
 ```
 
 Every kind ships a short name (`nbep`, `nbsite`, `nbtag`, …), and `kubectl api-resources
---api-group=netbox.kubeforge.org` lists all 64 of them with theirs.
+--api-group=netbox.kubeforge.org` lists all 72 of them with theirs.
 
 ## What is here
 
@@ -26,6 +26,7 @@ Every kind ships a short name (`nbep`, `nbsite`, `nbtag`, …), and `kubectl api
 | [`racks.yaml`](racks.yaml) | A rack role, a flat rack group, a catalogue rack type, one rack in a location and one deliberately without, and a reservation on the first |
 | [`ipam-remainder.yaml`](ipam-remainder.yaml) | The allocation registry, an address role, an FHRP group with its assignment, and services |
 | [`cables.yaml`](cables.yaml) | A bundle, a patch lead, and a two-strand trunk landing on two ports at one end |
+| [`vpn.yaml`](vpn.yaml) | The crypto catalogue, a tunnel group, a tunnel in it and one deliberately without, and an L2VPN with its route targets |
 
 ## What is not here yet
 

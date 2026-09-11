@@ -67,3 +67,11 @@ resources:
 - bases/netbox.kubeforge.org_netboxrackreservations.yaml
 - bases/netbox.kubeforge.org_netboxpowerpanels.yaml
 - bases/netbox.kubeforge.org_netboxpowerfeeds.yaml
+- bases/netbox.kubeforge.org_netboxikeproposals.yaml
+- bases/netbox.kubeforge.org_netboxikepolicies.yaml
+- bases/netbox.kubeforge.org_netboxipsecproposals.yaml
+- bases/netbox.kubeforge.org_netboxipsecpolicies.yaml
+- bases/netbox.kubeforge.org_netboxipsecprofiles.yaml
+- bases/netbox.kubeforge.org_netboxtunnelgroups.yaml
+- bases/netbox.kubeforge.org_netboxtunnels.yaml
+- bases/netbox.kubeforge.org_netboxl2vpns.yaml

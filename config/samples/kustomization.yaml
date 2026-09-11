@@ -61,3 +61,11 @@ resources:
 - netbox_v1alpha1_netboxrackreservation.yaml
 - netbox_v1alpha1_netboxpowerpanel.yaml
 - netbox_v1alpha1_netboxpowerfeed.yaml
+- netbox_v1alpha1_netboxikeproposal.yaml
+- netbox_v1alpha1_netboxikepolicy.yaml
+- netbox_v1alpha1_netboxipsecproposal.yaml
+- netbox_v1alpha1_netboxipsecpolicy.yaml
+- netbox_v1alpha1_netboxipsecprofile.yaml
+- netbox_v1alpha1_netboxtunnelgroup.yaml
+- netbox_v1alpha1_netboxtunnel.yaml
+- netbox_v1alpha1_netboxl2vpn.yaml

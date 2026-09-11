@@ -44,6 +44,11 @@ var stampedObjectTypes = []string{
 	"tenancy.contactrole", "tenancy.tenant", "tenancy.tenantgroup",
 	"virtualization.cluster", "virtualization.clustergroup",
 	"virtualization.clustertype", "virtualization.virtualdisk", "virtualization.virtualmachine", "virtualization.vminterface",
+	// vpn.tunneltermination and vpn.l2vpntermination are deliberately absent: neither is a
+	// Kind yet (#59), and a stamp set naming a model no descriptor writes would be a
+	// custom field on objects the operator never touches.
+	"vpn.ikepolicy", "vpn.ikeproposal", "vpn.ipsecpolicy", "vpn.ipsecprofile",
+	"vpn.ipsecproposal", "vpn.l2vpn", "vpn.tunnel", "vpn.tunnelgroup",
 	"wireless.wirelesslan", "wireless.wirelesslangroup", "wireless.wirelesslink",
 }
 

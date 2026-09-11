@@ -1,0 +1,27 @@
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxL2VPN
+metadata:
+  name: campus-evpn
+  namespace: default
+spec:
+  endpointRef: homelab
+  onConflict: Fail
+  deletionPolicy: Delete
+
+  name: Campus EVPN
+  slug: campus-evpn
+  type: vxlan-evpn
+  status: active
+  identifier: 65000
+
+  # Two independent many-to-many relations onto ipam.RouteTarget, written from this side only
+  # and compared as unordered sets: reordering either list produces no API write, `[]` clears
+  # the relation, and omitting the field leaves NetBox's own targets alone.
+  importTargets:
+    - name: rt-65000-1000
+  exportTargets:
+    - name: rt-65000-1000
+
+  # No `terminations`. vpn.L2VPNTermination is a separate model whose identity is a generic
+  # foreign key, and it is not part of this release (#59).
+  description: Campus-wide VXLAN EVPN overlay
