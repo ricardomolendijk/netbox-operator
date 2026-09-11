@@ -48,7 +48,11 @@ func TestRefAliasTargets(t *testing.T) {
 		{"rackGroup", RackGroupRef{}, "NetBoxRackGroup"},
 		{"rack", RackRef{}, "NetBoxRack"},
 		{"powerPanel", PowerPanelRef{}, "NetBoxPowerPanel"},
-		{"powerFeed", PowerFeedRef{}, "NetBoxPowerFeed"}} {
+		{"powerFeed", PowerFeedRef{}, "NetBoxPowerFeed"},
+		// The second target with no slug column: ipam.VLANTranslationPolicy is unique on
+		// `name` alone (docs/netbox-schema.md), so a slug-mode ref matches nothing there
+		// either.
+		{"vlanTranslationPolicy", VLANTranslationPolicyRef{}, "NetBoxVLANTranslationPolicy"}} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := tc.ref.TargetGVK()
 

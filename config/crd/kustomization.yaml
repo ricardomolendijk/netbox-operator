@@ -75,3 +75,5 @@ resources:
 - bases/netbox.kubeforge.org_netboxtunnelgroups.yaml
 - bases/netbox.kubeforge.org_netboxtunnels.yaml
 - bases/netbox.kubeforge.org_netboxl2vpns.yaml
+- bases/netbox.kubeforge.org_netboxvlantranslationpolicies.yaml
+- bases/netbox.kubeforge.org_netboxvlantranslationrules.yaml

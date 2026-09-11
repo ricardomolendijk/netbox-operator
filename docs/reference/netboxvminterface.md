@@ -222,6 +222,25 @@ the interfaces that carry it, and NetBox cross-validates it against `mode`.
 `vrf ForeignKey -> ipam.VRF on_delete=SET_NULL`, declared on `VMInterface` itself rather than
 on `BaseInterface` — `dcim.Interface` has no `vrf` of its own.
 
+### `spec.vlanTranslationPolicyRef`
+
+| | |
+|---|---|
+| Type | `ObjectRef` → [`NetBoxVLANTranslationPolicy`](netboxvlantranslationpolicy.md) |
+| Required | no |
+
+The table of VLAN ID rewrites applied to this interface.
+`vlan_translation_policy (BaseInterface) ForeignKey -> ipam.VLANTranslationPolicy
+on_delete=PROTECT`.
+
+Inherited from `BaseInterface`, so it is the same column
+[`NetBoxInterface`](netboxinterface.md#specvlantranslationpolicyref) carries and it points at
+the same Kind: one policy can be shared by a physical interface and a VM interface at once.
+
+Not deferred — a policy has no dependency on the interface pointing at it. `PROTECT`, so it is
+not a containment parent ([ADR-0003](../decisions/0003-ownership-and-references.md) rule 4), and
+pointing at a policy is what stops it being deleted.
+
 ### `spec.description`
 
 `MaxLength=200`, inherited from `virtualization.ComponentModel`. Omit it to leave NetBox's own
@@ -232,7 +251,6 @@ value alone; set it to `""` to clear it.
 - **`macAddress` / `primaryMACAddressRef`.** NetBox 4.2 moved the MAC to `dcim.MACAddress`
   behind a generic FK. This model's own entry lists only `mac_addresses GenericRelation` — a
   reverse relation, never a column. `NetBoxMACAddress` is NBO-048.
-- **`vlanTranslationPolicyRef`** — `ipam.VLANTranslationPolicy` is NBO-055.
 - **`comments`.** `virtualization.ComponentModel` is a `NetBoxModel` rather than a
   `PrimaryModel`, so there is no such column.
 - **`ipAddresses`, `fhrpGroupAssignments`, `tunnelTerminations`, `l2vpnTerminations`** — all

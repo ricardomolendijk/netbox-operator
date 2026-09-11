@@ -468,6 +468,19 @@ type (
 	// vpn.TunnelGroup, bases). Half of `vpn.Tunnel`'s natural key, which is why declaring it
 	// changes which lookup candidate applies.
 	TunnelGroupRef ObjectRef
+	// VLANTranslationPolicyRef points at a NetBoxVLANTranslationPolicy
+	// (ipam.VLANTranslationPolicy, ipam/vlan-translation-policies).
+	//
+	// Three fields point at one: `ipam.VLANTranslationRule.policy` (`REQ`, CASCADE) and
+	// `vlan_translation_policy` on both `dcim.Interface` and `virtualization.VMInterface`
+	// (both PROTECT) (docs/netbox-schema.md). So a policy in use by an interface refuses to be
+	// deleted, while deleting one takes its own rules with it -- the same alias either way,
+	// because the cascade is a property of the *column* rather than of the target.
+	//
+	// The target has no `slug` column, so `slug` mode matches nothing here and reports
+	// NotFound. Name the CR, or use `lookup: {name: "dc1-to-dc2"}` for a policy the operator
+	// does not manage.
+	VLANTranslationPolicyRef ObjectRef
 )
 
 // TargetGVK reports the Kind this reference resolves against.
@@ -766,6 +779,7 @@ var (
 	_ RefTarget = RackGroupRef{}
 	_ RefTarget = RackRef{}
 	_ RefTarget = PowerPanelRef{}
+	_ RefTarget = VLANTranslationPolicyRef{}
 )
 
 // TargetGVK reports the Kind this reference resolves against.
@@ -951,3 +965,11 @@ func (r TunnelGroupRef) TargetGVK() schema.GroupVersionKind {
 
 // AsObjectRef returns the underlying reference.
 func (r TunnelGroupRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r VLANTranslationPolicyRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxVLANTranslationPolicy")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r VLANTranslationPolicyRef) AsObjectRef() ObjectRef { return ObjectRef(r) }

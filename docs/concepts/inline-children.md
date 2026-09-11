@@ -1,14 +1,18 @@
 # Inline children: the sugar, and the real CRs behind it
 
 > **Status: built.** The materialiser is NBO-032
-> ([#45](https://github.com/ricardomolendijk/netbox-operator/issues/45)), and two Kinds use it:
-> `NetBoxDevice`'s `interfaces` and their `addresses`, NBO-034
-> ([#47](https://github.com/ricardomolendijk/netbox-operator/issues/47)), and
+> ([#45](https://github.com/ricardomolendijk/netbox-operator/issues/45)), and three Kinds use
+> it: `NetBoxDevice`'s `interfaces` and their `addresses`, NBO-034
+> ([#47](https://github.com/ricardomolendijk/netbox-operator/issues/47)),
 > `NetBoxVirtualMachine`'s `interfaces`, their `addresses` and its `disks`, NBO-033
-> ([#46](https://github.com/ricardomolendijk/netbox-operator/issues/46)). No other Kind carries
-> an inline list. Everything below describes shipped behaviour; the exceptions are marked where
-> they appear, and there are two — a device's other nine component relations have no Kind to
-> materialise yet, and `claimFrom: {ipRangeRef}` is NBO-064.
+> ([#46](https://github.com/ricardomolendijk/netbox-operator/issues/46)), and
+> [`NetBoxVLANTranslationPolicy`](../reference/netboxvlantranslationpolicy.md#specrules)'s
+> `rules`, NBO-068 ([#64](https://github.com/ricardomolendijk/netbox-operator/issues/64)) —
+> which is the simplest one and the shortest read: one set, no nesting, no discriminator and no
+> `DerivedRefs`. No other Kind carries an inline list. Everything below describes shipped
+> behaviour; the exceptions are marked where they appear, and there are two — a device's other
+> nine component relations have no Kind to materialise yet, and `claimFrom: {ipRangeRef}` is
+> NBO-064.
 
 Some kinds carry inline lists that the operator turns into **real child CRs**:
 
