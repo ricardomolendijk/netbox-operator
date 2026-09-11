@@ -77,3 +77,7 @@ resources:
 - bases/netbox.kubeforge.org_netboxl2vpns.yaml
 - bases/netbox.kubeforge.org_netboxvlantranslationpolicies.yaml
 - bases/netbox.kubeforge.org_netboxvlantranslationrules.yaml
+- bases/netbox.kubeforge.org_netboxmoduletypeprofiles.yaml
+- bases/netbox.kubeforge.org_netboxmoduletypes.yaml
+- bases/netbox.kubeforge.org_netboxmodulebays.yaml
+- bases/netbox.kubeforge.org_netboxmodules.yaml
