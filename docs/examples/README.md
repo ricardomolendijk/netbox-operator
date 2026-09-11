@@ -14,6 +14,7 @@ kubectl get nbep,nbsite -n netbox-demo
 
 Every kind ships a short name (`nbep`, `nbsite`, `nbtag`, …), and `kubectl api-resources
 --api-group=netbox.kubeforge.org` lists all 76 of them with theirs.
+--api-group=netbox.kubeforge.org` lists all 78 of them with theirs.
 
 ## What is here
 
@@ -28,6 +29,7 @@ Every kind ships a short name (`nbep`, `nbsite`, `nbtag`, …), and `kubectl api
 | [`vlan-translation.yaml`](vlan-translation.yaml) | A translation policy with three inline rules and one written longhand, plus the physical and virtual interfaces that point at it -- the two columns this Kind unblocks |
 | [`cables.yaml`](cables.yaml) | A bundle, a patch lead, and a two-strand trunk landing on two ports at one end |
 | [`vpn.yaml`](vpn.yaml) | The crypto catalogue, a tunnel group, a tunnel in it and one deliberately without, and an L2VPN with its route targets |
+| [`modules.yaml`](modules.yaml) | A module-type profile with its JSON Schema, a catalogue module type, a bay on a switch chassis, and the module installed in it |
 
 ## What is not here yet
 
