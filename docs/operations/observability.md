@@ -638,7 +638,7 @@ Emitted by the engine when it writes, or when it refuses to.
 | `DriftDetected` | Normal | `ReportDrift` | Drift was found on a `driftMode: Report` endpoint and deliberately left alone. The message is the same `field: old → new` diff, prefixed `report only: would have written …`. |
 | `Conflict` | Warning | `Claim` | *(also)* The live NetBox object carries another cluster's or another CR's provenance stamp. Names the claimant and the manifest to edit. Fires once per claimant; the write goes ahead regardless ([multi-writer](multi-writer.md)). |
 | `ConflictSustained` | Warning | `Claim` | The same claimant has been on the object for five consecutive reconciles — a two-writer fight rather than a flap. Fires exactly once, at the threshold. |
-| `Deleted`, `Retained`, `NothingToDelete`, `DeleteBlocked`, `FinalizerSkipped` | Normal, `DeleteBlocked` Warning | `Delete` | The CR is going away. Every outcome gets an Event, because once the finalizer is off there is no status left to read ([deletion](../concepts/deletion.md)). |
+| `Deleted`, `Retained`, `NothingToDelete`, `DeleteBlocked`, `FinalizerSkipped`, `CascadeDeleted` | Normal, `DeleteBlocked` and `CascadeDeleted` Warning | `Delete` | The CR is going away. `CascadeDeleted` names the CRs that `netbox.kubeforge.org/cascade-delete=true` removed so a refused delete could proceed — a Warning, because it deletes objects the user did not name. Every outcome gets an Event, because once the finalizer is off there is no status left to read ([deletion](../concepts/deletion.md)). |
 | `ChildMaterialised`, `ChildPruned` | Normal | `Materialise`, `Prune` | An inline entry became a child CR, or a child CR went away because its entry did. The Event names the child in `related` ([inline children](../concepts/inline-children.md)). |
 | `ChildFieldReverted` | Warning | `Materialise` | A field on a materialised child that somebody else had taken ownership of, taken back. |
 
@@ -680,6 +680,7 @@ is the allocation engine trying to give a claim an address, prefix or range out 
 | `AllocationContended` | Warning | NetBox refused the allocating write because somebody else got there first. |
 | `ForeignAllocation` | Warning | The address this claim holds carries another claim's identity. |
 | `ReclaimedOutsidePool` | Warning | The claim's stored allocation is no longer inside the pool it was taken from. |
+| `AllocationLost` | Warning | A settled claim's address is no longer in NetBox at all. The claim keeps reporting it — a claim never re-allocates — so this is the only thing that says the pin is stale. |
 
 ### On a `NetBoxSweep`
 
