@@ -412,35 +412,6 @@ type (
 	// upstream. Unlike the eight cable-termination aliases above it is not a union member:
 	// dcim.PowerPanel mixes in no CabledObjectModel and a cable never terminates on a panel.
 	PowerPanelRef ObjectRef
-	// ModuleTypeProfileRef points at a NetBoxModuleTypeProfile (dcim.ModuleTypeProfile,
-	// dcim/module-type-profiles).
-	//
-	// The one kind in the module block with no `slug` column: `dcim.ModuleTypeProfile` is
-	// unique on `name` alone (docs/netbox-schema.md -> dcim.ModuleTypeProfile), so a
-	// slug-mode ref matches nothing there and `name` or `lookup` is the mode to use.
-	ModuleTypeProfileRef ObjectRef
-
-	// ModuleTypeRef points at a NetBoxModuleType (dcim.ModuleType, dcim/module-types).
-	//
-	// The hardware catalogue entry a module is built from, and what the eight
-	// `ModularComponentTemplateModel` kinds will point at when they land (#54): a template
-	// belongs to a device type *or* to a module type.
-	ModuleTypeRef ObjectRef
-
-	// ModuleBayRef points at a NetBoxModuleBay (dcim.ModuleBay, dcim/module-bays).
-	//
-	// `dcim.Module.module_bay` is a `OneToOneField`, so this reference is the module's whole
-	// identity rather than one column of it (docs/netbox-schema.md -> dcim.Module).
-	ModuleBayRef ObjectRef
-
-	// ModuleRef points at a NetBoxModule (dcim.Module, dcim/modules).
-	//
-	// What every `dcim.ModularComponentModel` subclass's `module` column points at -- a
-	// component may belong to a module rather than directly to the device
-	// (docs/netbox-schema.md -> dcim.ModularComponentModel). NetBoxModuleBay is the first
-	// subclass to carry it, because `module` is one of the three columns of its unique
-	// constraint; the rest follow with the remaining component kinds (#54).
-	ModuleRef ObjectRef
 
 	// CircuitTerminationRef points at a NetBoxCircuitTermination
 	// (circuits.CircuitTermination, circuits/circuit-terminations).
@@ -510,6 +481,42 @@ type (
 	// NotFound. Name the CR, or use `lookup: {name: "dc1-to-dc2"}` for a policy the operator
 	// does not manage.
 	VLANTranslationPolicyRef ObjectRef
+	// The five aliases below are NBO-057's catalogue slice of the `circuits` app. Unlike
+	// CircuitTerminationRef above, every one of them has a Descriptor in this build, so every
+	// one of them resolves rather than reporting RefKindUnavailable.
+
+	// ProviderRef points at a NetBoxProvider (circuits.Provider, circuits/providers).
+	//
+	// The root of the `circuits` app: `ProviderAccount`, `ProviderNetwork` and `Circuit` each
+	// carry a required foreign key to it, all three `on_delete=PROTECT`
+	// (docs/netbox-schema.md -> circuits.Provider and the three models naming it).
+	ProviderRef ObjectRef
+
+	// ProviderAccountRef points at a NetBoxProviderAccount (circuits.ProviderAccount,
+	// circuits/provider-accounts).
+	ProviderAccountRef ObjectRef
+
+	// ProviderNetworkRef points at a NetBoxProviderNetwork (circuits.ProviderNetwork,
+	// circuits/provider-networks).
+	//
+	// The provider's own network on the far side of the demarcation point. Also one member of
+	// the generic foreign key on `circuits.CircuitTermination`, which NBO-057 defers -- the
+	// alias is declared now because the Kind ships now, not because that union does.
+	ProviderNetworkRef ObjectRef
+
+	// CircuitTypeRef points at a NetBoxCircuitType (circuits.CircuitType,
+	// circuits/circuit-types).
+	//
+	// Distinct from VirtualCircuitTypeRef, which does not exist yet: `circuits.CircuitType`
+	// and `circuits.VirtualCircuitType` are two models over one `BaseCircuitType`, with two
+	// endpoints and two tables, so one alias could not serve both.
+	CircuitTypeRef ObjectRef
+
+	// CircuitRef points at a NetBoxCircuit (circuits.Circuit, circuits/circuits).
+	//
+	// What `circuits.CircuitTermination.circuit` points at -- `on_delete=CASCADE`, so when
+	// that Kind ships it takes this as its containment parent.
+	CircuitRef ObjectRef
 )
 
 // TargetGVK reports the Kind this reference resolves against.
@@ -809,11 +816,52 @@ var (
 	_ RefTarget = RackRef{}
 	_ RefTarget = PowerPanelRef{}
 	_ RefTarget = VLANTranslationPolicyRef{}
-	_ RefTarget = ModuleTypeProfileRef{}
-	_ RefTarget = ModuleTypeRef{}
-	_ RefTarget = ModuleBayRef{}
-	_ RefTarget = ModuleRef{}
+	_ RefTarget = ProviderRef{}
+	_ RefTarget = ProviderAccountRef{}
+	_ RefTarget = ProviderNetworkRef{}
+	_ RefTarget = CircuitTypeRef{}
+	_ RefTarget = CircuitRef{}
 )
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r ProviderRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxProvider")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r ProviderRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r ProviderAccountRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxProviderAccount")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r ProviderAccountRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r ProviderNetworkRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxProviderNetwork")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r ProviderNetworkRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r CircuitTypeRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxCircuitType")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r CircuitTypeRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
+
+// TargetGVK reports the Kind this reference resolves against.
+func (r CircuitRef) TargetGVK() schema.GroupVersionKind {
+	return GroupVersion.WithKind("NetBoxCircuit")
+}
+
+// AsObjectRef returns the underlying reference.
+func (r CircuitRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
 
 // TargetGVK reports the Kind this reference resolves against.
 func (r RackRoleRef) TargetGVK() schema.GroupVersionKind {
@@ -846,38 +894,6 @@ func (r RackRef) TargetGVK() schema.GroupVersionKind {
 
 // AsObjectRef returns the underlying reference.
 func (r RackRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
-
-// TargetGVK reports the Kind this reference resolves against.
-func (r ModuleTypeProfileRef) TargetGVK() schema.GroupVersionKind {
-	return GroupVersion.WithKind("NetBoxModuleTypeProfile")
-}
-
-// AsObjectRef returns the underlying reference.
-func (r ModuleTypeProfileRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
-
-// TargetGVK reports the Kind this reference resolves against.
-func (r ModuleTypeRef) TargetGVK() schema.GroupVersionKind {
-	return GroupVersion.WithKind("NetBoxModuleType")
-}
-
-// AsObjectRef returns the underlying reference.
-func (r ModuleTypeRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
-
-// TargetGVK reports the Kind this reference resolves against.
-func (r ModuleBayRef) TargetGVK() schema.GroupVersionKind {
-	return GroupVersion.WithKind("NetBoxModuleBay")
-}
-
-// AsObjectRef returns the underlying reference.
-func (r ModuleBayRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
-
-// TargetGVK reports the Kind this reference resolves against.
-func (r ModuleRef) TargetGVK() schema.GroupVersionKind {
-	return GroupVersion.WithKind("NetBoxModule")
-}
-
-// AsObjectRef returns the underlying reference.
-func (r ModuleRef) AsObjectRef() ObjectRef { return ObjectRef(r) }
 
 // TargetGVK reports the Kind this reference resolves against.
 func (r DeviceTypeRef) TargetGVK() schema.GroupVersionKind {

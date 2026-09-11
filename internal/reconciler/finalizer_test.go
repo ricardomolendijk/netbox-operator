@@ -717,7 +717,25 @@ func TestDeletionPolicyDefaultsToDelete(t *testing.T) {
 // all saying Delete is a table nobody would keep correct -- but the *reading* stays: this
 // walks the registry and asserts through the same function finalizer.go calls, so a kind that
 // somehow reintroduces a Retain default fails here rather than in somebody's cluster.
-func TestEveryKindDefaultsToDelete(t *testing.T) {
+//
+// TestEveryKindsDeletionDefaultIsStated is criterion 2 of #186, and it is the test whose
+// absence was the bug. `Descriptor.RetainOnDelete` and `deletionPolicyOf` both shipped, five
+// of the six kinds docs/concepts/deletion.md documented as `Retain` did not set the flag, and
+// nothing failed -- because no test read the default *per kind* at all.
+//
+// So it reads it the way finalizer.go does, through Descriptor.RetainOnDelete and
+// deletionPolicyOf, rather than off the generated CRD. There is no `+kubebuilder:default` to
+// read there and cannot be: spec.deletionPolicy is declared once on the shared envelope, so a
+// marker would be one answer for every kind. A test against the schema would therefore pass
+// while the engine deleted a production prefix.
+//
+// It is exhaustive in both directions. A registered kind with no row fails, so adding a kind
+// forces somebody to state its default; a row naming a kind that is not registered fails too,
+// so the table cannot rot into a list of kinds that used to exist.
+//
+// Claims are not in it. A claim's default is claimRetainsByDefault rather than a Descriptor,
+// asserted in the last row of TestDeletionPolicyDefaultsToDelete above.
+func TestEveryKindsDeletionDefaultIsStated(t *testing.T) {
 	descriptors := registry.List()
 	if len(descriptors) == 0 {
 		t.Fatal("the registry is empty; this test would pass by describing nothing")

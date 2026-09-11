@@ -1,0 +1,205 @@
+# Circuits, provider to circuit: a provider, a billing account, a provider network, a circuit
+# type and two circuits.
+#
+#   kubectl create namespace homelab
+#   kubectl apply -f docs/examples/circuits.yaml
+#   kubectl get nbprovider,nbcircuit -n homelab -w
+#
+# Replace the URL and the token before applying.
+#
+# **This is the catalogue half of the `circuits` app, not all of it.** Circuit terminations,
+# circuit groups and the virtual-circuit trio are deferred (#58): a `NetBoxCircuitTermination`
+# needs a Descriptor before a cable or a circuit can name one, and there is none in this build.
+# So there is no `terminations:` block here, and there is no cable landing on a circuit -- both
+# would be manifests that pass admission and never reconcile.
+#
+# What this file is really showing is an identity the operator narrowed on purpose.
+# `circuits.Circuit` has two usable unique constraints -- `(provider, cid)` and
+# `(provider_account, cid)` -- and only the first is a natural-key candidate. They are keyed on
+# *different* references, so the second could only ever fire on a circuit belonging to another
+# provider. See docs/reference/netboxcircuit.md.
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: netbox-token
+  namespace: homelab
+  labels:
+    # Required. The operator's Secret cache selects on this label, so a Secret without it is
+    # invisible even when the name on the endpoint is right.
+    netbox.kubeforge.org/endpoint-credential: "true"
+type: Opaque
+stringData:
+  # A NetBox API token with write access to the circuits app.
+  token: "0123456789abcdef0123456789abcdef01234567"
+---
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxEndpoint
+metadata:
+  name: homelab
+  namespace: homelab
+spec:
+  url: https://netbox.home.arpa
+  tokenSecretRef:
+    name: netbox-token
+  resyncPeriod: 2m
+  mode: Apply
+---
+# The registry that allocated the provider's AS number. `ipam.ASN.rir` is a REQ foreign key, so
+# this has to exist before the ASN can.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxRIR
+metadata:
+  name: ripe
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  name: RIPE NCC
+  slug: ripe
+---
+# The provider's AS number. Only here so that `NetBoxProvider.asns` below has something to
+# point at -- it is the one to-many reference in this file, and the one field whose failure mode
+# is worth knowing: if any element cannot be resolved the whole list is left out of the payload,
+# because writing the ones that did resolve would be a full-list replacement with a shorter
+# list, which is a deletion reported as a success.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxASN
+metadata:
+  name: as2914
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  asn: 2914
+  rirRef:
+    name: ripe
+---
+# The root of the app. `circuits.Provider` declares no meta.constraints at all, so its identity
+# comes from the column-level UNIQUE on `slug` -- the dcim.Manufacturer derivation. `name` is
+# UNIQUE too and deliberately not a second candidate.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxProvider
+metadata:
+  name: ntt
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  name: NTT Communications
+  slug: ntt
+
+  asns:
+    - name: as2914
+
+  description: Transit provider
+---
+# The billing account. `(provider, account)` is the identity; `(provider, name)` is also a
+# UniqueConstraint and is *not* a candidate, because it carries `condition=~Q(name='')` and
+# there is no NetBox filter for "and this column is not the empty string". A candidate that
+# dropped the condition would match the unconstrained set.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxProviderAccount
+metadata:
+  name: ntt-eu-billing
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  providerRef:
+    name: ntt
+
+  account: "EU-4417"
+  name: EU billing account
+---
+# The provider's own network on the far side of the demarcation point. Nothing in this file
+# points at it yet: it exists to be the target of a `NetBoxCircuitTermination`, which is
+# deferred. Applying it now is still worth doing -- a provider network is the object a circuit
+# terminating "into the cloud" needs, and its identity is the clean contrast with the account's:
+# same constraint name, no `condition=` clause, so it is usable exactly as written.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxProviderNetwork
+metadata:
+  name: ntt-backbone
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  providerRef:
+    name: ntt
+
+  name: Backbone
+  serviceId: NTT-BB-0001
+---
+# The catalogue kind `NetBoxCircuit.typeRef` points at. Two base classes from its identity:
+# circuits.CircuitType declares no columns of its own, BaseCircuitType adds `color`, and
+# OrganizationalModel is where the UNIQUE on `slug` lives.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxCircuitType
+metadata:
+  name: transit
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  name: Transit
+  slug: transit
+
+  # Undefaulted in the CRD, unlike NetBoxRackRole's: BaseCircuitType.color is `blank=True` with
+  # no Django default, so defaulting it here would invent a value NetBox does not have.
+  color: "2196f3"
+---
+# The circuit. Looked up by `(provider, cid)`, so an unresolved `providerRef` means no NetBox
+# write at all rather than a circuit created against the wrong carrier.
+#
+# There is no `terminationA` or `terminationZ` here, and there never will be: both columns are
+# read-only on the model and written by NetBox from the termination's side, so nothing in this
+# spec can express them and no request body this kind produces can contain them.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxCircuit
+metadata:
+  name: ntt-transit-ams
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  cid: "100000123"
+  providerRef:
+    name: ntt
+  typeRef:
+    name: transit
+  providerAccountRef:
+    name: ntt-eu-billing
+
+  status: active
+  installDate: "2026-01-15"
+  commitRate: 1000000
+
+  # A string, not a number: NetBox stores `distance` as decimal(8,2) and returns "12.50", and
+  # the engine compares the two numerically, so this produces no PATCH on the second reconcile.
+  distance: "12.5"
+  distanceUnit: km
+
+  description: Primary transit into AMS
+---
+# A second circuit under the same provider, with no billing account and no dates. The point of
+# it: `cid` is unique *per provider*, not globally, so this one and the one above coexist only
+# because their cids differ -- and a third CR repeating `100000123` under `ntt` would adopt the
+# first circuit rather than create anything.
+apiVersion: netbox.kubeforge.org/v1alpha1
+kind: NetBoxCircuit
+metadata:
+  name: ntt-transit-fra
+  namespace: homelab
+spec:
+  endpointRef: homelab
+
+  cid: "100000124"
+  providerRef:
+    name: ntt
+  typeRef:
+    name: transit
+
+  # Planned rather than active, and written out rather than left to the CRD default: a field the
+  # spec never sets is a field the operator never corrects.
+  status: planned

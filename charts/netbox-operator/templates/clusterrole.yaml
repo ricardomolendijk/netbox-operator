@@ -38,6 +38,8 @@ rules:
   - netboxasns
   - netboxcablebundles
   - netboxcables
+  - netboxcircuits
+  - netboxcircuittypes
   - netboxclustergroups
   - netboxclusters
   - netboxclustertypes
@@ -75,6 +77,9 @@ rules:
   - netboxpowerfeeds
   - netboxpowerpanels
   - netboxprefixclaims
+  - netboxprovideraccounts
+  - netboxprovidernetworks
+  - netboxproviders
   - netboxrackgroups
   - netboxrackreservations
   - netboxrackroles
@@ -106,6 +111,8 @@ rules:
   - netboxasns/finalizers
   - netboxcablebundles/finalizers
   - netboxcables/finalizers
+  - netboxcircuits/finalizers
+  - netboxcircuittypes/finalizers
   - netboxclustergroups/finalizers
   - netboxclusters/finalizers
   - netboxclustertypes/finalizers
@@ -148,6 +155,9 @@ rules:
   - netboxpowerpanels/finalizers
   - netboxprefixclaims/finalizers
   - netboxprefixes/finalizers
+  - netboxprovideraccounts/finalizers
+  - netboxprovidernetworks/finalizers
+  - netboxproviders/finalizers
   - netboxrackgroups/finalizers
   - netboxrackreservations/finalizers
   - netboxrackroles/finalizers
@@ -188,6 +198,8 @@ rules:
   - netboxasns/status
   - netboxcablebundles/status
   - netboxcables/status
+  - netboxcircuits/status
+  - netboxcircuittypes/status
   - netboxclustergroups/status
   - netboxclusters/status
   - netboxclustertypes/status
@@ -231,6 +243,9 @@ rules:
   - netboxpowerpanels/status
   - netboxprefixclaims/status
   - netboxprefixes/status
+  - netboxprovideraccounts/status
+  - netboxprovidernetworks/status
+  - netboxproviders/status
   - netboxrackgroups/status
   - netboxrackreservations/status
   - netboxrackroles/status

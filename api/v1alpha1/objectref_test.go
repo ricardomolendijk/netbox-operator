@@ -52,19 +52,14 @@ func TestRefAliasTargets(t *testing.T) {
 		// The second target with no slug column: ipam.VLANTranslationPolicy is unique on
 		// `name` alone (docs/netbox-schema.md), so a slug-mode ref matches nothing there
 		// either.
-		{"vlanTranslationPolicy", VLANTranslationPolicyRef{}, "NetBoxVLANTranslationPolicy"}} {
-		// The second target with no slug column, and the first in dcim:
-		// dcim.ModuleTypeProfile is unique on `name` alone (docs/netbox-schema.md), so a
-		// slug-mode ref matches nothing there either.
-		// The other reference target with no slug column, and the reason the module block
-		// has two: neither dcim.ModuleTypeProfile nor dcim.ModuleType has one, where
-		// dcim.Manufacturer, dcim.DeviceType, dcim.RackType and dcim.Platform all do
-		// (docs/netbox-schema.md). A slug-mode ref matches nothing against either.
-		{"moduleTypeProfile", ModuleTypeProfileRef{}, "NetBoxModuleTypeProfile"},
-		{"moduleType", ModuleTypeRef{}, "NetBoxModuleType"},
-		{"moduleBay", ModuleBayRef{}, "NetBoxModuleBay"},
-		{"module", ModuleRef{}, "NetBoxModule"},
-	} {
+		{"vlanTranslationPolicy", VLANTranslationPolicyRef{}, "NetBoxVLANTranslationPolicy"},
+		{"provider", ProviderRef{}, "NetBoxProvider"},
+		{"providerAccount", ProviderAccountRef{}, "NetBoxProviderAccount"},
+		{"providerNetwork", ProviderNetworkRef{}, "NetBoxProviderNetwork"},
+		// Two models over one BaseCircuitType, two endpoints, two tables: `circuitType` is
+		// circuits.CircuitType and never circuits.VirtualCircuitType.
+		{"circuitType", CircuitTypeRef{}, "NetBoxCircuitType"},
+		{"circuit", CircuitRef{}, "NetBoxCircuit"}} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := tc.ref.TargetGVK()
 
