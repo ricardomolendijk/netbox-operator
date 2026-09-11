@@ -40,16 +40,15 @@ const (
 // spec fields that a user writes alongside the rest -- and the engine excludes exactly
 // those from the NetBox payload by reflecting over that struct.
 //
-// Every optional foreign key dcim.Site has -- `region`, `group`, `tenant` and the `asns`
-// many-to-many (docs/netbox-schema.md -> dcim.Site) -- is still absent from this Kind, but
-// no longer for want of a resolver: internal/resolver landed in M2 and resolves references,
-// including to-many ones. What is left is per-field work on this Kind, and it waits on the
-// Kinds each field points at -- `group` on NetBoxSiteGroup (NBO-066), `tenant` on
-// NetBoxTenant (NBO-021), `asns` on NetBoxASN (NBO-055) -- all of which now ship, so what is
-// left is the per-field work on this Kind and nothing blocks it. A field that is accepted and
-// does nothing is worse than a field that is not there: `kubectl apply` reports success and
-// NetBox never sees the value, which is why each one waits for its own change rather than
-// arriving with the Kind it points at (docs/coverage.md records all four as gaps).
+// Of the optional foreign keys dcim.Site has -- `region`, `group`, `tenant` and the `asns`
+// many-to-many (docs/netbox-schema.md -> dcim.Site) -- only `asns` is declared here. It is the
+// first, and it arrived on its own rather than with the other three because each one is
+// per-field work on this Kind: a field that is accepted and does nothing is worse than a field
+// that is not there, because `kubectl apply` reports success and NetBox never sees the value.
+// `region`, `group` and `tenant` are still absent, and no longer for want of a resolver --
+// internal/resolver landed in M2 and resolves references, including to-many ones -- nor for want
+// of the Kinds they point at, since NetBoxRegion, NetBoxSiteGroup (NBO-066) and NetBoxTenant
+// (NBO-021) all ship. docs/coverage.md records those three as gaps.
 //
 // `tags` is the exception that is only waiting on this Kind: NetBoxTag exists, and the
 // digest now carries the row to cite it against (`tags (TagsMixin) NetBoxTaggableManagerField
@@ -93,6 +92,39 @@ type NetBoxSiteSpec struct {
 	// +kubebuilder:validation:MaxLength=50
 	// +optional
 	Facility string `json:"facility,omitempty"`
+
+	// ASNRefs are the autonomous system numbers this site announces
+	// (docs/netbox-schema.md -> dcim.Site, `asns ManyToManyField -> ipam.ASN`).
+	//
+	// A set and not a list: the schema IR records the column as
+	// `class: M2M, api: {many: true, serializer_field: SerializedPKRelatedField}` with
+	// `in_write_path: true` (hack/testdata/ir-4.6.8.json.gz -> dcim.Site.asns), so NetBox
+	// takes it as a list of ids and returns it as a list of nested objects, in an order
+	// nobody chose. `ClassRefMany` on the descriptor is what makes the comparison
+	// order-independent, so reordering the entries in a manifest produces no PATCH.
+	//
+	// It is a full replacement, like every to-many reference in this API: the list is the
+	// whole membership, so removing an entry removes the assignment. A partially resolvable
+	// list writes nothing at all -- writing the entries that did resolve would be a
+	// full-list replacement with a shorter list, which is a deletion reported as a success.
+	// The object then reports `RefsResolved=False` naming the entry that failed
+	// (docs/concepts/references.md).
+	//
+	// Omit it to leave NetBox's own value alone; set it to `[]` to clear the value in
+	// NetBox. The two are different intents and the operator can tell them apart
+	// (docs/concepts/field-ownership.md).
+	//
+	// `ASNRef` is the one reference alias whose target has no `slug`: ipam.ASN is unique on
+	// `asn` (docs/netbox-schema.md -> ipam.ASN), so use `name` for a sibling CR or
+	// `lookup: {asn: "64512"}` for an ASN this operator does not manage.
+	//
+	// MaxItems is not a NetBox limit. `ObjectRef` carries five CEL rules and the API server
+	// costs each at the list's maximum length, so an unbounded list of refs is refused at
+	// install; 256 is the project standard (docs/concepts/references.md, "A list needs a
+	// bound").
+	// +optional
+	// +kubebuilder:validation:MaxItems=256
+	ASNRefs []ASNRef `json:"asns,omitempty"`
 
 	// PhysicalAddress is the site's street address
 	// (docs/netbox-schema.md -> dcim.Site, `physical_address CharField len=200`).

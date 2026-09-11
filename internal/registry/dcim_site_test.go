@@ -83,25 +83,46 @@ func TestSiteFieldMapCoversEverySpecField(t *testing.T) {
 		}
 	}
 
-	// No Ref entries: dcim.Site's foreign keys are out of scope this milestone and are
-	// absent from the CRD, so the map must not declare them either.
+	// `asns` is the one reference in scope, and it is a to-many:
+	// `asns ManyToManyField -> ipam.ASN` (docs/netbox-schema.md -> dcim.Site), recorded in
+	// the schema IR as `class: M2M` with `api.many: true`. dcim.Site's three remaining
+	// foreign keys -- `region`, `group`, `tenant` -- are absent from the CRD, so the map
+	// must not declare them either.
+	refs := map[string]FieldClass{}
 	for _, f := range d.Fields {
 		if f.Class.Ref() {
-			t.Errorf("field %q is marked as a reference, but no dcim.Site FK is in scope yet", f.Spec)
+			refs[f.Spec] = f.Class
+		}
+	}
+	wantRefs := map[string]FieldClass{"asns": ClassRefMany}
+	if !reflect.DeepEqual(refs, wantRefs) {
+		t.Errorf("reference fields = %v, want %v", refs, wantRefs)
+	}
+
+	// A reference that resolves to nothing is a reference that writes nothing, so the
+	// target has to be the Kind that owns ipam.ASN and not merely non-empty.
+	wantTarget := netboxv1alpha1.ASNRef{}.TargetGVK()
+	for _, f := range d.Fields {
+		if f.Spec == "asns" && f.Target != wantTarget {
+			t.Errorf("asns targets %s, want %s", f.Target, wantTarget)
 		}
 	}
 }
 
-// TestSiteNeedsNoFieldClasses is the substantive claim of the second kind. A choice column
-// and two decimals are exactly the shapes that look like they need special handling and do
-// not: the engine's existing normalisation covers both, so the descriptor declares no field
-// class at all. If this test starts failing, either the normalisation regressed or someone
-// added a class that is not carrying its weight.
-func TestSiteNeedsNoFieldClasses(t *testing.T) {
+// TestSiteNeedsOnlyTheOneFieldClass is the substantive claim of the second kind. A choice
+// column and two decimals are exactly the shapes that look like they need special handling
+// and do not: the engine's existing normalisation covers both, so the descriptor declares no
+// class for any of them. The single class it does declare is `asns`, and it is there because
+// no normalisation can infer set semantics from a JSON list -- an order-sensitive array
+// arrives in exactly the same shape. If this test starts failing, either the normalisation
+// regressed or someone added a class that is not carrying its weight.
+func TestSiteNeedsOnlyTheOneFieldClass(t *testing.T) {
 	d, _ := Get(netboxv1alpha1.GroupVersion.WithKind("NetBoxSite"))
 
-	if got := d.M2MFields(); len(got) != 0 {
-		t.Errorf("M2MFields() = %v, want none", got)
+	// M2MFields() is what internal/netbox reads to compare a to-many as an unordered id
+	// set, so `asns` being in it is the whole of what stops a reordered list PATCHing.
+	if got := d.M2MFields(); !reflect.DeepEqual(got, []string{"asns"}) {
+		t.Errorf("M2MFields() = %v, want [asns]", got)
 	}
 	if got := d.ArrayFields(); len(got) != 0 {
 		t.Errorf("ArrayFields() = %v, want none", got)

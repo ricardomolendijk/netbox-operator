@@ -199,7 +199,12 @@ func (p *pass) finish(ctx context.Context, requeue time.Duration) (ctrl.Result, 
 	status := p.obj.NetBoxStatus()
 	status.ObservedGeneration = p.obj.GetGeneration()
 
-	if equality.Semantic.DeepEqual(p.before, status) {
+	// p.observed is the second term because the comparison is over the shared envelope only:
+	// a column mirrored out of NetBox lives on the Kind's own status, which DeepEqual here
+	// cannot see, so a Kind that learned one has to say so or the value is thrown away
+	// (netboxv1alpha1.ObserveColumns). It is false for every Kind that mirrors nothing, so
+	// the quiet-resync behaviour this guard exists for is unchanged for all of them.
+	if !p.observed && equality.Semantic.DeepEqual(p.before, status) {
 		logf.FromContext(ctx).V(1).Info("status unchanged; not writing", "action", "none")
 
 		return ctrl.Result{RequeueAfter: Jitter(requeue)}, nil

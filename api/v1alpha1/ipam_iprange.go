@@ -36,13 +36,14 @@ const (
 // delegated to another team -- recorded so that this operator and that somebody do not both
 // hand out `10.0.30.150`.
 //
-// **There is no `size` field, and that is not an omission.** `ipam.IPRange.size` is
+// **There is no `size` *spec* field, and that is not an omission.** `ipam.IPRange.size` is
 // `editable=False` and computed in `save()` as `end - start + 1` (netbox/ipam/models/ip.py,
 // NetBox 4.6.8), so it is not in the write serializer at all: a `size` in a payload is
 // silently dropped. It is `REQ` in the schema digest because the *column* is not nullable,
 // which is the trap docs/concepts/generic-refs.md#the-req-trap-in-the-schema-digest describes
 // for a different pair of columns. The two endpoints are the input; the count is NetBox's
-// answer, and this kind reports it in status rather than accepting it in spec.
+// answer, and this kind reports it in `status.size` rather than accepting it in spec
+// (NetBoxIPRangeStatus).
 //
 // There is no scope union either -- `ipam.IPRange` is `ContactsMixin, PrimaryModel` with no
 // `CachedScopeMixin` (docs/netbox-schema.md -> ipam.IPRange) -- and no `parentRef`: a range's
@@ -158,20 +159,46 @@ type NetBoxIPRangeSpec struct {
 	Comments string `json:"comments,omitempty"`
 }
 
+// NetBoxIPRangeStatus is the shared object status plus the one column NetBox computes.
+//
+// The first status on a managed Kind that is not the plain NetBoxObjectStatus, and the
+// embedding is what keeps that from mattering: `status.id`, `status.conditions` and the rest
+// are in exactly the same places, `NetBoxStatus()` still hands the engine the envelope, and
+// the engine's only knowledge of the extra field is the ObservedColumns type assertion.
+type NetBoxIPRangeStatus struct {
+	NetBoxObjectStatus `json:",inline"`
+
+	// Size is how many addresses the range covers, as NetBox counts them, inclusive of both
+	// endpoints (docs/netbox-schema.md -> ipam.IPRange, `size PositiveIntegerField REQ`; the
+	// schema IR records it in ipam.IPRange's serializer field list, so every read carries it).
+	//
+	// **Read back, never sent.** NetBox computes it in `IPRange.save()` as `end - start + 1`
+	// and the column is `editable=False`, which is why `size` is in the descriptor's ReadOnly
+	// list and why it cannot be a spec field. Reported here so that "how big is this range"
+	// is answerable from `kubectl get` rather than only from NetBox.
+	//
+	// Absent until the first pass that reaches a live object, and never cleared by one that
+	// does not: a response that did not carry the column leaves the last known count alone
+	// (ObservedColumns).
+	// +optional
+	Size int64 `json:"size,omitempty"`
+}
+
 // NetBoxIPRange is one ipam.IPRange in NetBox.
 //
 // Namespaced like every kind in v1alpha1 (docs/decisions/0002-crd-scoping.md).
 //
-// There is no SIZE printer column, for the reason there is no `size` field: NetBox derives it
-// and the operator never sends it, so a column reading the spec would be empty on every object.
-// What a human wants side by side is where the block starts, where it ends, and whether NetBox
-// agrees.
+// The SIZE printer column reads `.status.size` and not the spec, because the spec does not
+// have it and must not: NetBox derives the count from the two endpoints. What a human wants
+// side by side is where the block starts, where it ends, how many addresses that came to, and
+// whether NetBox agrees.
 //
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Namespaced,shortName=nbrange
 // +kubebuilder:printcolumn:name="Start",type=string,JSONPath=`.spec.startAddress`
 // +kubebuilder:printcolumn:name="End",type=string,JSONPath=`.spec.endAddress`
+// +kubebuilder:printcolumn:name="Size",type=integer,JSONPath=`.status.size`
 // +kubebuilder:printcolumn:name="VRF",type=string,JSONPath=`.spec.vrfRef.name`
 // +kubebuilder:printcolumn:name="Status",type=string,JSONPath=`.spec.status`
 // +kubebuilder:printcolumn:name="ID",type=integer,JSONPath=`.status.id`
@@ -182,15 +209,36 @@ type NetBoxIPRange struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   NetBoxIPRangeSpec  `json:"spec,omitempty"`
-	Status NetBoxObjectStatus `json:"status,omitempty"`
+	Spec   NetBoxIPRangeSpec   `json:"spec,omitempty"`
+	Status NetBoxIPRangeStatus `json:"status,omitempty"`
 }
 
 // NetBoxSpec returns the engine-owned part of the spec.
 func (r *NetBoxIPRange) NetBoxSpec() *NetBoxObjectSpec { return &r.Spec.NetBoxObjectSpec }
 
 // NetBoxStatus returns the engine-owned part of the status, for the engine to write.
-func (r *NetBoxIPRange) NetBoxStatus() *NetBoxObjectStatus { return &r.Status }
+func (r *NetBoxIPRange) NetBoxStatus() *NetBoxObjectStatus { return &r.Status.NetBoxObjectStatus }
+
+// ObserveColumns records the `size` NetBox computed for this range.
+//
+// Guarded on the column being present rather than on its value: a suppressed DryRun write and
+// a 204 with an empty body both arrive as objects that never mentioned `size`, and blanking a
+// count that is still correct would make the printer column flicker to empty on every dry run
+// (ObservedColumns).
+//
+// Zero is not treated as absent, even though NetBox can never produce it -- a range is
+// inclusive of both endpoints, so the smallest is one address. Special-casing it would be a
+// rule with no case, and would hide a server that had started answering something new.
+func (r *NetBoxIPRange) ObserveColumns(live map[string]any) bool {
+	size, answered := observedInt(live["size"])
+	if !answered || size == r.Status.Size {
+		return false
+	}
+
+	r.Status.Size = size
+
+	return true
+}
 
 // NetBoxIPRangeList is a list of NetBoxIPRange.
 // +kubebuilder:object:root=true
